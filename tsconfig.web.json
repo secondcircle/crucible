@@ -1,5 +1,10 @@
 {
-  "include": ["vitest.setup.ts", "src/renderer/src/**/*.ts", "src/renderer/src/**/*.tsx"],
+  "include": [
+    "vitest.setup.ts",
+    "src/shared/**/*.ts",
+    "src/renderer/src/**/*.ts",
+    "src/renderer/src/**/*.tsx"
+  ],
   "compilerOptions": {
     "composite": true,
     "target": "ES2022",
