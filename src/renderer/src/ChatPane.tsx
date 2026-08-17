@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useReducer, useState } from 'react'
 import type { AgentPort, PortEvent, TurnId } from '../../shared/agent/port'
 
 /**
@@ -8,7 +8,9 @@ import type { AgentPort, PortEvent, TurnId } from '../../shared/agent/port'
  * Its only agent-side dependency is the agent port, handed to it as a prop
  * (D4): not `window.crucible`, not Electron, not the π SDK. That is what lets
  * the same component run in the app over IPC and in jsdom against the fake
- * adapter, with nothing swapped inside it.
+ * adapter, with nothing swapped inside it. One prop is the whole of what a
+ * caller must supply, and what it renders is the whole of what a caller — or a
+ * test — may read back.
  *
  * What it promises: deltas appear as they arrive; a turn's terminal event
  * finishes the message or writes an error line under whatever text had already
@@ -41,26 +43,52 @@ type Entry =
       readonly done: boolean
     }
 
-/** The turn an event belongs to, or -1 if this pane has no such turn. */
-function turnIndex(entries: readonly Entry[], turnId: TurnId): number {
-  return entries.findIndex((entry) => entry.from === 'agent' && entry.turnId === turnId)
+/**
+ * Everything a turn does to this pane, in one value: what stands in the
+ * transcript, whether a prompt is waiting to be answered, and a refusal that
+ * belongs to no turn. Keeping them together is what makes the guard a property
+ * of one thing — a prompt not yet answered, or a turn not yet done — rather
+ * than an agreement between separate pieces of state.
+ */
+interface Conversation {
+  readonly entries: readonly Entry[]
+  /** A prompt sent that the port has neither accepted nor refused yet. */
+  readonly pending: boolean
+  /** The port's last outright refusal, until the next send clears it. */
+  readonly refusal?: string
 }
 
+const NOTHING_SAID: Conversation = { entries: [], pending: false }
+
 /**
- * The whole of what the port's events do to the transcript. Written as a
- * function of the entries so the pane keeps one piece of state and the guard is
- * derived from it: a turn that is not `done` is a live turn.
+ * Everything that can move a conversation, and all that can. A refusal arrives
+ * here as the text to show and never as the thing that was thrown: converting a
+ * caller's value is the caller's code running, and nothing a reducer does may
+ * be observable — React replays reducers under `StrictMode`, which is how the
+ * app mounts this pane.
+ */
+type Change =
+  | { readonly type: 'sent'; readonly text: string }
+  | { readonly type: 'heard'; readonly event: PortEvent }
+  | { readonly type: 'refused'; readonly refusal: string }
+  | { readonly type: 'answered' }
+
+/**
+ * The whole of what the port's events do to the transcript.
  *
  * Two rules of D3 and D6 are enforced here rather than trusted from upstream: a
  * turn that has already closed ignores everything after its terminal event, and
- * an event for a turn this pane never saw start is dropped.
+ * an event for a turn this pane never saw start is dropped. Both are answered
+ * by returning the entries unchanged, which is also how the pane avoids a
+ * render for an event that changed nothing.
  */
-function apply(entries: readonly Entry[], event: PortEvent): readonly Entry[] {
-  const index = turnIndex(entries, event.turnId)
+function heard(entries: readonly Entry[], event: PortEvent): readonly Entry[] {
+  const { turnId } = event
+  const index = entries.findIndex((entry) => entry.from === 'agent' && entry.turnId === turnId)
 
   if (event.type === 'turn_started') {
     if (index !== -1) return entries
-    return [...entries, { from: 'agent', turnId: event.turnId, text: '', done: false }]
+    return [...entries, { from: 'agent', turnId, text: '', done: false }]
   }
   if (index === -1) return entries
 
@@ -76,44 +104,82 @@ function apply(entries: readonly Entry[], event: PortEvent): readonly Entry[] {
   return entries.with(index, { ...turn, done: true, error: event.message })
 }
 
+/**
+ * The pane's turn rules, in one pure function: what a send, an answer to it and
+ * an event from the port each make of the conversation so far. Private to this
+ * module — the pane's interface is what it renders, and every one of these
+ * rules is observable there.
+ *
+ * Pure means running it twice must be worth nothing, because `StrictMode`
+ * replays it: every value it is handed is already computed, and it moves values
+ * about rather than converting or formatting anything a port supplied.
+ *
+ * A prompt is answered with a turn id, and a failed turn is reported as that
+ * turn's terminal error — so a rejected `prompt` is the port failing to accept
+ * at all. It belongs to no turn, which is why it is kept apart from the entries
+ * and shown beneath them, and why it leaves nothing live behind.
+ */
+function next(conversation: Conversation, change: Change): Conversation {
+  switch (change.type) {
+    case 'sent':
+      // A new send drops the last refusal and puts what was sent in the
+      // transcript at once; the turn it starts has no id to render under yet.
+      return {
+        entries: [...conversation.entries, { from: 'you', text: change.text }],
+        pending: true
+      }
+    case 'refused':
+      return { ...conversation, refusal: change.refusal }
+    // Accepted, refused, or refused with something that could not even be
+    // converted: either way the prompt has been answered and the guard falls.
+    case 'answered':
+      return conversation.pending ? { ...conversation, pending: false } : conversation
+    case 'heard': {
+      const entries = heard(conversation.entries, change.event)
+      return entries === conversation.entries ? conversation : { ...conversation, entries }
+    }
+  }
+}
+
 export function ChatPane({ port }: { port: AgentPort }): React.JSX.Element {
-  const [entries, setEntries] = useState<readonly Entry[]>([])
-  const [pending, setPending] = useState(false)
-  const [refusal, setRefusal] = useState<string | undefined>(undefined)
+  const [conversation, change] = useReducer(next, NOTHING_SAID)
   const [draft, setDraft] = useState('')
 
   // Subscribe before anything is prompted: events may arrive before the prompt
   // promise resolves, and subscription is live-only — there is no backlog to
   // catch up on.
-  useEffect(() => port.onEvent((event) => setEntries((current) => apply(current, event))), [port])
+  useEffect(() => port.onEvent((event) => change({ type: 'heard', event })), [port])
 
   // A turn is live from the moment a prompt is sent — a prompt not yet accepted
   // has no turn id and so no entry of its own — until its terminal event.
-  const live = pending || entries.some((entry) => entry.from === 'agent' && !entry.done)
+  const live =
+    conversation.pending ||
+    conversation.entries.some((entry) => entry.from === 'agent' && !entry.done)
   const text = draft.trim()
 
   function send(): void {
     if (live || text === '') return
-    setEntries((current) => [...current, { from: 'you', text }])
+    change({ type: 'sent', text })
     setDraft('')
-    setRefusal(undefined)
-    setPending(true)
-    void accept(port.prompt(text))
+    void answer(port.prompt(text))
   }
 
-  /**
-   * A prompt is answered with a turn id, and a failed turn is reported as that
-   * turn's terminal error — so a rejected `prompt` is the port failing to accept
-   * at all. It belongs to no turn, which is why it is shown beneath the
-   * transcript rather than in it, and why it releases the guard.
-   */
-  async function accept(prompted: Promise<TurnId>): Promise<void> {
+  async function answer(prompted: Promise<TurnId>): Promise<void> {
     try {
       await prompted
-    } catch (error) {
-      setRefusal(error instanceof Error ? error.message : String(error))
+    } catch (cause) {
+      // Converted here, once, before the conversation hears of it: a refusal
+      // that is not an `Error` is shown as whatever it converts to, and that
+      // conversion is the port's code, which may run only when it is caught.
+      change({
+        type: 'refused',
+        refusal: cause instanceof Error ? cause.message : String(cause)
+      })
     } finally {
-      setPending(false)
+      // Unconditionally: a port whose refusal cannot even be converted to a
+      // string still answered the prompt, and must not leave send disabled for
+      // good.
+      change({ type: 'answered' })
     }
   }
 
@@ -121,7 +187,7 @@ export function ChatPane({ port }: { port: AgentPort }): React.JSX.Element {
     <main>
       <h1>Crucible</h1>
       <ol aria-label="Transcript">
-        {entries.map((entry, position) => (
+        {conversation.entries.map((entry, position) => (
           // The transcript is append-only and never reordered, so an entry's
           // position is a stable key — and unlike an id, it cannot be minted by
           // a port.
@@ -133,7 +199,7 @@ export function ChatPane({ port }: { port: AgentPort }): React.JSX.Element {
           </li>
         ))}
       </ol>
-      {refusal === undefined ? null : <p role="alert">{refusal}</p>}
+      {conversation.refusal === undefined ? null : <p role="alert">{conversation.refusal}</p>}
       <form
         onSubmit={(submitted) => {
           submitted.preventDefault()
