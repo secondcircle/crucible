@@ -1,0 +1,33 @@
+{
+  "id": "build-260817-yos1",
+  "workflow": "build",
+  "description": "build slice 3/7 · agent-port-fake-pane: Define the agent port types and build the fake adapter and chat pane against them, with no Electron involved.",
+  "inputs": {
+    "spec": "/Users/ike/repos/crucible/.crucible/runs/build-260817-eke1/artifacts/slice-3-agent-port-fake-pane.md"
+  },
+  "cwd": "/Users/ike/repos/crucible",
+  "stagedAt": 1786987178973,
+  "venue": "worktree",
+  "after": "build-260817-185p",
+  "planned": [
+    {
+      "id": "evaluate",
+      "model": "anthropic/claude-opus-5:high"
+    },
+    {
+      "id": "implement",
+      "model": "anthropic/claude-opus-5:high",
+      "parents": [
+        "evaluate"
+      ]
+    },
+    {
+      "id": "review",
+      "model": "openai-codex/gpt-5.6-sol:high",
+      "parents": [
+        "implement"
+      ]
+    }
+  ],
+  "blockedBy": "build-260817-185p failed"
+}

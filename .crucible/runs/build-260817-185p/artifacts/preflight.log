@@ -1,0 +1,21 @@
+venue: worktree · branch crucible/build-260817-185p · repo /Users/ike/repos/crucible
+$ git worktree add -b crucible/build-260817-185p /Users/ike/repos/crucible/.crucible/worktrees/crucible-build-260817-185p HEAD
+exit 0
+HEAD is now at fe2e47c Seam sketch for the Electron boilerplate milestone
+Preparing worktree (new branch 'crucible/build-260817-185p')
+
+$ make -n validate
+exit 2
+make: *** No rule to make target `validate'.  Stop.
+
+preflight verdict: no-validate-target
+$ git worktree remove --force /Users/ike/repos/crucible/.crucible/worktrees/crucible-build-260817-185p
+exit 0
+(no output)
+
+$ git worktree prune
+exit 0
+(no output)
+
+removed the fresh worktree /Users/ike/repos/crucible/.crucible/worktrees/crucible-build-260817-185p
+staged bootstrap run build-260817-pkq5 (build, venue local) — a human must authorize it

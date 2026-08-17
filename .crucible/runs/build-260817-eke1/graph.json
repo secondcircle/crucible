@@ -1,0 +1,147 @@
+{
+  "id": "build-260817-eke1",
+  "workflow": "build",
+  "status": "complete",
+  "cwd": "/Users/ike/repos/crucible",
+  "runDir": "/Users/ike/repos/crucible/.crucible/runs/build-260817-eke1",
+  "inputs": {
+    "spec": "/Users/ike/repos/crucible/.crucible/runs/steer-260817-zb2v/artifacts/steering-doc.md"
+  },
+  "venue": "local",
+  "nodes": [
+    {
+      "id": "evaluate",
+      "status": "complete",
+      "parents": [],
+      "model": "anthropic/claude-opus-5:high",
+      "reads": [
+        {
+          "name": "steering-doc.md",
+          "path": "/Users/ike/repos/crucible/.crucible/runs/steer-260817-zb2v/artifacts/steering-doc.md",
+          "desc": "input"
+        }
+      ],
+      "artifacts": [
+        {
+          "name": "ledger",
+          "path": "/Users/ike/repos/crucible/.crucible/runs/build-260817-eke1/artifacts/slices.yaml",
+          "desc": "the slice ledger: the cut this chain executes"
+        }
+      ],
+      "nudges": 0,
+      "startedAt": 1786986243804,
+      "lastActivityAt": 1786986303337,
+      "toolCalls": 5,
+      "context": {
+        "tokens": 23783,
+        "contextWindow": 1000000,
+        "percent": 2.3783
+      },
+      "cost": 0.3902515,
+      "summary": "Transformed the steering doc's Build order into `slices.yaml`: seven entries, one per numbered Build order slice, in the document's own order (scaffold-dev-loop → log-sink → agent-port-fake-pane → renderer-import-fence → agent-channel → logging-at-the-seam → sdk-adapter-and-proof). The document's order already linearizes cleanly — every `Blocked by` edge (2←1, 3←1, 4←3, 5←3+4, 6←2+5, 7←5) points at an entry above, so `after` is simply the preceding id, null on the first. Each entry carries an imperative goal, the decision ids it realizes (all three ⚠ decisions D1/D2/D3 appear; every D1–D12 is covered somewhere), and observable `done` statements drawn from the slice's closing checks, the Behaviour table and the DoD lines it lands. The enforcement slice (renderer import fence) stays alone with no consumer, its first consumer being the next slice, exactly as the document states. Verified repository state matches the document's Facts on file (no application code, git initialized, `logs/` gitignored), so no deviation report was needed. Validated the file mechanically with a YAML parse plus chain and coverage assertions.",
+      "endedAt": 1786986303341
+    },
+    {
+      "id": "implement",
+      "status": "complete",
+      "parents": [
+        "evaluate"
+      ],
+      "model": "anthropic/claude-opus-5:high",
+      "reads": [
+        {
+          "name": "steering-doc.md",
+          "path": "/Users/ike/repos/crucible/.crucible/runs/steer-260817-zb2v/artifacts/steering-doc.md",
+          "desc": "input"
+        },
+        {
+          "name": "slices.yaml",
+          "path": "/Users/ike/repos/crucible/.crucible/runs/build-260817-eke1/artifacts/slices.yaml",
+          "desc": "input"
+        }
+      ],
+      "artifacts": [
+        {
+          "name": "notes",
+          "path": "/Users/ike/repos/crucible/.crucible/runs/build-260817-eke1/artifacts/impl-notes.md",
+          "desc": "what changed and how it was verified"
+        }
+      ],
+      "nudges": 0,
+      "startedAt": 1786986303344,
+      "lastActivityAt": 1786986980423,
+      "toolCalls": 73,
+      "context": {
+        "tokens": 79531,
+        "contextWindow": 1000000,
+        "percent": 7.9531
+      },
+      "cost": 3.2455575,
+      "verdict": "done",
+      "summary": "Implemented slice 1 `scaffold-dev-loop` only (D2, D5, D10): a hand-rolled electron-vite + React scaffold with `package.json` (dev/lint/typecheck/test, plus a `postinstall` that fetches the Electron binary, since Electron 43 ships no postinstall), `electron.vite.config.ts` (preload deliberately un-externalized and CJS so it bundles to one sandbox-loadable file), `src/main/index.ts`, `src/main/window.ts` with `createMainWindow` carrying the D2 `webPreferences` (sandbox, contextIsolation, no nodeIntegration) and the `ELECTRON_RENDERER_URL` dev load, a one-line preload that exposes nothing, an empty React tree, the vitest + Testing Library + jsdom harness with one component test, ESLint 10 flat config (no renderer fence — that is slice 4), and the tsconfig node/web split. Verified by running it: `npm run dev` opens the window with the renderer process carrying `--enable-sandbox` and no Node globals, the preload logs `[crucible] preload loaded`; an edit to App.tsx hot-updated the live window (`[vite] hot updated: /src/App.tsx`, no reload) and was reverted; A1 is settled in favour of electron-vite forwarding `--remote-debugging-port` (dev script uses `--remoteDebuggingPort=9222`; main sets no switch), `agent-browser connect 9222` + `snapshot` attach; `lsof` shows `127.0.0.1:9222 (LISTEN)` (loopback confirmed by curl against the LAN address failing); a second launch against a busy 9222 opens a window but logs `bind() failed: Address already in use` and leaves connect attached to the first app. All raw output is appended to the steering run's `evidence.md`; port 9222 and the stale-app rule are documented in `AGENTS.md`. `npm run lint`, `npm run typecheck` and `npm test` are green. No git state touched.",
+      "endedAt": 1786986981106
+    },
+    {
+      "id": "review",
+      "status": "complete",
+      "parents": [
+        "evaluate",
+        "implement"
+      ],
+      "model": "openai-codex/gpt-5.6-sol:high",
+      "reads": [
+        {
+          "name": "steering-doc.md",
+          "path": "/Users/ike/repos/crucible/.crucible/runs/steer-260817-zb2v/artifacts/steering-doc.md",
+          "desc": "input"
+        },
+        {
+          "name": "slices.yaml",
+          "path": "/Users/ike/repos/crucible/.crucible/runs/build-260817-eke1/artifacts/slices.yaml",
+          "desc": "input"
+        },
+        {
+          "name": "impl-notes.md",
+          "path": "/Users/ike/repos/crucible/.crucible/runs/build-260817-eke1/artifacts/impl-notes.md",
+          "desc": "input"
+        }
+      ],
+      "artifacts": [
+        {
+          "name": "review",
+          "path": "/Users/ike/repos/crucible/.crucible/runs/build-260817-eke1/artifacts/review.md",
+          "desc": "review findings with repros"
+        }
+      ],
+      "nudges": 0,
+      "startedAt": 1786986981107,
+      "lastActivityAt": 1786987178909,
+      "toolCalls": 36,
+      "context": {
+        "tokens": 72078,
+        "contextWindow": 272000,
+        "percent": 26.499264705882354
+      },
+      "cost": 1.379083,
+      "verdict": {
+        "approved": true,
+        "blocking": [],
+        "nits": [
+          "Evidence says the scaffold was “committed by slice 1,” but the application files are untracked and impl-notes says no git state was touched.",
+          "Clean npm ci on Node v25.9.0 emits jsdom@30.0.1's EBADENGINE warning, although installation and all required tests succeed."
+        ]
+      },
+      "summary": "Reviewed the full slice-1 scaffold and working-tree changes against D2, D5, D10 and every stated done criterion. Independently ran the app, connected Agent Browser on 9222, verified loopback binding, sandboxed renderer globals, bundled preload execution, live React HMR, and the documented busy-port/first-app attachment behavior. Reran lint, typecheck, and tests both in-tree and after a clean temporary npm install; all passed. Audited scope and found no implementation from later slices. Wrote the complete review to review.md with no blocking findings and two non-blocking factual/toolchain nits.",
+      "endedAt": 1786987178911
+    }
+  ],
+  "startedAt": 1786986243795,
+  "outputs": {
+    "result": "approved",
+    "diff": "/Users/ike/repos/crucible/.crucible/runs/build-260817-eke1/artifacts/changes.diff",
+    "nits": "Evidence says the scaffold was “committed by slice 1,” but the application files are untracked and impl-notes says no git state was touched.; Clean npm ci on Node v25.9.0 emits jsdom@30.0.1's EBADENGINE warning, although installation and all required tests succeed.",
+    "slice": "scaffold-dev-loop (1/7)",
+    "staged": "build-260817-185p, build-260817-yos1, build-260817-gcjt, build-260817-au2o, build-260817-hltr, build-260817-8q9i, refine-260817-ft6r — the remaining slices and the terminal refine"
+  },
+  "endedAt": 1786987178975
+}

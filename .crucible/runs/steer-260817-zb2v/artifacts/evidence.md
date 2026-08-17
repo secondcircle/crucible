@@ -450,3 +450,407 @@ Not listed as seams (no behaviour to swap for this milestone): BrowserWindow con
 - GitHub API tree listings that failed to parse; not used as evidence.
 - Contents of `@earendil-works/pi-coding-agent/client` beyond the type barrel (RemoteSession / transcript helpers exist; behaviour unread).
 - electron-log JSONL capability beyond "format can be a function" (not tried).
+
+---
+
+## 2026-08-17 — draft pass (steering document)
+
+Re-verified in `/Users/ike/repos/crucible` before writing the steering document.
+Nothing new was researched here; these are checks that the seam sketch's
+executed decisions and the "no application code yet" baseline still hold.
+
+Commands and results:
+
+- `git log --oneline -n 5` → `fe2e47c Seam sketch for the Electron boilerplate
+  milestone`, `fe55b08 Align residue and steer run for the Electron boilerplate
+  milestone`. Both dated 2026-08-17 (`git log --format='%H %ad %s' --date=short`).
+- `git remote -v` → `origin https://github.com/secondcircle/crucible.git`
+  (fetch and push).
+- `gh repo view secondcircle/crucible --json name,visibility,defaultBranchRef`
+  → `{"defaultBranchRef":{"name":"main"},"name":"crucible","visibility":"PRIVATE"}`.
+- `cat .gitignore` → `node_modules/`, `out/`, `dist/`, `logs/`, `.DS_Store`,
+  `.firecrawl/`. The `logs/` line DoD 6 depends on is present.
+- `ls -a` → `.crucible`, `.firecrawl`, `.git`, `.gitignore`, `AGENTS.md`,
+  `CONTEXT.md`, `docs`. `ls package.json` → `No such file or directory`.
+  Still no application code, no `src/`, no lockfile, no `node_modules/`.
+
+Implication for the steering document: the version-control decision is done,
+not pending; build order starts at the scaffold, and every application file is
+still new.
+
+Tooling note: the format's mechanical lint was run against the draft with
+`node --experimental-strip-types` importing `lintSteeringDoc` from
+`/Users/ike/repos/pi-extensions/crucible/workflows/steer.ts`; final run
+reported no problems (Zone A 197 nonblank lines, 2205 words).
+
+---
+
+## 2026-08-17 — revision pass (fact audit + cold read)
+
+### What the two reviews changed in the steering document
+
+Both blocking findings were accepted and fixed in place; no finding was refuted.
+
+1. **`## Not doing` contradicted its own preamble** (fact audit, blocking 1). The
+   bullets "Abort, steer, follow-up while streaming — refused instead (D6)" and
+   "Tool calls, thinking, compaction, retries — dropped by the mapping (D3)"
+   both described active runtime behaviour inside a section whose first line
+   says nothing refuses anything at runtime. Both bullets are gone. A single
+   line after the fence list now points at the Decision that does the refusing
+   (D6), which is the promotion path the format allows; the dropped SDK events
+   are stated in D3's own text, so no fence entry is needed for them.
+2. **Zone B invented empty-prompt validation and stamped it "D6"** (fact audit,
+   blocking 2). The row now records the truthful default — no validation layer
+   exists this milestone, an empty prompt is admitted like any other and gets a
+   turn and a terminal event — and cites D3, whose text establishes exactly that
+   rule. No new decision is introduced anywhere in Zone B as a result.
+3. **`(Contracts)` pointers that pointed nowhere** (minor 3). Rather than
+   downgrade the pointers to "(Shape)", Contracts now actually carries
+   `createSdkAdapter`'s construction and `toPortEvent`'s mapping table, which is
+   where a builder would look for them anyway.
+4. **`warn` record on an unrecognized `CRUCIBLE_AGENT`** (minor 5). The
+   unstated log level is gone; D5's own text now settles unrecognized values
+   ("unset or unrecognized means fake") and the row only says the ignored value
+   reaches the log.
+5. **`console-message` field name** (minor 6). "level and source" replaced with
+   the primary doc's actual parameters: `message`, `level`, `lineNumber`,
+   `sourceId`, `frame`.
+
+Cold-read divergences, all settled by naming one build in Zone A and
+elaborating it in Zone B: event cardinality (started → deltas → exactly one
+terminal, immediate failures included) in D3; busy-send behaviour (the pane
+disables send; the guard is for races and non-UI callers) in D6 and the chat
+pane's Shape entry; fixed debugging port 9222 and unrecognized-value fallback
+in D5; reload ends the turn and releases the guard in the agent channel's Shape
+entry; explicit provider/model in D11; one log file per launch in D9. Zone A
+stayed inside budget (197 nonblank lines, 2200 words) by trimming prose
+elsewhere, not by demoting any of these.
+
+The cold read's twelve unanswerables are answered in Zone B (Contracts and the
+behaviour table): turn-id ownership per seam, error payload and redaction,
+subscription guarantees, refusal and guard release, disposal on reload/close/
+quit, log durability, forwarded console levels, debug-port binding, malformed
+input handling, the fence's transitive argument, `prove:sdk`'s pass criterion,
+and the Agent Browser recipe.
+
+### New verification done for this pass
+
+The revision added a Contracts snippet for `createSdkAdapter`; the first draft
+of that snippet guessed the SDK's option names (`sessions:` / `settings:`), so
+the real surface was read before publishing it.
+
+Read: `/opt/homebrew/lib/node_modules/@earendil-works/pi-coding-agent/dist/core/sdk.d.ts`,
+`dist/core/settings-manager.d.ts`, `dist/core/session-manager.d.ts`,
+`node_modules/@earendil-works/pi-ai/dist/compat.d.ts`,
+`node_modules/@earendil-works/pi-ai/dist/providers/all.d.ts`.
+
+- `CreateAgentSessionOptions` fields, verbatim from `sdk.d.ts`: `cwd`,
+  `agentDir`, `modelRuntime`, `model`, `thinkingLevel`, `scopedModels`,
+  `noTools` (`"all" | "builtin"`), `tools`, `excludeTools`, `customTools`,
+  `resourceLoader`, `sessionManager`, `settingsManager`, `sessionStartEvent`.
+  The guessed `sessions` / `settings` keys do not exist.
+- Documented defaults, verbatim: `agentDir` "Default: ~/.pi/agent";
+  `sessionManager` "Default: SessionManager.create(cwd)"; `settingsManager`
+  "Default: SettingsManager.create(cwd, agentDir)"; `modelRuntime` "Defaults to
+  a runtime using agentDir/auth.json and models.json".
+  This is the mechanical basis for D11: passing `SettingsManager.inMemory()`
+  replaces the manager that would read `~/.pi/agent/settings.json`, while
+  leaving `agentDir` default keeps auth resolution — credentials in, settings
+  (and their `packages: ["../../repos/pi-extensions"]`) out.
+- `SettingsManager.inMemory(settings?: Partial<Settings>, options?)` and
+  `SessionManager.inMemory(cwd?, options?)` both exist as statics.
+- `getModel` is exported from `@earendil-works/pi-ai/compat` and is marked
+  `@deprecated`: "Use `getBuiltinModel` from
+  '@earendil-works/pi-ai/providers/all' or `Models.getModel()`".
+  `getBuiltinModel(provider, modelId)` is declared in `dist/providers/all.d.ts`.
+- `claude-fable-5` is present in the built-in anthropic catalog:
+  `node -e "Object.keys(require('./dist/providers/data/anthropic.json')['anthropic-messages'])"`
+  → `claude-fable-5`, `claude-haiku-4-5`, `claude-opus-4-5`, `claude-opus-4-6`,
+  `claude-opus-4-7`, … So the pinned constant names a model the catalog knows;
+  whether the on-disk credentials may call it is still what `prove:sdk` settles.
+
+Lint after revision: `lintSteeringDoc` reports no problems; Zone A 197 nonblank
+lines, 2200 words.
+
+---
+
+## 2026-08-17 — revision pass 2 (fact-audit-2 + cold-read-2)
+
+Both blocking findings accepted and fixed; no finding refuted. Four of the five
+minor findings fixed; one (M3, "HMR") fixed by a route the auditor did not
+propose, described below.
+
+### Blocking
+
+**B1 — Contracts decided a log schema Zone A calls open.** Accepted: the
+example record carried nine fields and a closed `source` enum (including
+`agent-port`, used nowhere else) under a heading citing D8/D9, while "Where to
+push back" and A6 say only timestamp, sequence, source and turn id are settled.
+Fixed by shrinking the fenced record to exactly those four fields, deleting the
+`agent-port` enum value, and replacing the rest with what D8 *does* decide —
+that each record must convey adapter identity, prompt, event and error — while
+stating outright that field names, levels and nesting are the implementer's,
+bounded by two constraints (single-line JSON; nothing needing a second writer).
+The `source` field keeps a stated obligation rather than an enum: it must
+distinguish `main` from `renderer`, because D9's forwarding claim is otherwise
+uncheckable.
+
+**B2 — "the switch binds loopback only" was uncited.** Accepted, and checked
+rather than reworded away. Fetched
+`https://raw.githubusercontent.com/electron/electron/main/docs/api/command-line-switches.md`
+(HTTP 200, 2026-08-17):
+
+- `### --remote-debugging-port=`port`` — "Enables remote debugging over HTTP on
+  the specified `port`." That is the entire entry; there is no statement about
+  bind address.
+- `grep -c "remote-debugging-address" cls.md` → `0`. Electron documents no
+  companion address switch, so my draft's implied "and we can pin it if not"
+  would also have been unfounded.
+- The file's opening example is
+  `app.commandLine.appendSwitch('remote-debugging-port', '8315')` before the
+  `ready` event — which independently confirms the A1 fallback the build order
+  already carried.
+
+So the claim is now carried as what it is: an UNVERIFIED row with a one-shot
+check (`lsof -nP -iTCP:9222 -sTCP:LISTEN` while the app runs), a Contracts
+sentence saying Electron documents no address switch and that off-loopback
+binding is a finding to fix, and a check in build-order slice 1.
+
+### Minor
+
+- **M1 (size self-report).** Correct and my error: I counted Zone A with an
+  `awk` that stops *before* the cut line, while `splitZones` includes it. The
+  document now reports what the format's own tool measures ("199 lines, as the
+  format's lint counts them"), and this pass reports tool numbers only: Zone A
+  199 nonblank lines, 2258 words; Zone B 303.
+- **M2 (flag spelling).** Fixed: `--remote-debugging-port=9222` everywhere.
+- **M3 (HMR untraced).** Accepted as a real contract gap, but not by deleting
+  the word: HMR is DoD 1 in the intent brief, so the honest fix is to give it a
+  Decision and a choke point. D2 now reads "renderer loaded from electron-vite's
+  dev URL so edits hot-reload", and its `*Enforced:*` line names
+  `createMainWindow` — its `webPreferences` *and* its dev-URL load — which is
+  literally the one function where both the sandbox flags and the dev-vs-file
+  load are decided (evidence, "Electron / electron-vite prior art":
+  `ELECTRON_RENDERER_URL` in dev vs `loadFile` in prod). Slice 1 now closes on a
+  hot-reload check.
+- **M4 (malformed IPC row).** Fixed: the row no longer invents type validation
+  or payload-shape logging; it states the same no-throw-across-IPC shape D6
+  already establishes for the handler.
+- **M5 (second-window row tagged D6).** Fixed: retagged D2, and the row now
+  says what D2 makes true — `createMainWindow` is the only `BrowserWindow`, so
+  single-flight is app-global by construction. That also answers the cold
+  read's "per window, per session, or global?".
+
+### Cold-read divergences, all settled in Zone A
+
+- *Tools/compaction/retries*: D3 now separates the two builds explicitly —
+  tool, compaction and retry **events** are dropped by the mapping; **tools**
+  are off at the session (D11); compaction and retries remain the SDK's own
+  business rather than something Crucible disables.
+- *Event-before-promise ordering*: the agent port's interface prose now states
+  that a turn's events can begin before the prompt call resolves, so callers
+  subscribe first — Build B, matching what Contracts already required.
+- *Reload cancels or detaches*: the agent channel's interface prose now says a
+  reload disposes the adapter's session, so the underlying work stops rather
+  than running on unseen.
+- *Where single-flight lives*: the port's interface prose now says whoever
+  answers a prompt mints its turn id, and single-flight lives in exactly one
+  place — main's handler — while an adapter driven straight from a test serves
+  whatever it is asked.
+
+Cold-read unanswerables that were genuinely missing are now in Zone B: the fake
+adapter's script/cadence contract (exported constants, pause as a constructor
+parameter, zero in tests), log privacy and retention (verbatim prompts, no
+redaction, no rotation, repo-local and gitignored, revisit before logs leave the
+machine), pre-prompt failure (a session that cannot be created fails the first
+prompt as a terminal `error`), and partial-output-then-failure (deltas stand,
+the error line goes under them). The remainder were already answered in Zone B,
+which the cold reader does not see by design.
+
+Zone A stayed inside budget by trimming prose in The bet, Shape and Done looks
+like — no settled decision was demoted to get there. Lint: CLEAN.
+
+---
+
+## 2026-08-17 — final fix-only pass (fact-audit-3)
+
+Four blocking findings, all four accepted; none refuted. Zone A did not grow
+(199 nonblank lines before and after, 2272 words), nothing was restructured,
+and no minor finding was chased.
+
+**B1 — empty-prompt row tagged D3.** The auditor is right and my previous
+evidence note was wrong: I wrote that D3's text "establishes exactly that rule",
+but D3 decides the four-event vocabulary and what `toPortEvent` drops, and says
+nothing about whether a prompt is admitted. The row asserted an invariant ("no
+validation layer exists… it is admitted like any other prompt") with no Decision
+to classify it, which is the same leakage the first audit caught, in a quieter
+form. Fixing it properly would mean a new Decision, and a fix-only pass may not
+grow Zone A — so the row now asserts nothing: it records that no Decision
+governs empty prompts, tells slice 3 to pick one and keep it in one place, and
+carries `none` in the Decision column instead of a borrowed tag. That leaves the
+gap visible to the human rather than papered over with a wrong citation.
+
+**B2 — session disposal on reload/close/quit tagged D6.** Accepted. Four sites
+(Shape's agent channel, Contracts' SDK adapter, two behaviour rows) asserted
+that a window reload, close or quit disposes the live session and releases the
+guard — a real commitment about whether a paid request is torn down — while D6's
+text covered only refusal and correlation. D6's body now carries it: "…reload,
+close or quit disposes that session and frees the guard." Its `*Enforced:*` line
+is unchanged and still correct: the single-flight guard in main's `agent:prompt`
+handler is the one place a turn's lifetime — acquisition and release — is
+decided. The body was tightened elsewhere so the entry stayed three lines.
+
+**B3 — log failure policy tagged D9.** Accepted. "Records are dropped, not
+buffered" and "`append` writes synchronously" are engineering commitments
+(blocking I/O per call; accepted data loss on write failure) that D9's text did
+not contain. D9's body now reads "…writing one file per launch under `logs/`,
+appending synchronously and dropping any record it cannot write", so both rows
+trace to the Decision that classifies them, and the reviewer sees the trade-off
+where reviewers look.
+
+**B4 — preload `require` whitelist.** Accepted, and it was a plain error of
+mine: Contracts said "no `require` of anything outside `electron`" while Facts
+on file in the same document correctly reports Electron's sandbox whitelist.
+Re-checked against evidence.md's "Electron / electron-vite prior art" section,
+which records from `docs/tutorial/sandbox.md` that a sandboxed preload may
+`require` `electron`, `events`, `timers`, `url` (plus `Buffer`, `process`,
+`setImmediate`). Contracts now states that whitelist and points at Facts on
+file, so the two sections agree.
+
+Lint after this pass: CLEAN. Zone A 199 nonblank lines, 2272 words; Zone B 304.
+
+---
+
+## 2026-08-17 — slice 1 (scaffold and dev loop) verification
+
+All of the below was run on this machine against the scaffold committed by
+slice 1 (`build-260817-eke1`), Node v25.9.0, electron 43.4.0,
+electron-vite 5.0.0, vite 7.3.6, agent-browser 0.34.0.
+
+### A1 settled: `electron-vite dev` does forward the switch
+
+`electron-vite@5.0.0` has a `--remoteDebuggingPort <port>` CLI option:
+`dist/cli.js` sets `process.env.REMOTE_DEBUGGING_PORT`, and `startElectron`
+(`dist/chunks/lib-q6ns0vZr.js:226`) pushes
+`--remote-debugging-port=${process.env.REMOTE_DEBUGGING_PORT}` onto the Electron
+argv when `NODE_ENV_ELECTRON_VITE === 'development'`. So the `dev` script is
+`electron-vite dev --remoteDebuggingPort=9222` and **main sets no switch of its
+own** — A1's fallback (`app.commandLine.appendSwitch` under a dev guard) is not
+needed and was not implemented.
+
+Observed at launch, stdout of `npm run dev`:
+
+```
+starting electron app...
+
+DevTools listening on ws://127.0.0.1:9222/devtools/browser/2f1ceae7-…
+```
+
+Process argv (`ps`): `…/Electron.app/Contents/MacOS/Electron . --remote-debugging-port=9222`.
+
+### Agent Browser attaches
+
+```
+$ agent-browser connect 9222
+[agent-browser] launched browser
+✓ Done
+$ agent-browser snapshot
+- generic [ref=e1] clickable [onclick]
+  - main
+    - heading "Crucible" [level=1, ref=e2]
+    - paragraph
+      - StaticText "Scaffold running."
+```
+
+### The port binds loopback
+
+```
+$ lsof -nP -iTCP:9222 -sTCP:LISTEN
+COMMAND    PID USER   FD   TYPE             DEVICE SIZE/OFF NODE NAME
+Electron 57595  ike   31u  IPv4 0x69f6c9e56c85a546      0t0  TCP 127.0.0.1:9222 (LISTEN)
+```
+
+Loopback only, as guessed — not `*:9222`. Cross-checked over HTTP:
+`curl http://127.0.0.1:9222/json/version` → 200; the same request to this
+machine's LAN address (`192.168.1.148:9222`) fails to connect. No finding to
+fix.
+
+### A launch against an already-busy 9222
+
+Second `npm run dev` while the first app still held the port. The renderer dev
+server moves aside on its own (`Port 5173 is in use, trying another one…` →
+5174), the **second app still opens a window**, and Chromium logs:
+
+```
+[57977:0817/121132.294006:ERROR:net/socket/socket_posix.cc:175] bind() failed: Address already in use (48)
+[57977:0817/121132.294029:ERROR:content/browser/devtools/devtools_http_handler.cc:311] Cannot start http server for devtools.
+```
+
+Electron does **not** fall back to another port and does not exit: the second
+launch is simply undebuggable. The hazard the steering document named is real —
+`agent-browser connect 9222` then attaches to whichever app got there first,
+with nothing in its output saying so:
+
+```
+$ agent-browser connect 9222 && agent-browser eval "location.href"
+"http://localhost:5173/"        # the FIRST app; the second is on 5174
+$ curl -s http://127.0.0.1:9222/json/list | grep '"url"'
+   "url": "http://localhost:5173/",
+```
+
+Operational rule, now in `AGENTS.md`: quit the stale launch before connecting.
+
+### Sandbox, context isolation, no node integration (D2)
+
+`createMainWindow` sets `sandbox: true`, `contextIsolation: true`,
+`nodeIntegration: false`. Observed at runtime rather than only in source:
+
+- the renderer child process carries Chromium's `--enable-sandbox`:
+  `Electron Helper (Renderer) --type=renderer --user-data-dir=…/crucible --app-path=/Users/ike/repos/crucible --enable-sandbox --remote-debugging-port=9222 …`
+- in the renderer, `agent-browser eval` reports
+  `{"require":"undefined","process":"undefined","module":"undefined","crucible":"undefined","url":"http://localhost:5173/"}`
+  — no Node globals, and nothing exposed on `window` yet (D7 is slice 5).
+
+### A5 settled: a bundled preload loads under `sandbox: true`
+
+The preload config omits `externalizeDepsPlugin` and forces `format: 'cjs'`, so
+electron-vite emits one file, `out/preload/index.js` (0.06 kB). It loads:
+`agent-browser console` after a reload shows
+
+```
+[info] [crucible] preload loaded
+[debug] [vite] connecting...
+[debug] [vite] connected.
+```
+
+Note on the Contracts snippet: it names the preload `../preload/index.mjs`.
+This scaffold keeps `package.json` CommonJS (no `"type": "module"`), so
+electron-vite emits one CJS bundle named `index.js` and the window points at
+`../preload/index.js` — verified above to load under `sandbox: true`. Same
+fact, different extension.
+
+### HMR through `ELECTRON_RENDERER_URL`
+
+With the app running, editing `src/renderer/src/App.tsx` (`Scaffold running.` →
+`Scaffold running — hmr probe.`) updated the live window within seconds:
+`agent-browser get text body` returned the new text, and the console shows
+`[vite] hot updated: /src/App.tsx` with **no** second `[crucible] preload loaded`
+line — a hot update, not a reload. The edit was reverted.
+
+### Toolchain notes
+
+- `npm run lint`, `npm run typecheck` (node + web projects) and `npm test`
+  (vitest 4.1.10, jsdom, one component test) are all green.
+- Electron 43.4.0 ships **no `postinstall`**; it exposes an `install-electron`
+  bin instead, so `npm install` alone leaves `node_modules/electron/dist`
+  missing and `electron-vite dev` dies with `Error: Electron uninstall`. The
+  repo's `package.json` therefore carries `"postinstall": "install-electron"`,
+  verified to fetch the binary on `npm install`.
+- `jsdom@30.0.1` declares `node: ^22.22.2 || ^24.15.0 || >=26.0.0`, so npm warns
+  EBADENGINE on this machine's Node v25.9.0. It is a warning only: the jsdom
+  component test runs and passes.
+- Registry facts differ from the versions quoted in the earlier passes:
+  latest `eslint` is 10.8.1, `typescript` 7.0.2 (typescript-eslint 8.67 caps at
+  `<6.1.0`, so TypeScript is pinned to ^5.9.3), and `@vitejs/plugin-react@6`
+  requires vite ^8 while electron-vite 5 peers vite ^5–^7 — hence
+  `@vitejs/plugin-react@^5.2.0`.

@@ -1,0 +1,32 @@
+{
+  "id": "build-260817-8q9i",
+  "workflow": "build",
+  "description": "build slice 7/7 · sdk-adapter-and-proof: Build the SDK adapter with `toPortEvent`, session disposal and the `dev:sdk` and `prove:sdk` scripts, and prove it once against the real SDK.",
+  "inputs": {
+    "spec": "/Users/ike/repos/crucible/.crucible/runs/build-260817-eke1/artifacts/slice-7-sdk-adapter-and-proof.md"
+  },
+  "cwd": "/Users/ike/repos/crucible",
+  "stagedAt": 1786987178975,
+  "venue": "worktree",
+  "after": "build-260817-hltr",
+  "planned": [
+    {
+      "id": "evaluate",
+      "model": "anthropic/claude-opus-5:high"
+    },
+    {
+      "id": "implement",
+      "model": "anthropic/claude-opus-5:high",
+      "parents": [
+        "evaluate"
+      ]
+    },
+    {
+      "id": "review",
+      "model": "openai-codex/gpt-5.6-sol:high",
+      "parents": [
+        "implement"
+      ]
+    }
+  ]
+}

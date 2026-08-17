@@ -1,0 +1,23 @@
+{
+  "id": "build-260817-185p",
+  "workflow": "build",
+  "status": "failed",
+  "cwd": "/Users/ike/repos/crucible",
+  "runDir": "/Users/ike/repos/crucible/.crucible/runs/build-260817-185p",
+  "inputs": {
+    "spec": "/Users/ike/repos/crucible/.crucible/runs/build-260817-eke1/artifacts/slice-2-log-sink.md"
+  },
+  "venue": "worktree",
+  "nodes": [],
+  "startedAt": 1786987179657,
+  "branch": "crucible/build-260817-185p",
+  "error": "venue preflight failed: no-validate-target",
+  "outputs": {
+    "verdict": "no-validate-target",
+    "worktreeRemoved": true,
+    "preflightLog": "/Users/ike/repos/crucible/.crucible/runs/build-260817-185p/artifacts/preflight.log",
+    "bootstrapSpec": "/Users/ike/repos/crucible/.crucible/runs/build-260817-185p/artifacts/bootstrap-spec.md",
+    "stagedBootstrapRun": "build-260817-pkq5"
+  },
+  "endedAt": 1786987179736
+}
