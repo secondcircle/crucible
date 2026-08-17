@@ -64,7 +64,7 @@ export interface MemorySink extends LogSink {
 const stamped = new Set(['ts', 'seq'])
 
 /**
- * The one place a record is made, for both adapters. The stamps go on first and
+ * The one place a record is made, for every adapter. The stamps go on first and
  * a caller's fields are copied in around them, so no entry — literal, forwarded
  * or hostile — can displace `ts` or `seq`.
  */
@@ -77,19 +77,8 @@ function stamp(entry: LogEntry, seq: number): LogRecord {
   return record as unknown as LogRecord
 }
 
-/** One record, one line — or nothing at all, if it will not serialize. */
-function serialize(
-  entry: LogEntry,
-  seq: number,
-  report: (what: string, cause: unknown) => void
-): string | undefined {
-  try {
-    return JSON.stringify(stamp(entry, seq))
-  } catch (error) {
-    report(`cannot serialize record ${seq}`, error)
-    return undefined
-  }
-}
+/** How anything inside a sink says a record was dropped, and why. */
+type Report = (what: string, cause: unknown) => void
 
 /**
  * One stderr line per sink, whatever goes wrong and however often: the app runs
@@ -98,7 +87,7 @@ function serialize(
  * file costs the rest of the launch, and the sink keeps taking `append` either
  * way.
  */
-function createReporter(): (what: string, cause: unknown) => void {
+function createReporter(): Report {
   let reported = false
   return (what, cause) => {
     if (reported) return
@@ -111,50 +100,112 @@ function createReporter(): (what: string, cause: unknown) => void {
 }
 
 /**
- * The file adapter: one JSONL file per launch under `directory`, named from the
- * launch's start time. The directory is created if it is missing.
+ * Puts one line where this destination keeps them. `done` is the destination's
+ * last words: one call that finishes it and says why, in that order, so nothing
+ * the diagnostic itself does — a stderr interceptor that logs, a `write` that
+ * throws — can reach a destination that is already finished. It is one call
+ * rather than two because the order is the sink's to get right, not an
+ * adapter's.
  */
-export function createFileSink(directory: string): LogSink {
-  const report = createReporter()
-  const startedAt = new Date().toISOString().replace(/[:.]/g, '-')
-  const file = join(directory, `${startedAt}.jsonl`)
+type Write = (line: string, done: Report) => void
 
-  let handle: number | undefined
-  try {
-    mkdirSync(directory, { recursive: true })
-    handle = openSync(file, 'a')
-  } catch (error) {
-    report(`cannot open ${file}`, error)
+/**
+ * Where an adapter's lines go, which is the whole of what an adapter has to
+ * say. It is opened once, when the sink is made, and answers with its `Write` —
+ * or with nothing at all, if the place could not be opened, which it may say
+ * why of through `report`.
+ *
+ * A destination that cannot fail says nothing about failure. One that can is
+ * the only thing that knows what its failure is called, so it names it; what a
+ * failure *costs* is not its business but the sink's, below.
+ */
+type Destination = (report: Report) => Write | undefined
+
+/**
+ * Every sink there is, whatever it writes to: one number per `append` spent in
+ * order, the stamps, the serialization, and everything the `LogSink` interface
+ * promises about them — one diagnostic per sink whatever fails, an
+ * unserializable record costing exactly one record, and a destination that is
+ * done costing every record after it, without a line of work spent on any of
+ * them. Holding all of it here is what leaves an adapter with nothing to get
+ * wrong but the writing.
+ */
+function createSink(destination: Destination): LogSink {
+  const report = createReporter()
+
+  let write: Write | undefined
+  const done: Report = (what, cause) => {
+    // Finished before a word is said about it, so that whatever the diagnostic
+    // itself does finds a destination that is already gone.
+    write = undefined
+    report(what, cause)
   }
 
+  write = destination(report)
   let seq = 0
   return {
     append(entry) {
+      // The number is spent before anything can go wrong with the record, so a
+      // gap in the log is a reader's evidence that something was dropped.
       seq += 1
-      if (handle === undefined) return
-      const line = serialize(entry, seq, report)
-      if (line === undefined) return
+      if (write === undefined) return
+
+      let line: string | undefined
       try {
-        writeSync(handle, `${line}\n`)
+        line = JSON.stringify(stamp(entry, seq))
       } catch (error) {
-        handle = undefined
-        report(`cannot write ${file}`, error)
+        report(`cannot serialize record ${seq}`, error)
+        return
       }
+      // A record whose own `toJSON` answers with nothing serializes to nothing:
+      // `JSON.stringify` returns rather than throws, so there is no cause to
+      // report and nothing to write.
+      if (line === undefined) return
+
+      write(line, done)
     }
   }
 }
 
+/**
+ * The file adapter: one JSONL file per launch under `directory`, named from the
+ * launch's start time. The directory is created if it is missing.
+ */
+export function createFileSink(directory: string): LogSink {
+  const startedAt = new Date().toISOString().replace(/[:.]/g, '-')
+  const file = join(directory, `${startedAt}.jsonl`)
+
+  return createSink((report) => {
+    let handle: number
+    try {
+      mkdirSync(directory, { recursive: true })
+      handle = openSync(file, 'a')
+    } catch (error) {
+      report(`cannot open ${file}`, error)
+      return undefined
+    }
+
+    return (line, done) => {
+      try {
+        writeSync(handle, `${line}\n`)
+      } catch (error) {
+        // A file that has failed once is done for the launch: no buffer, no
+        // retry, and the app runs on without its log.
+        done(`cannot write ${file}`, error)
+      }
+    }
+  })
+}
+
 /** The in-memory adapter, for tests: what a file sink would have written. */
 export function createMemorySink(): MemorySink {
-  const report = createReporter()
   const lines: string[] = []
-  let seq = 0
   return {
     lines,
-    append(entry) {
-      seq += 1
-      const line = serialize(entry, seq, report)
-      if (line !== undefined) lines.push(line)
-    }
+    // An array has no way to fail and nothing to report: the whole destination
+    // is where the line goes.
+    ...createSink(() => (line) => {
+      lines.push(line)
+    })
   }
 }
