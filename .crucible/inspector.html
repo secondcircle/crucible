@@ -1,0 +1,456 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Crucible inspector</title>
+<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/dompurify/dist/purify.min.js"></script>
+<style>
+  :root {
+    --bg:#14141f; --panel:#1b1b29; --panel2:#212132; --line:#33334d;
+    --text:#d6d9e8; --muted:#8a8fa8; --dim:#5c6078;
+    --blue:#7aa2f7; --green:#9ece6a; --yellow:#e0af68; --red:#f7768e;
+    --sky:#7dcfff; --purple:#bb9af7;
+  }
+  * { box-sizing:border-box; margin:0; }
+  body { background:var(--bg); color:var(--text); font:13px/1.5 "SF Mono",ui-monospace,Menlo,monospace; height:100vh; display:flex; flex-direction:column; overflow:hidden; }
+
+  #head { padding:10px 14px; border-bottom:1px solid var(--line); background:var(--panel); display:flex; align-items:center; gap:10px; }
+  #title { font-weight:700; }
+  #title .dim { color:var(--dim); font-weight:400; }
+  .tabs { margin-left:auto; display:flex; gap:4px; }
+  .tab { padding:2px 10px; border-radius:4px; color:var(--muted); cursor:pointer; font-size:11px; }
+  .tab.active { background:var(--panel2); color:var(--text); font-weight:700; }
+
+  #body { flex:1; overflow-y:auto; padding:14px 16px; }
+  .empty { color:var(--dim); text-align:center; margin-top:60px; }
+  .empty b { color:var(--muted); }
+
+  /* ---- session stats strip ---- */
+  .stats { display:flex; align-items:center; gap:16px; flex-wrap:wrap; background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:8px 12px; margin-bottom:14px; font-size:12px; color:var(--muted); }
+  .stats b { color:var(--text); font-weight:700; }
+  .stats .running { color:var(--yellow); } .stats .complete { color:var(--green); }
+  .stats .blocked, .stats .stalled, .stats .failed { color:var(--red); }
+  .bar { display:inline-block; width:64px; height:7px; background:var(--panel2); border:1px solid var(--line); border-radius:4px; vertical-align:middle; overflow:hidden; }
+  .bar span { display:block; height:100%; background:var(--sky); }
+  .bar.hot span { background:var(--yellow); }
+
+  /* ---- transcript ---- */
+  pre { background:var(--panel); border:1px solid var(--line); border-radius:6px; padding:7px 10px; overflow-x:auto; color:var(--muted); font-size:12px; white-space:pre-wrap; overflow-wrap:anywhere; max-height:340px; overflow-y:auto; }
+  details > summary { cursor:pointer; list-style:none; }
+  details > summary::-webkit-details-marker { display:none; }
+  details > summary::before { content:"▸ "; color:var(--dim); font-size:10px; }
+  details[open] > summary::before { content:"▾ "; }
+  .fold > summary { font-size:11px; color:var(--dim); padding:2px 0; }
+  .fold > summary:hover { color:var(--muted); }
+  .fold > pre { margin-top:4px; }
+
+  .task { margin-bottom:12px; }
+  .task > summary { color:var(--purple) !important; font-weight:700; }
+
+  .prose-msg { border-left:2px solid var(--blue); padding:2px 0 2px 12px; margin:14px 0; }
+  .prose { overflow-wrap:anywhere; }
+  .prose h1,.prose h2,.prose h3 { font-size:13px; color:var(--sky); margin:10px 0 4px; }
+  .prose p { margin:6px 0; } .prose ul,.prose ol { margin:6px 0; padding-left:22px; }
+  .prose li { margin:2px 0; }
+  .prose code { background:var(--panel2); border-radius:3px; padding:0 4px; font-size:12px; }
+  .prose pre { margin:6px 0; max-height:none; } .prose pre code { background:none; padding:0; }
+  .prose table { border-collapse:collapse; margin:10px 0; font-size:12px; display:block; max-width:100%; overflow-x:auto; }
+  .prose th, .prose td { border:1px solid var(--line); padding:5px 10px; text-align:left; vertical-align:top; overflow-wrap:break-word; word-break:normal; }
+  .prose th { background:var(--panel2); color:var(--sky); font-weight:700; white-space:nowrap; }
+  .prose td:first-child, .prose th:first-child { white-space:nowrap; color:var(--muted); }
+  .prose tbody tr:nth-child(even) { background:rgba(255,255,255,.025); }
+  .prose hr { border:0; border-top:1px solid var(--line); margin:12px 0; }
+  .prose strong { color:var(--text); }
+  .prose blockquote { border-left:2px solid var(--line); padding-left:10px; color:var(--muted); margin:6px 0; }
+  .prose a { color:var(--sky); }
+
+  .think { margin:8px 0 8px 14px; }
+  .think > summary { font-style:italic; }
+
+  .tool { margin:2px 0 2px 14px; }
+  .tool .tline { color:var(--dim); font-size:12px; }
+  .tool .tline b { color:var(--sky); font-weight:400; }
+  .tool .targ { color:var(--muted); }
+  .tool .tmeta { color:var(--dim); font-size:11px; }
+  .tool pre { margin:4px 0 4px 14px; max-height:260px; }
+  .tool .argdetail { margin-top:2px; }
+  .tool .argdetail pre { border-style:dashed; }
+  .tool.sem .tline b { color:var(--green); font-weight:700; }
+  .tool.alarm .tline b { color:var(--red); font-weight:700; }
+  .tool > details > summary { font-size:12px; color:var(--dim); padding:1px 0; }
+  .tool > details > summary:hover .targ { color:var(--text); }
+
+  .note { border-left:2px solid var(--green); padding:2px 0 2px 12px; margin:14px 0; }
+  .note .nwho { color:var(--green); font-weight:700; font-size:11px; margin-bottom:2px; }
+
+  .cursor { display:inline-block; width:7px; height:13px; background:var(--yellow); vertical-align:text-bottom; animation:blink 1s steps(1) infinite; margin-left:14px; }
+  @keyframes blink { 50% { opacity:0; } }
+
+  .blockbox { border:1.5px solid var(--red); border-radius:8px; padding:10px 12px; background:rgba(247,118,142,.07); margin-bottom:12px; }
+  .blockbox .t { color:var(--red); font-weight:700; margin-bottom:4px; }
+  .answered { border-color:var(--green); background:rgba(158,206,106,.06); }
+  .answered .t { color:var(--green); }
+
+  /* ---- artifacts / details tabs ---- */
+  .sect { font-size:11px; font-weight:700; color:var(--purple); text-transform:uppercase; letter-spacing:.08em; margin:14px 0 6px; }
+  .sect:first-child { margin-top:0; }
+  .artrow { border:1px solid var(--line); border-radius:6px; padding:7px 10px; margin-bottom:6px; cursor:pointer; }
+  .artrow:hover { border-color:var(--sky); }
+  .artrow .an { color:var(--sky); font-weight:700; }
+  .artrow .ad { color:var(--muted); font-size:12px; }
+  .artrow .ap { color:var(--dim); font-size:11px; overflow-wrap:anywhere; }
+  .kv { display:flex; gap:10px; margin-bottom:4px; font-size:12px; }
+  .kv .k { color:var(--dim); width:90px; flex:none; }
+  .chipline { color:var(--dim); font-size:11px; margin-bottom:10px; overflow-wrap:anywhere; }
+  .back { color:var(--sky); cursor:pointer; font-size:11px; }
+
+  #chat { display:none; gap:8px; padding:10px 14px 4px; border-top:1px solid var(--line); background:var(--panel); }
+  #chat input { flex:1; background:var(--bg); border:1px solid var(--line); border-radius:6px; color:var(--text); padding:7px 10px; font:inherit; }
+  #chat input:focus { outline:none; border-color:var(--blue); }
+  #chat button { background:var(--blue); border:0; border-radius:6px; color:#14141f; font:inherit; font-weight:700; padding:0 14px; cursor:pointer; }
+  .hint { display:none; color:var(--dim); font-size:11px; padding:4px 14px 10px; background:var(--panel); }
+</style>
+</head>
+<body>
+<div id="head">
+  <span id="title">—</span>
+  <div class="tabs" id="tabs" style="display:none">
+    <span class="tab active" data-tab="session" onclick="setTab('session')">session</span>
+    <span class="tab" data-tab="artifacts" onclick="setTab('artifacts')">artifacts</span>
+    <span class="tab" data-tab="details" onclick="setTab('details')">details</span>
+  </div>
+</div>
+<div id="body"><div class="empty">click a <b>node</b> to open its live session<br>click an <b>artifact chip</b> to open the file</div></div>
+<div id="chat"><input id="chatbox" placeholder="message this agent…"><button onclick="send()">send</button></div>
+<div class="hint" id="hint">delivered into this node's session — same as <code>crucible answer &lt;run&gt; &lt;node&gt; "…"</code></div>
+
+<script>
+const BASE = "http://127.0.0.1:43487".startsWith("__") ? "" : "http://127.0.0.1:43487";
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;" }[c]));
+const age = (ts) => { if (!ts) return ""; const s = Math.floor((Date.now()-ts)/1000);
+  return s < 60 ? s+"s" : s < 3600 ? Math.floor(s/60)+"m" : Math.floor(s/3600)+"h"+Math.floor(s%3600/60)+"m"; };
+const md = (t) => (window.marked && window.DOMPurify)
+  ? `<div class="prose">${DOMPurify.sanitize(marked.parse(t))}</div>`
+  : `<div class="prose" style="white-space:pre-wrap">${esc(t)}</div>`;
+const shortModel = (m) => m ? (m.split("/")[1] ?? m).replace(/:[a-z]+$/, "") : "";
+
+let target = null;
+// The inspector iframe reloads on every panel re-show (node click), so the
+// active tab must survive page loads — sticky via localStorage.
+let tab = localStorage.getItem("cr-insp-tab") || "session";
+let lastNode = null;
+let lastKey = "";
+let openFolds = new Set();   // preserve expanded tool outputs across re-renders
+
+function setTab(t) {
+  tab = t;
+  localStorage.setItem("cr-insp-tab", t);
+  for (const el of document.querySelectorAll(".tab")) el.classList.toggle("active", el.dataset.tab === t);
+  render();
+}
+
+async function refresh() {
+  try {
+    target = await (await fetch(BASE + "/api/inspect")).json();
+  } catch {
+    $("title").textContent = "waiting for the crucible server…";
+    return;
+  }
+  render();
+}
+
+function showChat(node) {
+  const live = node && ["running", "blocked", "stalled"].includes(node.status) && tab === "session";
+  $("chat").style.display = live ? "flex" : "none";
+  $("hint").style.display = live ? "block" : "none";
+  if (live) {
+    $("chatbox").placeholder = node.status === "blocked" ? "answer the blocker…"
+      : node.status === "stalled" ? "get it moving…" : "steer this agent… (delivered at its next pause)";
+  }
+}
+
+// ------------------------------------------------------------ steps model
+// The transcript becomes a flat list of steps; tool calls absorb their
+// results (FIFO pairing), so each tool renders as ONE unit: call + output.
+
+function legacyToBlocks(e) {
+  const blocks = [];
+  if (e.text) blocks.push({ kind: (e.role || "").toLowerCase().includes("tool") ? "result" : "text", text: e.text });
+  for (const t of e.toolCalls ?? []) blocks.push({ kind: "tool", name: t, text: "" });
+  return blocks;
+}
+
+function buildSteps(entries) {
+  const steps = [];
+  const pending = [];
+  entries.forEach((e, i) => {
+    const role = (e.role || "").toLowerCase();
+    const blocks = e.blocks ?? legacyToBlocks(e);
+    if (role === "user") {
+      steps.push({ kind: i === 0 ? "task" : "note", text: blocks.map((b) => b.text).join("\n") });
+      return;
+    }
+    if (role.includes("tool")) {
+      const text = blocks.map((b) => b.text).join("\n");
+      const open = pending.shift();
+      if (open) open.result = text;
+      else steps.push({ kind: "orphan", text });
+      return;
+    }
+    for (const b of blocks) {
+      if (b.kind === "thinking") steps.push({ kind: "thinking", text: b.text });
+      else if (b.kind === "tool") {
+        const step = { kind: "tool", name: b.name || "tool", args: b.text || "", result: null };
+        steps.push(step);
+        pending.push(step);
+      } else if (b.text) steps.push({ kind: "prose", text: b.text });
+    }
+  });
+  return steps;
+}
+
+function parseArgs(step) {
+  try { const a = JSON.parse(step.args); return a && typeof a === "object" ? a : null; } catch { return null; }
+}
+
+const oneline = (v, n = 110) => typeof v === "string" ? v.replace(/\s+/g, " ").trim().slice(0, n) : "";
+const tailPath = (p) => typeof p === "string" ? (p.length > 64 ? "…" + p.slice(-64) : p) : "";
+
+/** What the tool acted on — the one thing worth reading without expanding. */
+function argsSummary(step) {
+  const a = parseArgs(step);
+  if (!a) return oneline((step.args || "").split("\n").find((l) => l.trim()) ?? "");
+  switch (step.name) {
+    case "read": return tailPath(a.path) + (a.offset ? ` @${a.offset}` : "");
+    case "edit": { const n = Array.isArray(a.edits) ? a.edits.length : 1; return `${tailPath(a.path)} · ${n} edit${n === 1 ? "" : "s"}`; }
+    case "write": return `${tailPath(a.path)} · ${String(a.content ?? "").length} chars`;
+    case "bash": return oneline(a.command ?? a.cmd);
+    case "grep": return oneline(a.pattern ?? "") + (a.path ? ` in ${tailPath(a.path)}` : "");
+    case "find": case "ls": return oneline(a.pattern ?? "") || tailPath(a.path) || "";
+    case "complete_node": return oneline(a.summary);
+    case "raise_blocker": return oneline(a.reason);
+    default: {
+      const v = a.command ?? a.cmd ?? a.path ?? a.file_path ?? a.pattern ?? a.query ?? a.reason ?? a.summary ?? a.url;
+      if (typeof v === "string") return oneline(v);
+      const keys = Object.keys(a);
+      return keys.length ? keys.slice(0, 4).join(", ") : "";
+    }
+  }
+}
+
+/** Expanded view of the call itself — edits as old→new, writes as content. */
+function argsDetail(step) {
+  const a = parseArgs(step);
+  if (!a) {
+    return (step.args || "").trim().split("\n").length > 1 ? `<pre>${esc(step.args)}</pre>` : "";
+  }
+  if (step.name === "edit" && Array.isArray(a.edits)) {
+    const body = a.edits.map((e, i) =>
+      `── edit ${i + 1} ── old ──
+${e.oldText ?? ""}
+── new ──
+${e.newText ?? ""}`).join("\n\n");
+    return `<pre>${esc(`${a.path ?? ""}\n\n${body}`)}</pre>`;
+  }
+  if (step.name === "write") {
+    return `<pre>${esc(`${a.path ?? ""}\n\n${a.content ?? ""}`)}</pre>`;
+  }
+  const keys = Object.keys(a);
+  if (keys.length === 1 && typeof a[keys[0]] === "string" && !a[keys[0]].includes("\n") && a[keys[0]].length < 120) {
+    return ""; // fully conveyed by the summary line
+  }
+  return `<pre>${esc(JSON.stringify(a, null, 2))}</pre>`;
+}
+
+/** A collapsible fold whose open state survives the refresh re-renders. */
+function fold(id, cls, label, text) {
+  const open = openFolds.has(id) ? " open" : "";
+  return `<details class="fold ${cls}" data-fold="${id}"${open}><summary>${label}</summary><pre>${esc(text)}</pre></details>`;
+}
+
+function renderStep(step, i) {
+  if (step.kind === "task") {
+    return fold("task", "task", `task prompt · ${step.text.length} chars`, step.text);
+  }
+  if (step.kind === "note") {
+    const long = step.text.length > 500;
+    return `<div class="note"><div class="nwho">message to node</div>${
+      long ? fold(`n${i}`, "", `${step.text.length} chars`, step.text) : `<pre>${esc(step.text)}</pre>`}</div>`;
+  }
+  if (step.kind === "thinking") {
+    return fold(`t${i}`, "think", `thinking · ${step.text.length} chars`, step.text);
+  }
+  if (step.kind === "prose") {
+    return `<div class="prose-msg">${md(step.text)}</div>`;
+  }
+  if (step.kind === "orphan") {
+    return `<div class="tool"><div class="tline">→ <b>result</b></div><pre>${esc(step.text)}</pre></div>`;
+  }
+  // Tool: ONE uniform unit. The line reads "→ tool  subject · preview";
+  // expanding reveals the full call (args) and the full output, height-capped.
+  const cls = step.name === "complete_node" ? "sem" : step.name === "raise_blocker" ? "alarm" : "";
+  const summary = argsSummary(step);
+  const result = step.result;
+  const detail = argsDetail(step);
+
+  let meta;
+  if (result == null) {
+    meta = "· running…";
+  } else {
+    const lines = result.trim() ? result.trim().split("\n").length : 0;
+    meta = lines <= 1 ? `· ${esc(oneline(result, 70)) || "(no output)"}` : `· ${lines} lines`;
+  }
+
+  const line = `→ <b>${esc(step.name)}</b> <span class="targ">${esc(summary)}</span> <span class="tmeta">${meta}</span>`;
+  const inner = `${detail ? `<div class="argdetail">${detail}</div>` : ""}${
+    result != null ? `<pre>${esc(result)}</pre>` : ""}`;
+  if (!inner) {
+    return `<div class="tool ${cls}"><div class="tline">${line}</div></div>`;
+  }
+  const foldId = `f${i}`;
+  const open = openFolds.has(foldId) ? " open" : "";
+  return `<div class="tool ${cls}"><details data-fold="${foldId}"${open}><summary>${line}</summary>${inner}</details></div>`;
+}
+
+// ------------------------------------------------------------ views
+
+async function render() {
+  if (!target || !target.kind) {
+    $("title").textContent = "—";
+    $("body").innerHTML = '<div class="empty">click a <b>node</b> to open its live session<br>click an <b>artifact chip</b> to open the file</div>';
+    $("tabs").style.display = "none";
+    showChat(null);
+    return;
+  }
+
+  if (target.kind === "file") {
+    $("tabs").style.display = "none";
+    showChat(null);
+    $("title").innerHTML = `${esc(target.name ?? "file")} <span class="dim">— artifact</span>`;
+    const res = await fetch(`${BASE}/api/file?path=${encodeURIComponent(target.path)}`);
+    const text = res.ok ? await res.text() : `(cannot read ${target.path})`;
+    const back = lastNode ? `<span class="back" onclick='openNode(lastNode)'>◂ back to ${esc(lastNode.node)}</span> · ` : "";
+    const body = /\.(md|markdown|txt)$/i.test(target.path) && res.ok ? md(text) : `<pre style="max-height:none">${esc(text)}</pre>`;
+    $("body").innerHTML = `<div class="chipline">${back}${esc(target.path)}</div>${body}`;
+    if (JSON.stringify(target) !== lastKey) $("body").scrollTop = 0;
+    lastKey = JSON.stringify(target);
+    return;
+  }
+
+  lastNode = { kind: "node", run: target.run, node: target.node };
+  const state = await (await fetch(BASE + "/api/state")).json();
+  const run = (state.runs || []).find((r) => r.id === target.run);
+  const node = run?.nodes.find((n) => n.id === target.node);
+  if (!node) { $("title").textContent = `${target.node} — not found`; return; }
+
+  const dur = node.startedAt && node.endedAt ? Math.round((node.endedAt - node.startedAt) / 1000) + "s" : age(node.startedAt) + "…";
+  $("title").innerHTML = `${esc(node.id)} <span class="dim">— ${esc(node.status)} · ${esc(dur)}</span>`;
+  $("tabs").style.display = "flex";
+  showChat(node);
+
+  const switched = JSON.stringify(target) + tab !== lastKey;
+  if (switched) openFolds = new Set();
+  lastKey = JSON.stringify(target) + tab;
+  const body = $("body");
+  const atBottom = body.scrollTop + body.clientHeight >= body.scrollHeight - 60;
+
+  if (tab === "artifacts") {
+    const row = (a) => `<div class="artrow" onclick='openFile(${JSON.stringify(a.path)},${JSON.stringify(a.name)})'>
+      <span class="an">${esc(a.name)}</span> <span class="ad">${esc(a.desc ?? "")}</span>
+      <div class="ap">${esc(a.path)}</div></div>`;
+    body.innerHTML =
+      `<div class="sect">reads (inputs)</div>${node.reads.map(row).join("") || '<div class="chipline">none</div>'}` +
+      `<div class="sect">outputs</div>${node.artifacts.map(row).join("") || '<div class="chipline">none yet — artifacts appear when the node completes</div>'}` +
+      (node.verdict !== undefined ? `<div class="sect">verdict</div><pre>${esc(JSON.stringify(node.verdict, null, 2))}</pre>` : "") +
+      (node.summary ? `<div class="sect">completion summary</div>${md(node.summary)}` : "");
+    return;
+  }
+
+  if (tab === "details") {
+    const kv = (k, v) => `<div class="kv"><span class="k">${k}</span><span>${esc(v)}</span></div>`;
+    body.innerHTML =
+      kv("status", node.status) + kv("model", node.model ?? "—") +
+      kv("started", node.startedAt ? new Date(node.startedAt).toLocaleTimeString() : "—") +
+      kv("duration", dur) + kv("nudges", String(node.nudges ?? 0)) +
+      kv("tool calls", String(node.toolCalls ?? "—")) +
+      kv("cost", node.cost > 0 ? "$" + node.cost.toFixed(4) : "—") +
+      kv("context", node.context && node.context.percent != null ? `${Math.round(node.context.percent)}% of ${Math.round(node.context.contextWindow / 1000)}K` : "—") +
+      kv("parents", node.parents.join(", ") || "(root)") +
+      (node.error ? kv("error", node.error) : "") +
+      (node.blocker ? `<div class="sect">blocker history</div><pre>${esc(JSON.stringify(node.blocker, null, 2))}</pre>` : "") +
+      `<div class="sect">raw node state</div><pre>${esc(JSON.stringify(node, null, 2))}</pre>`;
+    return;
+  }
+
+  // ---- session tab ----
+  const entries = await (await fetch(`${BASE}/api/transcript?run=${encodeURIComponent(target.run)}&node=${encodeURIComponent(target.node)}`)).json();
+  const steps = buildSteps(entries);
+  const toolCount = node.toolCalls ?? steps.filter((s) => s.kind === "tool").length;
+
+  const c = node.context;
+  const pct = c && c.percent != null ? Math.round(c.percent) : null;
+  const bar = pct != null
+    ? `<span class="bar ${pct > 70 ? "hot" : ""}"><span style="width:${Math.min(100, pct)}%"></span></span> <b>${pct}%</b>${
+        c.tokens != null ? ` <span>(${Math.round(c.tokens / 1000)}K / ${Math.round(c.contextWindow / 1000)}K)</span>` : ""}`
+    : "<b>—</b>";
+
+  const parts = [];
+  const cost = node.cost > 0 ? "$" + (node.cost >= 1 ? node.cost.toFixed(2) : node.cost.toPrecision(2)) : null;
+  parts.push(`<div class="stats">
+    <span class="${esc(node.status)}"><b>${esc(node.status)}</b> · ${esc(dur)}</span>
+    <span>ctx ${bar}</span>
+    <span><b>${toolCount}</b> tool calls</span>${cost ? `
+    <span><b>${cost}</b></span>` : ""}
+    <span>${esc(shortModel(node.model))}</span>${node.status === "running" && node.now ? `
+    <span style="color:var(--yellow);font-style:italic">⚙ ${esc(node.now)}</span>` : ""}</div>`);
+
+  if (node.blocker) {
+    const answered = Boolean(node.blocker.answeredAt);
+    parts.push(`<div class="blockbox ${answered ? "answered" : ""}">
+      <div class="t">${answered ? "✓ blocker answered" : "⚠ raise_blocker"} · ${age(node.blocker.raisedAt)} ago</div>
+      <div><b>reason:</b> ${esc(node.blocker.reason)}</div>
+      ${node.blocker.details ? `<div style="color:var(--muted);margin-top:4px">${esc(node.blocker.details)}</div>` : ""}
+      ${answered ? `<div style="color:var(--muted);margin-top:4px"><b>answer:</b> ${esc(node.blocker.answer ?? "")}</div>` : ""}</div>`);
+  }
+
+  steps.forEach((s, i) => parts.push(renderStep(s, i)));
+  if (node.status === "running") parts.push('<span class="cursor"></span>');
+
+  body.innerHTML = parts.join("") || '<div class="empty">no transcript yet</div>';
+  for (const d of body.querySelectorAll("details[data-fold]")) {
+    d.addEventListener("toggle", () => {
+      if (d.open) openFolds.add(d.dataset.fold); else openFolds.delete(d.dataset.fold);
+    });
+  }
+  if (switched || atBottom) body.scrollTop = body.scrollHeight;
+}
+
+async function openFile(path, name) {
+  try { await fetch(BASE + "/api/inspect", { method: "POST", body: JSON.stringify({ kind: "file", path, name }) }); } catch {}
+  refresh();
+}
+async function openNode(t) {
+  try { await fetch(BASE + "/api/inspect", { method: "POST", body: JSON.stringify(t) }); } catch {}
+  refresh();
+}
+
+async function send() {
+  const message = $("chatbox").value.trim();
+  if (!message || target?.kind !== "node") return;
+  $("chatbox").value = "";
+  await fetch(BASE + "/api/answer", { method: "POST", body: JSON.stringify({ run: target.run, node: target.node, message }) });
+  refresh();
+}
+
+$("chatbox").addEventListener("keydown", (e) => { if (e.key === "Enter") send(); });
+for (const el of document.querySelectorAll(".tab")) el.classList.toggle("active", el.dataset.tab === tab);
+const es = new EventSource(BASE + "/events");
+es.onmessage = () => refresh();
+es.onopen = () => refresh();
+setInterval(refresh, 5000);
+refresh();
+</script>
+</body>
+</html>
