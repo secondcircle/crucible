@@ -1,9 +1,16 @@
 // @vitest-environment node
-import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+import {
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  statSync,
+  writeFileSync
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { createFileSink, createMemorySink, type LogRecord } from './sink'
+import { createFileSink, createMemorySink, type LogEntry, type LogRecord } from './sink'
 
 function parse(lines: readonly string[]): LogRecord[] {
   return lines.map((line) => JSON.parse(line) as LogRecord)
@@ -17,8 +24,16 @@ function temporaryDirectory(): string {
   return directory
 }
 
+function fileRecords(directory: string): LogRecord[] {
+  const files = readdirSync(directory)
+  expect(files).toHaveLength(1)
+  const text = readFileSync(join(directory, files[0]), 'utf8')
+  return text === '' ? [] : parse(text.trim().split('\n'))
+}
+
 afterEach(() => {
   vi.restoreAllMocks()
+  vi.useRealTimers()
   let directory = temporaryDirectories.pop()
   while (directory !== undefined) {
     rmSync(directory, { recursive: true, force: true })
@@ -159,5 +174,92 @@ describe('the log sink', () => {
       sink.append({ source: 'main', event: 'app_ready' })
     }).not.toThrow()
     expect(stderr).toHaveBeenCalledTimes(1)
+  })
+
+  it('creates its file when it is made, before any record is appended', () => {
+    const directory = join(temporaryDirectory(), 'logs')
+
+    createFileSink(directory)
+
+    const files = readdirSync(directory)
+    expect(files).toHaveLength(1)
+    expect(files[0]).toMatch(/^\d{4}-\d{2}-\d{2}T[\d-]+Z\.jsonl$/)
+    expect(statSync(join(directory, files[0])).size).toBe(0)
+  })
+
+  it('drops a record the file adapter cannot serialize and writes the next one', () => {
+    const stderr = vi.spyOn(process.stderr, 'write').mockReturnValue(true)
+    const directory = temporaryDirectory()
+    const circular: Record<string, unknown> = {}
+    circular.self = circular
+
+    const sink = createFileSink(directory)
+    sink.append({ source: 'main', event: 'first' })
+    sink.append({ source: 'main', event: 'bad', circular })
+    sink.append({ source: 'main', event: 'third' })
+
+    expect(fileRecords(directory).map((record) => [record.seq, record.event])).toEqual([
+      [1, 'first'],
+      [3, 'third']
+    ])
+    expect(stderr).toHaveBeenCalledTimes(1)
+  })
+
+  it('shares one file with a sink made in the same millisecond, sequences and all', () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-08-17T09:15:00.000Z'))
+    const directory = temporaryDirectory()
+
+    const first = createFileSink(directory)
+    const second = createFileSink(directory)
+    first.append({ source: 'main', event: 'from_first' })
+    second.append({ source: 'main', event: 'from_second' })
+    first.append({ source: 'main', event: 'from_first_again' })
+
+    expect(readdirSync(directory)).toEqual(['2026-08-17T09-15-00-000Z.jsonl'])
+    expect(fileRecords(directory).map((record) => [record.seq, record.event])).toEqual([
+      [1, 'from_first'],
+      [1, 'from_second'],
+      [2, 'from_first_again']
+    ])
+  })
+
+  it('drops an own __proto__ field instead of writing it through', () => {
+    const sink = createMemorySink()
+
+    sink.append(
+      JSON.parse('{"source":"main","event":"forwarded","__proto__":{"polluted":true}}') as LogEntry
+    )
+
+    expect(sink.lines).toHaveLength(1)
+    const [record] = parse(sink.lines)
+    expect(record).toMatchObject({ seq: 1, source: 'main', event: 'forwarded' })
+    expect(Object.keys(record)).toEqual(['ts', 'seq', 'source', 'event'])
+    expect(({} as Record<string, unknown>).polluted).toBeUndefined()
+  })
+
+  it('lets an own toJSON replace the whole stamped record', () => {
+    const sink = createMemorySink()
+
+    sink.append({ source: 'main', event: 'forwarded', toJSON: () => ({ replaced: true }) })
+
+    expect(sink.lines).toEqual(['{"replaced":true}'])
+  })
+
+  it('takes any entry a cast can produce: the types are the only validation', () => {
+    const sink = createMemorySink()
+    const entry: LogEntry = { source: 'renderer', event: 'console', level: 'warn', count: 2 }
+
+    sink.append(entry)
+    // @ts-expect-error a source outside main | renderer is not a log source
+    sink.append({ source: 'agent', event: 'turn_started' })
+    // @ts-expect-error every entry names the event it records
+    sink.append({ source: 'main' })
+
+    expect(parse(sink.lines).map((record) => [record.seq, record.source, record.event])).toEqual([
+      [1, 'renderer', 'console'],
+      [2, 'agent', 'turn_started'],
+      [3, 'main', undefined]
+    ])
   })
 })
