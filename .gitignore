@@ -5,3 +5,4 @@ logs/
 .DS_Store
 .firecrawl/
 *.tsbuildinfo
+.crucible/worktrees/

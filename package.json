@@ -7,6 +7,7 @@
   "scripts": {
     "postinstall": "install-electron",
     "dev": "electron-vite dev --remoteDebuggingPort=9222",
+    "build": "electron-vite build",
     "lint": "eslint .",
     "typecheck": "npm run typecheck:node && npm run typecheck:web",
     "typecheck:node": "tsc --noEmit -p tsconfig.node.json",
