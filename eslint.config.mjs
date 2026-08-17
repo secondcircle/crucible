@@ -4,7 +4,8 @@ import globals from 'globals'
 import tseslint from 'typescript-eslint'
 
 export default tseslint.config(
-  { ignores: ['out/**', 'dist/**', 'logs/**', 'node_modules/**'] },
+  // .crucible holds workflow records (run artifacts, repro scripts) — not app code.
+  { ignores: ['out/**', 'dist/**', 'logs/**', 'node_modules/**', '.crucible/**'] },
   js.configs.recommended,
   tseslint.configs.recommended,
   {
