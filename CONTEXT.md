@@ -34,3 +34,15 @@ _Avoid_: mock, stub.
 **SDK adapter**:
 The agent-port implementation backed by the real π SDK.
 _Avoid_: real backend, live mode.
+
+**Workspace**:
+An OS folder opened in Crucible as an agent working directory and as the home of that folder's sessions.
+_Avoid_: project, repository.
+
+**Session**:
+A user-curated workspace sidebar item holding one agent conversation. It appears only when the user creates or adds it in Crucible; adapter-managed history never populates the sidebar by discovery.
+_Avoid_: thread, chat, backing-store record.
+
+**Session reset**:
+Replacement of a session's conversation with a fresh stock π session while keeping the same sidebar identity.
+_Avoid_: new session, clear chat.
