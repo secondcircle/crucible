@@ -1,6 +1,7 @@
 import { createFakeAdapter } from '../../shared/agent/fake-adapter'
 import type { AgentAdapter } from '../../shared/agent/port'
 import type { LogSink } from '../log/sink'
+import { createSdkAdapter } from './sdk-adapter'
 import { withLogging } from './with-logging'
 
 /**
@@ -24,18 +25,15 @@ export function selectAdapter(log: LogSink): AgentAdapter {
   const requested = process.env.CRUCIBLE_AGENT
   const asked = requested === undefined || requested === '' ? null : requested
 
-  // The SDK adapter is not built yet — it arrives with its own slice, and this
-  // is the one line that changes when it does. Until then `sdk` is honoured the
-  // only way an unbuilt flavor can be: with the fake, and loudly in the log.
+  // `sdk` is the only value that buys anything, and it buys paid calls — so it
+  // has to be spelled exactly. Everything else is the fake.
+  const adapter = asked === 'sdk' ? 'sdk' : 'fake'
   const reason =
-    asked === 'sdk'
-      ? 'the SDK adapter is not built yet, so this launch runs on the fake adapter'
-      : asked === null || asked === 'fake'
-        ? null
-        : `CRUCIBLE_AGENT=${asked} is not a launch flavor, so the fake adapter answers`
+    adapter === 'sdk' || asked === null || asked === 'fake'
+      ? null
+      : `CRUCIBLE_AGENT=${asked} is not a launch flavor, so the fake adapter answers`
 
-  const adapter = 'fake'
   log.append({ source: 'main', event: 'adapter_selected', adapter, requested: asked, reason })
 
-  return withLogging(createFakeAdapter(), log, adapter)
+  return withLogging(adapter === 'sdk' ? createSdkAdapter() : createFakeAdapter(), log, adapter)
 }

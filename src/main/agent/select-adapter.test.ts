@@ -5,6 +5,12 @@
 // writes, which is what makes a misspelt flavor diagnosable instead of silent.
 // Its one input is the environment it reads for itself (D5), so a flavor is
 // driven the way a launch script drives it: by setting `CRUCIBLE_AGENT`.
+//
+// One row of D5's table is deliberately absent: `CRUCIBLE_AGENT=sdk`. Choosing
+// it constructs the SDK adapter, which opens a real session against the
+// credentials on disk, and `npm test` makes no paid call and no network call at
+// all (D12). That row is proved by `npm run prove:sdk`, run once by hand, and
+// by `npm run dev:sdk` — never here.
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { LogRecord } from '../log/sink'
 import { createMemorySink } from '../log/sink'
@@ -69,10 +75,8 @@ describe('the launch flavor', () => {
     expect(record.reason).toContain('sdkk')
   })
 
-  it('says in the log why an asked-for sdk launch is answering with the fake', () => {
-    const { record } = chooseWith('sdk')
-
-    expect(record).toMatchObject({ adapter: 'fake', requested: 'sdk' })
-    expect(record.reason).toContain('not built yet')
+  it('is spelled exactly, so a near miss is the fake and says so', () => {
+    expect(chooseWith('SDK').record).toMatchObject({ adapter: 'fake', requested: 'SDK' })
+    expect(chooseWith(' sdk').record).toMatchObject({ adapter: 'fake', requested: ' sdk' })
   })
 })

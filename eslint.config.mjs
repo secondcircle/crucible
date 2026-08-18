@@ -64,7 +64,7 @@ export default tseslint.config(
     rules: { 'no-restricted-syntax': 'off' }
   },
   {
-    files: ['*.ts', '*.mjs'],
+    files: ['*.ts', '*.mjs', 'scripts/**/*.ts'],
     languageOptions: { globals: globals.node }
   }
 )

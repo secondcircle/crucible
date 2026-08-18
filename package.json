@@ -7,6 +7,8 @@
   "scripts": {
     "postinstall": "install-electron",
     "dev": "electron-vite dev --remoteDebuggingPort=9222",
+    "dev:sdk": "CRUCIBLE_AGENT=sdk npm run dev",
+    "prove:sdk": "CRUCIBLE_AGENT=sdk node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/prove-sdk.ts",
     "build": "electron-vite build",
     "lint": "eslint .",
     "typecheck": "npm run typecheck:node && npm run typecheck:web",
@@ -35,6 +37,8 @@
     "vitest": "^4.1.10"
   },
   "dependencies": {
+    "@earendil-works/pi-ai": "^0.84.2",
+    "@earendil-works/pi-coding-agent": "^0.84.2",
     "react": "^19.2.8",
     "react-dom": "^19.2.8"
   }

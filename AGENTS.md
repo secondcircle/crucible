@@ -34,4 +34,19 @@ binds loopback (`127.0.0.1:9222`). Check it with
 use` and is not debuggable, and `agent-browser connect 9222` silently attaches
 to the *first* app. Quit the stale one before connecting.
 
+`npm run dev` is the **fake** launch flavor: canned replies, no paid call, and
+what every agent-driven check should use.
+
+## The paid flavor, and the two scripts that use it
+
+`npm run dev:sdk` is the same app and the same window on the real π SDK
+(`CRUCIBLE_AGENT=sdk`), so a turn there costs money. `npm run prove:sdk` is the
+one-shot proof that the SDK adapter still works: one short turn, headless,
+printing the model id and the date, exiting non-zero unless it saw
+`turn_started`, a `text_delta` and `turn_ended` within 60 seconds. Run it only
+with explicit human authorization; the human may run it or direct an agent to
+execute and record it. Paste its stdout beside that authorization in the
+evidence file. It is never part of `npm test`, and `npm test` constructs no SDK
+adapter at all.
+
 Other scripts: `npm run lint`, `npm run typecheck`, `npm test`.

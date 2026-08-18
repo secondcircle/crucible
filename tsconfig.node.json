@@ -2,6 +2,7 @@
   "include": [
     "electron.vite.config.ts",
     "vitest.config.ts",
+    "scripts/**/*.ts",
     "src/shared/**/*.ts",
     "src/main/**/*.ts",
     "src/preload/**/*.ts"
@@ -12,6 +13,10 @@
     "lib": ["ES2023"],
     "module": "ESNext",
     "moduleResolution": "bundler",
+    // `npm run prove:sdk` runs the SDK adapter under plain Node, whose ESM
+    // resolver does no extension guessing, so that one module imports its
+    // mapping as `./to-port-event.ts`.
+    "allowImportingTsExtensions": true,
     "types": ["node"],
     "strict": true,
     "noUnusedLocals": true,

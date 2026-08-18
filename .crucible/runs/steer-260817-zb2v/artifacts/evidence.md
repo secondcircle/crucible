@@ -854,3 +854,328 @@ line — a hot update, not a reload. The edit was reverted.
   `<6.1.0`, so TypeScript is pinned to ^5.9.3), and `@vitejs/plugin-react@6`
   requires vite ^8 while electron-vite 5 peers vite ^5–^7 — hence
   `@vitejs/plugin-react@^5.2.0`.
+
+## 2026-08-18 — slice 7 (SDK adapter and the proof) verification
+
+Run on this machine against the adapter committed by slice 7
+(`build-260817-8q9i`), Node v25.9.0, electron 43.4.0,
+`@earendil-works/pi-coding-agent@0.84.2`, `@earendil-works/pi-ai@0.84.2`.
+
+### A2 settled, and not the way it was guessed: the pinned model could not answer
+
+The on-disk credentials are **valid** — `~/.pi/agent/auth.json` holds live
+OAuth entries for `anthropic`, `openai-codex` and `xai`, and the request reaches
+Anthropic — but a bare `createAgentSession` against Anthropic draws on the
+extra-usage pool rather than the subscription, and that pool is empty. Every
+Anthropic model answers the same 400, so it is not a model-tier problem:
+
+```
+anthropic claude-fable-5   -> error 400 {"type":"error","error":{"type":"invalid_request_error",
+    "message":"You're out of extra usage. Add more at claude.ai/settings/usage and keep going."},
+    "request_id":"req_011CeAV1UmHy2dgWny5Qq66M"}
+  text: ""
+anthropic claude-haiku-4-5 -> error 400 {… "You're out of extra usage. …"}
+  text: ""
+openai-codex gpt-5.4-mini  -> stop
+  text: "Hello from the Crucible agent."
+xai grok-4.5               -> stop
+  text: "Hello there, friend — welcome aboard!"
+```
+
+Subscription usage is only drawn when the product name `pi` is rewritten to the
+π symbol in the system prompt — the legacy system's `anthropic-pi-symbol`
+extension. That behaviour is deliberately **not** ported in this slice. Human
+ruling on the deviation report: repin `SDK_MODEL` to `openai-codex` /
+`gpt-5.4-mini`, one constant, and carry the rename as a named follow-up.
+
+### `assistantMessageEvent.error` is unreachable in this SDK version
+
+`message_update` is emitted in exactly one place —
+`pi-agent-core/dist/agent-loop.js:222` — and only for the streaming *content*
+variants (`text_*`, `thinking_*`, `toolcall_*`, lines 210-226). `case "done":`
+and `case "error":` (line 228) both fold the outcome into the final message and
+emit `message_end` instead, and `prompt()` resolves normally. Raw session events
+for the failing request above:
+
+```
+EVENT {"type":"agent_start"}
+EVENT {"type":"turn_start"}
+EVENT {"type":"message_start"}   # the user message
+EVENT {"type":"message_end"}     # the user message
+EVENT {"type":"message_start"}
+EVENT {"type":"message_end", message:{… "stopReason":"error",
+        "errorMessage":"400 {…\"You're out of extra usage.…\"}"}}
+EVENT {"type":"turn_end"}
+EVENT {"type":"agent_end"}
+```
+
+So D3's mapping table gained one row (human-approved): `message_end` whose
+assistant message has `stopReason: "error"` maps to `error` with code
+`adapter`. Without it a paid failure reached the pane as a clean `turn_ended`
+with no text. Verified end to end by pointing `SDK_MODEL` at the exhausted
+Anthropic pair for one run — `turn_started`, then the error, and **no**
+trailing `turn_ended`, because the first terminal event closes the turn:
+
+```
+[t-1] turn_started
+[t-1] error (adapter) 400 {"type":"error","error":{"type":"invalid_request_error",
+      "message":"You're out of extra usage. Add more at claude.ai/settings/usage and keep going."},
+      "request_id":"req_011CeAVj2oGAp1v4bbBEcrEr"}
+FAIL — the turn failed: …
+```
+
+The constant was put back to `openai-codex` / `gpt-5.4-mini` immediately after.
+
+### `npm run prove:sdk` — the one-shot proof (D12), stdout verbatim
+
+```
+> crucible@0.0.0 prove:sdk
+> CRUCIBLE_AGENT=sdk node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/prove-sdk.ts
+
+prove:sdk — Crucible SDK adapter against the real π SDK
+date:   2026-08-18T16:02:43.950Z
+model:  openai-codex/gpt-5.4-mini
+node:   v25.9.0
+prompt: "Say hello in five words."
+
+prompt accepted as t-1
+[t-1] turn_started
+[t-1] text_delta "Hello"
+[t-1] text_delta " from"
+[t-1] text_delta " me"
+[t-1] text_delta ","
+[t-1] text_delta " right"
+[t-1] text_delta " now"
+[t-1] text_delta "."
+[t-1] turn_ended
+
+reply:  "Hello from me, right now."
+PASS — turn_started, 7 text_delta, turn_ended
+```
+
+Exit code 0, one turn, tools off, well inside the 60s deadline. The model pair
+actually proved is **`openai-codex/gpt-5.4-mini`**, not the
+`anthropic/claude-fable-5` the steering document named.
+
+### `npm run dev:sdk` — the same pane on the real SDK
+
+`CRUCIBLE_AGENT=sdk npm run dev`, then the DoD 5 recipe against the real
+adapter. Agent Browser after "Say hello in five words." was sent through the
+pane:
+
+```
+- generic [ref=e1] clickable [onclick]
+  - main
+    - heading "Crucible" [level=1, ref=e2]
+    - list "Transcript"
+      - listitem "You" [level=1, ref=e3]
+        - StaticText "Say hello in five words."
+      - listitem "Agent" [level=1, ref=e4]
+        - StaticText "Hello from the coding assistant."
+    - form
+      - textbox "Message" [ref=e5]
+      - button "Send" [disabled, ref=e6]
+```
+
+That launch's log shows the flavor and the whole turn in one stream:
+
+```
+{"ts":"2026-08-18T16:03:17.421Z","seq":2,"source":"main","event":"adapter_selected","adapter":"sdk","requested":"sdk","reason":null}
+{"ts":"2026-08-18T16:03:38.654Z","seq":9,"source":"main","event":"prompt","adapter":"sdk","turnId":"t-1","prompt":"Say hello in five words."}
+{"ts":"2026-08-18T16:03:38.655Z","seq":10,"source":"main","event":"turn_started","adapter":"sdk","turnId":"t-1"}
+{"ts":"2026-08-18T16:03:40.699Z","seq":11,"source":"main","event":"text_delta","adapter":"sdk","turnId":"t-1","delta":"Hello"}
+…
+{"ts":"2026-08-18T16:03:40.869Z","seq":17,"source":"main","event":"turn_ended","adapter":"sdk","turnId":"t-1"}
+```
+
+### Closing the window mid-turn disposes the SDK session
+
+Same launch. A second prompt — "Count from 1 to 200, one number per line,
+nothing else." — was sent, and the window was closed four seconds into the
+stream (`window.close()` through Agent Browser). The log ends where the window
+did:
+
+```
+{"ts":"2026-08-18T16:04:59.383Z","seq":241,"source":"main","event":"text_delta","adapter":"sdk","turnId":"t-2","delta":"\n"}
+{"ts":"2026-08-18T16:04:59.396Z","seq":242,"source":"main","event":"windows_closed"}
+{"ts":"2026-08-18T16:05:11.722Z","seq":243,"source":"main","event":"app_quitting"}
+```
+
+224 records for `t-2`, the last of them the delta `"111"` — then nothing. This
+is evidence about the *session*, not merely about the channel: `withLogging`
+subscribes to the adapter directly and never unsubscribes, so a session left
+streaming would have gone on writing `text_delta` records into this file with
+no window to send them to. It wrote none, and no `turn_ended` or `error`
+followed: the turn was abandoned and the session disposed.
+
+At the adapter's own interface, headless, same result — a turn was disposed
+after three deltas of a 200-line count:
+
+```
+event turn_started
+disposing mid-turn after 3 deltas
+exited 3.1s after dispose; events after dispose: 0
+```
+
+The process ended on its own three seconds after `dispose()` rather than
+running the count to completion, so nothing was left holding the event loop:
+`AgentSession.dispose()` only detaches listeners, and the adapter therefore
+calls `abort()` first — that is what stops the paid request.
+
+### `npm test` with credentials present makes no network call
+
+`npm test` → 12 files, 114 tests, green, in under a second. No test constructs
+the SDK adapter: `toPortEvent` lives in its own module that imports the SDK for
+**types only**, so nothing SDK-shaped is loaded at runtime by the suite, and
+`select-adapter.test.ts` deliberately no longer exercises the
+`CRUCIBLE_AGENT=sdk` row of D5's table (that row is proved by `prove:sdk` and
+`dev:sdk` instead). `npm run lint` and `npm run typecheck` are green too.
+
+### D11 settled: credentials in, the legacy system out
+
+The UNVERIFIED row "`createAgentSession()` with default `agentDir` would load
+the legacy packages" was checked directly rather than through `prove:sdk`'s
+stdout — widening the adapter's interface to expose its session just so a
+script could print a package list would have cost more than the fact is worth.
+Building both settings managers side by side, then the session exactly as
+`createSdkAdapter` builds it:
+
+```
+in-memory settings packages: []
+on-disk  settings packages: ["../../repos/pi-extensions"]
+extensions loaded: []
+extension errors: []
+active tools: []
+```
+
+So the guess was right and D11's remedy works: the settings the SDK would have
+loaded by default do carry the legacy system, `SettingsManager.inMemory()` keeps
+them unread, and nothing from `../../repos/pi-extensions` reaches a Crucible
+session — while the default `agentDir` still resolves `auth.json`, which is why
+the runs above authenticate at all. `noTools: "all"` is visible in the same
+place: no active tools.
+
+### Follow-up this slice deliberately did not take
+
+**Port `anthropic-pi-symbol` behaviour into the SDK adapter when Crucible
+re-pins Anthropic.** Anthropic sessions draw subscription usage only when the
+product name `pi` is rewritten to the π symbol in the system prompt; the legacy
+system does it in an extension of that name. A bare `createAgentSession` lacks
+the rename and routes to the extra-usage pool, which is what the 400 above is.
+Until that behaviour exists here, `SDK_MODEL` names a provider that answers.
+
+### Toolchain notes
+
+- The SDK is ESM-only and its `exports` map has no `require` condition, so
+  `require('@earendil-works/pi-coding-agent')` fails outright with
+  `ERR_PACKAGE_PATH_NOT_EXPORTED` — not something Node 22+'s `require(esm)`
+  rescues. The adapter therefore loads it with `import()`, which rollup keeps as
+  a real dynamic import in the CommonJS main bundle (verified in
+  `out/main/index.js`). A fake-flavor launch never loads the SDK at all.
+- `prove:sdk` runs the adapter under plain Node's type stripping, whose ESM
+  resolver does no extension guessing, so `sdk-adapter.ts` imports its mapping
+  as `./to-port-event.ts` (hence `allowImportingTsExtensions` in
+  `tsconfig.node.json`) and the script is run with
+  `--disable-warning=MODULE_TYPELESS_PACKAGE_JSON` to keep its stdout clean in a
+  package with no `"type": "module"`.
+
+## 2026-08-18 — slice 7 fix round (review finding: provider payloads at the port)
+
+The review of slice 7 blocked on `error.message` carrying the provider's
+payload across the agent port, against the Contracts' "`error.message` is
+display-safe text for the pane. Stacks, SDK error objects and provider payloads
+go to the log (D8), never into the event." Every `code: "adapter"` event in the
+SDK path is now built by one function, `adapterError`, and the raw cause stops
+there.
+
+### What a provider payload becomes at the port
+
+The 400 that the exhausted Anthropic pool answers with (recorded verbatim
+earlier in this file) reaches the port as its sentence and nothing else:
+
+```
+in : 400 {"type":"error","error":{"type":"invalid_request_error",
+     "message":"You're out of extra usage. Add more at claude.ai/settings/usage and keep going."},
+     "request_id":"req_011CeAV1UmHy2dgWny5Qq66M"}
+out: { type: "error", turnId: "t-1", code: "adapter",
+       message: "You're out of extra usage. Add more at claude.ai/settings/usage and keep going." }
+```
+
+No `request_id`, no JSON, no status line. A payload with no human sentence in
+it, an HTML error page, an `Error` whose message carries a stack, and an SDK
+error object handed over as a thrown cause all become
+`"The agent failed without saying why."` — 12 cases in
+`src/main/agent/adapter-error.test.ts`, plus the mapping's own two in
+`to-port-event.test.ts`. `npm test`: 13 files, 124 tests, green; `npm run
+lint`, `npm run typecheck` and `npm run build` green, and the fix is in the
+main bundle (`adapterError` in `out/main/index.js`).
+
+### `npm run prove:sdk` after the fix — stdout verbatim
+
+```
+> crucible@0.0.0 prove:sdk
+> CRUCIBLE_AGENT=sdk node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/prove-sdk.ts
+
+prove:sdk — Crucible SDK adapter against the real π SDK
+date:   2026-08-18T16:23:19.143Z
+model:  openai-codex/gpt-5.4-mini
+node:   v25.9.0
+prompt: "Say hello in five words."
+
+prompt accepted as t-1
+[t-1] turn_started
+[t-1] text_delta "Hello"
+[t-1] text_delta " from"
+[t-1] text_delta " the"
+[t-1] text_delta " coding"
+[t-1] text_delta " assistant"
+[t-1] text_delta "."
+[t-1] turn_ended
+
+reply:  "Hello from the coding assistant."
+PASS — turn_started, 6 text_delta, turn_ended
+```
+
+Exit code 0, one turn, well inside the 60s deadline: the happy path still
+streams real model text through the adapter after the change. Who ran it: the
+fix agent, to verify the change end to end. The done-criterion's own run — the
+one a **human** performs — is the operator entry below.
+
+### The authorized proof run — `npm run prove:sdk`, stdout verbatim
+
+**Authorization.** The spec's owner amended the done-criterion's intent for this
+milestone: a **human authorizes** the paid proof; an agent may execute and
+record it. This run was authorized by the spec's owner and executed at their
+direction in this worktree on 2026-08-18, against the fixed adapter. It is the
+run the criterion asks for, and it is not to be repeated — each run spends
+money.
+
+```
+> crucible@0.0.0 prove:sdk
+> CRUCIBLE_AGENT=sdk node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/prove-sdk.ts
+
+prove:sdk — Crucible SDK adapter against the real π SDK
+date:   2026-08-18T16:22:56.128Z
+model:  openai-codex/gpt-5.4-mini
+node:   v25.9.0
+prompt: "Say hello in five words."
+
+prompt accepted as t-1
+[t-1] turn_started
+[t-1] text_delta "Hello"
+[t-1] text_delta " there"
+[t-1] text_delta ","
+[t-1] text_delta " happy"
+[t-1] text_delta " to"
+[t-1] text_delta " help"
+[t-1] text_delta "."
+[t-1] turn_ended
+
+reply:  "Hello there, happy to help."
+PASS — turn_started, 7 text_delta, turn_ended
+```
+
+`turn_started`, seven `text_delta` and `turn_ended`, in that order, well inside
+the 60-second deadline; model id `openai-codex/gpt-5.4-mini` and date
+`2026-08-18T16:22:56.128Z` are in the stdout above, and no credential is
+printed.
