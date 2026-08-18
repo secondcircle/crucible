@@ -8,6 +8,10 @@
 // replaced by stand-ins, and asserts on the real JSONL file the real sink
 // writes under the app path. Nothing here reaches past that: the log file and
 // the Electron calls are the only outputs this module has.
+//
+// The window the factory returns is a stand-in too, because the composition
+// root now serves the agent channel over it (D6); what that channel then does
+// is tested at its own interface, not here.
 import { mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -21,7 +25,8 @@ const harness = vi.hoisted(() => ({
   quits: 0,
   windowsCreated: 0,
   onCreateWindow: undefined as (() => void) | undefined,
-  releaseReady: () => {}
+  releaseReady: () => {},
+  ipcHandlers: new Set<string>()
 }))
 
 vi.mock('electron', () => ({
@@ -42,13 +47,25 @@ vi.mock('electron', () => ({
   },
   BrowserWindow: {
     getAllWindows: () => harness.windows
+  },
+  ipcMain: {
+    handle: (channel: string) => {
+      harness.ipcHandlers.add(channel)
+    },
+    removeHandler: (channel: string) => {
+      harness.ipcHandlers.delete(channel)
+    }
   }
 }))
 
 vi.mock('./window', () => ({
   createMainWindow: () => {
     harness.windowsCreated += 1
-    const window = {}
+    // As much of a window as the agent channel touches.
+    const window = {
+      on: () => {},
+      webContents: { on: () => {}, send: () => {}, isDestroyed: () => false }
+    }
     harness.windows.push(window)
     harness.onCreateWindow?.()
     return window
@@ -118,7 +135,9 @@ beforeEach(() => {
   harness.windowsCreated = 0
   harness.onCreateWindow = undefined
   harness.releaseReady = () => {}
+  harness.ipcHandlers.clear()
   vi.stubEnv('ELECTRON_RENDERER_URL', undefined)
+  vi.stubEnv('CRUCIBLE_AGENT', undefined)
   freshAppPath()
 })
 
@@ -138,7 +157,9 @@ describe('the main process', () => {
 
     expect(readdirSync(logDirectory())).toHaveLength(1)
     const [starting, ...rest] = records()
-    expect(rest).toEqual([])
+    // The launch flavor is chosen before readiness too, and says so (D5).
+    expect(rest).toHaveLength(1)
+    expect(rest[0]).toMatchObject({ seq: 2, source: 'main', event: 'adapter_selected' })
     expect(starting).toMatchObject({
       seq: 1,
       source: 'main',
@@ -171,10 +192,21 @@ describe('the main process', () => {
 
     await becomeReady()
 
-    expect(events()).toEqual(['app_starting', 'app_ready', 'window_created'])
-    expect(atFactoryCall).toEqual(['app_starting', 'app_ready'])
+    expect(events()).toEqual(['app_starting', 'adapter_selected', 'app_ready', 'window_created'])
+    expect(atFactoryCall).toEqual(['app_starting', 'adapter_selected', 'app_ready'])
     expect(harness.windowsCreated).toBe(1)
-    expect(records().map((record) => record.seq)).toEqual([1, 2, 3])
+    expect(records().map((record) => record.seq)).toEqual([1, 2, 3, 4])
+  })
+
+  it('serves the agent channel over the window it opened, until it quits', async () => {
+    await launch()
+    expect(harness.ipcHandlers.has('agent:prompt')).toBe(false)
+
+    await becomeReady()
+    expect(harness.ipcHandlers.has('agent:prompt')).toBe(true)
+
+    emit('will-quit')
+    expect(harness.ipcHandlers.has('agent:prompt')).toBe(false)
   })
 
   it('re-opens and logs a window on dock activate when none is open', async () => {
@@ -186,7 +218,7 @@ describe('the main process', () => {
 
     expect(harness.windowsCreated).toBe(2)
     expect(records().at(-1)).toMatchObject({
-      seq: 4,
+      seq: 5,
       source: 'main',
       event: 'window_created',
       reason: 'activate'
@@ -200,7 +232,7 @@ describe('the main process', () => {
     emit('activate')
 
     expect(harness.windowsCreated).toBe(1)
-    expect(events()).toEqual(['app_starting', 'app_ready', 'window_created'])
+    expect(events()).toEqual(['app_starting', 'adapter_selected', 'app_ready', 'window_created'])
   })
 
   it('logs the last window closing and quits, off macOS', async () => {
@@ -211,7 +243,13 @@ describe('the main process', () => {
     emit('window-all-closed')
 
     expect(harness.quits).toBe(1)
-    expect(events()).toEqual(['app_starting', 'app_ready', 'window_created', 'windows_closed'])
+    expect(events()).toEqual([
+      'app_starting',
+      'adapter_selected',
+      'app_ready',
+      'window_created',
+      'windows_closed'
+    ])
   })
 
   it('logs the last window closing and stays alive, on macOS', async () => {
@@ -222,7 +260,13 @@ describe('the main process', () => {
     emit('window-all-closed')
 
     expect(harness.quits).toBe(0)
-    expect(events()).toEqual(['app_starting', 'app_ready', 'window_created', 'windows_closed'])
+    expect(events()).toEqual([
+      'app_starting',
+      'adapter_selected',
+      'app_ready',
+      'window_created',
+      'windows_closed'
+    ])
   })
 
   it('leaves the whole launch readable in order, down to the last record', async () => {
@@ -235,10 +279,11 @@ describe('the main process', () => {
 
     expect(records().map((record) => [record.seq, record.event])).toEqual([
       [1, 'app_starting'],
-      [2, 'app_ready'],
-      [3, 'window_created'],
-      [4, 'windows_closed'],
-      [5, 'app_quitting']
+      [2, 'adapter_selected'],
+      [3, 'app_ready'],
+      [4, 'window_created'],
+      [5, 'windows_closed'],
+      [6, 'app_quitting']
     ])
   })
 })

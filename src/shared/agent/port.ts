@@ -74,3 +74,27 @@ export interface AgentPort {
   /** Returns an unsubscribe, like the SDK's own subscribe. */
   onEvent(listener: PortEventListener): Unsubscribe
 }
+
+/**
+ * An adapter with work to stop: the agent port, plus the one operation its
+ * owner needs and its callers never see.
+ *
+ * A caller of the port never learns what stands behind it, but something
+ * usually does — the SDK adapter's session, the fake adapter's scheduled
+ * script — and that work runs on after the document that asked for it is gone
+ * unless someone stops it. So whoever builds an adapter hands it to main's
+ * agent channel, which owns it from then on and disposes it when the window
+ * that was watching navigates away, closes or quits (D6). The renderer never
+ * sees this type: what crosses IPC is the port and nothing else.
+ *
+ * `dispose` is not the end of the object's life. It abandons whatever is in
+ * flight and releases what stood behind it — the abandoned turn says nothing
+ * more — while the adapter itself serves the next prompt from scratch, which
+ * is what lets the document that comes back after a reload prompt immediately.
+ * It is idempotent, and doing it with nothing in flight is allowed and does
+ * nothing.
+ */
+export interface AgentAdapter extends AgentPort {
+  /** Abandon the work in flight; the adapter stays usable. */
+  dispose(): void
+}

@@ -1,6 +1,6 @@
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
-import { createFakeAdapter } from '../../shared/agent/fake-adapter'
+import { createIpcClient } from './agent/ipc-client'
 import { ChatPane } from './ChatPane'
 
 /**
@@ -9,18 +9,21 @@ import { ChatPane } from './ChatPane'
  * document `index.html` ships and mounts the pane there — so there is nothing
  * here to call and nothing to hand it.
  *
- * For now it builds the fake adapter directly, so the pane can be driven with
- * no Electron anywhere. The agent channel slice replaces that one line with the
- * IPC client, and nothing else in the renderer changes — the pane never learns
- * which adapter answered it.
+ * The port it builds is the IPC client, always: the app has exactly one path to
+ * an agent and agents driving it must drive the shipped one, so which adapter
+ * answers is main's choice (D5) and no fake is ever constructed in the
+ * renderer. A component test hands the pane a port of its own instead, which is
+ * the same seam used from the other side.
  */
-const container = document.getElementById('root')
-if (!container) throw new Error('renderer: #root is missing from index.html')
+function mountApp(): void {
+  const container = document.getElementById('root')
+  if (!container) throw new Error('renderer: #root is missing from index.html')
 
-const port = createFakeAdapter()
+  createRoot(container).render(
+    <StrictMode>
+      <ChatPane port={createIpcClient()} />
+    </StrictMode>
+  )
+}
 
-createRoot(container).render(
-  <StrictMode>
-    <ChatPane port={port} />
-  </StrictMode>
-)
+mountApp()

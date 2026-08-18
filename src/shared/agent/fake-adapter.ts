@@ -1,4 +1,4 @@
-import type { AgentPort, PortEvent, PortEventListener, TurnId } from './port'
+import type { AgentAdapter, PortEvent, PortEventListener, TurnId } from './port'
 
 /**
  * The fake adapter: the canned-response implementation of the agent port, and
@@ -8,7 +8,8 @@ import type { AgentPort, PortEvent, PortEventListener, TurnId } from './port'
  * process, node unit tests and jsdom component tests alike. What it hides is the
  * script and its cadence: one factory and one option are the whole of its
  * interface, so a caller — the chat pane, main's handler, a test — sees nothing
- * of it but the agent port.
+ * of it but the agent port, and whoever owns it sees one thing more, `dispose`,
+ * which stops the script in flight (D6).
  */
 
 /** The scripted reply, split the way it streams. */
@@ -40,10 +41,10 @@ const REPLY_DELTAS: readonly string[] = [
  */
 const DEFAULT_DELTA_PAUSE_MS = 60
 
-/** Zero pause resolves now rather than scheduling: no test waits on a timer. */
-function pause(ms: number): Promise<void> {
-  if (ms <= 0) return Promise.resolve()
-  return new Promise((resolve) => setTimeout(resolve, ms))
+/** A turn in flight, from the outside: the one thing that can be done to it. */
+interface RunningTurn {
+  /** Stop the script where it stands; nothing more is emitted for this turn. */
+  abandon(): void
 }
 
 /**
@@ -59,6 +60,9 @@ function pause(ms: number): Promise<void> {
  * ordering rather than an accident of this adapter: a caller subscribes first
  * and prompts second. Every event after it is one pause apart, so a test that
  * drives the clock sees the turn exactly one event at a time.
+ *
+ * `dispose` stops the scripts in flight — the beats still to come are what this
+ * adapter has "running" — and leaves the adapter ready for the next prompt.
  */
 export function createFakeAdapter({
   deltaPauseMs = DEFAULT_DELTA_PAUSE_MS
@@ -68,8 +72,9 @@ export function createFakeAdapter({
    * microtasks — which is what tests pass, so no test ever waits on a clock.
    */
   readonly deltaPauseMs?: number
-} = {}): AgentPort {
+} = {}): AgentAdapter {
   const listeners = new Set<PortEventListener>()
+  const inFlight = new Set<RunningTurn>()
   let turns = 0
 
   function emit(event: PortEvent): void {
@@ -78,16 +83,52 @@ export function createFakeAdapter({
     for (const listener of [...listeners]) listener(event)
   }
 
-  // One pause before each event, the terminal one included: a turn's end is a
-  // beat of the script like any other, never something that lands in the same
-  // tick as its last delta.
-  async function stream(turnId: TurnId): Promise<void> {
-    for (const delta of REPLY_DELTAS) {
-      await pause(deltaPauseMs)
-      emit({ type: 'text_delta', turnId, delta })
+  /**
+   * Runs one turn's script and registers it as in flight until it is over.
+   *
+   * One pause before each event, the terminal one included: a turn's end is a
+   * beat of the script like any other, never something that lands in the same
+   * tick as its last delta. A beat that is abandoned is the end of the script:
+   * the pending timer is cleared, the wait is released, and the turn falls
+   * silent where it stood.
+   */
+  function run(turnId: TurnId): void {
+    let abandoned = false
+    let timer: ReturnType<typeof setTimeout> | undefined
+    let release: (() => void) | undefined
+
+    // Zero pause resolves on a microtask rather than scheduling: no test waits
+    // on a timer.
+    function beat(): Promise<void> {
+      return new Promise<void>((resolve) => {
+        release = resolve
+        if (deltaPauseMs <= 0) queueMicrotask(resolve)
+        else timer = setTimeout(resolve, deltaPauseMs)
+      })
     }
-    await pause(deltaPauseMs)
-    emit({ type: 'turn_ended', turnId })
+
+    const turn: RunningTurn = {
+      abandon(): void {
+        abandoned = true
+        if (timer !== undefined) clearTimeout(timer)
+        timer = undefined
+        release?.()
+      }
+    }
+
+    async function script(): Promise<void> {
+      for (const delta of REPLY_DELTAS) {
+        await beat()
+        if (abandoned) return
+        emit({ type: 'text_delta', turnId, delta })
+      }
+      await beat()
+      if (abandoned) return
+      emit({ type: 'turn_ended', turnId })
+    }
+
+    inFlight.add(turn)
+    void script().finally(() => inFlight.delete(turn))
   }
 
   return {
@@ -98,7 +139,7 @@ export function createFakeAdapter({
       turns += 1
       const turnId = `t-${turns}`
       emit({ type: 'turn_started', turnId })
-      void stream(turnId)
+      run(turnId)
       return Promise.resolve(turnId)
     },
 
@@ -107,6 +148,13 @@ export function createFakeAdapter({
       return () => {
         listeners.delete(listener)
       }
+    },
+
+    // Subscriptions are left alone: whoever is listening keeps listening, and
+    // hears the next turn in full. Only the scripts in flight are dropped.
+    dispose(): void {
+      for (const turn of [...inFlight]) turn.abandon()
+      inFlight.clear()
     }
   }
 }

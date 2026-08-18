@@ -215,6 +215,41 @@ describe('the fake adapter', () => {
     expect(deltasOf(events, turnId)).toBe(CANNED_REPLY)
   })
 
+  it('stops a turn in flight when disposed, and serves the next prompt', async () => {
+    vi.useFakeTimers()
+    const port = createFakeAdapter({ deltaPauseMs: 5 })
+    const { events } = record(port)
+
+    const abandoned = await port.prompt('Hello agent')
+    await vi.advanceTimersByTimeAsync(10)
+    expect(deltasOf(events, abandoned)).not.toBe('')
+
+    port.dispose()
+    const atDispose = [...events]
+    // Nothing is left scheduled: the turn is not running quietly, it is over.
+    expect(vi.getTimerCount()).toBe(0)
+    await vi.advanceTimersByTimeAsync(60_000)
+
+    // The script stopped where it stood — no more deltas, and no terminal event
+    // either, because the turn was abandoned rather than finished.
+    expect(events).toEqual(atDispose)
+    expect(events.some((event) => isTerminal(event, abandoned))).toBe(false)
+
+    // Disposing is not the end of the adapter: the next prompt runs in full,
+    // for the listener that was there all along.
+    const next = await port.prompt('again')
+    await vi.advanceTimersByTimeAsync(60_000)
+    expect(deltasOf(events, next)).toBe(CANNED_REPLY)
+    expect(events.at(-1)).toEqual({ type: 'turn_ended', turnId: next })
+
+    // Disposing with nothing in flight is allowed and does nothing.
+    expect(() => {
+      port.dispose()
+      port.dispose()
+    }).not.toThrow()
+    expect(events.at(-1)).toEqual({ type: 'turn_ended', turnId: next })
+  })
+
   it('emits events that survive structured clone', async () => {
     const port = createFakeAdapter({ deltaPauseMs: 0 })
     const { events } = record(port)
