@@ -1,6 +1,7 @@
 import { createFakeAdapter } from '../../shared/agent/fake-adapter'
 import type { AgentAdapter } from '../../shared/agent/port'
 import type { LogSink } from '../log/sink'
+import { withLogging } from './with-logging'
 
 /**
  * Which adapter a launch puts behind the agent port — the launch flavor (D5).
@@ -15,7 +16,9 @@ import type { LogSink } from '../log/sink'
  * why they differ when they do.
  *
  * The sink is passed in (D9: one sink, built at startup, handed to everything);
- * the flavor is not, because it is not the caller's to choose.
+ * the flavor is not, because it is not the caller's to choose. Whatever this
+ * returns is wrapped in `withLogging` before it leaves — every port a launch
+ * gets is a logged one, and this is the only place that can promise that (D8).
  */
 export function selectAdapter(log: LogSink): AgentAdapter {
   const requested = process.env.CRUCIBLE_AGENT
@@ -31,7 +34,8 @@ export function selectAdapter(log: LogSink): AgentAdapter {
         ? null
         : `CRUCIBLE_AGENT=${asked} is not a launch flavor, so the fake adapter answers`
 
-  log.append({ source: 'main', event: 'adapter_selected', adapter: 'fake', requested: asked, reason })
+  const adapter = 'fake'
+  log.append({ source: 'main', event: 'adapter_selected', adapter, requested: asked, reason })
 
-  return createFakeAdapter()
+  return withLogging(createFakeAdapter(), log, adapter)
 }

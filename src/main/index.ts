@@ -2,6 +2,7 @@ import { join } from 'node:path'
 import { app, BrowserWindow } from 'electron'
 import { type AgentChannel, serveAgentChannel } from './agent/channel'
 import { selectAdapter } from './agent/select-adapter'
+import { forwardRendererOutput } from './log/renderer-output'
 import { createFileSink } from './log/sink'
 import { createMainWindow } from './window'
 
@@ -31,7 +32,12 @@ let channel: AgentChannel | undefined
  * and the channel it is served over lives and dies with it.
  */
 function openWindow(reason?: 'activate'): void {
-  channel = serveAgentChannel(adapter, createMainWindow())
+  const window = createMainWindow()
+  // D9: the renderer writes nothing itself. Its console output and any preload
+  // failure are forwarded here and appended to the same sink, so one file holds
+  // both processes in one order.
+  forwardRendererOutput(window.webContents, log)
+  channel = serveAgentChannel(adapter, window)
   log.append(
     reason === undefined
       ? { source: 'main', event: 'window_created' }

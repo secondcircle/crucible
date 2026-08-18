@@ -26,7 +26,10 @@ const harness = vi.hoisted(() => ({
   windowsCreated: 0,
   onCreateWindow: undefined as (() => void) | undefined,
   releaseReady: () => {},
-  ipcHandlers: new Set<string>()
+  ipcHandlers: new Set<string>(),
+  // What the newest window's `webContents` is listening for — the two renderer
+  // output events among them (D9).
+  webContentsListeners: new Map<string, (...args: unknown[]) => void>()
 }))
 
 vi.mock('electron', () => ({
@@ -62,9 +65,16 @@ vi.mock('./window', () => ({
   createMainWindow: () => {
     harness.windowsCreated += 1
     // As much of a window as the agent channel touches.
+    harness.webContentsListeners.clear()
     const window = {
       on: () => {},
-      webContents: { on: () => {}, send: () => {}, isDestroyed: () => false }
+      webContents: {
+        on: (event: string, listener: (...args: unknown[]) => void) => {
+          harness.webContentsListeners.set(event, listener)
+        },
+        send: () => {},
+        isDestroyed: () => false
+      }
     }
     harness.windows.push(window)
     harness.onCreateWindow?.()
@@ -136,6 +146,7 @@ beforeEach(() => {
   harness.onCreateWindow = undefined
   harness.releaseReady = () => {}
   harness.ipcHandlers.clear()
+  harness.webContentsListeners.clear()
   vi.stubEnv('ELECTRON_RENDERER_URL', undefined)
   vi.stubEnv('CRUCIBLE_AGENT', undefined)
   freshAppPath()
@@ -207,6 +218,29 @@ describe('the main process', () => {
 
     emit('will-quit')
     expect(harness.ipcHandlers.has('agent:prompt')).toBe(false)
+  })
+
+  it('forwards what the renderer says into the launch’s own log, in order', async () => {
+    await launch()
+    await becomeReady()
+
+    const said = harness.webContentsListeners.get('console-message')
+    expect(said).toBeDefined()
+    said?.({
+      message: '[crucible] preload loaded',
+      level: 'info',
+      lineNumber: 1,
+      sourceId: 'preload'
+    })
+
+    expect(records().map((record) => [record.seq, record.source, record.event])).toEqual([
+      [1, 'main', 'app_starting'],
+      [2, 'main', 'adapter_selected'],
+      [3, 'main', 'app_ready'],
+      [4, 'main', 'window_created'],
+      [5, 'renderer', 'console']
+    ])
+    expect(records().at(-1)).toMatchObject({ message: '[crucible] preload loaded', level: 'info' })
   })
 
   it('re-opens and logs a window on dock activate when none is open', async () => {
