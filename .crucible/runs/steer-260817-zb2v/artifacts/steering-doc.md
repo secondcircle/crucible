@@ -53,7 +53,9 @@ Turn started, text delta, turn ended, error. Every accepted turn emits started, 
 or more deltas, then exactly one terminal event — an immediate failure is started, then
 error. Ended carries no text: a turn's text is its accumulated deltas, nothing reconciles
 them after the fact. Tool, compaction and retry events are dropped by the mapping: tools are off at the
-session (D11), while compaction and retries stay the SDK's own business.
+session (D11), while compaction and retries stay the SDK's own business. An SDK
+failure is provisional until `session.prompt()` finishes: a recovered retry never crosses as
+an error, while an exhausted retry closes the port turn with its final failure.
 *Instead of:* mirroring the SDK's `AgentEvent` union and its nesting.
 *Because:* the fake adapter hand-writes every event; a foreign union makes it expensive.
 *Enforced:* `toPortEvent` in the SDK adapter (Contracts).
@@ -135,11 +137,16 @@ Crucible rather than inferred.
 *Because:* those settings load `packages: ["../../repos/pi-extensions"]`, making Crucible
 depend on the legacy system at runtime.
 *Enforced:* `createSdkAdapter`'s in-memory session construction (Contracts).
+*Amended 2026-08-18:* the interim pin is `openai-codex/gpt-5.4-mini`. A bare
+Anthropic SDK session misses the legacy `anthropic-pi-symbol` extension's system-prompt
+rewrite and routes to extra usage rather than subscription usage. Port that behavior before
+re-pinning Anthropic; it is a later upgrade, not part of this milestone.
 *Reversal cost:* cheap
 
 ### D12 "Proven against the real SDK once" is an opt-in script · proposed
 
-`npm run prove:sdk` is committed, run deliberately by a human, never part of `npm test`.
+`npm run prove:sdk` is committed, run only on a human's explicit authorization (an agent may
+execute and record it at the human's direction — amended 2026-08-18), never part of `npm test`.
 *Instead of:* a vitest case skipped unless an env var is set.
 *Because:* a skipped test invites CI or an agent to un-skip it and spend money.
 *Enforced:* stated, not enforced
@@ -235,8 +242,9 @@ Refused at runtime rather than absent, hence a Decision not a fence: overlapping
 - `npm run dev` opens the app with HMR, renderer sandboxed.
 - An agent launches the app, connects Agent Browser, sends "Hello agent" and watches the
   canned reply stream into the pane — no paid call anywhere.
-- A human runs `npm run prove:sdk` once, sees real model text stream, pastes the output into
-  the evidence file; `npm run dev:sdk` shows the same pane on the real SDK.
+- A human authorizes `npm run prove:sdk` once (running it themselves or directing an agent to);
+  real model text streams, and the stdout goes into the evidence file beside the recorded
+  authorization; `npm run dev:sdk` shows the same pane on the real SDK.
 - A component test on the fake asserts the rendered reply; unit tests cover adapters, handler, sink.
 - After a session, that launch's JSONL file in `logs/` shows main lifecycle, the prompt,
   adapter identity, every event and a renderer console line in one order.
@@ -334,7 +342,7 @@ The SDK adapter's construction and mapping — `createSdkAdapter` and `toPortEve
 const { session } = await createAgentSession({
   sessionManager: SessionManager.inMemory(),
   settingsManager: SettingsManager.inMemory(),   // default would read ~/.pi/agent/settings.json
-  model: getBuiltinModel("anthropic", "claude-fable-5"),  // Crucible's own constants
+  model: getBuiltinModel("openai-codex", "gpt-5.4-mini"), // Crucible's interim constants
   noTools: "all",
 });
 // agentDir stays default — that is the whole of "credentials only": the model
@@ -348,8 +356,16 @@ const { session } = await createAgentSession({
 turn_start                                          -> turn_started
 message_update + assistantMessageEvent.text_delta   -> text_delta   (.delta)
 turn_end                                            -> turn_ended
-throw from prompt(), or assistantMessageEvent.error -> error        (code "adapter")
+message_update + assistantMessageEvent.error        -> provisional error (code "adapter")
+message_end + assistant stopReason "error"          -> provisional error (code "adapter")
+throw from prompt()                                 -> error        (code "adapter")
 ```
+
+The installed SDK folds provider failures into assistant `message_end` rather than exposing
+its typed `assistantMessageEvent.error` through `AgentSession.subscribe`. Both rows stay in
+the mapping. They update the port turn's provisional outcome, but do not settle it until
+`session.prompt()` returns: transient retries remain the SDK's business and a recovered
+reply replaces the provisional failure; an exhausted retry emits its last failure.
 
 The adapter owns the session it made: `dispose()` on window close, reload or app
 quit, which is also what releases the single-flight guard (D6). Two failure shapes
@@ -367,8 +383,9 @@ a visible stream in the app while tests pass zero and never wait on a timer.
 `prove:sdk`, the one-shot proof (D12): prompts `"Say hello in five words."` against
 `createSdkAdapter`, prints each port event, and exits non-zero unless it saw
 `turn_started`, at least one `text_delta`, then `turn_ended` within 60 seconds. One
-turn, tools off, no retry loop, so the spend is one short completion. Its stdout
-goes into evidence with the model id and date; credentials are never printed.
+turn, tools off, no caller retry loop, so the spend is one short completion (the SDK may
+retry transient provider failures internally). Its stdout goes into evidence with the model
+id, date, and explicit human authorization; credentials are never printed.
 
 The Agent Browser recipe DoD 5 is written against (D5): `npm run dev`, then
 `agent-browser connect 9222`, `snapshot -i`, fill the message input, click send,
