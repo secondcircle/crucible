@@ -62,6 +62,19 @@ export interface SessionView {
   readonly turn?: { readonly turnId: TurnId; readonly startedAt: number }
 }
 
+/**
+ * Whether a session's conversation is *known* to hold nothing.
+ *
+ * An unfetched view's items are `[]` whatever the conversation behind it holds,
+ * so emptiness and ignorance look alike until `loaded` tells them apart. The
+ * guards that ask before a destructive change (SE-7, MO-7) read an unfetched
+ * view as "not known to be empty" and ask, because the alternative is applying
+ * the change to a conversation nobody has looked at yet.
+ */
+export function knownEmpty(view: SessionView | undefined): boolean {
+  return view?.loaded === true && view.items.length === 0
+}
+
 export interface ShellState {
   readonly snapshot: ShellSnapshot
   readonly models: readonly ModelInfo[]

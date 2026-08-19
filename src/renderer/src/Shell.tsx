@@ -12,7 +12,7 @@ import { ResumeOverlay } from './components/ResumeOverlay'
 import { Sidebar } from './components/Sidebar'
 import { TopBar } from './components/TopBar'
 import { Transcript } from './components/Transcript'
-import { NOTHING_YET, reduce } from './state/shell-state'
+import { knownEmpty, NOTHING_YET, reduce } from './state/shell-state'
 import './shell.css'
 
 /**
@@ -37,7 +37,10 @@ import './shell.css'
  *   (CO-4). Precedence cannot live in the components that each know only one
  *   of the three.
  * - **The two guards**: reset on a non-empty session, and a thinking-level
- *   change on a non-empty session, both ask first (SE-7, MO-7).
+ *   change on a non-empty session, both ask first (SE-7, MO-7). Both skip the
+ *   question only for a conversation *known* to be empty — see `knownEmpty` —
+ *   because a session whose settled history has not landed shows no items and
+ *   may hold plenty.
  */
 
 /** What is open, at most one at a time. */
@@ -64,6 +67,9 @@ export function Shell({ port }: { port: AgentPort }): React.JSX.Element {
   const session = snapshot.sessions.find((candidate) => candidate.id === activeSessionId)
   const view = activeSessionId === undefined ? undefined : views[activeSessionId]
   const items = view?.items ?? []
+  // Nothing to lose, and known to be nothing: what lets a guard skip its
+  // question (SE-7, MO-7).
+  const emptyConversation = knownEmpty(view)
   const working = session?.working ?? false
   const model = models.find((candidate) => candidate.id === session?.model)
   const elapsedSeconds = useElapsedSeconds(working ? view?.turn?.startedAt : undefined)
@@ -190,8 +196,9 @@ export function Shell({ port }: { port: AgentPort }): React.JSX.Element {
     if (id === undefined) return
     setPopover('none')
     // A session with nothing in it has nothing to lose, so it is reset without
-    // a question; anything else asks first (SE-7).
-    if (items.length === 0) {
+    // a question; anything else — including a conversation still being fetched,
+    // which is not the same as an empty one — asks first (SE-7).
+    if (emptyConversation) {
       applyReset(id)
       return
     }
@@ -220,7 +227,7 @@ export function Shell({ port }: { port: AgentPort }): React.JSX.Element {
     const sessionId = activeSessionId
     setPopover('none')
     if (sessionId === undefined) return
-    if (items.length === 0) {
+    if (emptyConversation) {
       void port.setThinkingLevel(sessionId, level).catch(report)
       return
     }
