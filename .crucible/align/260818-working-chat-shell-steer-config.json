@@ -1,0 +1,7 @@
+{
+  "research": "xai/grok-4.6:high",
+  "seams": "openai-codex/gpt-5.6-sol:high",
+  "draft": "openai-codex/gpt-5.6-sol:high",
+  "factAudit": "openai-codex/gpt-5.6-sol:high",
+  "coldRead": "openai-codex/gpt-5.6-sol:high"
+}

@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Mock A — Ember</title>
+<style>
+  :root{
+    --bg:#191419; --bg2:#211a20; --panel:#241c23; --line:#3a2e38;
+    --ink:#e8dfe2; --dim:#9b8a94; --faint:#6b5d66;
+    --accent:#e07a4f; --accent2:#f0a37c; --ok:#7fb069;
+    --user:#2c2230; --mono:ui-monospace,'SF Mono',Menlo,monospace;
+  }
+  *{box-sizing:border-box;margin:0}
+  body{background:var(--bg);color:var(--ink);font:14px/1.55 -apple-system,'Segoe UI',sans-serif;height:100vh;display:flex;overflow:hidden}
+  /* ---------- sidebar ---------- */
+  .side{width:248px;background:var(--bg2);border-right:1px solid var(--line);display:flex;flex-direction:column}
+  .brand{padding:16px 16px 10px;font-weight:700;letter-spacing:.06em;font-size:15px}
+  .brand em{color:var(--accent);font-style:normal}
+  .newchat{margin:6px 12px 14px;padding:8px;border:1px solid var(--line);border-radius:8px;background:var(--panel);color:var(--ink);text-align:center;font-size:13px;cursor:pointer}
+  .wslabel{padding:4px 16px;font-size:10.5px;text-transform:uppercase;letter-spacing:.12em;color:var(--faint)}
+  .ws{padding:7px 16px;font-size:13px;color:var(--dim);cursor:pointer;display:flex;align-items:center;gap:8px}
+  .ws .dot{width:7px;height:7px;border-radius:50%;background:var(--faint)}
+  .ws.active{color:var(--ink);background:var(--panel)}
+  .ws.active .dot{background:var(--accent);box-shadow:0 0 6px var(--accent)}
+  .ws.working .dot{background:var(--ok);animation:breathe 2.4s infinite}
+  @keyframes breathe{50%{opacity:.35}}
+  .sessions{margin:2px 0 10px;border-left:1px solid var(--line);margin-left:22px}
+  .sess{padding:5px 12px;font-size:12.5px;color:var(--dim);cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .sess.active{color:var(--accent2)}
+  .side .foot{margin-top:auto;padding:12px 16px;border-top:1px solid var(--line);font-size:12px;color:var(--dim);display:flex;justify-content:space-between;align-items:center}
+  /* ---------- main ---------- */
+  .main{flex:1;display:flex;flex-direction:column;min-width:0}
+  .top{display:flex;align-items:center;gap:12px;padding:10px 20px;border-bottom:1px solid var(--line);font-size:12.5px;color:var(--dim)}
+  .top .title{color:var(--ink);font-weight:600;font-size:13.5px}
+  .meter{margin-left:auto;display:flex;align-items:center;gap:8px}
+  .meter .bar{width:110px;height:5px;border-radius:3px;background:var(--panel);overflow:hidden}
+  .meter .bar i{display:block;height:100%;width:34%;background:linear-gradient(90deg,var(--accent),var(--accent2))}
+  .chat{flex:1;overflow-y:auto;padding:28px 0}
+  .msg{max-width:680px;margin:0 auto 26px;padding:0 24px}
+  .msg .who{font-size:11px;text-transform:uppercase;letter-spacing:.1em;color:var(--faint);margin-bottom:6px}
+  .msg.user .bubble{background:var(--user);border:1px solid var(--line);border-radius:10px;padding:10px 14px}
+  .msg.agent .who{color:var(--accent)}
+  .msg p{margin-bottom:8px}
+  pre{background:#120e12;border:1px solid var(--line);border-radius:8px;padding:12px 14px;font:12px/1.5 var(--mono);color:#d7c9b8;overflow-x:auto;margin:10px 0}
+  code.inline{font:12px var(--mono);background:#120e12;padding:1px 5px;border-radius:4px;color:var(--accent2)}
+  ul{margin:4px 0 10px 20px}
+  .tool{display:flex;gap:8px;align-items:center;font:12px var(--mono);color:var(--dim);background:#120e12;border:1px solid var(--line);border-left:3px solid var(--ok);border-radius:6px;padding:7px 12px;margin:10px 0}
+  .cursor{display:inline-block;width:7px;height:15px;background:var(--accent);vertical-align:text-bottom;animation:breathe 1s infinite}
+  /* ---------- composer ---------- */
+  .composer{max-width:680px;width:100%;margin:0 auto;padding:0 24px 18px}
+  .cbox{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px 14px 10px}
+  .cbox textarea{width:100%;background:none;border:none;color:var(--ink);font:14px/1.5 inherit;resize:none;outline:none;height:44px}
+  .crow{display:flex;align-items:center;gap:8px;margin-top:6px}
+  .chip{font-size:12px;color:var(--dim);border:1px solid var(--line);border-radius:14px;padding:3px 10px;cursor:pointer;display:flex;gap:6px;align-items:center}
+  .chip b{color:var(--ink);font-weight:600}
+  .send{margin-left:auto;background:var(--accent);color:#1c120c;border:none;border-radius:8px;padding:6px 14px;font-weight:700;cursor:pointer}
+  .send.working{background:var(--panel);color:var(--ink);border:1px solid var(--accent);display:flex;align-items:center;gap:8px;padding:5px 12px}
+  .spin{width:13px;height:13px;border-radius:50%;border:2px solid var(--line);border-top-color:var(--accent);animation:rot .8s linear infinite}
+  @keyframes rot{to{transform:rotate(360deg)}}
+  .stopsq{width:9px;height:9px;background:var(--accent);border-radius:2px}
+  .esc{text-align:center;font-size:11.5px;color:var(--faint);margin-top:8px}
+  .esc kbd{font:11px var(--mono);border:1px solid var(--line);border-radius:4px;padding:1px 5px;color:var(--dim)}
+  /* right pane collapsed */
+  .edge{width:26px;border-left:1px solid var(--line);background:var(--bg2);display:flex;align-items:center;justify-content:center;cursor:pointer}
+  .edge span{writing-mode:vertical-rl;font-size:10.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--faint)}
+</style></head><body>
+  <nav class="side">
+    <div class="brand"><em>◆</em> CRUCIBLE</div>
+    <button class="newchat">New session</button>
+    <div class="wslabel">Workspaces</div>
+    <div class="ws active working"><span class="dot"></span> crucible</div>
+    <div class="sessions">
+      <div class="sess active">electron boilerplate steer</div>
+      <div class="sess">ui/ux prototyping</div>
+      <div class="sess">agent port design notes</div>
+    </div>
+    <div class="ws"><span class="dot"></span> pi-extensions</div>
+    <div class="ws"><span class="dot"></span> resume-site</div>
+    <div class="ws"><span class="dot"></span> homelab</div>
+    <div class="foot"><span>ike</span><span style="color:var(--ok)">● working</span></div>
+  </nav>
+  <main class="main">
+    <div class="top">
+      <span class="title">electron boilerplate steer</span>
+      <span>crucible · main</span>
+      <div class="meter"><span>34% ctx</span><div class="bar"><i></i></div><span style="color:var(--faint)">68k / 200k</span></div>
+    </div>
+    <div class="chat">
+      <div class="msg user"><div class="who">You</div><div class="bubble">Wire the fake adapter as the dev default and show me how a component test drives the chat pane through the agent port.</div></div>
+      <div class="msg agent"><div class="who">Agent · Opus 5</div>
+        <p>The fake adapter is now the default whenever <code class="inline">CRUCIBLE_ADAPTER</code> is unset. A component test scripts it with a canned event stream:</p>
+        <pre>const port = fakeAdapter([
+  delta("Hello "), delta("ike."), done(),
+]);
+render(&lt;ChatPane port={port} /&gt;);
+await screen.findByText("Hello ike.");</pre>
+        <div class="tool">▸ bash — npm test · 14 passed</div>
+        <p>Three things worth knowing:</p>
+        <ul><li>the port never leaks SDK types into the renderer</li><li>streams replay deterministically, so no flaky waits</li><li>the same canned streams power dev mode</li></ul>
+        <p>Next I'll forward renderer console output into the merged log<span class="cursor"></span></p>
+      </div>
+    </div>
+    <div class="composer">
+      <div class="cbox">
+        <textarea placeholder="Message the agent…"></textarea>
+        <div class="crow">
+          <div class="chip">⌾ <b>Opus 5</b></div>
+          <div class="chip">think: <b>high</b></div>
+          <div class="chip">＋</div>
+          <button class="send working"><span class="spin"></span><span class="stopsq"></span> Stop</button>
+        </div>
+      </div>
+      <div class="esc"><span style="color:var(--accent2)">agent working · 41s</span> — <kbd>esc</kbd> or Stop to cancel · <kbd>⇧⏎</kbd> newline</div>
+    </div>
+  </main>
+  <div class="edge"><span>Context ▸</span></div>
+</body></html>

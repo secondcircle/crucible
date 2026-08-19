@@ -35,6 +35,12 @@ _Avoid_: mock, stub.
 The agent-port implementation backed by the real π SDK.
 _Avoid_: real backend, live mode.
 
+**Ember**:
+The shell's visual language — the palette, typography, spacing, and
+component patterns defined by `docs/design/mock-a-ember.html` and its
+supporting mocks. The name of the look, not of any feature.
+_Avoid_: the theme, the skin, the dark mode.
+
 **Workspace**:
 An OS folder opened in Crucible as an agent working directory and as the home of that folder's sessions.
 _Avoid_: project, repository.

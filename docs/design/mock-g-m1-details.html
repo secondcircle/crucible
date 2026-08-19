@@ -1,0 +1,180 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>M1 UI/UX decisions</title>
+<style>
+  :root{
+    --bg:#191419; --bg2:#211a20; --panel:#241c23; --panel2:#2e242d; --line:#3a2e38;
+    --ink:#e8dfe2; --dim:#9b8a94; --faint:#6b5d66;
+    --accent:#e07a4f; --accent2:#f0a37c; --ok:#7fb069; --err:#d96a5a; --think:#b08cc9;
+    --mono:ui-monospace,'SF Mono',Menlo,monospace;
+  }
+  *{box-sizing:border-box;margin:0}
+  body{background:#100d10;color:var(--ink);font:13.5px/1.55 -apple-system,'Segoe UI',sans-serif;padding:34px;max-width:960px}
+  h1{font-size:16px;margin-bottom:4px}
+  h1 em{color:var(--accent);font-style:normal}
+  .sub{color:var(--faint);font-size:12px;margin-bottom:28px}
+  section{margin-bottom:34px}
+  h2{font-size:11px;text-transform:uppercase;letter-spacing:.13em;color:var(--accent2);margin-bottom:4px}
+  .why{font-size:12px;color:var(--dim);margin-bottom:12px;max-width:640px}
+  .frame{background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:18px 20px;max-width:640px}
+  .bubble{background:#2c2230;border:1px solid var(--line);border-radius:10px;padding:9px 13px;max-width:80%;margin-left:auto;margin-bottom:10px}
+  .bubble.queued{opacity:.55;border-style:dashed}
+  .qtag{display:flex;gap:6px;justify-content:flex-end;align-items:center;font-size:11px;color:var(--faint);margin:-4px 0 10px}
+  .qtag .tgl{border:1px solid var(--line);border-radius:10px;overflow:hidden;display:flex}
+  .qtag .tgl span{padding:1px 8px;cursor:pointer}
+  .qtag .tgl .on{background:var(--accent);color:#1c120c;font-weight:600}
+  .agent p{margin-bottom:8px}
+  .who{font-size:11px;text-transform:uppercase;letter-spacing:.1em;color:var(--accent);margin-bottom:6px}
+  /* tool chips */
+  .tool{display:flex;gap:8px;align-items:center;font:12px var(--mono);color:var(--dim);background:#120e12;border:1px solid var(--line);border-left:3px solid var(--ok);border-radius:6px;padding:7px 12px;margin:8px 0;cursor:pointer}
+  .tool .n{color:var(--ink)}
+  .tool .exp{margin-left:auto;color:var(--faint)}
+  .toolopen{border:1px solid var(--line);border-left:3px solid var(--ok);border-radius:6px;margin:8px 0;overflow:hidden}
+  .toolopen .head{display:flex;gap:8px;font:12px var(--mono);color:var(--dim);background:#120e12;padding:7px 12px;cursor:pointer}
+  .toolopen pre{background:#0d0a0d;padding:10px 14px;font:11.5px/1.5 var(--mono);color:#cbbfa4;margin:0;max-height:120px;overflow:auto}
+  .think{border-left:3px solid var(--think);background:#161018;color:var(--faint);font-size:12px;border-radius:6px;padding:7px 12px;margin:8px 0;cursor:pointer;font-style:italic}
+  /* compaction */
+  .notice{display:flex;align-items:center;gap:10px;border:1px dashed var(--line);border-radius:8px;padding:8px 14px;margin:14px 0;font-size:12px;color:var(--dim)}
+  .notice b{color:var(--accent2);font-weight:600}
+  .notice .act{margin-left:auto;color:var(--accent2);cursor:pointer;font-size:11.5px}
+  /* error */
+  .errcard{border:1px solid var(--err);border-radius:8px;padding:10px 14px;margin:10px 0;font-size:12.5px;background:#1d1113}
+  .errcard b{color:var(--err)}
+  .errcard .acts{margin-top:6px;display:flex;gap:12px;font-size:12px}
+  .errcard .acts span{color:var(--accent2);cursor:pointer}
+  /* login dialog */
+  .dialog{background:var(--panel);border:1px solid var(--line);border-radius:12px;max-width:420px;box-shadow:0 20px 50px rgba(0,0,0,.5);overflow:hidden}
+  .dialog .dh{padding:13px 18px;border-bottom:1px solid var(--line);font-weight:650;font-size:13.5px}
+  .prow{display:flex;align-items:center;gap:12px;padding:12px 18px;border-bottom:1px solid var(--line)}
+  .prow:last-child{border:none}
+  .pic{width:30px;height:30px;border-radius:8px;background:var(--bg);display:flex;align-items:center;justify-content:center;font-size:13px;color:var(--dim)}
+  .prow .nm{font-size:13px;font-weight:600}
+  .prow .nm small{display:block;font-weight:400;font-size:11px;color:var(--faint)}
+  .prow .st{margin-left:auto;font-size:11px;color:var(--ok)}
+  .btn{border:1px solid var(--line);background:var(--bg);color:var(--ink);border-radius:7px;padding:4px 12px;font-size:12px;cursor:pointer}
+  .btn.primary{background:var(--accent);color:#1c120c;border:none;font-weight:600}
+  .btn.ghost{color:var(--dim)}
+  /* trust */
+  .trust .dh small{display:block;font-weight:400;color:var(--faint);font-size:11.5px;margin-top:3px}
+  .trust .body{padding:14px 18px;font-size:12.5px;color:var(--dim)}
+  .trust .body code{font:11.5px var(--mono);color:var(--accent2)}
+  .trust .foot{display:flex;gap:10px;justify-content:flex-end;padding:12px 18px;border-top:1px solid var(--line)}
+  /* session header */
+  .shead{display:flex;align-items:center;gap:10px;background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:10px 16px;max-width:640px;position:relative}
+  .shead .t{font-weight:650}
+  .shead .pen{color:var(--faint);cursor:pointer;font-size:12px}
+  .shead .meta{margin-left:auto;font:11.5px var(--mono);color:var(--dim);cursor:pointer}
+  .pop{position:absolute;right:12px;top:44px;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px 16px;font:11.5px var(--mono);color:var(--dim);line-height:1.8;box-shadow:0 14px 34px rgba(0,0,0,.5);z-index:2}
+  .pop b{color:var(--ink);font-weight:400}
+  .pop .cost{color:var(--accent2)}
+  /* thinking chips */
+  .chips{display:flex;gap:10px;align-items:center}
+  .chip{font-size:12px;color:var(--dim);border:1px solid var(--line);border-radius:14px;padding:3px 10px;display:flex;gap:6px;align-items:center}
+  .chip b{font-weight:600}
+  .chip.lo b{color:var(--dim)}
+  .chip.md b{color:var(--accent2)}
+  .chip.hi b{color:var(--accent)}
+  .chip.hi{border-color:var(--accent)}
+  .arrow{color:var(--faint);font-size:11px}
+</style></head><body>
+  <h1><em>◆</em> M1 — the subjective UI decisions, drawn</h1>
+  <p class="sub">Everything in parity core where more than one reasonable design exists. React per section; Ember language throughout. Already settled elsewhere: shell layout, working state, model picker, resume overlay.</p>
+
+  <section>
+    <h2>1 · Queued messages — steering vs follow-up</h2>
+    <p class="why">Ruled: typing while streaming just works — messages queue, render ghosted-dashed, and all deliver together at the next opportunity. No toggles, no settings. <b style="color:var(--ink)">Esc = stop the agent</b> (queued messages return to the composer, queue on top, draft below). <b style="color:var(--ink)">Click the queued stack</b> = unqueue without aborting. Double-esc is reserved for the session tree (M2).</p>
+    <div class="frame">
+      <div class="agent"><div class="who">Agent · streaming</div><p>Writing the component test for the unmount race now — first the fake stream needs a pause helper so the test can…</p></div>
+      <div class="bubble queued">Also add a test where the stream errors mid-delta.</div>
+      <div class="bubble queued">And check the log line ordering while you're in there.</div>
+      <div class="qtag">2 queued · deliver together when possible · click to unqueue · <kbd style="font:10.5px var(--mono);border:1px solid var(--line);border-radius:3px;padding:0 4px">esc</kbd> stops the agent</div>
+    </div>
+  </section>
+
+  <section>
+    <h2>2 · Tool calls & thinking — collapsed by default</h2>
+    <p class="why">Ruled: collapsed by default, bounded height always. Chip label = the tool's <em>arguments</em> (always known), body = truncated result — no output parsing; built-in tools get bespoke renderers (bash: command + tail · edit: diff · write: path + line count), unknown tools get generic truncation. Every finished call carries an <b style="color:var(--ink)">≈token badge</b> estimated from result size, hot past a threshold. Three states:</p>
+    <div class="frame">
+      <div class="think">thought for 12s — weighing decorator vs inline logging…</div>
+      <div style="font-size:10.5px;color:var(--faint);margin:10px 0 4px">RUNNING — the porthole: live tail, capped height, never grows</div>
+      <div class="toolopen" style="border-left-color:var(--accent)">
+        <div class="head"><span class="rspin"></span><span class="n">write</span> src/components/ChatPane.tsx <span style="margin-left:auto;color:var(--accent2)">line 2,140…</span></div>
+        <pre style="max-height:72px">      onEvent={(e) =&gt; dispatch(e)}
+      aria-live="polite"
+    &gt;
+      {turns.map((t) =&gt; (
+        &lt;Turn key={t.id} turn={t} /&gt;</pre>
+      </div>
+      <div style="font-size:10.5px;color:var(--faint);margin:10px 0 4px">DONE — collapsed chips with token badges</div>
+      <div class="tool"><span>▸</span><span class="n">bash</span> npm test <span class="exp">1.2s · ≈0.4k tok</span></div>
+      <div class="tool" style="border-left-color:var(--err)"><span>▸</span><span class="n">bash</span> grep -r "adapter" . <span class="exp" style="color:var(--err)">0.8s · ≈41k tok ⚠</span></div>
+      <div style="font-size:10.5px;color:var(--faint);margin:10px 0 4px">EXPANDED — truncated result, full output one more click away</div>
+      <div class="toolopen">
+        <div class="head"><span>▾</span><span class="n">bash</span> npm test <span style="margin-left:auto;color:var(--faint)">≈0.4k tok</span></div>
+        <pre>… (312 lines hidden — open full)
+Test Files  3 passed (3)
+     Tests  14 passed (14)
+  Duration  1.18s</pre>
+      </div>
+      <style>.rspin{width:11px;height:11px;border-radius:50%;border:2px solid var(--line);border-top-color:var(--accent);animation:rrot .8s linear infinite;display:inline-block}@keyframes rrot{to{transform:rotate(360deg)}}</style>
+    </div>
+  </section>
+
+  <section>
+    <h2>3 · Compaction notice</h2>
+    <p class="why">Auto-compaction is SDK plumbing; the human just needs to know history got summarized and where the full record lives. A quiet inline seam in the transcript, not a modal.</p>
+    <div class="frame">
+      <div class="notice">✂ <span>Context compacted — <b>118k → 42k</b>. Older messages summarized; full history preserved.</span><span class="act">view summary</span></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>4 · Errors in the stream</h2>
+    <p class="why">The port's fourth event. Errors are cards in the transcript at the point they happened — never toasts that vanish. Plain words, then actions.</p>
+    <div class="frame">
+      <div class="errcard"><b>Turn failed</b> — provider returned 529 (overloaded) after 3 retries. Your message is back in the composer.<div class="acts"><span>retry</span><span>switch model</span><span>view log</span></div></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>5 · Login / logout</h2>
+    <p class="why">A providers dialog, not a settings maze. Each row: state + one action. The model picker greys out models your credentials can't reach, with "log in to unlock" as the row's action.</p>
+    <div class="dialog">
+      <div class="dh">Providers</div>
+      <div class="prow"><div class="pic">A\</div><div class="nm">Anthropic<small>ike@…com · OAuth</small></div><span class="st">● connected</span><button class="btn ghost">Log out</button></div>
+      <div class="prow"><div class="pic">⟐</div><div class="nm">OpenAI<small>not connected</small></div><button class="btn primary" style="margin-left:auto">Log in…</button></div>
+      <div class="prow"><div class="pic">G</div><div class="nm">Google<small>API key</small></div><span class="st">● key set</span><button class="btn ghost">Remove</button></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>6 · Cache health — first-class</h2>
+    <p class="why">Ruled: cache breaks are never silent. Three layers — a persistent header badge (click jumps to the break), an inline seam at the exact turn it happened, and a guard dialog before any action known to invalidate the cache (thinking-level change mid-session, etc.).</p>
+    <div class="frame" style="margin-bottom:14px">
+      <div class="shead" style="border:none;padding:0 0 12px"><span class="t">electron boilerplate steer</span><span class="meta">opus-5 · 34% ctx · <b style="color:var(--err)">cache ⚠ 2 breaks</b> · $4.12</span></div>
+      <div class="notice" style="border-color:var(--err)">⚡ <span><b style="color:var(--err)">Cache broken here</b> — full reprompt, ≈118k tokens re-sent (+$0.62). Cause: thinking level changed.</span><span class="act">view log</span></div>
+    </div>
+    <div class="dialog trust">
+      <div class="dh">Invalidate session cache?</div>
+      <div class="body">Changing the thinking level mid-session invalidates the entire prompt cache — ≈118k tokens will be re-sent at full price on your next message.</div>
+      <div class="foot"><button class="btn">Keep current level</button><button class="btn primary">Change anyway</button></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>7 · Session header — rename + info + cost</h2>
+    <p class="why">The title row above the chat. Click the name to rename inline; the metadata cluster opens the info popover (replaces /session and /name). Cost lives here, always visible, per session.</p>
+    <div class="shead"><span class="t">electron boilerplate steer</span><span class="pen">✎</span><span class="meta">opus-5 · 34% ctx · $4.12 ▾</span>
+      <div class="pop">session <b>s41-8c2f</b> · 214 messages<br>tokens <b>↑1.2M ↓84k</b> · cache <b>92%</b><br>cost this session <b class="cost">$4.12</b><br>file <b>~/.crucible/sessions/s41.jsonl</b></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>8 · Thinking level — one chip, three states</h2>
+    <p class="why">Click cycles low → medium → high (replaces Shift+Tab). The chip is the indicator: label and heat change, no separate setting screen.</p>
+    <div class="chips">
+      <span class="chip lo">✦ think: <b>low</b></span><span class="arrow">→ click →</span>
+      <span class="chip md">✦ think: <b>med</b></span><span class="arrow">→ click →</span>
+      <span class="chip hi">✦ think: <b>high</b></span>
+    </div>
+  </section>
+</body></html>

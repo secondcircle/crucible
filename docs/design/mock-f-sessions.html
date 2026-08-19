@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Sessions — resume UX</title>
+<style>
+  :root{
+    --bg:#191419; --bg2:#211a20; --panel:#241c23; --panel2:#2e242d; --line:#3a2e38;
+    --ink:#e8dfe2; --dim:#9b8a94; --faint:#6b5d66;
+    --accent:#e07a4f; --accent2:#f0a37c; --ok:#7fb069;
+    --mono:ui-monospace,'SF Mono',Menlo,monospace;
+  }
+  *{box-sizing:border-box;margin:0}
+  body{background:#100d10;color:var(--ink);font:13.5px/1.5 -apple-system,'Segoe UI',sans-serif;padding:30px;display:flex;gap:40px;flex-wrap:wrap}
+  .label{font-size:11px;text-transform:uppercase;letter-spacing:.12em;color:var(--faint);margin-bottom:8px}
+  .note{font-size:11.5px;color:var(--faint);max-width:250px;margin-top:10px;line-height:1.5}
+  /* --- sidebar close-up --- */
+  .side{width:250px;background:var(--bg2);border:1px solid var(--line);border-radius:10px;padding:10px 0;box-shadow:0 10px 28px rgba(0,0,0,.4)}
+  .brand{padding:6px 16px 10px;font-weight:700;letter-spacing:.06em;font-size:14px}
+  .brand em{color:var(--accent);font-style:normal}
+  .newchat{margin:0 12px 12px;padding:7px;border:1px solid var(--line);border-radius:8px;background:var(--panel);text-align:center;font-size:12.5px;cursor:pointer}
+  .newchat span{color:var(--faint);font-size:11px}
+  .wslabel{padding:2px 16px;font-size:10.5px;text-transform:uppercase;letter-spacing:.12em;color:var(--faint);display:flex;justify-content:space-between;align-items:center}
+  .ws{padding:6px 16px;font-size:13px;color:var(--dim);cursor:pointer;display:flex;align-items:center;gap:8px}
+  .ws .dot{width:7px;height:7px;border-radius:50%;background:var(--faint)}
+  .ws.active{color:var(--ink);background:var(--panel)}
+  .ws.active .dot{background:var(--accent);box-shadow:0 0 6px var(--accent)}
+  .sessions{margin-left:22px;border-left:1px solid var(--line);padding:2px 0 6px}
+  .sess{padding:4px 12px;font-size:12.5px;color:var(--dim);cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .sess.active{color:var(--accent2)}
+  .sess small{color:var(--faint);font-size:10.5px;margin-left:6px}
+  .more{padding:4px 12px;font-size:11.5px;color:var(--faint);cursor:pointer}
+  .more:hover{color:var(--accent2)}
+  .addws{margin:8px 12px 0;padding:6px;border:1px dashed var(--line);border-radius:8px;color:var(--faint);text-align:center;font-size:12px;cursor:pointer}
+  /* --- resume overlay --- */
+  .overlaywrap{width:460px}
+  .overlay{background:var(--panel);border:1px solid var(--line);border-radius:12px;box-shadow:0 24px 60px rgba(0,0,0,.6);overflow:hidden}
+  .osearch{display:flex;align-items:center;gap:10px;padding:12px 16px;border-bottom:1px solid var(--line)}
+  .osearch .q{color:var(--ink);font-size:14px}
+  .osearch .q i{border-right:1.5px solid var(--accent);padding-right:1px;font-style:normal}
+  .osearch .scope{margin-left:auto;font-size:11px;color:var(--dim);border:1px solid var(--line);border-radius:10px;padding:2px 8px}
+  .group{padding:8px 16px 2px;font-size:10.5px;text-transform:uppercase;letter-spacing:.12em;color:var(--faint)}
+  .row{display:flex;align-items:center;gap:10px;padding:8px 16px;cursor:pointer}
+  .row:hover,.row.sel{background:var(--panel2)}
+  .row .nm{font-size:13px}
+  .row .nm small{display:block;font-size:11px;color:var(--faint);font-weight:400}
+  .row .meta{margin-left:auto;text-align:right;font:11px var(--mono);color:var(--dim);line-height:1.4}
+  .row .meta b{color:var(--accent2);font-weight:400}
+  .badge{width:8px;height:8px;border-radius:50%;background:var(--ok)}
+  .badge.idle{background:var(--faint)}
+  .ofoot{padding:8px 16px;border-top:1px solid var(--line);font-size:10.5px;color:var(--faint)}
+  .ofoot kbd{font:10px var(--mono);border:1px solid var(--line);border-radius:3px;padding:0 4px;color:var(--dim)}
+</style></head><body>
+  <div>
+    <div class="label">Sidebar — sessions live under their workspace</div>
+    <div class="side">
+      <div class="brand"><em>◆</em> CRUCIBLE</div>
+      <div class="newchat">New session <span>in crucible · ⌘N</span></div>
+      <div class="wslabel">Workspaces</div>
+      <div class="ws active"><span class="dot"></span> crucible</div>
+      <div class="sessions">
+        <div class="sess active">electron boilerplate steer <small>4m</small></div>
+        <div class="sess">ui/ux prototyping <small>2h</small></div>
+        <div class="sess">agent port design <small>yst</small></div>
+        <div class="more">all 14 sessions… ⌘O</div>
+      </div>
+      <div class="ws"><span class="dot"></span> pi-extensions</div>
+      <div class="ws"><span class="dot"></span> resume-site</div>
+      <div class="addws">＋ Add workspace — opens folder picker</div>
+    </div>
+    <div class="note">Recent 3 sessions inline; everything else behind "all sessions" or ⌘O. "New session" always creates in the active (highlighted) workspace.</div>
+  </div>
+  <div class="overlaywrap">
+    <div class="label">Resume — ⌘O overlay, search across sessions</div>
+    <div class="overlay">
+      <div class="osearch"><span style="color:var(--faint)">⌕</span><span class="q">boiler<i></i></span><span class="scope">crucible ▾ · all workspaces</span></div>
+      <div class="group">Today</div>
+      <div class="row sel"><span class="badge"></span><div class="nm">electron boilerplate steer<small>you: "check the crucible run…" · main</small></div><div class="meta">opus-5 · 68k ctx<br><b>$4.12</b> · 4m ago</div></div>
+      <div class="row"><span class="badge idle"></span><div class="nm">ui/ux prototyping<small>agent: "four mockups are up…"</small></div><div class="meta">opus-5 · 112k ctx<br><b>$7.90</b> · 2h ago</div></div>
+      <div class="group">Yesterday</div>
+      <div class="row"><span class="badge idle"></span><div class="nm">agent port design<small>agent: "the port never leaks SDK types…"</small></div><div class="meta">sonnet-4.7 · 41k ctx<br><b>$0.88</b> · 1d ago</div></div>
+      <div class="ofoot"><kbd>↑↓</kbd> select · <kbd>⏎</kbd> resume · <kbd>⌘⏎</kbd> resume in new window · scope toggles workspace/all</div>
+    </div>
+    <div class="note">Replaces /resume: type-to-search, grouped by recency, last message as the scent, cost/model/context as the metadata. Scoped to active workspace by default, one toggle to all.</div>
+  </div>
+</body></html>
