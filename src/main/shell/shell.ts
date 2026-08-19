@@ -42,9 +42,12 @@ import type { ShellStore } from './store'
  * - **Lazy binding.** A curated session is bound to its conversation the first
  *   time this launch needs it — a transcript, a prompt, a model change — rather
  *   than all at once at launch, so opening the app costs nothing per remembered
- *   session. What the adapter reports back about a rebind (its token, the model
- *   and level it actually restored) is written into the store: after a rebind
- *   the adapter's word wins.
+ *   session. A turn accepted while its session is still binding belongs to the
+ *   shell alone until the bind resolves, so a stop, a reset or a removal in
+ *   that window ends it here and the adapter is never asked to run work the
+ *   user has already stopped. What the adapter reports back about a rebind
+ *   (its token, the model and level it actually restored) is written into the
+ *   store: after a rebind the adapter's word wins.
  *
  * Everything it takes is an argument — the store, the adapter, the folder
  * picker, the seed workspace — so the whole of it is unit-testable in plain
@@ -81,6 +84,19 @@ interface LiveTurn {
   readonly turnId: TurnId
   /** Whether `turn_started` has already been sent for it. */
   started: boolean
+  /**
+   * Whether the adapter has been asked to run it. False for the whole of the
+   * bind that precedes the run: the window in which the session is already
+   * working to everything above the port while the adapter has never heard of
+   * the turn.
+   */
+  dispatched: boolean
+  /**
+   * Whether a stop has been asked for it. A dispatched turn is stopped by the
+   * adapter, which says so with its own terminal event; an undispatched one is
+   * ended here, and the mark is what keeps it from being dispatched later.
+   */
+  cancelled: boolean
 }
 
 export function createShell({
@@ -185,9 +201,38 @@ export function createShell({
     return binding
   }
 
-  /** Stop a session's live turn and wait for the adapter to have handled it. */
+  /**
+   * End a turn the adapter never ran, as cancelled: the start it is owed, then
+   * its terminal event, then the snapshot that says the session is idle again.
+   */
+  function endAsCancelled(sessionId: SessionId, turn: LiveTurn): void {
+    live.delete(sessionId)
+    if (!turn.started) {
+      turn.started = true
+      emit({ type: 'turn_started', sessionId, turnId: turn.turnId })
+    }
+    emit({ type: 'turn_cancelled', sessionId, turnId: turn.turnId })
+    emitState()
+  }
+
+  /**
+   * Stop a session's live turn and wait for the stop to have landed.
+   *
+   * A turn is live from the moment its prompt is accepted (2.3), which is
+   * before the bind that precedes it has resolved, and on the SDK flavor that
+   * bind is seconds long. Forwarding to the adapter is right only once the
+   * adapter is running the turn; until then the adapter has nothing to cancel,
+   * so the turn ends here instead, immediately (CAN-1), and the bind's
+   * continuation finds it gone and never asks the adapter to run it (CAN-6).
+   */
   async function stop(id: SessionId): Promise<void> {
-    if (!live.has(id)) return
+    const turn = live.get(id)
+    if (turn === undefined) return
+    turn.cancelled = true
+    if (!turn.dispatched) {
+      endAsCancelled(id, turn)
+      return
+    }
     await adapter.cancel(id)
   }
 
@@ -451,7 +496,7 @@ export function createShell({
 
       turns += 1
       const turnId = `t-${turns}`
-      const turn: LiveTurn = { turnId, started: false }
+      const turn: LiveTurn = { turnId, started: false, dispatched: false, cancelled: false }
       live.set(sessionId, turn)
       emitState()
 
@@ -459,11 +504,27 @@ export function createShell({
       // conversation that cannot be opened is this turn's error, which is the
       // one place a person will see it.
       void ensureBound(sessionId)
-        .then(() => adapter.prompt(sessionId, turnId, text))
+        .then(async () => {
+          // The turn may no longer be this session's live one: a stop, a reset,
+          // a removal or a document going away while the bind was in flight has
+          // already ended it. The adapter is then never asked to run it, which
+          // is what keeps a stopped turn from streaming on, and on the SDK
+          // flavor from being paid for (CAN-1, CAN-6, SE-7, WS-4).
+          if (live.get(sessionId) !== turn) return
+          turn.dispatched = true
+          await adapter.prompt(sessionId, turnId, text)
+        })
         .then(() => {
           // A turn the adapter finished without saying so still ends exactly
           // once, and it ends here.
           if (live.get(sessionId) !== turn) return
+          // A stop was asked for and the adapter returned without saying how
+          // the turn ended: cancelled is the honest outcome, not a normal end
+          // (A3).
+          if (turn.cancelled) {
+            endAsCancelled(sessionId, turn)
+            return
+          }
           live.delete(sessionId)
           if (!turn.started) emit({ type: 'turn_started', sessionId, turnId })
           emit({ type: 'turn_ended', sessionId, turnId })
@@ -471,6 +532,12 @@ export function createShell({
         })
         .catch((cause: unknown) => {
           if (live.get(sessionId) !== turn) return
+          // Likewise for a rejection after a stop: an abort is the stop
+          // landing, not a failure to show anyone (A3).
+          if (turn.cancelled) {
+            endAsCancelled(sessionId, turn)
+            return
+          }
           live.delete(sessionId)
           if (!turn.started) emit({ type: 'turn_started', sessionId, turnId })
           emit({

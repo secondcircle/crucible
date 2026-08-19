@@ -361,6 +361,101 @@ describe('cancellation', () => {
   })
 })
 
+// A session restored from a previous launch binds lazily, and a real SDK bind
+// is seconds long: dynamic import, settings, resource-loader reload, model
+// runtime, session open. A prompt sent in that window is accepted and shown as
+// working while the adapter has never heard of the turn, so everything that
+// stops a turn has to land there too, before the adapter is ever asked to run
+// it. On the SDK flavor the turn that would otherwise run is paid (CAN-6).
+describe('a turn accepted while its session is still binding', () => {
+  let sessionId: SessionId
+  let release: () => void = () => {}
+  let prompts: number
+
+  /** Second launch over the same store, through an adapter that binds on a gate. */
+  async function gatedRelaunch(): Promise<void> {
+    const created = await withSession()
+    sessionId = created.sessionId
+    shell.dispose()
+
+    const inner = createFakeAdapter({ pauseMs: 0 })
+    const gate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    prompts = 0
+    const gated: ConversationAdapter = {
+      ...inner,
+      async bind(request) {
+        await gate
+        return inner.bind(request)
+      },
+      async prompt(id, turnId, text) {
+        prompts += 1
+        return inner.prompt(id, turnId, text)
+      }
+    }
+    shell = createShell({
+      store: createShellStore(file),
+      adapter: gated,
+      pickFolder: async () => picked
+    })
+    events = []
+    shell.onEvent((event) => events.push(event))
+  }
+
+  const terminals = (): string[] =>
+    types().filter(
+      (type) => type === 'turn_ended' || type === 'turn_cancelled' || type === 'turn_error'
+    )
+
+  it('is cancelled at once, and the adapter is never asked to run it', async () => {
+    await gatedRelaunch()
+    await shell.prompt(sessionId, 'hello')
+
+    await shell.cancel(sessionId)
+
+    // Immediately (CAN-1): the stop does not wait on the bind it is stuck
+    // behind.
+    expect(terminals()).toEqual(['turn_cancelled'])
+    expect(sessionOf(await shell.snapshot(), sessionId)?.working).toBe(false)
+
+    release()
+    await settled()
+    expect(prompts).toBe(0)
+    expect(terminals()).toEqual(['turn_cancelled'])
+  })
+
+  it('is cancelled with the session that is removed, and says nothing after', async () => {
+    await gatedRelaunch()
+    await shell.prompt(sessionId, 'hello')
+
+    await shell.removeSession(sessionId)
+    release()
+    await settled()
+
+    // No turn of any kind run for an entry that has left the sidebar, and no
+    // phantom error from an adapter asked to prompt a released session (SE-6).
+    expect(terminals()).toEqual(['turn_cancelled'])
+    expect(prompts).toBe(0)
+    expect((await shell.snapshot()).sessions).toEqual([])
+  })
+
+  it('is cancelled by a reset rather than run under the fresh conversation', async () => {
+    await gatedRelaunch()
+    await shell.prompt(sessionId, 'hello')
+
+    const reset = shell.resetSession(sessionId)
+    release()
+    await reset
+    await settled()
+
+    // SE-7: reset cancels live work, so the pre-reset turn is not a normal end.
+    expect(terminals()).toEqual(['turn_cancelled'])
+    expect(prompts).toBe(0)
+    expect((await shell.snapshot()).sessions.map((session) => session.id)).toEqual([sessionId])
+  })
+})
+
 describe('models and thinking levels', () => {
   it('reports what the adapter can reach and nothing else', async () => {
     expect(await shell.listModels()).toEqual([
