@@ -4,32 +4,9 @@ import type { TranscriptItem } from '../../shared/agent/port'
 import { displaySafeMessage } from './adapter-error.ts'
 import { renderToolOutput, summarizeToolArgs } from './sdk-events.ts'
 
-/**
- * A π conversation's messages, rendered as the port's transcript items.
- *
- * This is the other half of the SDK-side translation — `sdk-events.ts` handles
- * a turn as it happens, this handles one that already did — and the two produce
- * the same item kinds on purpose: a restored transcript renders through exactly
- * the code a live one does (TR-7), so history cannot drift into a second
- * appearance of its own.
- *
- * Message order is item order. Inside an assistant message, blocks are walked
- * in order too, so a thinking block that preceded some text still precedes it
- * afterwards, and consecutive text blocks merge into the one markdown item they
- * were always meant to read as.
- *
- * Two message facts become items of their own:
- *
- * - An assistant message the SDK marks `aborted` is a turn somebody stopped, so
- *   it closes with the same quiet stopped marker a live cancellation leaves
- *   (A4). That is what makes "the cancelled turn's partial output is still in
- *   context" visible after a relaunch rather than merely true.
- * - An assistant message marked `error` closes with an error item carrying a
- *   display-safe sentence — the raw `errorMessage` never crosses.
- *
- * Everything else the SDK can store — custom entries, images, tool `details` —
- * is dropped rather than guessed at. A transcript item is text.
- */
+// Stored messages produce the same item kinds a live turn does, so history
+// renders through the code a stream renders through. Anything the SDK stores
+// that is not text is dropped rather than guessed at.
 export type StoredMessage = AgentSession['messages'][number]
 
 export function toTranscript(messages: readonly StoredMessage[]): TranscriptItem[] {
@@ -72,8 +49,8 @@ export function toTranscript(messages: readonly StoredMessage[]): TranscriptItem
       }
       if (block.type === 'thinking') {
         flush()
-        // No duration: the SDK does not store how long a stored thought took,
-        // and a number nobody measured is not one to show (A27).
+        // The SDK does not store how long a thought took, and a number nobody
+        // measured is not one to show.
         if (block.thinking.trim() !== '') items.push({ kind: 'thinking', text: block.thinking })
         continue
       }

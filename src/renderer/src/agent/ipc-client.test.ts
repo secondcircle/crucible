@@ -1,10 +1,6 @@
 // @vitest-environment jsdom
 //
-// The IPC client is the renderer's one adapter over the preload surface, so
-// what is asserted is the crossing itself: an operation becomes one named
-// request, an answer comes back as the value, a refusal comes back as a
-// rejection carrying exactly main's sentence, and events fan out to whoever
-// subscribed. The surface is a stand-in — this side of the boundary is all a
+// The preload surface is a stand-in, because this side of the boundary is all a
 // document can see.
 import { afterEach, describe, expect, it } from 'vitest'
 import type { PortRequest, PortResult } from '../../../shared/agent/channels'

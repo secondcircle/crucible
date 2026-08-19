@@ -1,42 +1,20 @@
 import type { Shell } from '../shell/shell'
 import type { LogSink } from '../log/sink'
 
-/**
- * Logging is a decorator at the agent-port seam (LF-2).
- *
- * `withLogging` wraps the shell and records every operation asked of the port,
- * every answer, every refusal and every event that came back out. It adds
- * nothing to the port — a caller of the wrapped shell cannot tell it from the
- * one that was wrapped, which is the point: no adapter and no component knows
- * logging exists, and coverage arrives with the seam rather than with each
- * implementation remembering to log.
- *
- * What it hides: the record shapes, the field names, the fact that events are
- * observed through a subscription of its own rather than through a caller's,
- * and that a failed operation is recorded before it is re-thrown. All of it is
- * one module's business because everything goes through one `append`.
- *
- * The third argument is the identity: an adapter cannot be asked its name
- * without every adapter knowing why it was asked, so the wrapper is told at the
- * one place that already knows — the launch flavor. The name goes on every
- * record this wrapper writes, so a reader of any single line knows which
- * flavor produced it.
- */
+// Logging is a decorator at the port seam so no adapter and no component has
+// to remember to log. The adapter's name is passed in rather than asked of the
+// adapter, which would make every adapter aware it is being logged.
 export function withLogging(shell: Shell, log: LogSink, adapter: string): Shell {
   shell.onEvent((event) => {
-    // The port event's own `type` names the record, so the log reads as the
-    // sequence the port produced — `turn_started`, `text_delta`, … — each with
-    // whatever else that event carries. A `state` event carries the snapshot,
-    // which is the one record a reader can reconstruct the sidebar from.
+    // The event's own `type` names the record, so the log reads back as the
+    // sequence the port produced.
     const { type, ...detail } = event
     log.append({ source: 'main', event: type, adapter, ...detail })
   })
 
-  /**
-   * One port operation, recorded around its call. The arguments are logged
-   * verbatim, prompt text included: this is a local run log, and a turn that
-   * cannot be read back against what was asked is not diagnostic.
-   */
+  // Arguments are logged verbatim, prompt text included: this is a local run
+  // log, and a turn that cannot be read back against what was asked tells a
+  // reader nothing.
   function op<A extends unknown[], R>(
     name: string,
     run: (...args: A) => Promise<R>
@@ -51,7 +29,7 @@ export function withLogging(shell: Shell, log: LogSink, adapter: string): Shell 
         return result
       } catch (cause) {
         // The stack belongs here and nowhere else: what crosses the port is
-        // display-safe text, and this is the record that still has the rest.
+        // display-safe text, and this record keeps the rest.
         log.append({
           source: 'main',
           event: `${name}_refused`,

@@ -1,11 +1,7 @@
 // @vitest-environment jsdom
 //
-// Tool calls and thinking are the two regions that are most tempting to fake,
-// so this test drives them only through events and checks that nothing appears
-// without one: no chip before a `tool_started`, no thinking block before a
-// `thinking_delta`, and a running call that is visibly running rather than
-// merely present. It also pins the ordering rule — text after a tool or a
-// thought opens a new block instead of growing the last one.
+// Tool calls and thinking are the two regions most tempting to fake, so nothing
+// here may appear without the event that earns it.
 import { act, fireEvent, render, screen } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 import { Shell } from './Shell'

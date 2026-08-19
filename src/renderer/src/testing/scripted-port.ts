@@ -14,41 +14,22 @@ import type {
   WorkspaceId
 } from '../../../shared/agent/port'
 
-/**
- * The scripted port: an in-test implementation of the agent port, handed to the
- * shell as a prop.
- *
- * This is the seam ADR 0001 bought. A component test drives the whole surface
- * through the same interface the app's IPC client satisfies, so what the tests
- * below assert is what a person would see with an adapter behind main — and no
- * test ever needs a process, a window, or a paid call.
- *
- * It answers operations the way main does, so the UI it feeds behaves as the
- * app does: creating a session activates it, a prompt marks the session working
- * and starts a turn, cancelling ends that turn as cancelled. What it does *not*
- * do is stream by itself: a test says exactly what arrives and when, which is
- * what makes a component test about rendering rather than about timing.
- */
+// Answers operations the way main does, but streams nothing by itself: a test
+// says exactly what arrives and when, which keeps component tests about
+// rendering rather than about timing.
 export interface ScriptedPort extends AgentPort {
-  /** Every operation the shell asked for, in order. */
   readonly calls: ReadonlyArray<{ readonly op: string; readonly args: readonly unknown[] }>
   /** The snapshot as it stands, which every `state` event carries whole. */
   readonly snapshotNow: ShellSnapshot
-  /** The models the picker will show. */
   models: readonly ModelInfo[]
-  /** What a history search answers with. */
   history: readonly HistoryMatch[]
-  /** Settled transcripts, by session, as `transcript()` will answer them. */
   readonly transcripts: Map<SessionId, readonly TranscriptItem[]>
   /** What the folder picker will answer with; `null` is a cancelled picker. */
   folder: string | null
 
-  /** Change the snapshot and tell the shell, as a `state` event does. */
   update(change: (snapshot: ShellSnapshot) => ShellSnapshot): void
-  /** Say something on the port, exactly as written. */
   emit(event: PortEvent): void
 
-  /** The live turn of a session, if this port started one. */
   turnOf(sessionId: SessionId): TurnId | undefined
   text(sessionId: SessionId, delta: string): void
   thinking(sessionId: SessionId, delta: string): void
@@ -318,7 +299,6 @@ export function createScriptedPort(initial: Partial<ShellSnapshot> = {}): Script
   return port
 }
 
-/** A workspace and one session in it: where most component tests start. */
 export function oneSession(
   overrides: Partial<SessionState> = {}
 ): Pick<ShellSnapshot, 'workspaces' | 'sessions' | 'activeWorkspaceId' | 'activeSessionId'> {

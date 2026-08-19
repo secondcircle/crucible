@@ -1,10 +1,7 @@
 // @vitest-environment jsdom
 //
-// Models and thinking levels are the two controls that must never say anything
-// Crucible made up: the picker lists what the port reported and nothing else,
-// the thinking menu lists exactly the selected model's own levels, and a level
-// change on a conversation that already exists asks first, because it throws
-// that session's cache away.
+// These two controls must never say anything Crucible made up, so everything
+// they show is traced back to what the port reported.
 import { act, fireEvent, render, screen, within } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 import type { ModelInfo } from '../../shared/agent/port'

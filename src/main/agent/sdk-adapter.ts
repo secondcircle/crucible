@@ -24,74 +24,42 @@ import type {
   TurnId,
   Unsubscribe
 } from '../../shared/agent/port'
-// Spelled with their extensions so this module can also be loaded by plain
-// Node — that is what `npm run prove:sdk` does, and Node's ESM resolver has no
-// extension guessing. Every other import here is type-only and erased.
+// Spelled with their extensions so plain Node can load this module too: its
+// ESM resolver does no extension guessing. Every other import here is
+// type-only and erased.
 import { displaySafeMessage } from './adapter-error.ts'
 import { createEventMapper } from './sdk-events.ts'
 import { toTranscript } from './sdk-transcript.ts'
 
-/**
- * The adapter contract backed by the real π SDK — main only, and the only
- * module in Crucible that opens a paid session.
- *
- * `createSdkAdapter()` is the whole interface: no options, because nothing
- * about a session is a caller's to choose. What it runs is stock π (A17): the
- * built-in tools, the stock system prompt, the workspace's own context files
- * and skills, and the user's credentials and custom models. Each bound session
- * is a persistent π session whose working directory is that session's workspace
- * folder, so `AGENTS.md`, `.pi/skills` and the rest resolve exactly as they do
- * for the CLI in that folder.
- *
- * The one thing it deliberately does not load is the legacy system. The user's
- * global settings name it — `packages: ["../../repos/pi-extensions"]` — and
- * that is precisely the line this adapter must not honor (SA-3). It does that
- * by building the resource loader itself: settings are read as the user wrote
- * them, then `packages` and `extensions` are overridden to empty and the loader
- * is built with `noExtensions`, so no extension and no package resource of any
- * origin reaches a Crucible session. Everything else about the loader is the
- * default, which is what keeps "stock π" true of the rest.
- *
- * π storage stays here (ADR 0004). Above this module a conversation is an
- * opaque binding token; here it is a session file, and the translation between
- * the two — create, rebind, reset, resume, search — happens through π's public
- * session APIs and nowhere else. Nothing above ever sees a path.
- *
- * The SDK is imported dynamically for two reasons: it is ESM-only, so the
- * CommonJS main bundle cannot `require` it, and a fake-flavor launch then never
- * loads it at all (SA-8).
- */
-
-/** The π module, loaded once and only when this adapter is actually used. */
+// The only module in Crucible that opens a paid session. It takes no options
+// because nothing about a π session is a caller's to choose, and it is where
+// π storage stops: above it a conversation is only an opaque token.
+//
+// The SDK is imported dynamically because it is ESM-only, so the CommonJS main
+// bundle cannot `require` it, and a fake-flavor launch then never loads it.
 type Sdk = typeof import('@earendil-works/pi-coding-agent')
 
-/** What a bound session holds while it is bound. */
 interface Bound {
   session: AgentSession
   readonly workspacePath: string
   token: string
-  /** The turn in flight, if any: one per session, many per adapter. */
+  /** One per session, many per adapter. */
   running?: RunningTurn
 }
 
-/** A turn in flight, from the outside. */
 interface RunningTurn {
-  /** Stop the underlying run; the turn ends as cancelled (SA-6). */
   cancel(): void
   /** Abandon it with its document: the turn says nothing more at all. */
   abandon(): void
 }
 
-/** How many history entries one search may answer with. */
 const HISTORY_LIMIT = 50
 
-/** How much of a stored first message becomes a search result's preview. */
 const PREVIEW_LIMIT = 140
 
 export function createSdkAdapter(): ConversationAdapter {
   const listeners = new Set<AdapterEventListener>()
   const sessions = new Map<SessionId, Bound>()
-  /** One resource loader per workspace folder, built on first use. */
   const resources = new Map<string, Promise<WorkspaceResources>>()
   let sdkModule: Promise<Sdk> | undefined
   let modelRuntime: Promise<ModelRuntime> | undefined
@@ -115,10 +83,9 @@ export function createSdkAdapter(): ConversationAdapter {
     return modelRuntime
   }
 
-  /**
-   * The loader and settings one workspace's sessions share. Stock π everywhere
-   * except the two lines that keep the legacy system out (SA-3).
-   */
+  // Stock π except for the emptied `packages` and `extensions` and
+  // `noExtensions` below, which is what keeps the user's globally configured
+  // extensions, the legacy system among them, out of a Crucible session.
   function workspaceResources(workspacePath: string): Promise<WorkspaceResources> {
     const existing = resources.get(workspacePath)
     if (existing !== undefined) return existing
@@ -155,7 +122,6 @@ export function createSdkAdapter(): ConversationAdapter {
     return found
   }
 
-  /** One π session, opened against a session manager the caller chose. */
   async function open(
     workspacePath: string,
     sessionManager: SessionManager,
@@ -175,8 +141,8 @@ export function createSdkAdapter(): ConversationAdapter {
 
     if (preferred?.model !== undefined) {
       // A preference the credentials cannot reach is not an error: the SDK's
-      // own fallback answers, and what is reported afterwards is what is
-      // actually in effect (MO-4).
+      // own fallback answers, and what gets reported back is what is in
+      // effect.
       try {
         options.model = await resolveModel(preferred.model)
       } catch {
@@ -191,7 +157,6 @@ export function createSdkAdapter(): ConversationAdapter {
     return session
   }
 
-  /** What a session is worth saying about it, once it is open. */
   function describe(bound: Bound, restored: boolean): Binding {
     const model = bound.session.model
     return {
@@ -202,7 +167,8 @@ export function createSdkAdapter(): ConversationAdapter {
     }
   }
 
-  /** The token a session is known by: its own file, which never leaves here. */
+  // The token is the session's own file, which is why it must never leave
+  // this module as anything but an opaque string.
   function tokenOf(session: AgentSession): string {
     return session.sessionFile ?? session.sessionId
   }
@@ -213,13 +179,14 @@ export function createSdkAdapter(): ConversationAdapter {
     return bound
   }
 
-  /** Stop the work, then let go of the session, in that order. */
+  // Stop the work before letting go of the session, or an in-flight request
+  // outlives the thing that could abort it.
   function close(session: AgentSession): void {
     void (async () => {
       try {
         await session.abort()
       } catch {
-        // Nothing left to tell: whoever owned this session has stopped
+        // Nobody is left to tell: whoever owned this session has stopped
         // speaking for it.
       }
       try {
@@ -241,17 +208,17 @@ export function createSdkAdapter(): ConversationAdapter {
 
       if (request.token !== undefined) {
         try {
-          // The session's own file carries its model and thinking level, so
-          // nothing is forced on a conversation being rebound (MO-3).
+          // No preference is passed: the session's own file already carries
+          // the model and thinking level it was left on.
           session = await open(
             request.workspacePath,
             pi.SessionManager.open(request.token, undefined, request.workspacePath)
           )
           restored = true
         } catch {
-          // The conversation is gone — deleted, moved, or written by a build
-          // that is no longer here. A fresh one is bound instead, and the
-          // caller is told plainly that nothing was restored.
+          // The conversation is gone: deleted, moved, or written by a build
+          // that is no longer here. A fresh one is bound instead and the
+          // caller is told nothing was restored.
           session = undefined
         }
       }
@@ -276,7 +243,7 @@ export function createSdkAdapter(): ConversationAdapter {
       const previous = bound.session
 
       // The old conversation is detached, not deleted: its file stays where π
-      // put it and it stays findable through history search (A25).
+      // put it and stays findable through history search.
       bound.running?.abandon()
       close(previous)
 
@@ -323,7 +290,7 @@ export function createSdkAdapter(): ConversationAdapter {
       if (bound === undefined) return
       bound.running?.abandon()
       // The session object is let go; its file is not touched. Removal forgets
-      // a sidebar entry and nothing else (A24).
+      // a sidebar entry and nothing else.
       close(bound.session)
       sessions.delete(sessionId)
     },
@@ -345,8 +312,8 @@ export function createSdkAdapter(): ConversationAdapter {
         .sort((left, right) => right.modified.getTime() - left.modified.getTime())
         .slice(0, HISTORY_LIMIT)
         .map((info) => ({
-          // The ref is the file path, which is why it never leaves this module
-          // as anything but an opaque string: the preview is what is shown.
+          // A file path, so it stays opaque above this module; the preview is
+          // the part meant to be shown.
           ref: info.path,
           preview: preview(info.name ?? info.firstMessage),
           at: info.modified.toISOString()
@@ -366,8 +333,8 @@ export function createSdkAdapter(): ConversationAdapter {
         .map((model) => ({
           id: modelIdOf(model),
           label: model.name,
-          // A model's own native levels, as the SDK reports them for it. No
-          // low/medium/high is hard-coded anywhere in Crucible (A22).
+          // Whatever the SDK reports for this model: no level names are
+          // hard-coded anywhere in Crucible.
           thinkingLevels: pi.getSupportedThinkingLevels(model) as readonly ThinkingLevel[]
         }))
         .sort((left, right) => left.label.localeCompare(right.label))
@@ -390,11 +357,8 @@ export function createSdkAdapter(): ConversationAdapter {
 
       let cancelled = false
       let abandoned = false
-      /**
-       * How this turn would end if the stream stopped now. A failure the SDK
-       * reported is remembered rather than emitted: if it is transient the SDK
-       * retries behind this seam, and only its last word counts.
-       */
+      // A reported failure is remembered rather than emitted, because the SDK
+      // retries transient ones behind this seam and only its last word counts.
       let outcome: AdapterEvent = { type: 'turn_ended', sessionId, turnId }
 
       emit({ type: 'turn_started', sessionId, turnId })
@@ -419,7 +383,7 @@ export function createSdkAdapter(): ConversationAdapter {
         cancel(): void {
           cancelled = true
           // Aborting the run is what stops a paid request from streaming on
-          // unseen (CAN-6).
+          // unseen.
           void session.abort()
         },
         abandon(): void {
@@ -444,13 +408,13 @@ export function createSdkAdapter(): ConversationAdapter {
 
       if (abandoned) return
 
-      // Cancelled is its own outcome, decided here because only the adapter
-      // that called `abort()` knows an abort happened (A3, SA-6).
+      // Decided here because only the adapter that called `abort()` knows an
+      // abort happened.
       emit(cancelled ? { type: 'turn_cancelled', sessionId, turnId } : outcome)
 
       const usage = session.getContextUsage()
-      // Absent data shows as absent: no usage event means the meter keeps
-      // saying nothing rather than showing a guess (SA-7, TB-2).
+      // No usage event at all, rather than a guess, when the SDK reports
+      // nothing.
       if (usage?.tokens != null) {
         emit({
           type: 'usage',

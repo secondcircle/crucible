@@ -2,19 +2,9 @@ import type { ShellSnapshot, SessionId, WorkspaceId } from '../../../shared/agen
 import { sessionLabel } from '../labels'
 import './sidebar.css'
 
-/**
- * The left sidebar: workspaces, and the curated sessions of the active one
- * (A16, mock A and mock F).
- *
- * Everything it shows comes from the snapshot, so there is no membership rule
- * in here at all: the sidebar contains what main says is curated, which is only
- * ever what a person created or explicitly resumed (ADR 0002). It shows working
- * state per session and per workspace, and both are the snapshot's `working`
- * flags rather than anything this component times or guesses (SE-5, WS-8).
- *
- * A row's working state is in its accessible name rather than in a colored dot
- * alone: the dot is the eye's version, the name is everybody else's.
- */
+// Everything shown comes from the snapshot, so no membership rule lives here.
+// A row's working state is in its accessible name and not the colored dot
+// alone: the dot is the eye's version, the name is everybody else's.
 export function Sidebar({
   snapshot,
   onNewSession,

@@ -1,4 +1,3 @@
-/* Transcript, tool chips and thinking blocks: mock A, with mock G's details. */
 .chat {
   flex: 1;
   overflow-y: auto;
@@ -121,7 +120,8 @@
   border-left-color: var(--error);
 }
 
-/* Cut off with its turn: it never said how it went, so neither does the chip. */
+/* A call cut off with its turn never said how it went, so neither does the
+   chip. */
 .tool.stopped .toolhead {
   border-left-color: var(--faint);
 }

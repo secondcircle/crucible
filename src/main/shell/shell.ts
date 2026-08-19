@@ -19,83 +19,33 @@ import type {
 import { displaySafeMessage } from '../agent/adapter-error'
 import type { ShellStore } from './store'
 
-/**
- * The shell: main's implementation of the agent port, and the ordering
- * authority behind it (ADR 0003).
- *
- * It composes the two halves the port is made of — the shell store above, which
- * owns workspaces, curated membership and activation, and the adapter below,
- * which owns conversations — and it is the only place that knows both. What it
- * adds on top of them is the part neither can hold alone:
- *
- * - **One live turn per session, any number of sessions live at once** (A18).
- *   The guard is per session and it is enforced here, not in the UI and not by
- *   an adapter's own limitation.
- * - **Turn identity.** A turn id is minted when a prompt is accepted and handed
- *   down, so nothing has to be correlated afterwards and an adapter cannot
- *   start a turn nobody asked for. An event carrying an id that is not this
- *   session's live turn is dropped: that is what makes a cancelled turn silent
- *   after its terminal event, and a stale one harmless (A3).
- * - **The snapshot.** Store facts and adapter facts are merged into one value,
- *   and every `state` event carries the whole of it, so a late one always
- *   supersedes an earlier one.
- * - **Lazy binding.** A curated session is bound to its conversation the first
- *   time this launch needs it — a transcript, a prompt, a model change — rather
- *   than all at once at launch, so opening the app costs nothing per remembered
- *   session. A turn accepted while its session is still binding belongs to the
- *   shell alone until the bind resolves, so a stop, a reset or a removal in
- *   that window ends it here and the adapter is never asked to run work the
- *   user has already stopped. What the adapter reports back about a rebind
- *   (its token, the model and level it actually restored) is written into the
- *   store: after a rebind the adapter's word wins.
- *
- * Everything it takes is an argument — the store, the adapter, the folder
- * picker, the seed workspace — so the whole of it is unit-testable in plain
- * node with a temp file and a fake.
- */
-
-/** The port, plus the one operation its owner needs and its callers never see. */
+// Turn guards and ordering live here rather than in the UI or an adapter, so
+// they hold whoever is behind the port.
 export interface Shell extends AgentPort {
-  /**
-   * Abandon the work in flight — the document that asked for it is gone —
-   * without ending the shell. Live turns are dropped and say nothing more, the
-   * per-session guards fall, and the store and its bindings stand, so the
-   * document that comes back after a reload prompts immediately. Idempotent,
-   * and doing it with nothing in flight is allowed and does nothing.
-   */
+  // Drops live turns but keeps bindings, so the document that comes back after
+  // a reload can prompt immediately.
   dispose(): void
 }
 
 export interface ShellOptions {
   readonly store: ShellStore
   readonly adapter: ConversationAdapter
-  /** Opens the OS folder picker; `null` means the user cancelled (WS-1). */
+  /** `null` means the user cancelled the picker. */
   readonly pickFolder: () => Promise<string | null>
-  /**
-   * A folder to ensure present and active at launch, exactly as if it had been
-   * picked (WS-7). It is what lets an agent-driven check reach a chattable
-   * state without an OS dialog.
-   */
+  // Lets an agent-driven check reach a chattable state without an OS dialog.
   readonly seedWorkspacePath?: string
 }
 
-/** The turn this session is running right now, as far as the port is concerned. */
 interface LiveTurn {
   readonly turnId: TurnId
-  /** Whether `turn_started` has already been sent for it. */
   started: boolean
-  /**
-   * Whether the adapter has been asked to run it. False for the whole of the
-   * bind that precedes the run: the window in which the session is already
-   * working to everything above the port while the adapter has never heard of
-   * the turn.
-   */
+  // False for the whole of the bind that precedes the run: the session is
+  // working to everyone above the port while the adapter has never heard of
+  // the turn.
   dispatched: boolean
-  /**
-   * Whether a stop has been asked for it. A dispatched turn is stopped by the
-   * adapter, which says so with its own terminal event; an undispatched one is
-   * ended here, and the mark is what keeps it from being dispatched later.
-   */
+  // A dispatched turn is stopped by the adapter and says so itself; an
+  // undispatched one is ended here, and this mark keeps it from being
+  // dispatched afterwards.
   cancelled: boolean
 }
 
@@ -108,7 +58,6 @@ export function createShell({
   const listeners = new Set<PortEventListener>()
   const live = new Map<SessionId, LiveTurn>()
   const usage = new Map<SessionId, { usedTokens: number; contextWindow: number }>()
-  /** Sessions bound to a conversation this launch, by the bind in flight. */
   const bindings = new Map<SessionId, Promise<Binding>>()
   let turns = 0
 
@@ -148,7 +97,6 @@ export function createShell({
     emit({ type: 'state', snapshot: snapshot() })
   }
 
-  /** A refusal a person can read; the cause, if there is one, went to the log. */
   function refuse(message: string): never {
     throw new Error(message)
   }
@@ -161,11 +109,8 @@ export function createShell({
     return { workspacePath: workspace.path }
   }
 
-  /**
-   * The session's conversation, bound if this launch has not bound it yet. The
-   * promise is remembered rather than the result, so two callers racing for the
-   * same session bind it once.
-   */
+  // The promise is remembered rather than the result, so two callers racing
+  // for the same session bind it once.
   function ensureBound(id: SessionId): Promise<Binding> {
     const already = bindings.get(id)
     if (already !== undefined) return already
@@ -182,7 +127,7 @@ export function createShell({
       })
       .then((bound) => {
         // After a rebind the adapter's word wins: what it says it restored is
-        // what the store and the snapshot then say (2.5).
+        // what the store then says.
         store.updateSession(id, {
           token: bound.token,
           model: bound.model,
@@ -201,10 +146,8 @@ export function createShell({
     return binding
   }
 
-  /**
-   * End a turn the adapter never ran, as cancelled: the start it is owed, then
-   * its terminal event, then the snapshot that says the session is idle again.
-   */
+  // A turn the adapter never ran still owes its listeners a start before its
+  // terminal event.
   function endAsCancelled(sessionId: SessionId, turn: LiveTurn): void {
     live.delete(sessionId)
     if (!turn.started) {
@@ -215,16 +158,9 @@ export function createShell({
     emitState()
   }
 
-  /**
-   * Stop a session's live turn and wait for the stop to have landed.
-   *
-   * A turn is live from the moment its prompt is accepted (2.3), which is
-   * before the bind that precedes it has resolved, and on the SDK flavor that
-   * bind is seconds long. Forwarding to the adapter is right only once the
-   * adapter is running the turn; until then the adapter has nothing to cancel,
-   * so the turn ends here instead, immediately (CAN-1), and the bind's
-   * continuation finds it gone and never asks the adapter to run it (CAN-6).
-   */
+  // A turn is live from the moment its prompt is accepted, which on the SDK
+  // flavor is seconds before its bind resolves; until the adapter is running
+  // it there is nothing there to cancel, so it ends here instead.
   async function stop(id: SessionId): Promise<void> {
     const turn = live.get(id)
     if (turn === undefined) return
@@ -236,9 +172,8 @@ export function createShell({
     await adapter.cancel(id)
   }
 
-  // Everything the adapter says, filtered down to the turn that is live. The
-  // subscription is the shell's own and lasts as long as the launch: it records
-  // what the adapter did, not what some document happened to be watching.
+  // The subscription is the shell's own and lasts as long as the launch: it
+  // records what the adapter did, not what some document happened to watch.
   adapter.onEvent((event) => {
     if (event.type === 'usage') {
       usage.set(event.sessionId, {
@@ -250,10 +185,8 @@ export function createShell({
     }
 
     const turn = live.get(event.sessionId)
-    // An event for a turn that is not live belongs to a turn that has already
-    // ended, been cancelled, or been abandoned with its document. It is dropped
-    // here, which is what makes "nothing after the terminal event" true whoever
-    // is behind the port.
+    // Dropping events for turns that are no longer live is what makes "nothing
+    // after the terminal event" true whoever is behind the port.
     if (turn === undefined || turn.turnId !== event.turnId) return
 
     if (event.type === 'turn_started') {
@@ -291,8 +224,7 @@ export function createShell({
     emit(event)
   })
 
-  // WS-7: the seeded workspace is added exactly as a picked one would be, which
-  // also makes it the active workspace.
+  // Seeded exactly as a picked folder would be, so it also becomes active.
   if (seedWorkspacePath !== undefined) store.addWorkspace(seedWorkspacePath)
 
   return {
@@ -309,8 +241,8 @@ export function createShell({
 
     async addWorkspace(): Promise<WorkspaceId | null> {
       const path = await pickFolder()
-      // A cancelled picker changes nothing at all — no state event, no
-      // activation (WS-1).
+      // A cancelled picker changes nothing at all: no state event, no
+      // activation.
       if (path === null || path === '') return null
       const workspace = store.addWorkspace(path)
       emitState()
@@ -325,8 +257,8 @@ export function createShell({
     async removeWorkspace(id: WorkspaceId): Promise<void> {
       const sessions = store.state.sessions.filter((session) => session.workspaceId === id)
       for (const session of sessions) {
-        // Live work in a workspace being removed is stopped rather than left
-        // running unseen; its conversation stays in adapter history (WS-4).
+        // Stopped rather than left running unseen; the conversation itself
+        // stays in adapter history.
         await stop(session.id)
         adapter.release(session.id)
         bindings.delete(session.id)
@@ -348,8 +280,8 @@ export function createShell({
         const bound = await adapter.bind({
           sessionId: stored.id,
           workspacePath: workspace.path,
-          // A new session starts on Crucible's last selection when the adapter
-          // can still reach it, and on the adapter's fallback otherwise (MO-4).
+          // The last selection is a preference, not a demand: an adapter that
+          // cannot reach it falls back.
           preferredModel: store.state.lastModel
         })
         bindings.set(stored.id, Promise.resolve(bound))
@@ -376,8 +308,8 @@ export function createShell({
 
     async removeSession(id: SessionId): Promise<void> {
       await stop(id)
-      // Removal forgets the sidebar entry only: adapter-managed persistence is
-      // untouched and the conversation can be resumed again later (A24).
+      // Removal forgets the sidebar entry only: the conversation is left where
+      // it is and can be resumed later.
       adapter.release(id)
       bindings.delete(id)
       usage.delete(id)
@@ -420,9 +352,8 @@ export function createShell({
       const workspace = store.workspace(workspaceId)
       if (workspace === undefined) refuse('That workspace is no longer open.')
 
-      // A conversation that is already a curated session is activated rather
-      // than added twice (RES-5). Whether two opaque strings name the same
-      // conversation is the adapter's question, not this module's.
+      // Whether two opaque tokens name the same conversation is the adapter's
+      // question, not this module's.
       const existing = store.state.sessions.find(
         (session) =>
           session.workspaceId === workspaceId &&
@@ -463,16 +394,13 @@ export function createShell({
 
     async setModel(sessionId: SessionId, model: ModelId): Promise<void> {
       requireSession(sessionId)
-      // Model and thinking level belong to the session and change between
-      // turns, never during one (MO-6). The guard is read again after the bind,
-      // because a turn can start while a first-time bind is in flight.
+      // Read again after the bind, because a turn can start while a first-time
+      // bind is in flight.
       if (live.has(sessionId)) refuse('That session is working. Stop it first.')
       await ensureBound(sessionId)
       if (live.has(sessionId)) refuse('That session is working. Stop it first.')
       await adapter.setModel(sessionId, model)
       store.updateSession(sessionId, { model })
-      // Crucible remembers the last selection, which is where a new session
-      // starts (MO-4).
       store.setLastModel(model)
       emitState()
     },
@@ -489,9 +417,8 @@ export function createShell({
 
     async prompt(sessionId: SessionId, text: string): Promise<TurnId> {
       requireSession(sessionId)
-      // The guard is read before anything else, and the turn takes it in the
-      // same tick: a session is working from the moment its prompt is accepted,
-      // so nothing can slip between the check and the claim.
+      // Checked and claimed in the same tick, so nothing can slip between the
+      // two.
       if (live.has(sessionId)) refuse('That session is already working.')
 
       turns += 1
@@ -500,16 +427,12 @@ export function createShell({
       live.set(sessionId, turn)
       emitState()
 
-      // Binding is part of running the turn rather than of accepting it: a
-      // conversation that cannot be opened is this turn's error, which is the
-      // one place a person will see it.
+      // Binding is part of running the turn rather than of accepting it, so a
+      // conversation that cannot be opened surfaces as this turn's error.
       void ensureBound(sessionId)
         .then(async () => {
-          // The turn may no longer be this session's live one: a stop, a reset,
-          // a removal or a document going away while the bind was in flight has
-          // already ended it. The adapter is then never asked to run it, which
-          // is what keeps a stopped turn from streaming on, and on the SDK
-          // flavor from being paid for (CAN-1, CAN-6, SE-7, WS-4).
+          // A stop, reset or removal during the bind already ended this turn,
+          // and the adapter must never be asked to run work the user stopped.
           if (live.get(sessionId) !== turn) return
           turn.dispatched = true
           await adapter.prompt(sessionId, turnId, text)
@@ -518,9 +441,8 @@ export function createShell({
           // A turn the adapter finished without saying so still ends exactly
           // once, and it ends here.
           if (live.get(sessionId) !== turn) return
-          // A stop was asked for and the adapter returned without saying how
-          // the turn ended: cancelled is the honest outcome, not a normal end
-          // (A3).
+          // The adapter returned without saying how a stopped turn ended:
+          // cancelled is the honest outcome, not a normal end.
           if (turn.cancelled) {
             endAsCancelled(sessionId, turn)
             return
@@ -532,8 +454,8 @@ export function createShell({
         })
         .catch((cause: unknown) => {
           if (live.get(sessionId) !== turn) return
-          // Likewise for a rejection after a stop: an abort is the stop
-          // landing, not a failure to show anyone (A3).
+          // A rejection after a stop is the stop landing, not a failure to
+          // show anyone.
           if (turn.cancelled) {
             endAsCancelled(sessionId, turn)
             return
@@ -553,8 +475,8 @@ export function createShell({
     },
 
     async cancel(sessionId: SessionId): Promise<void> {
-      // Targeted, and harmless when it loses the race or names a session with
-      // nothing running (A3).
+      // Harmless when it loses the race or names a session with nothing
+      // running.
       await stop(sessionId)
     },
 

@@ -3,18 +3,11 @@ import type { HistoryMatch } from '../../../shared/agent/port'
 import { relativeTime } from '../labels'
 import './overlay.css'
 
-/**
- * Resume: the one place adapter-managed history is looked at, and only while
- * this overlay is open (A23, RES-2).
- *
- * The search runs on the query as it changes, scoped to the active workspace,
- * and a result shows a display-safe preview and a relative time — never a path,
- * a filename or anything else about how the conversation is stored (RES-3,
- * A28). Choosing one hands its opaque ref back and the shell does the rest.
- *
- * The overlay closes on Escape through the shell's precedence rule, not here,
- * so closing it never touches live work (RES-6).
- */
+// The one place adapter-managed history is looked at, and only while this
+// overlay is open. A result shows a preview and a relative time, never a path
+// or anything else about how the conversation is stored.
+//
+// Escape is the shell's to handle, so closing this never touches live work.
 export function ResumeOverlay({
   onSearch,
   onChoose,

@@ -1,9 +1,7 @@
 // @vitest-environment node
 //
-// WS-7 is what lets an agent-driven check reach a chattable state without an OS
-// dialog, so what it accepts and what it ignores are both worth pinning: a real
-// directory is honored, and anything else leaves the launch as it would have
-// been rather than failing it.
+// What the seed accepts and what it ignores both matter: a launch that cannot
+// honor it must still open.
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'

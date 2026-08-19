@@ -1,22 +1,9 @@
 // @vitest-environment node
 //
-// Reproduction left by review: a cancel handled while the session's accepted
-// turn is still waiting on its bind is silently dropped, and the turn then
-// runs to a normal end.
-//
-// The port contract (spec 2.3, port.ts): `cancel(sessionId)` affects at most
-// the live turn of that session at the moment it is handled — and a turn is
-// live from the moment its prompt is accepted: `prompt()` has resolved with a
-// minted TurnId, the snapshot says `working: true`, and the composer shows
-// Stop. The shell's `stop()` only forwards to `adapter.cancel()`, which finds
-// nothing running because `adapter.prompt()` has not been called yet, so the
-// user's Stop does nothing and the turn streams on (CAN-1; in the SDK flavor
-// that stream is paid, CAN-6).
-//
-// The window is real in the app: a session restored from a previous launch is
-// bound lazily, and an SDK bind is seconds long (dynamic SDK import, settings,
-// resource-loader reload, ModelRuntime.create, session open). A prompt sent in
-// that window waits on the same bind, with Stop shown and inert.
+// A turn is live from the moment its prompt is accepted, which is before its
+// bind resolves, and an SDK bind is seconds long. A stop landing in that window
+// has to end the turn here, or the user's Stop is inert and a paid turn streams
+// on.
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'

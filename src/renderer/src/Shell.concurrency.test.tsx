@@ -1,10 +1,7 @@
 // @vitest-environment jsdom
 //
-// Concurrency is the ruling that most changes what the shell has to hold: two
-// sessions can work at once, switching away from one does not stop it, and each
-// row tells the truth about its own session. So this test streams into two
-// sessions at the same time, switches between them, and checks that nothing was
-// lost, mixed up, or invented.
+// Two sessions stream at once here, because losing or mixing their items is the
+// failure this arrangement invites.
 import { act, fireEvent, render, screen } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 import type { ShellSnapshot } from '../../shared/agent/port'
@@ -43,7 +40,6 @@ async function twoStreamingSessions(): Promise<ScriptedPort> {
   return port
 }
 
-/** Click a session row by its label, working or not. */
 function activate(label: string): void {
   fireEvent.click(screen.getByRole('button', { name: (name) => name.startsWith(label) }))
 }

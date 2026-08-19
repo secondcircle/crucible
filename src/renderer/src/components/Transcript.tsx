@@ -3,21 +3,8 @@ import type { ViewItem } from '../state/shell-state'
 import { Markdown } from './Markdown'
 import './transcript.css'
 
-/**
- * The transcript: what happened in this session, in the order it happened.
- *
- * Three behaviors are the reason it is a component and not a `map`:
- *
- * - **It follows the stream, but never takes the scroll away.** While the
- *   reader is at the bottom it stays at the bottom; the moment they scroll up
- *   it stops, and nothing pulls them back down (TR-4).
- * - **Tool calls and thinking are event-backed and collapsible.** A tool chip
- *   exists because a `tool_started` arrived, never because a turn looked like
- *   it might call one (TL-1, TH-2), and its output is bounded whether it is
- *   running or finished (TL-2, TL-3).
- * - **One generic tool rendering.** Every tool renders the same way; bespoke
- *   per-tool renderers are later work (TL-4).
- */
+// Follows the stream only while the reader is already at the bottom: scrolling
+// up stops the follow, and nothing pulls them back down.
 export function Transcript({
   items,
   sessionId
@@ -61,9 +48,8 @@ export function Transcript({
     <div className="chat" ref={scroller} onScroll={onScroll} role="log" aria-label="Transcript">
       <ol className="items">
         {items.map((item, index) => (
-          // The transcript is append-only and never reordered, so an item's
-          // position is a stable key — and unlike an id, it cannot be minted by
-          // a port.
+          // The transcript is append-only and never reordered, so position is
+          // a stable key, and unlike an id it cannot be minted by a port.
           <li key={index}>
             <Item item={item} />
           </li>
@@ -79,7 +65,7 @@ function Item({ item }: { readonly item: ViewItem }): React.JSX.Element {
       return (
         <div className="msg user" aria-label="You">
           <div className="who">You</div>
-          {/* Plain text, always: a person's own message is never markdown (A6). */}
+          {/* Plain text, always: a person's own message is never markdown. */}
           <div className="bubble">{item.text}</div>
         </div>
       )
@@ -119,7 +105,6 @@ function Item({ item }: { readonly item: ViewItem }): React.JSX.Element {
   }
 }
 
-/** The dim Ember block: collapsed by default, and honest about its duration. */
 function Thinking({
   text,
   seconds,
@@ -146,7 +131,7 @@ function Thinking({
   )
 }
 
-/** One tool call, running or finished, in the one rendering every tool gets. */
+// Every tool renders the same way; per-tool renderings are later work.
 function Tool({
   name,
   summary,
@@ -164,13 +149,14 @@ function Tool({
   const tail = useRef<HTMLPreElement>(null)
 
   useEffect(() => {
-    // The porthole: while a tool runs, its output tails rather than grows.
+    // While a tool runs its output tails rather than grows, so a long-running
+    // call cannot push the rest of the transcript off the screen.
     const node = tail.current
     if (node !== null && running) node.scrollTop = node.scrollHeight
   }, [output, running])
 
-  // A call that was cut off by a cancelled turn never said how it went, and
-  // this is not the place to decide for it.
+  // A call cut off by a cancelled turn never said how it went, and this is not
+  // the place to decide for it.
   const state = running ? 'running' : ok === undefined ? 'stopped' : ok ? 'ok' : 'failed'
   const said = running ? 'running' : ok === undefined ? 'stopped' : ok ? 'done' : 'error'
 

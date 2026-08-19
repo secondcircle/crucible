@@ -1,17 +1,13 @@
 // @vitest-environment node
 //
-// The SDK boundary is covered with fakes of the SDK's event stream, never a
-// real session: `npm test` makes no paid call and constructs no SDK adapter
-// (SA-8). What is asserted is the whole of the contract this translation owes
-// its caller — which SDK events become which adapter events, which are dropped,
-// and that nothing of the SDK's own shapes survives the crossing.
+// Fakes of the SDK's event stream, never a real session, so this suite makes no
+// paid call and constructs no SDK adapter.
 import { describe, expect, it } from 'vitest'
 import type { AgentSessionEvent } from '@earendil-works/pi-coding-agent'
 import { createEventMapper, renderToolOutput, summarizeToolArgs } from './sdk-events'
 
 const TARGET = { sessionId: 's1', turnId: 't-1' }
 
-/** An SDK event, built loosely: the mapper is what has to survive real ones. */
 function sdk(event: unknown): AgentSessionEvent {
   return event as AgentSessionEvent
 }

@@ -1,29 +1,13 @@
 import { createElement, type ReactNode } from 'react'
 import './markdown.css'
 
-/**
- * Assistant markdown, rendered as elements (TR-1, TR-2).
- *
- * It is written here rather than pulled in because what has to be true of it is
- * short and absolute: **no string from an agent ever becomes markup**. There is
- * no `dangerouslySetInnerHTML` in this file and no HTML parsing anywhere in it,
- * so raw HTML in a reply arrives as the text it is — visible, inert — and a
- * fenced block full of `<script>` is a code block like any other. That is a
- * property of the rendering strategy, not of a sanitizer that could be
- * misconfigured.
- *
- * What it covers is what the ruling asked for: paragraphs, headings, bullet and
- * numbered lists, tables, blockquotes, rules, inline code, bold, italics, links
- * and fenced code blocks. Syntax highlighting is deliberately out (A6). Nesting
- * beyond one level is out too: a nested list renders as flat items rather than
- * as a wrong tree, which is the honest failure for a renderer this size.
- *
- * Links render as links and open in the OS browser: the anchor asks for a new
- * window, main denies the window and hands the address to the OS instead
- * (WIN-4), so the Crucible window cannot be navigated by anything an agent
- * writes. An address that is not `http`, `https` or `mailto` is not a link at
- * all — it renders as its own text.
- */
+// Written by hand rather than pulled in so that no string from an agent can
+// ever become markup: there is no `dangerouslySetInnerHTML` and no HTML
+// parsing here, which is a property of the strategy rather than of a sanitizer
+// that could be misconfigured.
+//
+// Nesting beyond one level renders flat rather than as a wrong tree, and an
+// address that is not http, https or mailto renders as plain text.
 export function Markdown({ markdown }: { markdown: string }): React.JSX.Element {
   return <div className="markdown">{blocks(markdown)}</div>
 }
@@ -169,7 +153,6 @@ function cells(row: string): string[] {
     .map((cell) => cell.trim())
 }
 
-/** Inline code, bold, italics and links; everything else is text. */
 const INLINE =
   /(`+)([\s\S]+?)\1|\*\*([\s\S]+?)\*\*|__([\s\S]+?)__|\*([^*\n]+?)\*|_([^_\n]+?)_|\[([^\]]*)\]\(([^)\s]+)\)/g
 

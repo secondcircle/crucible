@@ -1,10 +1,7 @@
 // @vitest-environment jsdom
 //
-// Stopping a turn is the behavior a person reaches for when an agent is going
-// the wrong way, so what it does has to be exact: the button becomes Stop while
-// work is live, Escape does the same thing, the partial output stays with a
-// quiet marker under it, and the next prompt goes out as a redirect. Escape
-// with nothing running does nothing at all, which is just as much a rule.
+// Stopping is what a person reaches for when an agent is going the wrong way,
+// so every path into it is pinned, Escape with nothing running included.
 import { act, fireEvent, render, screen } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 import { Shell } from './Shell'
@@ -18,7 +15,6 @@ async function shellWithSession(): Promise<ScriptedPort> {
   return port
 }
 
-/** Type and press Enter, which is how a prompt is sent (CO-1). */
 async function send(text: string): Promise<void> {
   const box = screen.getByLabelText('Message')
   fireEvent.change(box, { target: { value: text } })

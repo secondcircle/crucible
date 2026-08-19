@@ -3,61 +3,38 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname } from 'node:path'
 import type { ModelId, SessionId, ThinkingLevel, WorkspaceId } from '../../shared/agent/port'
 
-/**
- * The shell store: the Crucible-owned state that is identical in both launch
- * flavors — workspaces, the curated session list, what is active, and
- * Crucible's last model selection (A13, A20, A14).
- *
- * It lives above the adapters and there is exactly one of it, because curated
- * membership is genuine app state in every flavor (A27): forking it per adapter
- * would let the fake and the SDK flavors disagree about what the sidebar is.
- * The adapter is still the authority on conversation content, and on the model
- * and thinking level a rebind actually restored — where the two disagree after
- * a rebind, the adapter's word is written back here.
- *
- * The file it writes is Crucible's own and holds nothing of π's (A28): a
- * session entry carries the adapter's opaque binding token and nothing that
- * could be read as a path, a filename or a storage concept.
- *
- * Its storage location is an argument rather than a lookup, which is the whole
- * of what makes it unit-testable: a test hands it a temp file, the app hands it
- * one under Electron's user-data directory.
- */
+// One store above both adapters, so the launch flavors can never disagree about
+// what the sidebar holds. Its file location is an argument so a test can hand it
+// a temp file.
 
-/** The file's shape. `version` is what lets a later shape be migrated. */
+/** What lets a later shape be migrated. */
 const VERSION = 1
 
-/** A workspace as it is persisted: an id Crucible minted, and an OS folder. */
 export interface StoredWorkspace {
   readonly id: WorkspaceId
   readonly path: string
 }
 
-/** A curated session as it is persisted. */
 export interface StoredSession {
   readonly id: SessionId
   readonly workspaceId: WorkspaceId
-  /** ISO; the sidebar's neutral placeholder label derives from it (SE-3). */
+  /** ISO; the sidebar's neutral placeholder label derives from it. */
   readonly createdAt: string
-  /**
-   * The adapter's opaque binding token, so a later launch can rebind this same
-   * sidebar identity to the same conversation. Nothing outside the adapter
-   * interprets it (ADR 0004).
-   */
+  // Lets a later launch rebind this same sidebar identity to the same
+  // conversation. Nothing outside the adapter interprets it.
   readonly token?: string
   /** The last model and level the adapter reported for this session. */
   readonly model?: ModelId
   readonly thinkingLevel?: ThinkingLevel
 }
 
-/** Everything the store keeps, in the order the file keeps it. */
 export interface ShellStoreState {
   readonly workspaces: readonly StoredWorkspace[]
   readonly sessions: readonly StoredSession[]
   readonly activeWorkspaceId?: WorkspaceId
-  /** Each workspace remembers the session it was last on (WS-3, WS-5). */
+  /** Each workspace remembers the session it was last on. */
   readonly activeSessionByWorkspace: Readonly<Record<WorkspaceId, SessionId>>
-  /** Crucible's last model selection, which a new session starts on (MO-4). */
+  /** What a new session starts on. */
   readonly lastModel?: ModelId
 }
 
@@ -67,18 +44,14 @@ const EMPTY: ShellStoreState = {
   activeSessionByWorkspace: {}
 }
 
-/** What a caller may change, and how it reads back what it changed. */
 export interface ShellStore {
   readonly state: ShellStoreState
   /** The active workspace's remembered session, when it still exists. */
   activeSessionId(): SessionId | undefined
   workspace(id: WorkspaceId): StoredWorkspace | undefined
   session(id: SessionId): StoredSession | undefined
-  /**
-   * Add a folder, or answer with the workspace already holding it — picking a
-   * folder twice activates what is there rather than duplicating it (WS-2).
-   * Either way the workspace ends up active.
-   */
+  // Picking the same folder twice activates what is already there rather than
+  // duplicating it. Either way the workspace ends up active.
   addWorkspace(path: string): StoredWorkspace
   removeWorkspace(id: WorkspaceId): void
   activateWorkspace(id: WorkspaceId): void
@@ -89,7 +62,6 @@ export interface ShellStore {
   setLastModel(model: ModelId): void
 }
 
-/** How a store says it could not write; the app turns this into a log record. */
 export type StoreWriteFailure = (cause: unknown) => void
 
 export function createShellStore(
@@ -105,13 +77,12 @@ export function createShellStore(
       writeFileSync(path, `${JSON.stringify({ version: VERSION, ...next }, null, 2)}\n`, 'utf8')
     } catch (cause) {
       // A store that cannot write is still a store: the launch keeps working
-      // with what is in memory, and the failure is recorded rather than thrown
-      // at whoever happened to click something.
+      // from memory rather than throwing at whoever happened to click
+      // something.
       onWriteFailure(cause)
     }
   }
 
-  /** Activation of a workspace that has no remembered session stays unset. */
   function activation(next: ShellStoreState, workspaceId: WorkspaceId): ShellStoreState {
     return { ...next, activeWorkspaceId: workspaceId }
   }
@@ -222,12 +193,9 @@ export function createShellStore(
   }
 }
 
-/**
- * What is on disk, or an empty store. A file that cannot be read or parsed, or
- * that carries a version this build does not know, is treated as absent: the
- * shell opens empty rather than refusing to launch, and the next write replaces
- * it. Losing a sidebar is recoverable; a window that will not open is not.
- */
+// An unreadable, unparsable or unknown-version file is treated as absent, so
+// the window still opens: losing a sidebar is recoverable, a window that will
+// not open is not.
 function load(path: string): ShellStoreState {
   let parsed: unknown
   try {

@@ -1,10 +1,8 @@
 // @vitest-environment node
 //
-// The shell is main's whole behavior: the per-session guard, targeted
-// cancellation, curated membership, lazy binding and the snapshot everything
-// else reads. It is tested here against the real fake adapter and a real store
-// over a temp file, with no Electron and no IPC — which is the point of having
-// put the rules here rather than in the channel.
+// Driven against the real fake adapter and a real store over a temp file, with
+// no Electron and no IPC, which is the point of having put the rules here
+// rather than in the channel.
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -24,7 +22,6 @@ let adapter: ConversationAdapter
 let shell: Shell
 let events: PortEvent[]
 
-/** Everything the shell said, and one live subscription, as a document has. */
 function build(options: { seedWorkspacePath?: string } = {}): void {
   adapter = createFakeAdapter({ pauseMs: 0 })
   shell = createShell({
@@ -37,7 +34,6 @@ function build(options: { seedWorkspacePath?: string } = {}): void {
   shell.onEvent((event) => events.push(event))
 }
 
-/** A workspace with one session, which is where most of these start. */
 async function withSession(): Promise<{ workspaceId: string; sessionId: SessionId }> {
   picked = WORKSPACE
   const workspaceId = await shell.addWorkspace()
@@ -361,18 +357,14 @@ describe('cancellation', () => {
   })
 })
 
-// A session restored from a previous launch binds lazily, and a real SDK bind
-// is seconds long: dynamic import, settings, resource-loader reload, model
-// runtime, session open. A prompt sent in that window is accepted and shown as
+// A prompt sent while its session is still binding is accepted and shown as
 // working while the adapter has never heard of the turn, so everything that
-// stops a turn has to land there too, before the adapter is ever asked to run
-// it. On the SDK flavor the turn that would otherwise run is paid (CAN-6).
+// stops a turn has to land there too, before the adapter is asked to run it.
 describe('a turn accepted while its session is still binding', () => {
   let sessionId: SessionId
   let release: () => void = () => {}
   let prompts: number
 
-  /** Second launch over the same store, through an adapter that binds on a gate. */
   async function gatedRelaunch(): Promise<void> {
     const created = await withSession()
     sessionId = created.sessionId
@@ -414,8 +406,7 @@ describe('a turn accepted while its session is still binding', () => {
 
     await shell.cancel(sessionId)
 
-    // Immediately (CAN-1): the stop does not wait on the bind it is stuck
-    // behind.
+    // The stop does not wait on the bind it is stuck behind.
     expect(terminals()).toEqual(['turn_cancelled'])
     expect(sessionOf(await shell.snapshot(), sessionId)?.working).toBe(false)
 
@@ -433,8 +424,8 @@ describe('a turn accepted while its session is still binding', () => {
     release()
     await settled()
 
-    // No turn of any kind run for an entry that has left the sidebar, and no
-    // phantom error from an adapter asked to prompt a released session (SE-6).
+    // No turn run for an entry that has left the sidebar, and no phantom error
+    // from an adapter asked to prompt a released session.
     expect(terminals()).toEqual(['turn_cancelled'])
     expect(prompts).toBe(0)
     expect((await shell.snapshot()).sessions).toEqual([])
@@ -449,7 +440,7 @@ describe('a turn accepted while its session is still binding', () => {
     await reset
     await settled()
 
-    // SE-7: reset cancels live work, so the pre-reset turn is not a normal end.
+    // A reset cancels live work, so the pre-reset turn is not a normal end.
     expect(terminals()).toEqual(['turn_cancelled'])
     expect(prompts).toBe(0)
     expect((await shell.snapshot()).sessions.map((session) => session.id)).toEqual([sessionId])
@@ -517,7 +508,6 @@ describe('a relaunch', () => {
   })
 })
 
-/** Let every microtask the fake adapter scheduled run out. */
 async function settled(): Promise<void> {
   for (let turn = 0; turn < 50; turn += 1) await Promise.resolve()
 }

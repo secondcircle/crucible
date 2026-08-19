@@ -1,9 +1,7 @@
 // @vitest-environment node
 //
-// Restoring a conversation is the other half of the SDK translation, and it is
-// tested the same way: fake messages of the shapes π stores, never a session.
-// What matters is that a restored transcript is made of the same item kinds a
-// live turn produces, so history renders through the same code (TR-7).
+// Fake messages of the shapes π stores, never a session, so this suite makes no
+// paid call.
 import { describe, expect, it } from 'vitest'
 import { toTranscript, type StoredMessage } from './sdk-transcript'
 

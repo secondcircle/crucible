@@ -1,10 +1,8 @@
 // @vitest-environment jsdom
 //
-// Markdown is the one place an agent's own text becomes what the window shows,
-// so this test asserts both halves of that: the formatting a reply is entitled
-// to (lists, tables, inline code, fenced blocks), and the formatting it is not
-// — raw HTML arrives as visible text and never as elements, and a link is a
-// link that cannot navigate the Crucible window.
+// Markdown is where an agent's own text becomes what the window shows, so both
+// halves are asserted: the formatting a reply is entitled to, and the markup it
+// must never get.
 import { act, render, screen, within } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 import { Shell } from './Shell'

@@ -7,29 +7,10 @@ import type {
   TurnId
 } from '../../../shared/agent/port'
 
-/**
- * Everything the shell knows, and every way it can change: one value and one
- * pure function.
- *
- * The reducer is where the port's turn contract becomes what a person sees, so
- * the rules it keeps are worth naming:
- *
- * - **A session's items are built from its own events only.** Every event
- *   carries its session, so two sessions streaming at once never touch each
- *   other's transcript (A18) and switching away loses nothing.
- * - **A turn's events are ignored unless that turn is the session's live one.**
- *   After a terminal event the session has no live turn, so anything arriving
- *   late for it changes nothing — the renderer's own half of "nothing after the
- *   terminal event".
- * - **Arrival order is item order.** Text after a tool or a thought opens a new
- *   text block rather than growing the previous one (TR-3), which is what makes
- *   a transcript read as the sequence that actually happened.
- * - **Time is an input, never a reading.** Nothing here calls `Date.now`: the
- *   caller stamps each event, so the reducer is pure and React may replay it
- *   under `StrictMode` without the elapsed times drifting.
- */
+// Time is an input, never a reading: the caller stamps each event, so the
+// reducer stays pure and React may replay it under StrictMode without elapsed
+// times drifting.
 
-/** One rendered item. The port's transcript items, plus what is still moving. */
 export type ViewItem =
   | { readonly kind: 'user'; readonly text: string }
   | { readonly kind: 'assistant'; readonly markdown: string; readonly streaming: boolean }
@@ -53,24 +34,16 @@ export type ViewItem =
   | { readonly kind: 'stopped' }
   | { readonly kind: 'error'; readonly message: string }
 
-/** What the renderer holds for one session it has seen this launch. */
 export interface SessionView {
   readonly items: readonly ViewItem[]
   /** Whether settled history has been fetched, or the session is live-only. */
   readonly loaded: boolean
-  /** The live turn and when it was observed to start (TR-6). */
   readonly turn?: { readonly turnId: TurnId; readonly startedAt: number }
 }
 
-/**
- * Whether a session's conversation is *known* to hold nothing.
- *
- * An unfetched view's items are `[]` whatever the conversation behind it holds,
- * so emptiness and ignorance look alike until `loaded` tells them apart. The
- * guards that ask before a destructive change (SE-7, MO-7) read an unfetched
- * view as "not known to be empty" and ask, because the alternative is applying
- * the change to a conversation nobody has looked at yet.
- */
+// An unfetched view's items are `[]` whatever its conversation holds, so
+// emptiness and ignorance look alike until `loaded` tells them apart. Callers
+// guarding a destructive change must read ignorance as "not empty".
 export function knownEmpty(view: SessionView | undefined): boolean {
   return view?.loaded === true && view.items.length === 0
 }
@@ -96,7 +69,6 @@ export type ShellAction =
       readonly items: readonly TranscriptItem[]
     }
   | { readonly type: 'sent'; readonly sessionId: SessionId; readonly text: string }
-  /** Session reset: the identity stands, the conversation behind it is new. */
   | { readonly type: 'reset'; readonly sessionId: SessionId }
   | { readonly type: 'event'; readonly event: PortEvent; readonly at: number }
 
@@ -122,8 +94,8 @@ export function reduce(state: ShellState, action: ShellAction): ShellState {
     }
 
     case 'reset':
-      // Nothing of the old conversation survives here, because nothing of it is
-      // in the new one: it was detached, not cleared (A25).
+      // Nothing of the old conversation survives here, because nothing of it
+      // is in the new one: it was detached, not cleared.
       return withView(state, action.sessionId, { items: [], loaded: true })
 
     case 'sent': {
@@ -139,7 +111,6 @@ export function reduce(state: ShellState, action: ShellAction): ShellState {
   }
 }
 
-/** A settled item, as the renderer holds it: nothing about it is still moving. */
 function restored(item: TranscriptItem): ViewItem {
   switch (item.kind) {
     case 'assistant':
@@ -226,7 +197,8 @@ function heard(state: ShellState, event: PortEvent, at: number): ShellState {
         items: mapCall(view.items, event.callId, (tool) => ({
           ...tool,
           // The final output is the whole of it, which is not always what the
-          // chunks added up to: a tool that streamed nothing still has a result.
+          // chunks added up to: a tool that streamed nothing still has a
+          // result.
           output: event.output === '' ? tool.output : event.output,
           ok: event.ok,
           running: false
@@ -244,7 +216,7 @@ function heard(state: ShellState, event: PortEvent, at: number): ShellState {
       return withView(state, sessionId, {
         ...view,
         turn: undefined,
-        // The partial output stands, closed by the quiet stopped marker (A4).
+        // The partial output stands, closed by the quiet stopped marker.
         items: [...closeTurn(view.items, at), { kind: 'stopped' }]
       })
 
@@ -257,7 +229,8 @@ function heard(state: ShellState, event: PortEvent, at: number): ShellState {
   }
 }
 
-/** Text grows the open text block, or opens one after anything else (TR-3). */
+// Text after a tool or a thought opens a new block instead of growing the last
+// one, so the transcript reads as the sequence that happened.
 function appendText(items: readonly ViewItem[], delta: string, at: number): readonly ViewItem[] {
   const last = items[items.length - 1]
   if (last?.kind === 'assistant' && last.streaming) {
@@ -266,8 +239,8 @@ function appendText(items: readonly ViewItem[], delta: string, at: number): read
   return [...settle(items, at), { kind: 'assistant', markdown: delta, streaming: true }]
 }
 
-/** Thinking grows the open thinking block, or opens one, timed from its first
- * delta so the duration shown is one the renderer measured (TH-1). */
+// Timed from the first delta, so the duration shown is one the renderer
+// measured.
 function appendThinking(
   items: readonly ViewItem[],
   delta: string,
@@ -283,8 +256,6 @@ function appendThinking(
   ]
 }
 
-/** Close whatever was still moving: a text block stops streaming, a thought
- * gets the duration it actually took. */
 function settle(items: readonly ViewItem[], at: number): readonly ViewItem[] {
   const last = items[items.length - 1]
   if (last === undefined) return items
@@ -295,9 +266,8 @@ function settle(items: readonly ViewItem[], at: number): readonly ViewItem[] {
     return items.with(items.length - 1, {
       ...last,
       running: false,
-      // Measured, not guessed — and floored at a second, because a block that
-      // took 400ms did take about a second as far as a reader is concerned and
-      // "thought for 0s" says nothing at all.
+      // Floored at a second, because "thought for 0s" says nothing to a
+      // reader.
       seconds:
         last.startedAt === undefined
           ? undefined
@@ -307,19 +277,14 @@ function settle(items: readonly ViewItem[], at: number): readonly ViewItem[] {
   return items
 }
 
-/**
- * A turn is over: nothing more will arrive for it, so nothing of it may still
- * look like it is arriving. The open text or thinking block is closed, and a
- * tool that was running when the turn was cancelled stops spinning — with no
- * outcome, because it never reported one and this shell does not invent one.
- */
+// A tool still running when its turn ended stops spinning without an outcome,
+// because it never reported one and none is invented here.
 function closeTurn(items: readonly ViewItem[], at: number): readonly ViewItem[] {
   return settle(items, at).map((item) =>
     item.kind === 'tool' && item.running ? { ...item, running: false } : item
   )
 }
 
-/** Change the one tool item a call id names, and nothing else. */
 function mapCall(
   items: readonly ViewItem[],
   callId: string,

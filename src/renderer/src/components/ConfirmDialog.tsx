@@ -1,13 +1,7 @@
 import './overlay.css'
 
-/**
- * The guard dialog: two buttons, one sentence, no numbers it cannot honestly
- * compute (MO-7, SE-7).
- *
- * It is the only modal in the shell and the only cache-related surface in this
- * work. It says what the action does and offers the way out first, in the Ember
- * pattern from the details mock — plain words, then actions.
- */
+// The way out is offered first, because the actions guarded by this dialog are
+// the ones that cost a conversation or cost money.
 export function ConfirmDialog({
   title,
   body,

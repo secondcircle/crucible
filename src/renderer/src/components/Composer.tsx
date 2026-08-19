@@ -2,23 +2,11 @@ import { useEffect, useState } from 'react'
 import type { ModelInfo, ThinkingLevel } from '../../../shared/agent/port'
 import './composer.css'
 
-/**
- * The composer: the textarea, the two chips that own the session's model and
- * thinking level, and the one button that is Send or Stop.
- *
- * The keyboard rules are here because this is where they are felt: Enter sends,
- * Shift+Enter makes a newline (CO-1), an empty or whitespace-only draft keeps
- * Send unavailable (CO-2), and while the session works the button becomes Stop,
- * Enter stops sending, and the textarea stays editable so the next instruction
- * can be drafted while the current one is being stopped (CO-3).
- *
- * Escape is not handled here. It has an app-wide precedence — close what is
- * open, else stop the work, else nothing (CO-4) — and precedence cannot live in
- * the component that only knows about one of the three.
- *
- * No attachment control and no agent byline: both are deliberate omissions
- * (A2, CO-6).
- */
+// The textarea stays editable while the session works so the next instruction
+// can be drafted during a stop. Escape is deliberately not handled here: it
+// has an app-wide precedence this component cannot see.
+//
+// The missing attachment control and agent byline are omissions, not oversights.
 export function Composer({
   draft,
   disabled,
@@ -42,7 +30,6 @@ export function Composer({
   /** No workspace or no session: the composer is present but not usable. */
   readonly disabled: boolean
   readonly working: boolean
-  /** Genuine elapsed working time, measured from the observed turn start. */
   readonly elapsedSeconds?: number
   readonly model?: ModelInfo
   readonly modelId?: string
@@ -81,8 +68,8 @@ export function Composer({
               className="chip"
               aria-label={`Model: ${model?.label ?? modelId ?? 'none'}`}
               aria-expanded={modelPickerOpen}
-              // Model and thinking level belong to the session and change
-              // between turns, never during one (MO-6).
+              // Model and thinking level change between turns, never during
+              // one.
               disabled={disabled || working}
               onClick={onToggleModelPicker}
             >
@@ -148,12 +135,8 @@ export function Composer({
   )
 }
 
-/**
- * The searchable model picker (MO-1, mock D's interaction in Ember's clothes).
- * It lists what the port reported and nothing else — no model is named in
- * Crucible's own source (MO-2) — and its query state is its own, so opening it
- * again starts clean.
- */
+// Lists what the port reported and nothing else: no model is named in
+// Crucible's own source. Its query state is its own, so reopening starts clean.
 function ModelPicker({
   models,
   current,
@@ -210,11 +193,8 @@ function ModelPicker({
   )
 }
 
-/**
- * Genuine elapsed working time, ticking once a second from the moment this
- * document saw the turn start (TR-6). It is a hook rather than a component so
- * the composer can render the number inline.
- */
+// Ticks once a second from the moment this document saw the turn start, so the
+// number shown is measured rather than reported.
 export function useElapsedSeconds(since: number | undefined): number | undefined {
   const [now, setNow] = useState(() => Date.now())
 
@@ -225,7 +205,7 @@ export function useElapsedSeconds(since: number | undefined): number | undefined
   }, [since])
 
   if (since === undefined) return undefined
-  // A turn that has just started reads zero until the first tick, which is what
-  // a second-resolution clock can honestly say about it.
+  // A turn that has just started reads zero until the first tick, which is
+  // what a second-resolution clock can honestly say about it.
   return Math.max(0, Math.floor((now - since) / 1000))
 }

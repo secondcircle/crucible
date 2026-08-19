@@ -15,25 +15,12 @@ import type {
   WorkspaceId
 } from '../../../shared/agent/port'
 
-/**
- * The renderer's half of the agent channel: an agent port over the preload
- * surface.
- *
- * This is the one module in the renderer that may name `window.crucible` — the
- * import fence says so — and it exists so that nothing else has to. What it
- * hands back is the port and only the port, so the shell it feeds cannot tell
- * that a process boundary was crossed at all.
- *
- * It is deliberately thin. Correlation, guards and staleness are main's
- * business now that every event carries the session it belongs to and main
- * drops anything that is not a live turn's, so there is nothing left here to
- * hold: a request goes out, a result comes back, and a refusal that crossed as
- * a value becomes a rejection carrying exactly the sentence main wrote.
- *
- * It subscribes to the preload surface once, when it is built, and fans out to
- * its own listeners, so subscribing and unsubscribing a component costs nothing
- * and loses nothing — the client is the document's, not a component's.
- */
+// The one module in the renderer that may name `window.crucible`, and it holds
+// no state of its own: correlation, guards and staleness are all main's now
+// that every event carries the session it belongs to.
+//
+// It subscribes once and fans out, so a component may subscribe and unsubscribe
+// freely without losing events.
 
 /** The preload surface, as the renderer sees it: one object, two members. */
 interface CrucibleAgent {
@@ -47,7 +34,8 @@ declare global {
   }
 }
 
-/** The surface, or the one failure worth naming: a preload that did not load. */
+// A missing surface means the preload did not load, which is worth saying
+// plainly rather than failing on an undefined member later.
 function surface(): CrucibleAgent {
   const agent = window.crucible?.agent
   if (agent === undefined) {

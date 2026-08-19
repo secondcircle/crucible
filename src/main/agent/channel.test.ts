@@ -1,12 +1,7 @@
 // @vitest-environment node
 //
-// The channel is plumbing, so it is tested as plumbing: does a request reach
-// the right port operation with the right arguments, does a refusal cross as a
-// value rather than as an Electron-wrapped throw, does an event reach the
-// window, and does a document going away abandon the work. Electron is a
-// stand-in — an `ipcMain` that remembers what was registered and a window that
-// remembers what was sent — and the shell behind it is a stand-in too, because
-// its behavior is tested where it lives.
+// Electron and the shell are both stand-ins here: the shell's own behavior is
+// tested where it lives, and what is left is plumbing.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { BrowserWindow } from 'electron'
 import { EVENT_CHANNEL, REQUEST_CHANNEL, type PortResult } from '../../shared/agent/channels'
@@ -31,7 +26,6 @@ vi.mock('electron', () => ({
   }
 }))
 
-/** The window, as much of it as the channel touches. */
 interface StubWindow {
   readonly window: BrowserWindow
   readonly sent: readonly PortEvent[]
@@ -85,7 +79,6 @@ function stubWindow(): StubWindow {
   }
 }
 
-/** A shell that records what it was asked and answers however a test says. */
 function stubShell(answers: Partial<Record<string, unknown>> = {}): {
   shell: Shell
   asked: Array<{ op: string; args: unknown[] }>

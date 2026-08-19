@@ -1,14 +1,8 @@
 // @vitest-environment node
 //
-// Characterization of the composition root. `src/main/index.ts` is a module
-// whose interface is what it does when Electron loads it: it builds the run
-// log, appends the launch's lifecycle records, composes the store, the adapter
-// and the shell, and serves that shell over the request channel for one
-// window. So the test drives it the way Electron does — import the module,
-// resolve readiness, fire the app events — with `electron` and the window
-// factory replaced by stand-ins, and asserts on the real JSONL file the real
-// sink writes. What the shell then does is tested at its own interface, not
-// here.
+// The composition root's interface is what it does when Electron loads it, so
+// the test drives it the way Electron does, with `electron` and the window
+// factory replaced by stand-ins.
 import { mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'

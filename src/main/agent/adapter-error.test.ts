@@ -1,10 +1,7 @@
 // @vitest-environment node
 //
-// `displaySafeMessage` is where a failure becomes something a person can read,
-// for every direction a turn fails from — an adapter's own event, an operation
-// that throws, a provider payload. Nothing here loads the SDK: the rule is
-// about text, so the causes below are the shapes the SDK hands over, not the
-// SDK itself.
+// The causes below are the shapes the SDK hands over rather than the SDK
+// itself: the rule under test is about text.
 import { describe, expect, it } from 'vitest'
 import { displaySafeMessage } from './adapter-error'
 

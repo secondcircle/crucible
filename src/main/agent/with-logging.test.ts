@@ -1,9 +1,7 @@
 // @vitest-environment node
 //
-// The logging decorator has to be invisible to its caller and complete to its
-// reader, so both are asserted: the wrapped shell behaves exactly like the one
-// that was wrapped, and one launch's file holds the operations asked of it, the
-// answers, the refusals with their stacks, and every event that came back out.
+// The decorator has to be invisible to its caller and complete to its reader,
+// so both halves are asserted here.
 import { describe, expect, it } from 'vitest'
 import type { LogRecord } from '../log/sink'
 import { createMemorySink } from '../log/sink'

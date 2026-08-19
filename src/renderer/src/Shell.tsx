@@ -15,38 +15,12 @@ import { Transcript } from './components/Transcript'
 import { knownEmpty, NOTHING_YET, reduce } from './state/shell-state'
 import './shell.css'
 
-/**
- * The Ember shell: the whole surface, and the one component that owns an agent
- * port.
- *
- * The port arrives as a prop (ADR 0001). That is the seam every component test
- * drives — a scripted implementation of the same interface, handed in from the
- * outside — and it is why nothing under `src/renderer` names `window.crucible`
- * except the IPC client the composition root builds.
- *
- * What this component owns, and nothing else does:
- *
- * - **The order things are done in at startup.** Subscribe first, then read the
- *   snapshot, then everything else, because subscription is live-only and an
- *   event may arrive before the promise that caused it resolves.
- * - **Which sessions have had their settled history fetched.** A session seen
- *   live this launch is built from its own events; one that has not been seen
- *   is fetched once, the first time it is looked at.
- * - **Escape's precedence**: an open dialog, menu or overlay closes; otherwise
- *   the active session's live turn is cancelled; otherwise nothing happens
- *   (CO-4). Precedence cannot live in the components that each know only one
- *   of the three.
- * - **The two guards**: reset on a non-empty session, and a thinking-level
- *   change on a non-empty session, both ask first (SE-7, MO-7). Both skip the
- *   question only for a conversation *known* to be empty — see `knownEmpty` —
- *   because a session whose settled history has not landed shows no items and
- *   may hold plenty.
- */
+// The port arrives as a prop, which is the seam a component test drives, and
+// why nothing else under `src/renderer` names `window.crucible`.
 
-/** What is open, at most one at a time. */
+/** At most one is open at a time. */
 type Popover = 'none' | 'model' | 'thinking' | 'sessionMenu' | 'resume'
 
-/** A question the shell is waiting on an answer to. */
 type Question =
   | { readonly kind: 'reset'; readonly sessionId: SessionId }
   | { readonly kind: 'thinking'; readonly sessionId: SessionId; readonly level: ThinkingLevel }
@@ -67,8 +41,7 @@ export function Shell({ port }: { port: AgentPort }): React.JSX.Element {
   const session = snapshot.sessions.find((candidate) => candidate.id === activeSessionId)
   const view = activeSessionId === undefined ? undefined : views[activeSessionId]
   const items = view?.items ?? []
-  // Nothing to lose, and known to be nothing: what lets a guard skip its
-  // question (SE-7, MO-7).
+  // Known to hold nothing, which is what lets a guard skip its question.
   const emptyConversation = knownEmpty(view)
   const working = session?.working ?? false
   const model = models.find((candidate) => candidate.id === session?.model)
@@ -79,8 +52,8 @@ export function Shell({ port }: { port: AgentPort }): React.JSX.Element {
   }, [])
 
   // Subscribe before anything is asked for: events may arrive before the
-  // promise of the operation that caused them resolves, and subscription is
-  // live-only — there is no backlog to catch up on.
+  // promise of the operation that caused them resolves, and there is no
+  // backlog to catch up on afterwards.
   useEffect(() => {
     const stop = port.onEvent((event) => {
       // The clock is read here rather than in the reducer, which stays pure so
@@ -117,7 +90,8 @@ export function Shell({ port }: { port: AgentPort }): React.JSX.Element {
     void port.cancel(activeSessionId).catch(report)
   }, [activeSessionId, working, port, report])
 
-  // Escape, in precedence order (CO-4).
+  // Precedence cannot live in the components, which each know only one of the
+  // three things Escape can close.
   useEffect(() => {
     function onKeyDown(pressed: KeyboardEvent): void {
       if (pressed.key !== 'Escape') return
@@ -135,7 +109,7 @@ export function Shell({ port }: { port: AgentPort }): React.JSX.Element {
         pressed.preventDefault()
         cancel()
       }
-      // Escape with nothing open and nothing running does nothing (A5).
+      // Escape with nothing open and nothing running does nothing.
     }
     document.addEventListener('keydown', onKeyDown)
     return () => document.removeEventListener('keydown', onKeyDown)
@@ -154,7 +128,7 @@ export function Shell({ port }: { port: AgentPort }): React.JSX.Element {
     const text = draft.trim()
     if (text === '') return
     setDrafts((current) => ({ ...current, [id]: '' }))
-    // What was sent stands in the transcript at once (CO-5); the turn it starts
+    // What was sent stands in the transcript at once; the turn it starts
     // arrives as events.
     dispatch({ type: 'sent', sessionId: id, text })
     setFailure(undefined)
@@ -195,9 +169,8 @@ export function Shell({ port }: { port: AgentPort }): React.JSX.Element {
     const id = activeSessionId
     if (id === undefined) return
     setPopover('none')
-    // A session with nothing in it has nothing to lose, so it is reset without
-    // a question; anything else — including a conversation still being fetched,
-    // which is not the same as an empty one — asks first (SE-7).
+    // A conversation still being fetched shows no items but is not empty, so
+    // only a known-empty one skips the question.
     if (emptyConversation) {
       applyReset(id)
       return
@@ -231,8 +204,8 @@ export function Shell({ port }: { port: AgentPort }): React.JSX.Element {
       void port.setThinkingLevel(sessionId, level).catch(report)
       return
     }
-    // Changing the level mid-conversation invalidates the session's cache, so
-    // it is asked about before it is done (MO-7).
+    // Changing the level mid-conversation invalidates the session's prompt
+    // cache, which costs the user money, so it is asked about first.
     setQuestion({ kind: 'thinking', sessionId, level })
   }
 

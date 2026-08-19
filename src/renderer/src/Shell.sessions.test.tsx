@@ -1,10 +1,8 @@
 // @vitest-environment jsdom
 //
-// The curated flows: New Session, remove, reset with its confirmation, resume
-// through the overlay, and the workspace lifecycle around them. What is
-// asserted is what the sidebar does, because the sidebar is the curated state —
-// nothing here may appear by discovery, and nothing here may disappear because
-// a conversation was deleted.
+// The sidebar is the curated state, so it is what these assert on: nothing may
+// appear in it by discovery, and nothing may vanish from it because a
+// conversation was deleted.
 import { act, fireEvent, render, screen, within } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 import { Shell } from './Shell'

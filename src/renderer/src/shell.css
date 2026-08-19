@@ -1,4 +1,4 @@
-/* The three-region layout of mock A, minus the right Context edge (A16). */
+/* Three regions; the right-hand context edge is deliberately absent. */
 .shell {
   display: flex;
   height: 100%;
@@ -12,7 +12,7 @@
   min-width: 0;
 }
 
-/* The minimal Ember empty states: one sentence and the one thing to do. */
+/* Empty states: one sentence and the one thing to do. */
 .blank {
   flex: 1;
   display: flex;
@@ -39,8 +39,8 @@
   font-weight: 600;
 }
 
-/* An operation that was refused says so where the next action is, and stays
-   until the next send clears it. */
+/* A refusal is shown where the next action is, and stays until the next send
+   clears it. */
 .failure {
   max-width: var(--column);
   width: 100%;

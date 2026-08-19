@@ -1,16 +1,8 @@
 // @vitest-environment node
 //
-// `selectAdapter` has two outputs and this test reads both: the adapter it
-// returns — driven through the adapter contract, never inspected — and the one
-// record it writes, which is what makes a misspelt flavor diagnosable instead
-// of silent. Its one input is the environment it reads for itself, so a flavor
-// is chosen the way a launch script chooses it.
-//
-// One row of the table is deliberately absent: `CRUCIBLE_AGENT=sdk`. Choosing
-// it constructs the SDK adapter, which opens real sessions against the
-// credentials on disk, and `npm test` makes no paid call and no network call at
-// all. That row is proved by `npm run prove:sdk`, run once by hand under
-// explicit authorization, and by `npm run dev:sdk` — never here.
+// The flavor is chosen through the environment, the way a launch script chooses
+// it. One row is deliberately absent: asking for the SDK flavor would construct
+// the SDK adapter and open real sessions against the credentials on disk.
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { LogRecord } from '../log/sink'
 import { createMemorySink } from '../log/sink'

@@ -16,53 +16,30 @@ import type {
   TurnId
 } from './port'
 
-/**
- * The fake adapter: the deterministic, zero-cost implementation of the adapter
- * contract, and the default launch flavor (FA-1).
- *
- * It imports neither Electron nor the π SDK, so this one module serves the main
- * process, node unit tests and jsdom component tests alike. Everything it shows
- * is its own honest truth rather than a picture of somebody else's: the model
- * it lists says `fake` in its id and in its label, its usage numbers are the
- * ones it accumulated, and the thinking, tool and text events it emits are the
- * script it really ran. Nothing here exists to make the UI look busy.
- *
- * Its history is in memory and lasts one launch (FA-6). That is what makes
- * reset and resume observable at zero cost — a conversation detached by reset
- * is still searchable, and resuming it brings its transcript back — and it is
- * also why a relaunch finds the history empty while the curated sidebar, which
- * is main's own persisted state, is still there. An in-memory adapter that
- * pretended otherwise would be the one dishonest thing in the flavor.
- */
+// Imports neither Electron nor the π SDK, so the same module serves the main
+// process, node tests and jsdom tests. Its history lives in memory and lasts
+// one launch, which is what keeps reset and resume observable at zero cost.
 
-/** The only model this adapter can reach, and it says so in its own name. */
 export const FAKE_MODEL: ModelInfo = {
   id: 'fake/deterministic',
   label: 'Fake · deterministic (no network, no cost)',
-  // Native-style levels, more than one, so the thinking control is genuinely
-  // exercisable in the fake flavor (FA-2).
+  // More than one level, so the thinking control is genuinely exercisable in
+  // this flavor.
   thinkingLevels: ['off', 'low', 'high']
 }
 
-/** What a fake conversation pretends to have room for. */
 const CONTEXT_WINDOW = 200_000
 
-/**
- * The pause between beats when nobody says otherwise — long enough that a turn
- * visibly streams in the running app, short enough that it is over in about two
- * seconds. Tests pass zero, which runs the whole script on microtasks so no
- * test waits on a clock (FA-3).
- */
+// Long enough that a turn visibly streams, short enough that it is over in
+// about two seconds. Tests pass zero and wait on no clock.
 const DEFAULT_PAUSE_MS = 45
 
-/** The thinking the script shows, split the way it streams. */
 const THINKING_DELTAS: readonly string[] = [
   'The reply has to show every region of the shell: ',
   'a thinking block, a tool call that really runs, ',
   'and markdown with a list and a fenced block.'
 ]
 
-/** The tool call the script runs. */
 const TOOL = {
   name: 'bash',
   summary: 'npm test',
@@ -73,7 +50,6 @@ const TOOL = {
   ]
 } as const
 
-/** The reply, split the way it streams. */
 const REPLY_DELTAS: readonly string[] = [
   'The fake adapter answers every prompt with this same scripted turn.',
   ' Nothing was sent anywhere and nothing was paid for it.\n\n',
@@ -90,7 +66,7 @@ const REPLY_DELTAS: readonly string[] = [
   'Stop or Escape ends this turn wherever it stands.'
 ]
 
-/** The canned history every workspace starts with, so resume is demonstrable. */
+// Every workspace starts with these, so resume has something to find.
 const CANNED_HISTORY: readonly { readonly preview: string; readonly items: TranscriptItem[] }[] = [
   {
     preview: 'you: how does the agent port keep SDK types out of the renderer?',
@@ -119,48 +95,42 @@ const CANNED_HISTORY: readonly { readonly preview: string; readonly items: Trans
   }
 ]
 
-/** A conversation this adapter is keeping, bound or detached. */
 interface Conversation {
   readonly token: string
   readonly workspacePath: string
   readonly items: TranscriptItem[]
-  /** Monotonic within the conversation, and inside the context window (FA-7). */
+  /** Monotonic within the conversation, and inside the context window. */
   usedTokens: number
   /** ISO time of the last thing that happened in it. */
   at: string
 }
 
-/** What this adapter holds for one bound session. */
 interface Bound {
   conversation: Conversation
   model: ModelId
   thinkingLevel: ThinkingLevel
-  /** The turn in flight, if any: one per session, many per adapter (FA-5). */
+  /** One per session, many per adapter. */
   running?: RunningTurn
 }
 
-/** A turn in flight, from the outside: the one thing that can be done to it. */
 interface RunningTurn {
   readonly turnId: TurnId
-  /** Stop the script where it stands; nothing more is emitted for this turn. */
+  /** Stops the script where it stands; nothing more is emitted for this turn. */
   abandon(reason: 'cancelled' | 'disposed'): void
 }
 
-/** A word-count-ish estimate: coherent, monotonic, and honestly approximate. */
+// Deliberately approximate: the number only has to be coherent and monotonic.
 function estimateTokens(text: string): number {
   return Math.max(1, Math.ceil(text.length / 4))
 }
 
-/** How much of a conversation's last words a search result carries. */
 const PREVIEW_LIMIT = 140
 
-/** One line, and a short one: a preview is a scent, not the conversation. */
 function clip(text: string): string {
   const line = text.replace(/\s+/g, ' ').trim()
   return line.length <= PREVIEW_LIMIT ? line : `${line.slice(0, PREVIEW_LIMIT)}…`
 }
 
-/** The level a session starts on: the caller's, when this model has it. */
 function preferredLevel(preferred: ThinkingLevel | undefined): ThinkingLevel {
   return preferred !== undefined && FAKE_MODEL.thinkingLevels.includes(preferred) ? preferred : 'low'
 }
@@ -168,14 +138,13 @@ function preferredLevel(preferred: ThinkingLevel | undefined): ThinkingLevel {
 export function createFakeAdapter({
   pauseMs = DEFAULT_PAUSE_MS
 }: {
-  /** Milliseconds between beats. Zero runs the script on microtasks. */
+  /** Zero runs the script on microtasks. */
   readonly pauseMs?: number
 } = {}): ConversationAdapter {
   const listeners = new Set<AdapterEventListener>()
   /** Every conversation this launch has seen, bound or not, by token. */
   const conversations = new Map<string, Conversation>()
   const sessions = new Map<SessionId, Bound>()
-  /** Workspaces whose canned history has already been laid down. */
   const seeded = new Set<string>()
   let minted = 0
 
@@ -185,14 +154,9 @@ export function createFakeAdapter({
     for (const listener of [...listeners]) listener(event)
   }
 
-  /**
-   * Tokens say which kind of conversation they name, and that is load-bearing:
-   * a canned entry has the same fixed content in every launch, so rebinding to
-   * one after a relaunch restores exactly what it restored before, while a
-   * conversation this launch created is gone when the launch is — and its token
-   * must therefore match nothing rather than land on some other conversation
-   * that happens to have been minted in the same order (FA-6).
-   */
+  // The kind is in the token because canned conversations come back identical
+  // next launch while live ones are gone: a stale live token must match
+  // nothing rather than land on whatever was minted in the same order.
   function mintToken(kind: 'canned' | 'live'): string {
     minted += 1
     return `fake-${kind}-${minted}`
@@ -214,7 +178,7 @@ export function createFakeAdapter({
     return conversation
   }
 
-  /** The canned entries of FA-6, laid down once per workspace on first look. */
+  /** Laid down once per workspace, on first look. */
   function seed(workspacePath: string): void {
     if (seeded.has(workspacePath)) return
     seeded.add(workspacePath)
@@ -229,7 +193,6 @@ export function createFakeAdapter({
     return bound
   }
 
-  /** What a conversation looks like in a search result: its last words. */
   function previewOf(conversation: Conversation): string {
     for (const item of [...conversation.items].reverse()) {
       if (item.kind === 'user') return clip(`you: ${item.text}`)
@@ -238,11 +201,8 @@ export function createFakeAdapter({
     return 'an empty conversation'
   }
 
-  /**
-   * What a search reads: everything said in the conversation, not just the
-   * scent shown beside it — a person searching for a sentence they typed
-   * expects to find the conversation they typed it in.
-   */
+  // A search reads the whole conversation, not just the preview beside it: a
+  // person looking for a sentence they typed expects to find it.
   function searchableText(conversation: Conversation): string {
     return conversation.items
       .map((item) => {
@@ -256,11 +216,8 @@ export function createFakeAdapter({
       .toLowerCase()
   }
 
-  /**
-   * One turn's script. Every beat is preceded by a pause and followed by an
-   * abandonment check, so cancellation lands promptly wherever the script
-   * stands and emits nothing after its terminal event (FA-4).
-   */
+  // Every beat is preceded by a pause and followed by an abandonment check, so
+  // a cancel lands promptly wherever the script stands.
   function run(bound: Bound, sessionId: SessionId, turnId: TurnId, text: string): Promise<void> {
     let stopped: 'cancelled' | 'disposed' | undefined
     let timer: ReturnType<typeof setTimeout> | undefined
@@ -291,7 +248,6 @@ export function createFakeAdapter({
     let reply = ''
     let toolOutput = ''
 
-    /** What is written into the conversation whichever way the turn ends. */
     function settle(terminal: AdapterEvent): void {
       if (reply !== '') pending.push({ kind: 'assistant', markdown: reply })
       if (terminal.type === 'turn_cancelled') pending.push({ kind: 'stopped' })
@@ -303,8 +259,7 @@ export function createFakeAdapter({
       )
       bound.running = undefined
       emit(terminal)
-      // Usage is the adapter's own arithmetic and is reported after the turn,
-      // which is when it is genuinely known (FA-7).
+      // Reported after the turn, which is when it is genuinely known.
       emit({
         type: 'usage',
         sessionId,
@@ -366,11 +321,10 @@ export function createFakeAdapter({
       finish()
     }
 
-    /** The single terminal event, decided by how the script left off. */
     function finish(): void {
       if (stopped === 'disposed') {
-        // The document that asked is gone: the work is dropped and the turn
-        // says nothing more at all.
+        // The document that asked is gone, so the turn says nothing more at
+        // all, not even a terminal event.
         bound.running = undefined
         return
       }
@@ -388,9 +342,8 @@ export function createFakeAdapter({
     async bind(request: BindRequest): Promise<Binding> {
       seed(request.workspacePath)
 
-      // A session already bound this launch keeps the conversation it is on:
-      // binding twice is a caller asking the same question twice, not an
-      // instruction to start over.
+      // Binding twice is a caller asking the same question twice, not an
+      // instruction to start the conversation over.
       const already = sessions.get(request.sessionId)
       if (
         already !== undefined &&
@@ -407,9 +360,8 @@ export function createFakeAdapter({
       const existing = request.token === undefined ? undefined : conversations.get(request.token)
       const conversation = existing ?? newConversation(request.workspacePath)
       const bound: Bound = {
-        // One model is all this adapter can reach, so a preference for anything
-        // else falls back to it — and what is reported is what is in effect,
-        // fallback included (MO-4).
+        // One model is all this adapter can reach, so any other preference
+        // falls back to it and the fallback is what gets reported.
         conversation,
         model: FAKE_MODEL.id,
         thinkingLevel: preferredLevel(request.preferredThinkingLevel)
@@ -426,8 +378,8 @@ export function createFakeAdapter({
     async reset(sessionId: SessionId): Promise<Binding> {
       const bound = requireBound(sessionId)
       bound.running?.abandon('disposed')
-      // The old conversation is detached, not deleted: it stays in this
-      // adapter's history and stays findable through search (A25).
+      // The old conversation is detached, not deleted: it stays findable
+      // through search.
       const fresh = newConversation(bound.conversation.workspacePath)
       bound.conversation = fresh
       return {
@@ -464,7 +416,7 @@ export function createFakeAdapter({
       const bound = sessions.get(sessionId)
       bound?.running?.abandon('disposed')
       // The conversation itself stays in `conversations`: removal forgets the
-      // sidebar entry, never the history behind it (A24).
+      // sidebar entry, never the history behind it.
       sessions.delete(sessionId)
     },
 
@@ -512,8 +464,6 @@ export function createFakeAdapter({
     },
 
     async cancel(sessionId: SessionId): Promise<void> {
-      // Targeted by construction: only this session's turn is reachable from
-      // here, and a session with nothing running is left alone (A3).
       sessions.get(sessionId)?.running?.abandon('cancelled')
     },
 

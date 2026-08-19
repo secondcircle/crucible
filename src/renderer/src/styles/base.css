@@ -1,10 +1,6 @@
-/*
- * The document itself: Ember from the first paint (WIN-1).
- *
- * The window is created with the same background color and shown only once it
- * is ready, so these two rules and the window's own are the three that have to
- * agree for a launch never to flash white.
- */
+/* The window is created with this same background and shown only once it can
+   paint, so these rules and the window's own have to agree or a launch flashes
+   white. */
 @import './tokens.css';
 
 * {
@@ -40,13 +36,13 @@ button {
   background: color-mix(in srgb, var(--accent) 35%, transparent);
 }
 
-/* Focus is visible everywhere, in Ember's own accent rather than the OS blue. */
+/* Focus stays visible everywhere, in the accent rather than the OS blue. */
 :focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 1px;
 }
 
-/* The scrollbars of a dark app, so a transcript does not carry a white gutter. */
+/* Dark scrollbars, so a transcript does not carry a white gutter. */
 ::-webkit-scrollbar {
   width: 10px;
   height: 10px;

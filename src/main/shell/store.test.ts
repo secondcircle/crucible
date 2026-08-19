@@ -1,10 +1,7 @@
 // @vitest-environment node
 //
-// The shell store is what makes the sidebar survive a relaunch, so it is tested
-// the way a relaunch reads it: write through one store, build a second one over
-// the same file, and assert on what the second one knows. The file path is an
-// argument, which is the whole reason this is a plain unit test with a temp
-// directory and no Electron anywhere.
+// Read the way a relaunch reads it: write through one store, then build a
+// second over the same file and ask that one.
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'

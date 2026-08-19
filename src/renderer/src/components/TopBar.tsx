@@ -2,20 +2,11 @@ import type { ModelInfo, SessionState, WorkspaceState } from '../../../shared/ag
 import { sessionLabel, tokens } from '../labels'
 import './topbar.css'
 
-/**
- * The top bar: which session, in which workspace, on which model, working or
- * not, and how much of the context window is spent (TB-1, TB-2).
- *
- * Every one of those is a snapshot fact. The meter in particular says nothing
- * until the adapter has reported real usage — a dash, not a zero and not a
- * plausible-looking percentage — because a context meter that guesses is worse
- * than one that admits it does not know yet (A27).
- *
- * The session header menu lives here, and Reset Session lives in it (SE-7,
- * A19). Whether the menu is open is the shell's state rather than this
- * component's, because Escape has to be able to close it before it cancels
- * anything.
- */
+// The meter shows a dash until the adapter reports real usage: a context meter
+// that guesses is worse than one that admits it does not know yet.
+//
+// Whether the session menu is open is the shell's state, not this component's,
+// because Escape has to close it before it cancels anything.
 export function TopBar({
   session,
   workspace,

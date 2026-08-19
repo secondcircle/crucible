@@ -1,18 +1,14 @@
 // @vitest-environment node
 //
-// The fake adapter is what every zero-cost check in this repository runs
-// against, so what is asserted here is exactly what those checks are entitled
-// to rely on: the script's order, its terminal events, that cancellation lands
-// where it stands, that two sessions do not disturb each other, and that a
-// conversation detached by reset is still findable. Nothing here waits on a
-// clock — the adapter is built with no pause, so a turn is over in microtasks.
+// Every zero-cost check in this repository runs against this adapter, so what
+// those checks rely on is pinned here. Nothing waits on a clock: the adapter is
+// built with no pause, so a turn is over in microtasks.
 import { describe, expect, it } from 'vitest'
 import type { AdapterEvent } from './adapter'
 import { createFakeAdapter, FAKE_MODEL } from './fake-adapter'
 
 const WORKSPACE = '/workspaces/crucible'
 
-/** An adapter with one bound session, and everything it says, in order. */
 async function withSession(sessionId = 's1'): Promise<{
   adapter: ReturnType<typeof createFakeAdapter>
   events: AdapterEvent[]
