@@ -1,0 +1,205 @@
+/* The composer of mock A: box, chips, and the button that is Send or Stop. */
+.composer {
+  max-width: var(--column);
+  width: 100%;
+  margin: 0 auto;
+  padding: 0 24px 18px;
+  flex: none;
+}
+
+.cbox {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  padding: 12px 14px 10px;
+}
+
+.cbox textarea {
+  width: 100%;
+  background: none;
+  border: none;
+  resize: none;
+  outline: none;
+  height: 46px;
+  font: 14px/1.5 var(--font);
+  color: var(--ink);
+}
+
+.cbox textarea::placeholder {
+  color: var(--faint);
+}
+
+.crow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+.chipwrap {
+  position: relative;
+}
+
+.chip {
+  font-size: 12px;
+  color: var(--dim);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 3px 10px;
+  background: none;
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.chip b {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.chip:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.send {
+  margin-left: auto;
+  background: var(--accent);
+  color: var(--on-accent);
+  border: none;
+  border-radius: var(--radius);
+  padding: 6px 14px;
+  font-weight: 700;
+}
+
+.send:disabled {
+  background: var(--panel2);
+  color: var(--faint);
+  cursor: default;
+}
+
+.send.working {
+  background: var(--panel);
+  color: var(--ink);
+  border: 1px solid var(--accent);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 12px;
+  font-weight: 600;
+}
+
+.stopsq {
+  width: 9px;
+  height: 9px;
+  background: var(--accent);
+  border-radius: 2px;
+}
+
+.esc {
+  text-align: center;
+  font-size: 11.5px;
+  color: var(--faint);
+  margin-top: 8px;
+}
+
+.esc .workingnote {
+  color: var(--accent2);
+}
+
+kbd {
+  font: 11px var(--mono);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 1px 5px;
+  color: var(--dim);
+}
+
+/* popovers: the model picker and the thinking menu */
+.pop {
+  position: absolute;
+  bottom: 34px;
+  left: 0;
+  z-index: 4;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 18px 44px rgb(0 0 0 / 50%);
+  overflow: hidden;
+}
+
+.pop.picker {
+  width: 320px;
+}
+
+.pop .search {
+  width: 100%;
+  padding: 11px 14px;
+  border: none;
+  border-bottom: 1px solid var(--line);
+  background: none;
+  color: var(--ink);
+  font-size: 13px;
+  outline: none;
+}
+
+.models {
+  list-style: none;
+  margin: 0;
+  padding: 4px;
+  max-height: 260px;
+  overflow: auto;
+}
+
+.models button {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border: none;
+  background: none;
+  color: var(--ink);
+  font-size: 13px;
+  text-align: left;
+  border-radius: 6px;
+}
+
+.models button:hover,
+.models button[aria-current='true'] {
+  background: var(--panel2);
+}
+
+.models .check {
+  margin-left: auto;
+  color: var(--accent2);
+}
+
+.nomodels {
+  padding: 10px;
+  color: var(--faint);
+  font-size: 12px;
+}
+
+.pop.menu {
+  padding: 4px;
+  min-width: 130px;
+}
+
+.pop.menu button {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 7px 10px;
+  border: none;
+  background: none;
+  color: var(--ink);
+  font-size: 12.5px;
+  border-radius: 6px;
+}
+
+.pop.menu button:hover,
+.pop.menu button[aria-current='true'] {
+  background: var(--panel2);
+  color: var(--accent2);
+}

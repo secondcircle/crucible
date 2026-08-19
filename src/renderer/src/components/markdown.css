@@ -1,0 +1,88 @@
+/* Rendered markdown, in mock A's type: code dark, links in the accent. */
+.markdown > * + * {
+  margin-top: 8px;
+}
+
+.markdown p {
+  margin: 0;
+}
+
+.markdown h1,
+.markdown h2,
+.markdown h3,
+.markdown h4,
+.markdown h5,
+.markdown h6 {
+  font-size: 13.5px;
+  font-weight: 650;
+  color: var(--ink);
+  margin-top: 14px;
+}
+
+.markdown ul,
+.markdown ol {
+  margin: 4px 0 4px 20px;
+  padding: 0;
+}
+
+.markdown li {
+  margin: 2px 0;
+}
+
+.markdown pre {
+  background: var(--code);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 12px 14px;
+  overflow-x: auto;
+  margin: 10px 0;
+}
+
+.markdown pre code {
+  font: 12px/1.5 var(--mono);
+  color: var(--code-ink);
+  background: none;
+  padding: 0;
+}
+
+.markdown code {
+  font: 12px var(--mono);
+  background: var(--code);
+  padding: 1px 5px;
+  border-radius: 4px;
+  color: var(--accent2);
+}
+
+.markdown table {
+  border-collapse: collapse;
+  font-size: 12.5px;
+  margin: 10px 0;
+}
+
+.markdown th,
+.markdown td {
+  border: 1px solid var(--line);
+  padding: 5px 12px;
+  text-align: left;
+}
+
+.markdown th {
+  color: var(--dim);
+  font-weight: 600;
+  background: var(--bg2);
+}
+
+.markdown blockquote {
+  border-left: 3px solid var(--line);
+  padding-left: 12px;
+  color: var(--dim);
+}
+
+.markdown hr {
+  border: none;
+  border-top: 1px solid var(--line);
+}
+
+.markdown a {
+  color: var(--accent2);
+}

@@ -1,0 +1,428 @@
+// @vitest-environment node
+//
+// The shell is main's whole behavior: the per-session guard, targeted
+// cancellation, curated membership, lazy binding and the snapshot everything
+// else reads. It is tested here against the real fake adapter and a real store
+// over a temp file, with no Electron and no IPC — which is the point of having
+// put the rules here rather than in the channel.
+import { mkdtempSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import type { ConversationAdapter } from '../../shared/agent/adapter'
+import { createFakeAdapter } from '../../shared/agent/fake-adapter'
+import type { PortEvent, SessionId, ShellSnapshot } from '../../shared/agent/port'
+import { createShell, type Shell } from './shell'
+import { createShellStore } from './store'
+
+const WORKSPACE = '/repos/crucible'
+
+let directory: string
+let file: string
+let picked: string | null
+let adapter: ConversationAdapter
+let shell: Shell
+let events: PortEvent[]
+
+/** Everything the shell said, and one live subscription, as a document has. */
+function build(options: { seedWorkspacePath?: string } = {}): void {
+  adapter = createFakeAdapter({ pauseMs: 0 })
+  shell = createShell({
+    store: createShellStore(file),
+    adapter,
+    pickFolder: async () => picked,
+    ...options
+  })
+  events = []
+  shell.onEvent((event) => events.push(event))
+}
+
+/** A workspace with one session, which is where most of these start. */
+async function withSession(): Promise<{ workspaceId: string; sessionId: SessionId }> {
+  picked = WORKSPACE
+  const workspaceId = await shell.addWorkspace()
+  if (workspaceId === null) throw new Error('the picker was supposed to answer')
+  const sessionId = await shell.createSession(workspaceId)
+  return { workspaceId, sessionId }
+}
+
+const types = (): string[] => events.map((event) => event.type)
+
+const sessionOf = (snapshot: ShellSnapshot, id: SessionId) =>
+  snapshot.sessions.find((session) => session.id === id)
+
+beforeEach(() => {
+  directory = mkdtempSync(join(tmpdir(), 'crucible-shell-'))
+  file = join(directory, 'shell-state.json')
+  picked = null
+  build()
+})
+
+afterEach(() => {
+  shell.dispose()
+  rmSync(directory, { recursive: true, force: true })
+})
+
+describe('workspaces', () => {
+  it('adds what the picker returned, activates it, and says so', async () => {
+    picked = WORKSPACE
+
+    const id = await shell.addWorkspace()
+    const snapshot = await shell.snapshot()
+
+    expect(id).not.toBeNull()
+    expect(snapshot.workspaces).toEqual([{ id, name: 'crucible', path: WORKSPACE }])
+    expect(snapshot.activeWorkspaceId).toBe(id)
+    expect(types()).toEqual(['state'])
+  })
+
+  it('changes nothing when the picker is cancelled', async () => {
+    picked = null
+
+    const id = await shell.addWorkspace()
+
+    expect(id).toBeNull()
+    expect((await shell.snapshot()).workspaces).toEqual([])
+    expect(events).toEqual([])
+  })
+
+  it('takes a seeded workspace as if it had been picked', async () => {
+    build({ seedWorkspacePath: '/repos/seeded' })
+
+    const snapshot = await shell.snapshot()
+
+    expect(snapshot.workspaces).toEqual([
+      { id: snapshot.activeWorkspaceId, name: 'seeded', path: '/repos/seeded' }
+    ])
+  })
+
+  it('cancels the live work of a workspace it removes, and keeps the folder', async () => {
+    const { workspaceId, sessionId } = await withSession()
+    // Removed mid-turn, so what is asserted is that the work stopped rather
+    // than that it happened to be over already.
+    await shell.prompt(sessionId, 'a sentence said before the removal')
+
+    await shell.removeWorkspace(workspaceId)
+    await settled()
+    const snapshot = await shell.snapshot()
+
+    expect(snapshot.workspaces).toEqual([])
+    expect(snapshot.sessions).toEqual([])
+    expect(types()).toContain('turn_cancelled')
+    // The conversation is still the adapter's to find: removal forgot a
+    // sidebar entry, not a history.
+    expect(
+      await adapter.searchHistory(WORKSPACE, 'a sentence said before the removal')
+    ).toHaveLength(1)
+  })
+})
+
+describe('curated sessions', () => {
+  it('creates a session in the workspace, activates it, and binds a conversation', async () => {
+    const { workspaceId, sessionId } = await withSession()
+    const snapshot = await shell.snapshot()
+
+    expect(snapshot.sessions).toHaveLength(1)
+    expect(sessionOf(snapshot, sessionId)).toMatchObject({
+      workspaceId,
+      working: false,
+      model: 'fake/deterministic'
+    })
+    expect(snapshot.activeSessionId).toBe(sessionId)
+  })
+
+  it('never populates itself from history', async () => {
+    picked = WORKSPACE
+    const workspaceId = await shell.addWorkspace()
+    if (workspaceId === null) throw new Error('the picker was supposed to answer')
+
+    const found = await shell.searchHistory(workspaceId, '')
+
+    expect(found.length).toBeGreaterThan(0)
+    expect((await shell.snapshot()).sessions).toEqual([])
+  })
+
+  it('forgets a removed session without deleting its conversation', async () => {
+    const { workspaceId, sessionId } = await withSession()
+    await shell.prompt(sessionId, 'a sentence worth finding')
+
+    await shell.removeSession(sessionId)
+    await settled()
+
+    expect((await shell.snapshot()).sessions).toEqual([])
+    expect(types()).toContain('turn_cancelled')
+    const found = await shell.searchHistory(workspaceId, 'a sentence worth finding')
+    expect(found).toHaveLength(1)
+  })
+
+  it('keeps the sidebar identity through a reset and detaches the conversation', async () => {
+    const { workspaceId, sessionId } = await withSession()
+    await shell.prompt(sessionId, 'before the reset')
+    await settled()
+
+    await shell.resetSession(sessionId)
+
+    const snapshot = await shell.snapshot()
+    expect(snapshot.sessions.map((session) => session.id)).toEqual([sessionId])
+    expect(await shell.transcript(sessionId)).toEqual([])
+    expect(await shell.searchHistory(workspaceId, 'before the reset')).toHaveLength(1)
+  })
+
+  it('activates an existing entry rather than resuming a conversation twice', async () => {
+    const { workspaceId, sessionId } = await withSession()
+    await shell.prompt(sessionId, 'the one conversation')
+    await settled()
+    const [match] = await shell.searchHistory(workspaceId, 'the one conversation')
+
+    const resumed = await shell.resumeSession(workspaceId, match.ref)
+
+    expect(resumed).toBe(sessionId)
+    expect((await shell.snapshot()).sessions).toHaveLength(1)
+  })
+
+  it('adds a curated entry when a conversation is resumed for the first time', async () => {
+    const { workspaceId, sessionId } = await withSession()
+    await shell.prompt(sessionId, 'detached by the reset')
+    await settled()
+    await shell.resetSession(sessionId)
+    const [match] = await shell.searchHistory(workspaceId, 'detached by the reset')
+
+    const resumed = await shell.resumeSession(workspaceId, match.ref)
+
+    expect(resumed).not.toBe(sessionId)
+    const snapshot = await shell.snapshot()
+    expect(snapshot.sessions).toHaveLength(2)
+    expect(snapshot.activeSessionId).toBe(resumed)
+    expect(await shell.transcript(resumed)).toContainEqual({
+      kind: 'user',
+      text: 'detached by the reset'
+    })
+  })
+})
+
+describe('turns', () => {
+  it('emits one start, the stream, and one terminal event', async () => {
+    const { sessionId } = await withSession()
+    events.length = 0
+
+    await shell.prompt(sessionId, 'hello')
+    await settled()
+
+    const turnEvents = types().filter((type) => type !== 'state')
+    expect(turnEvents[0]).toBe('turn_started')
+    expect(turnEvents.at(-1)).toBe('turn_ended')
+    expect(turnEvents.filter((type) => type === 'turn_started')).toHaveLength(1)
+    expect(turnEvents.filter((type) => type === 'turn_ended')).toHaveLength(1)
+  })
+
+  it('refuses a second prompt while the session is working, and mints no turn', async () => {
+    const { sessionId } = await withSession()
+    const first = shell.prompt(sessionId, 'hello')
+
+    await expect(shell.prompt(sessionId, 'again')).rejects.toThrow(/already working/i)
+
+    await first
+    await settled()
+    expect(types().filter((type) => type === 'turn_started')).toHaveLength(1)
+  })
+
+  it('refuses a prompt to a session that is not curated', async () => {
+    await expect(shell.prompt('nobody', 'hello')).rejects.toThrow(/no longer open/i)
+  })
+
+  it('says a session is working while its turn is live, and idle after', async () => {
+    const { sessionId } = await withSession()
+
+    const working: boolean[] = []
+    shell.onEvent((event) => {
+      if (event.type === 'state') {
+        working.push(sessionOf(event.snapshot, sessionId)?.working === true)
+      }
+    })
+    await shell.prompt(sessionId, 'hello')
+    await settled()
+
+    expect(working[0]).toBe(true)
+    expect(working.at(-1)).toBe(false)
+    expect(sessionOf(await shell.snapshot(), sessionId)?.working).toBe(false)
+  })
+
+  it('folds the adapter\u2019s usage into the snapshot', async () => {
+    const { sessionId } = await withSession()
+
+    await shell.prompt(sessionId, 'hello')
+    await settled()
+
+    const usage = sessionOf(await shell.snapshot(), sessionId)?.usage
+    expect(usage?.usedTokens).toBeGreaterThan(0)
+    expect(usage?.contextWindow).toBeGreaterThan(usage?.usedTokens ?? 0)
+  })
+
+  it('runs two sessions at once, each with its own turn', async () => {
+    const { workspaceId, sessionId: first } = await withSession()
+    const second = await shell.createSession(workspaceId)
+    events.length = 0
+
+    await Promise.all([shell.prompt(first, 'one'), shell.prompt(second, 'two')])
+    await settled()
+
+    for (const id of [first, second]) {
+      const own = events.filter((event) => 'sessionId' in event && event.sessionId === id)
+      expect(own.map((event) => event.type)).toContain('turn_started')
+      expect(own.map((event) => event.type)).toContain('turn_ended')
+    }
+  })
+})
+
+describe('cancellation', () => {
+  it('ends the live turn as cancelled and nothing else follows it', async () => {
+    const { sessionId } = await withSession()
+    shell.onEvent((event) => {
+      if (event.type === 'text_delta') void shell.cancel(sessionId)
+    })
+
+    await shell.prompt(sessionId, 'hello')
+    await settled()
+
+    const own = types().filter((type) => type.startsWith('turn_'))
+    expect(own).toEqual(['turn_started', 'turn_cancelled'])
+  })
+
+  it('touches only the session it names', async () => {
+    const { workspaceId, sessionId: first } = await withSession()
+    const second = await shell.createSession(workspaceId)
+    shell.onEvent((event) => {
+      if (event.type === 'text_delta' && event.sessionId === first) void shell.cancel(first)
+    })
+
+    await Promise.all([shell.prompt(first, 'one'), shell.prompt(second, 'two')])
+    await settled()
+
+    const terminalFor = (id: SessionId): string[] =>
+      events
+        .filter((event) => 'sessionId' in event && event.sessionId === id)
+        .map((event) => event.type)
+        .filter((type) => type === 'turn_ended' || type === 'turn_cancelled')
+
+    expect(terminalFor(first)).toEqual(['turn_cancelled'])
+    expect(terminalFor(second)).toEqual(['turn_ended'])
+  })
+
+  it('does nothing when the session has no live turn', async () => {
+    const { sessionId } = await withSession()
+    events.length = 0
+
+    await shell.cancel(sessionId)
+    await shell.cancel('nobody')
+
+    expect(events).toEqual([])
+  })
+
+  it('does nothing when it loses the race with the turn\u2019s natural end', async () => {
+    const { sessionId } = await withSession()
+    await shell.prompt(sessionId, 'hello')
+    await settled()
+    const before = types()
+
+    await shell.cancel(sessionId)
+    await settled()
+
+    expect(types()).toEqual(before)
+  })
+
+  it('leaves the session ready for the next prompt', async () => {
+    const { sessionId } = await withSession()
+    const stopEarly = shell.onEvent((event) => {
+      if (event.type === 'text_delta') void shell.cancel(sessionId)
+    })
+    await shell.prompt(sessionId, 'hello')
+    await settled()
+    stopEarly()
+
+    await shell.prompt(sessionId, 'do this instead')
+    await settled()
+
+    const transcript = await shell.transcript(sessionId)
+    expect(transcript).toContainEqual({ kind: 'stopped' })
+    expect(transcript).toContainEqual({ kind: 'user', text: 'do this instead' })
+  })
+
+  it('drops every live turn when the document that was watching goes away', async () => {
+    const { workspaceId, sessionId: first } = await withSession()
+    const second = await shell.createSession(workspaceId)
+    void shell.prompt(first, 'one')
+    void shell.prompt(second, 'two')
+
+    shell.dispose()
+    await settled()
+
+    const snapshot = await shell.snapshot()
+    expect(snapshot.sessions.every((session) => !session.working)).toBe(true)
+  })
+})
+
+describe('models and thinking levels', () => {
+  it('reports what the adapter can reach and nothing else', async () => {
+    expect(await shell.listModels()).toEqual([
+      {
+        id: 'fake/deterministic',
+        label: 'Fake · deterministic (no network, no cost)',
+        thinkingLevels: ['off', 'low', 'high']
+      }
+    ])
+  })
+
+  it('remembers the last selection and starts the next session on it', async () => {
+    const { workspaceId, sessionId } = await withSession()
+
+    await shell.setModel(sessionId, 'fake/deterministic')
+    const next = await shell.createSession(workspaceId)
+
+    expect(sessionOf(await shell.snapshot(), next)?.model).toBe('fake/deterministic')
+  })
+
+  it('keeps the level on the session and refuses one the model lacks', async () => {
+    const { sessionId } = await withSession()
+
+    await shell.setThinkingLevel(sessionId, 'high')
+    expect(sessionOf(await shell.snapshot(), sessionId)?.thinkingLevel).toBe('high')
+
+    await expect(shell.setThinkingLevel(sessionId, 'xhigh')).rejects.toThrow()
+  })
+
+  it('refuses a change while that session is working', async () => {
+    const { sessionId } = await withSession()
+    const turn = shell.prompt(sessionId, 'hello')
+
+    await expect(shell.setThinkingLevel(sessionId, 'high')).rejects.toThrow(/working/i)
+    await expect(shell.setModel(sessionId, 'fake/deterministic')).rejects.toThrow(/working/i)
+
+    await turn
+  })
+})
+
+describe('a relaunch', () => {
+  it('restores the sidebar and rebinds a session the first time it is read', async () => {
+    const { sessionId } = await withSession()
+    await shell.prompt(sessionId, 'said before the relaunch')
+    await settled()
+    shell.dispose()
+
+    // A second shell over the same file, with a fresh adapter: the sidebar is
+    // the store's, and what the conversation holds is the adapter's.
+    build()
+    const snapshot = await shell.snapshot()
+
+    expect(snapshot.sessions.map((session) => session.id)).toEqual([sessionId])
+    expect(snapshot.activeSessionId).toBe(sessionId)
+    // The fake adapter's history is in memory, so a relaunch honestly finds an
+    // empty conversation behind the entry that survived.
+    expect(await shell.transcript(sessionId)).toEqual([])
+    expect(sessionOf(await shell.snapshot(), sessionId)?.model).toBe('fake/deterministic')
+  })
+})
+
+/** Let every microtask the fake adapter scheduled run out. */
+async function settled(): Promise<void> {
+  for (let turn = 0; turn < 50; turn += 1) await Promise.resolve()
+}

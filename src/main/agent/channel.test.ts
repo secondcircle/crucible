@@ -1,22 +1,18 @@
 // @vitest-environment node
 //
-// Main's half of the agent channel is tested where its callers meet it: the
-// `agent:prompt` handler Electron invokes, and the stream of port events that
-// comes back out at the window. Electron itself is a stand-in — an `ipcMain`
-// that remembers what was registered, and a window that remembers what was sent
-// — and the port behind the channel is the fake adapter, the same module the
-// app launches with, so nothing here is scripted twice.
+// The channel is plumbing, so it is tested as plumbing: does a request reach
+// the right port operation with the right arguments, does a refusal cross as a
+// value rather than as an Electron-wrapped throw, does an event reach the
+// window, and does a document going away abandon the work. Electron is a
+// stand-in — an `ipcMain` that remembers what was registered and a window that
+// remembers what was sent — and the shell behind it is a stand-in too, because
+// its behavior is tested where it lives.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { BrowserWindow } from 'electron'
-import { EVENT_CHANNEL, PROMPT_CHANNEL } from '../../shared/agent/channels'
-import { createFakeAdapter } from '../../shared/agent/fake-adapter'
-import type { AgentAdapter, PortEvent, TurnId } from '../../shared/agent/port'
+import { EVENT_CHANNEL, REQUEST_CHANNEL, type PortResult } from '../../shared/agent/channels'
+import type { PortEvent, PortEventListener } from '../../shared/agent/port'
+import type { Shell } from '../shell/shell'
 import { serveAgentChannel } from './channel'
-
-/** The reply the fake is scripted with today, written out independently. */
-const CANNED_REPLY =
-  'Hello from the fake adapter.' +
-  ' Nothing was sent anywhere and nothing was paid for this reply.'
 
 const electron = vi.hoisted(() => ({
   handlers: new Map<string, (invocation: unknown, ...args: unknown[]) => unknown>()
@@ -38,13 +34,11 @@ vi.mock('electron', () => ({
 /** The window, as much of it as the channel touches. */
 interface StubWindow {
   readonly window: BrowserWindow
-  /** Every port event the channel pushed at this window, in order. */
   readonly sent: readonly PortEvent[]
-  /** The window loads a new document — a reload, or any cross-document nav. */
+  /** A new document: a reload, or any cross-document navigation. */
   reload(): void
   /** A same-document navigation: a fragment, a `pushState`. */
   navigateInPlace(): void
-  /** The window is gone. */
   close(): void
 }
 
@@ -78,278 +72,200 @@ function stubWindow(): StubWindow {
   return {
     window: window as unknown as BrowserWindow,
     sent,
-    reload() {
-      for (const listener of navigations) listener({ isMainFrame: true, isSameDocument: false })
+    reload: () => {
+      for (const navigate of navigations) navigate({ isMainFrame: true, isSameDocument: false })
     },
-    navigateInPlace() {
-      for (const listener of navigations) listener({ isMainFrame: true, isSameDocument: true })
+    navigateInPlace: () => {
+      for (const navigate of navigations) navigate({ isMainFrame: true, isSameDocument: true })
     },
-    close() {
+    close: () => {
       destroyed = true
-      for (const listener of closes) listener()
+      for (const closed of closes) closed()
     }
   }
 }
 
-/** Invoke `agent:prompt` the way Electron does, payload and all. */
-async function prompt(text: unknown): Promise<TurnId> {
-  const handler = electron.handlers.get(PROMPT_CHANNEL)
-  if (handler === undefined) throw new Error('nothing is handling agent:prompt')
-  return (await handler({}, text)) as TurnId
-}
-
-/** The events of one renderer turn, in order. */
-function turn(sent: readonly PortEvent[], turnId: TurnId): PortEvent[] {
-  return sent.filter((event) => event.turnId === turnId)
-}
-
-/** What a turn's deltas add up to on screen. */
-function text(sent: readonly PortEvent[], turnId: TurnId): string {
-  return turn(sent, turnId)
-    .filter((event) => event.type === 'text_delta')
-    .map((event) => event.delta)
-    .join('')
-}
-
-/**
- * The fake adapter, with everything it says of its own recorded beside it and
- * every disposal counted. Disposal is only observable from this side: what the
- * channel stops sending is suppression, what the adapter stops saying — and
- * that it was told to let go at all — is the work stopping (D6).
- */
-function recordedFake(deltaPauseMs: number): {
-  adapter: AgentAdapter
-  said: readonly PortEvent[]
-  disposals: () => number
+/** A shell that records what it was asked and answers however a test says. */
+function stubShell(answers: Partial<Record<string, unknown>> = {}): {
+  shell: Shell
+  asked: Array<{ op: string; args: unknown[] }>
+  emit: (event: PortEvent) => void
+  disposals: number
 } {
-  const fake = createFakeAdapter({ deltaPauseMs })
-  const said: PortEvent[] = []
-  let disposals = 0
-  fake.onEvent((event) => said.push(event))
+  const asked: Array<{ op: string; args: unknown[] }> = []
+  const listeners = new Set<PortEventListener>()
+  const record = { disposals: 0 }
+
+  function op(name: string) {
+    return async (...args: unknown[]): Promise<unknown> => {
+      asked.push({ op: name, args })
+      const answer = answers[name]
+      if (answer instanceof Error) throw answer
+      return answer
+    }
+  }
+
+  const shell = {
+    snapshot: op('snapshot'),
+    onEvent: (listener: PortEventListener) => {
+      listeners.add(listener)
+      return () => listeners.delete(listener)
+    },
+    addWorkspace: op('addWorkspace'),
+    activateWorkspace: op('activateWorkspace'),
+    removeWorkspace: op('removeWorkspace'),
+    createSession: op('createSession'),
+    activateSession: op('activateSession'),
+    removeSession: op('removeSession'),
+    resetSession: op('resetSession'),
+    transcript: op('transcript'),
+    searchHistory: op('searchHistory'),
+    resumeSession: op('resumeSession'),
+    listModels: op('listModels'),
+    setModel: op('setModel'),
+    setThinkingLevel: op('setThinkingLevel'),
+    prompt: op('prompt'),
+    cancel: op('cancel'),
+    dispose: () => {
+      record.disposals += 1
+    }
+  } as unknown as Shell
 
   return {
-    adapter: {
-      prompt: (text) => fake.prompt(text),
-      onEvent: (listener) => fake.onEvent(listener),
-      dispose: () => {
-        disposals += 1
-        fake.dispose()
-      }
+    shell,
+    asked,
+    emit: (event: PortEvent) => {
+      for (const listener of listeners) listener(event)
     },
-    said,
-    disposals: () => disposals
+    get disposals() {
+      return record.disposals
+    }
   }
 }
 
-/** Let every pending timer and microtask run until nothing is left to do. */
-async function runToQuiet(): Promise<void> {
-  await vi.advanceTimersByTimeAsync(10_000)
+async function request(op: string, ...args: unknown[]): Promise<PortResult> {
+  const handler = electron.handlers.get(REQUEST_CHANNEL)
+  if (handler === undefined) throw new Error('nothing is serving the request channel')
+  return (await handler({}, { op, args })) as PortResult
 }
 
 beforeEach(() => {
   electron.handlers.clear()
-  vi.useFakeTimers()
 })
 
 afterEach(() => {
-  vi.useRealTimers()
+  electron.handlers.clear()
 })
 
-describe('the agent:prompt handler', () => {
-  it('answers with a turn id and streams the adapter’s turn under it', async () => {
-    const view = stubWindow()
-    serveAgentChannel(createFakeAdapter({ deltaPauseMs: 1 }), view.window)
+describe('what crosses the request channel', () => {
+  it('reaches the operation the request names, with its arguments', async () => {
+    const stub = stubShell({ prompt: 't-1' })
+    serveAgentChannel(stub.shell, stubWindow().window)
 
-    const id = await prompt('Hello agent')
+    const answer = await request('prompt', 'session-1', 'hello')
 
-    expect(id).toBe('t-1')
-    expect(view.sent).toEqual([{ type: 'turn_started', turnId: 't-1' }])
-
-    await runToQuiet()
-
-    expect(view.sent.every((event) => event.turnId === 't-1')).toBe(true)
-    expect(text(view.sent, 't-1')).toBe(CANNED_REPLY)
-    expect(view.sent.at(-1)).toEqual({ type: 'turn_ended', turnId: 't-1' })
-    // Exactly one start and one terminal event, whatever the script does between.
-    expect(view.sent.filter((event) => event.type === 'turn_started')).toHaveLength(1)
-    expect(
-      view.sent.filter((event) => event.type === 'turn_ended' || event.type === 'error')
-    ).toHaveLength(1)
+    expect(answer).toEqual({ ok: true, value: 't-1' })
+    expect(stub.asked).toEqual([{ op: 'prompt', args: ['session-1', 'hello'] }])
   })
 
-  it('refuses a prompt that arrives mid-turn, and the live turn runs on', async () => {
-    const view = stubWindow()
-    serveAgentChannel(createFakeAdapter({ deltaPauseMs: 1 }), view.window)
+  it('answers a refusal with the sentence main wrote, not with an IPC wrapper', async () => {
+    const stub = stubShell({ prompt: new Error('That session is already working.') })
+    serveAgentChannel(stub.shell, stubWindow().window)
 
-    const live = await prompt('Hello agent')
-    const refused = await prompt('and another thing')
+    const answer = await request('prompt', 'session-1', 'hello')
 
-    // The refusal is the second turn's own terminal error, and it is complete
-    // before the first turn has said another word.
-    expect(refused).toBe('t-2')
-    expect(refused).not.toBe(live)
-    expect(turn(view.sent, refused)).toEqual([
-      { type: 'turn_started', turnId: 't-2' },
-      { type: 'error', turnId: 't-2', code: 'busy', message: expect.any(String) }
-    ])
-    expect(turn(view.sent, live)).toEqual([{ type: 'turn_started', turnId: 't-1' }])
-
-    await runToQuiet()
-
-    // The live turn was untouched by the refusal: it kept the guard, kept
-    // streaming, and ended on its own.
-    expect(text(view.sent, live)).toBe(CANNED_REPLY)
-    expect(turn(view.sent, live).at(-1)).toEqual({ type: 'turn_ended', turnId: 't-1' })
-    expect(turn(view.sent, refused)).toHaveLength(2)
+    expect(answer).toEqual({ ok: false, message: 'That session is already working.' })
   })
 
-  it('releases the guard when the live turn ends, so the next prompt is served', async () => {
-    const view = stubWindow()
-    serveAgentChannel(createFakeAdapter({ deltaPauseMs: 1 }), view.window)
+  it('refuses an operation it does not serve, and one whose payload is wrong', async () => {
+    const stub = stubShell()
+    serveAgentChannel(stub.shell, stubWindow().window)
 
-    await prompt('Hello agent')
-    await runToQuiet()
-    await prompt('again')
-    await runToQuiet()
-
-    expect(text(view.sent, 't-2')).toBe(CANNED_REPLY)
-    expect(view.sent.filter((event) => event.type === 'error')).toEqual([])
+    expect(await request('deleteEverything', 'now')).toEqual({
+      ok: false,
+      message: 'Crucible was asked for something it does not do.'
+    })
+    expect(await request('activateSession', 42)).toMatchObject({ ok: false })
+    expect(stub.asked).toEqual([])
   })
 
-  it('answers a payload that is not text with a terminal error, and keeps serving', async () => {
-    const view = stubWindow()
-    serveAgentChannel(createFakeAdapter({ deltaPauseMs: 1 }), view.window)
+  it('serves the operations that take no argument at all', async () => {
+    const stub = stubShell({ snapshot: { workspaces: [], sessions: [] }, addWorkspace: null })
+    serveAgentChannel(stub.shell, stubWindow().window)
 
-    const id = await prompt(42)
-
-    expect(id).toBe('t-1')
-    expect(turn(view.sent, id)).toEqual([
-      { type: 'turn_started', turnId: 't-1' },
-      { type: 'error', turnId: 't-1', code: 'adapter', message: expect.any(String) }
-    ])
-
-    // Nothing was started, so nothing took the guard.
-    await prompt('Hello agent')
-    await runToQuiet()
-    expect(text(view.sent, 't-2')).toBe(CANNED_REPLY)
+    expect(await request('snapshot')).toEqual({ ok: true, value: { workspaces: [], sessions: [] } })
+    expect(await request('addWorkspace')).toEqual({ ok: true, value: null })
   })
+})
 
-  it('reports a port that cannot accept as that turn’s terminal error', async () => {
-    const view = stubWindow()
-    const refusing: AgentAdapter = {
-      prompt: () => Promise.reject(new Error('no session')),
-      onEvent: () => () => {},
-      dispose: () => {}
-    }
-    serveAgentChannel(refusing, view.window)
+describe('what crosses the event channel', () => {
+  it('is every port event, unchanged', async () => {
+    const stub = stubShell()
+    const window = stubWindow()
+    serveAgentChannel(stub.shell, window.window)
 
-    const id = await prompt('Hello agent')
+    stub.emit({ type: 'turn_started', sessionId: 's', turnId: 't-1' })
+    stub.emit({ type: 'text_delta', sessionId: 's', turnId: 't-1', delta: 'hi' })
 
-    expect(turn(view.sent, id)).toEqual([
-      { type: 'turn_started', turnId: 't-1' },
-      { type: 'error', turnId: 't-1', code: 'adapter', message: 'no session' }
+    expect(window.sent).toEqual([
+      { type: 'turn_started', sessionId: 's', turnId: 't-1' },
+      { type: 'text_delta', sessionId: 's', turnId: 't-1', delta: 'hi' }
     ])
   })
 
-  it('disposes the turn on reload: the adapter stops, the guard falls, no stale text follows', async () => {
-    const view = stubWindow()
-    const fake = recordedFake(1)
-    serveAgentChannel(fake.adapter, view.window)
+  it('stops at a closed window rather than sending into it', () => {
+    const stub = stubShell()
+    const window = stubWindow()
+    serveAgentChannel(stub.shell, window.window)
 
-    await prompt('Hello agent')
-    await vi.advanceTimersByTimeAsync(3)
-    expect(text(view.sent, 't-1')).not.toBe('')
+    window.close()
+    stub.emit({ type: 'turn_ended', sessionId: 's', turnId: 't-1' })
 
-    view.reload()
-    const before = [...view.sent]
-    const saidAtReload = [...fake.said]
-    await runToQuiet()
-    expect(view.sent).toEqual(before)
-    // Disposed, not merely unheard: the adapter's own turn stopped where it
-    // stood instead of running its script out with nobody watching, so it never
-    // even reached the end of its script.
-    expect(fake.said).toEqual(saidAtReload)
-    expect(fake.said.at(-1)?.type).toBe('text_delta')
+    expect(window.sent).toEqual([])
+  })
+})
 
-    // The document that came back prompts immediately — no refusal — and hears
-    // its own turn in full, on an adapter the disposal left usable.
-    const fresh = await prompt('Hello agent')
-    await runToQuiet()
+describe('a document going away', () => {
+  it('abandons the work on a cross-document navigation and keeps serving', async () => {
+    const stub = stubShell({ prompt: 't-2' })
+    const window = stubWindow()
+    serveAgentChannel(stub.shell, window.window)
 
-    expect(turn(view.sent, fresh)[0]).toEqual({ type: 'turn_started', turnId: 't-2' })
-    expect(text(view.sent, fresh)).toBe(CANNED_REPLY)
-    expect(turn(view.sent, fresh).at(-1)).toEqual({ type: 'turn_ended', turnId: 't-2' })
-    expect(view.sent.filter((event) => event.type === 'error')).toEqual([])
-    // The abandoned turn never said another word, not even under a new turn's id.
-    expect(turn(view.sent, 't-1')).toEqual(turn(before, 't-1'))
+    window.reload()
+
+    expect(stub.disposals).toBe(1)
+    expect(await request('prompt', 's', 'again')).toEqual({ ok: true, value: 't-2' })
   })
 
-  it('keeps serving across a same-document navigation', async () => {
-    const view = stubWindow()
-    serveAgentChannel(createFakeAdapter({ deltaPauseMs: 1 }), view.window)
+  it('leaves a same-document navigation alone', () => {
+    const stub = stubShell()
+    const window = stubWindow()
+    serveAgentChannel(stub.shell, window.window)
 
-    await prompt('Hello agent')
-    view.navigateInPlace()
-    await runToQuiet()
+    window.navigateInPlace()
 
-    expect(text(view.sent, 't-1')).toBe(CANNED_REPLY)
+    expect(stub.disposals).toBe(0)
   })
 
-  it('stops serving when the window closes, and says so by unregistering', async () => {
-    const view = stubWindow()
-    const fake = recordedFake(1)
-    const channel = serveAgentChannel(fake.adapter, view.window)
+  it('unregisters the handler when the window closes, so the next window may serve', () => {
+    const stub = stubShell()
+    const window = stubWindow()
+    serveAgentChannel(stub.shell, window.window)
 
-    await prompt('Hello agent')
-    await vi.advanceTimersByTimeAsync(3)
-    view.close()
-    const before = [...view.sent]
-    const saidAtClose = [...fake.said]
-    await runToQuiet()
+    window.close()
 
-    expect(view.sent).toEqual(before)
-    // The same disposal path as reload: a window that goes away mid-turn takes
-    // the adapter's work with it rather than leaving it running (D6).
-    expect(fake.said).toEqual(saidAtClose)
-    expect(fake.disposals()).toBe(1)
-    expect(electron.handlers.has(PROMPT_CHANNEL)).toBe(false)
-    // Disposing again is allowed and does nothing — the app quits this way.
-    expect(() => channel.dispose()).not.toThrow()
-    expect(fake.disposals()).toBe(1)
+    expect(electron.handlers.has(REQUEST_CHANNEL)).toBe(false)
+    expect(() => serveAgentChannel(stubShell().shell, stubWindow().window)).not.toThrow()
   })
 
-  it('disposes the adapter when the window goes away with no turn running', async () => {
-    const view = stubWindow()
-    const fake = recordedFake(1)
-    serveAgentChannel(fake.adapter, view.window)
+  it('disposes once however many times it is asked to', () => {
+    const stub = stubShell()
+    const window = stubWindow()
+    const channel = serveAgentChannel(stub.shell, window.window)
 
-    // A turn that ran to its own end released the guard, but the session it was
-    // served from is the adapter's and outlives it: closing has to let that go
-    // too, or a launch leaves work behind every time it is quit (D6).
-    await prompt('Hello agent')
-    await runToQuiet()
-    expect(text(view.sent, 't-1')).toBe(CANNED_REPLY)
-    expect(fake.disposals()).toBe(0)
+    channel.dispose()
+    channel.dispose()
 
-    view.close()
-
-    expect(fake.disposals()).toBe(1)
-  })
-
-  it('disposes the adapter on a reload that interrupts nothing', async () => {
-    const view = stubWindow()
-    const fake = recordedFake(1)
-    serveAgentChannel(fake.adapter, view.window)
-
-    // Nothing was ever asked, so there is no turn to abandon — the document
-    // still went away, and the adapter still answers to the next one alone.
-    view.reload()
-
-    expect(fake.disposals()).toBe(1)
-
-    // And it is still an adapter: the document that came back is served in full.
-    await prompt('Hello agent')
-    await runToQuiet()
-    expect(text(view.sent, 't-1')).toBe(CANNED_REPLY)
+    expect(stub.disposals).toBe(1)
   })
 })

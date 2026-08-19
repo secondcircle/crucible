@@ -1,0 +1,46 @@
+/*
+ * Ember's tokens: the palette and the type, from `docs/design/mock-a-ember.html`
+ * and the details mock beside it (ST-1).
+ *
+ * This is the one place a color or a font stack is written down. Every
+ * component stylesheet references these names, so the look is changed here or
+ * nowhere, and a literal `#e07a4f` appearing in a component is a bug you can
+ * grep for.
+ */
+:root {
+  /* surfaces */
+  --bg: #191419;
+  --bg2: #211a20;
+  --panel: #241c23;
+  --panel2: #2e242d;
+  --line: #3a2e38;
+  --code: #120e12;
+  --code-deep: #0d0a0d;
+  --user: #2c2230;
+  --think-bg: #161018;
+  --error-bg: #1d1113;
+
+  /* ink */
+  --ink: #e8dfe2;
+  --dim: #9b8a94;
+  --faint: #6b5d66;
+  --code-ink: #d7c9b8;
+  --output-ink: #cbbfa4;
+  --on-accent: #1c120c;
+
+  /* accents */
+  --accent: #e07a4f;
+  --accent2: #f0a37c;
+  --ok: #7fb069;
+  --error: #d96a5a;
+  --thinking: #b08cc9;
+
+  /* type */
+  --font: -apple-system, 'Segoe UI', system-ui, sans-serif;
+  --mono: ui-monospace, 'SF Mono', Menlo, monospace;
+
+  /* rhythm */
+  --radius: 8px;
+  --radius-lg: 12px;
+  --column: 680px;
+}

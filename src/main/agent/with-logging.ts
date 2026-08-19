@@ -1,73 +1,103 @@
-import type { AgentAdapter, PortEventListener, TurnId, Unsubscribe } from '../../shared/agent/port'
+import type { Shell } from '../shell/shell'
 import type { LogSink } from '../log/sink'
 
 /**
- * Logging is a decorator at the agent-port seam (D8).
+ * Logging is a decorator at the agent-port seam (LF-2).
  *
- * `withLogging` wraps any adapter and records which adapter answered, the
- * prompt it was given, every event it emitted and every error it raised. It
- * adds nothing to the agent port — a caller of the wrapped adapter cannot tell
- * it from the one that was wrapped, which is the point: no adapter knows
+ * `withLogging` wraps the shell and records every operation asked of the port,
+ * every answer, every refusal and every event that came back out. It adds
+ * nothing to the port — a caller of the wrapped shell cannot tell it from the
+ * one that was wrapped, which is the point: no adapter and no component knows
  * logging exists, and coverage arrives with the seam rather than with each
  * implementation remembering to log.
  *
  * What it hides: the record shapes, the field names, the fact that events are
- * observed through a subscription of its own rather than through the caller's,
- * and that a failed prompt is recorded before it is re-thrown. All of it is one
- * module's business because everything goes through one `append` (D9).
+ * observed through a subscription of its own rather than through a caller's,
+ * and that a failed operation is recorded before it is re-thrown. All of it is
+ * one module's business because everything goes through one `append`.
  *
- * Three arguments rather than the two D8 writes, and the third is the identity:
- * an adapter cannot be asked its name without every adapter knowing why it was
- * asked, so the wrapper is told at the one place that already knows — the
- * launch flavor (D5). The name goes on every record this wrapper writes, so a
- * reader of any single line knows which adapter produced it.
- *
- * `withLogging` subscribes when it is built and never unsubscribes: it records
- * what the adapter did, not what some caller happened to be listening for.
+ * The third argument is the identity: an adapter cannot be asked its name
+ * without every adapter knowing why it was asked, so the wrapper is told at the
+ * one place that already knows — the launch flavor. The name goes on every
+ * record this wrapper writes, so a reader of any single line knows which
+ * flavor produced it.
  */
-export function withLogging(port: AgentAdapter, log: LogSink, adapter: string): AgentAdapter {
-  port.onEvent((event) => {
+export function withLogging(shell: Shell, log: LogSink, adapter: string): Shell {
+  shell.onEvent((event) => {
     // The port event's own `type` names the record, so the log reads as the
-    // sequence the port produced — `turn_started`, `text_delta`, …, each with
-    // its turn id and whatever else that event carries.
+    // sequence the port produced — `turn_started`, `text_delta`, … — each with
+    // whatever else that event carries. A `state` event carries the snapshot,
+    // which is the one record a reader can reconstruct the sidebar from.
     const { type, ...detail } = event
     log.append({ source: 'main', event: type, adapter, ...detail })
   })
 
-  return {
-    async prompt(text: string): Promise<TurnId> {
+  /**
+   * One port operation, recorded around its call. The arguments are logged
+   * verbatim, prompt text included: this is a local run log, and a turn that
+   * cannot be read back against what was asked is not diagnostic.
+   */
+  function op<A extends unknown[], R>(
+    name: string,
+    run: (...args: A) => Promise<R>
+  ): (...args: A) => Promise<R> {
+    return async (...args: A): Promise<R> => {
+      log.append({ source: 'main', event: name, adapter, args })
       try {
-        const turnId = await port.prompt(text)
-        // A prompt and the turn that answered it are one fact, so they are one
-        // record: the text verbatim (D8's edge case: no redaction this
-        // milestone) under the id the adapter minted for it. Written once the
-        // id is known, because the log contract puts `turnId` on anything
-        // belonging to a turn and a prompt belongs to the turn it started —
-        // there is no way here to write the prompt without it.
-        log.append({ source: 'main', event: 'prompt', adapter, turnId, prompt: text })
-        return turnId
+        const result = await run(...args)
+        if (result !== undefined) {
+          log.append({ source: 'main', event: `${name}_answered`, adapter, result })
+        }
+        return result
       } catch (cause) {
-        // A refused prompt never became a turn, so it has no id — the text is
-        // what identifies it. The stack belongs here and nowhere else: an error
-        // that crosses the port carries display-safe text only.
+        // The stack belongs here and nowhere else: what crosses the port is
+        // display-safe text, and this is the record that still has the rest.
         log.append({
           source: 'main',
-          event: 'prompt_failed',
+          event: `${name}_refused`,
           adapter,
-          prompt: text,
+          args,
           message: cause instanceof Error ? cause.message : String(cause),
           stack: cause instanceof Error ? cause.stack : undefined
         })
         throw cause
       }
-    },
+    }
+  }
 
-    onEvent(listener: PortEventListener): Unsubscribe {
-      return port.onEvent(listener)
-    },
+  return {
+    // Read-only and called on every state change; logging it would drown the
+    // file in copies of what the `state` records already say.
+    snapshot: () => shell.snapshot(),
+    onEvent: (listener) => shell.onEvent(listener),
 
-    dispose(): void {
-      port.dispose()
+    addWorkspace: op('addWorkspace', () => shell.addWorkspace()),
+    activateWorkspace: op('activateWorkspace', (id) => shell.activateWorkspace(id)),
+    removeWorkspace: op('removeWorkspace', (id) => shell.removeWorkspace(id)),
+
+    createSession: op('createSession', (workspaceId) => shell.createSession(workspaceId)),
+    activateSession: op('activateSession', (id) => shell.activateSession(id)),
+    removeSession: op('removeSession', (id) => shell.removeSession(id)),
+    resetSession: op('resetSession', (id) => shell.resetSession(id)),
+    transcript: op('transcript', (id) => shell.transcript(id)),
+
+    searchHistory: op('searchHistory', (workspaceId, query) =>
+      shell.searchHistory(workspaceId, query)
+    ),
+    resumeSession: op('resumeSession', (workspaceId, ref) => shell.resumeSession(workspaceId, ref)),
+
+    listModels: op('listModels', () => shell.listModels()),
+    setModel: op('setModel', (sessionId, model) => shell.setModel(sessionId, model)),
+    setThinkingLevel: op('setThinkingLevel', (sessionId, level) =>
+      shell.setThinkingLevel(sessionId, level)
+    ),
+
+    prompt: op('prompt', (sessionId, text) => shell.prompt(sessionId, text)),
+    cancel: op('cancel', (sessionId) => shell.cancel(sessionId)),
+
+    dispose: () => {
+      log.append({ source: 'main', event: 'shell_disposed', adapter })
+      shell.dispose()
     }
   }
 }

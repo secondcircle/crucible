@@ -1,43 +1,33 @@
-import type { PortEvent, TurnId } from '../../shared/agent/port'
-
 /**
- * The one way an SDK failure becomes the port's `error` event.
+ * The one way a failure becomes text the port may carry.
  *
- * A turn can fail from either direction — the SDK reports it as an event, or
- * `prompt()` throws — and both directions hand this function the raw cause. It
- * answers with a whole `PortEvent`, so no other module in the SDK path writes
- * an `error` literal and none of them ever holds the raw text next to one: the
- * Contracts' rule that `error.message` is *display-safe text for the pane*, and
- * that stacks, SDK error objects and provider payloads never enter the event,
- * is kept here or nowhere.
+ * A turn can fail from either direction — an adapter reports it, or an
+ * operation throws — and both hand this function the raw cause. It answers with
+ * a sentence, so no other module holds the raw text next to an event it is
+ * building: the port's rule that a message is *display-safe text for a person*,
+ * and that stacks, SDK error objects and provider payloads never cross, is kept
+ * here or nowhere.
  *
  * What "display-safe" means, concretely — and this is the whole of the rule:
  *
  * - A cause that is neither an `Error` nor a string says nothing a pane could
  *   render; it becomes the fallback. An SDK error *object* is therefore never
- *   stringified into the event, only its `message` is even looked at.
+ *   stringified into a message, only its `message` is even looked at.
  * - Text that is already a plain sentence — short, one line, no structure — is
  *   what the provider or the SDK meant a human to read, and crosses as it is.
  * - Text that carries structure is a payload, not a sentence: a provider's
  *   `400 {"type":"error", … ,"request_id":"req_…"}`, an HTML error page, a
- *   stack trace. The payload never crosses. If a human-readable `message`
- *   sits inside it, that sentence — and only that sentence — is lifted out and
- *   crosses instead, so the pane can still say "You're out of extra usage"
- *   without also saying `request_id`.
+ *   stack trace. The payload never crosses. If a human-readable `message` sits
+ *   inside it, that sentence — and only that sentence — is lifted out and
+ *   crosses instead, so a person can still be told "You're out of extra usage"
+ *   without also being shown a request id.
  * - Anything left over becomes the fallback, so an error line always renders.
  *
- * The raw cause stops here. The run log records the `error` event that this
- * produced, because that is what crossed the seam and no adapter knows logging
- * exists (D8); a diagnostic richer than the sentence is a job for a seam that
- * this milestone does not have.
+ * The raw cause stops here. The run log records what crossed the seam, because
+ * that is the thing a reader has to reconcile with what the window showed.
  */
-export function adapterError(turnId: TurnId, cause: unknown, fallback = UNEXPLAINED): PortEvent {
-  return {
-    type: 'error',
-    turnId,
-    code: 'adapter',
-    message: displaySafeText(cause) ?? fallback
-  }
+export function displaySafeMessage(cause: unknown, fallback = UNEXPLAINED): string {
+  return displaySafeText(cause) ?? fallback
 }
 
 /** What an error says when nothing it carried could be shown to a person. */

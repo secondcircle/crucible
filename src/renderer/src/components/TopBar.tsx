@@ -1,0 +1,89 @@
+import type { ModelInfo, SessionState, WorkspaceState } from '../../../shared/agent/port'
+import { sessionLabel, tokens } from '../labels'
+import './topbar.css'
+
+/**
+ * The top bar: which session, in which workspace, on which model, working or
+ * not, and how much of the context window is spent (TB-1, TB-2).
+ *
+ * Every one of those is a snapshot fact. The meter in particular says nothing
+ * until the adapter has reported real usage — a dash, not a zero and not a
+ * plausible-looking percentage — because a context meter that guesses is worse
+ * than one that admits it does not know yet (A27).
+ *
+ * The session header menu lives here, and Reset Session lives in it (SE-7,
+ * A19). Whether the menu is open is the shell's state rather than this
+ * component's, because Escape has to be able to close it before it cancels
+ * anything.
+ */
+export function TopBar({
+  session,
+  workspace,
+  model,
+  menuOpen,
+  onToggleMenu,
+  onResetSession
+}: {
+  readonly session?: SessionState
+  readonly workspace?: WorkspaceState
+  readonly model?: ModelInfo
+  readonly menuOpen: boolean
+  readonly onToggleMenu: () => void
+  readonly onResetSession: () => void
+}): React.JSX.Element {
+  const usage = session?.usage
+  const meter =
+    usage === undefined || usage.contextWindow <= 0
+      ? undefined
+      : {
+          percent: Math.min(100, Math.round((usage.usedTokens / usage.contextWindow) * 100)),
+          used: tokens(usage.usedTokens),
+          window: tokens(usage.contextWindow)
+        }
+
+  return (
+    <header className="top">
+      <span className="title">{session === undefined ? 'No session' : sessionLabel(session)}</span>
+      <span className="where">{workspace?.name ?? 'No workspace'}</span>
+      {session?.model === undefined ? null : (
+        <span className="model">{model?.label ?? session.model}</span>
+      )}
+      {session?.working ? (
+        <span className="working" aria-label="Agent working">
+          ● working
+        </span>
+      ) : null}
+
+      <div className="meter" aria-label="Context usage">
+        {meter === undefined ? (
+          <span className="empty">— ctx</span>
+        ) : (
+          <>
+            <span>{meter.percent}% ctx</span>
+            <span className="bar">
+              <i style={{ width: `${meter.percent}%` }} />
+            </span>
+            <span className="counts">
+              {meter.used} / {meter.window}
+            </span>
+          </>
+        )}
+      </div>
+
+      {session === undefined ? null : (
+        <div className="sessionmenu">
+          <button aria-label="Session menu" aria-expanded={menuOpen} onClick={onToggleMenu}>
+            ⋯
+          </button>
+          {menuOpen ? (
+            <div className="menu" role="menu">
+              <button role="menuitem" onClick={onResetSession}>
+                Reset session
+              </button>
+            </div>
+          ) : null}
+        </div>
+      )}
+    </header>
+  )
+}

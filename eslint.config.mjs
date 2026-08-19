@@ -28,7 +28,7 @@ export default tseslint.config(
     // it changes what is forbidden under src/renderer and never what is
     // otherwise linted there.
     files: ['src/renderer/**', 'src/renderer/**/*.jsx'],
-    // The renderer import fence (D1, D4): the renderer reaches agents only
+    // The renderer import fence (ADR 0001): the renderer reaches agents only
     // through the agent port, so nothing under src/renderer may import the π
     // SDK, Electron, or main/preload modules, and nothing but the IPC client
     // may touch the preload surface. Two builtin rules are the whole of it.
@@ -52,15 +52,17 @@ export default tseslint.config(
           selector:
             "MemberExpression[object.name=/^(window|globalThis|self)$/][property.name='crucible']",
           message:
-            'The renderer reaches agents only through the agent port (D1). Take a port as a prop; only src/renderer/src/agent/ipc-client.ts may touch window.crucible.'
+            'The renderer reaches agents only through the agent port (ADR 0001). Take a port as a prop; only src/renderer/src/agent/ipc-client.ts may touch window.crucible.'
         }
       ]
     }
   },
   {
     // The single exception: the IPC client is the renderer's one adapter over
-    // the preload surface, so it is the one file allowed to name it.
-    files: ['src/renderer/src/agent/ipc-client.ts'],
+    // the preload surface, so it is the one file allowed to name it — and its
+    // own test, which stands in for that surface to drive it, is on the same
+    // side of the fence as the module it tests.
+    files: ['src/renderer/src/agent/ipc-client.ts', 'src/renderer/src/agent/ipc-client.test.ts'],
     rules: { 'no-restricted-syntax': 'off' }
   },
   {
