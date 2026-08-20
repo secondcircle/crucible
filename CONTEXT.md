@@ -49,6 +49,23 @@ _Avoid_: project, repository.
 A user-curated workspace sidebar item holding one agent conversation. It appears only when the user creates or adds it in Crucible; adapter-managed history never populates the sidebar by discovery.
 _Avoid_: thread, chat, backing-store record.
 
+**Session title**:
+The short description of what a session is about, written by a small model
+from that session's user and assistant messages and refreshed as the session
+goes. What the sidebar shows in place of a timestamp.
+_Avoid_: session name, summary, label.
+
+**Model alias**:
+The short display name Crucible shows for a model it knows by heart — `Opus`
+for `Claude Opus 5`. Display only: the picker still lists what the port
+reported, under the port's own labels.
+_Avoid_: nickname, friendly name, short name.
+
+**Model ring**:
+The ordered handful of models Shift-Tab cycles through without opening the
+picker. A build-time constant, and nothing in the UI names the key.
+_Avoid_: favorites, model cycle, quick switch.
+
 **Steering message**:
 A message queued while a session is working, delivered at the next boundary
 between tool calls to redirect the live turn. π's meaning, adopted verbatim.
