@@ -73,6 +73,10 @@ export async function invoke(service: WorkspaceService, request: unknown): Promi
       return service.startRun(text(0), text(1))
     case 'stopRun':
       return service.stopRun(text(0))
+    case 'branchBoard':
+      return service.branchBoard(text(0))
+    case 'openUrl':
+      return service.openUrl(text(0))
     default:
       throw new Error('Crucible was asked for something its workspace service does not do.')
   }

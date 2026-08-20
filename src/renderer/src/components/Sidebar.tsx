@@ -6,6 +6,7 @@ import './sidebar.css'
 // alone: the dot is the eye's version, the name is everybody else's.
 export function Sidebar({
   snapshot,
+  needYou,
   onNewSession,
   onAddWorkspace,
   onActivateWorkspace,
@@ -15,6 +16,9 @@ export function Sidebar({
   onResume
 }: {
   readonly snapshot: ShellSnapshot
+  // The whole cross-workspace glance: one number per workspace, and nothing
+  // for a workspace whose board has not answered or has nothing asking.
+  readonly needYou: Readonly<Record<WorkspaceId, number>>
   readonly onNewSession: () => void
   readonly onAddWorkspace: () => void
   readonly onActivateWorkspace: (id: WorkspaceId) => void
@@ -58,6 +62,14 @@ export function Sidebar({
                   <span className="dot" aria-hidden="true" />
                   {workspace.name}
                 </button>
+                {(needYou[workspace.id] ?? 0) > 0 ? (
+                  <span
+                    className="n"
+                    title={`${needYou[workspace.id]} need you in ${workspace.name}`}
+                  >
+                    {needYou[workspace.id]}
+                  </span>
+                ) : null}
                 <button
                   className="rowaction"
                   aria-label={`Remove workspace ${workspace.name}`}

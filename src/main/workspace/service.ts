@@ -1,12 +1,14 @@
-import { spawn } from 'node:child_process'
+import { execFile, spawn } from 'node:child_process'
 import { rankFiles } from '../../shared/workspace/match'
 import type {
+  BranchBoardAnswer,
   RunId,
   Unsubscribe,
   WorkspaceEvent,
   WorkspaceEventListener,
   WorkspaceService
 } from '../../shared/workspace/service'
+import { collectBoard, type CommandOutcome, type CommandRunner } from './collect-board'
 import { listFiles } from './files'
 
 // The workspace service's real flavor: the one module that reads the user's
@@ -21,9 +23,50 @@ interface Run {
   readonly kill: () => void
 }
 
-export function createWorkspaceService(): RealWorkspaceService {
+/** No more output than a repository's branches or pull requests can fill. */
+const MAX_OUTPUT = 8 * 1024 * 1024
+
+// Nothing the collector runs may block on a person or disturb a working tree an
+// agent is mid-turn in: no credential prompt, and no optional index lock.
+const COLLECTION_ENV = {
+  GIT_TERMINAL_PROMPT: '0',
+  GIT_OPTIONAL_LOCKS: '0',
+  GH_PROMPT_DISABLED: '1'
+}
+
+export function spawnRunner(): CommandRunner {
+  return (command, args, { cwd, timeoutMs }) =>
+    new Promise<CommandOutcome>((resolve) => {
+      execFile(
+        command,
+        [...args],
+        {
+          cwd,
+          timeout: timeoutMs,
+          maxBuffer: MAX_OUTPUT,
+          encoding: 'utf8',
+          env: { ...process.env, ...COLLECTION_ENV }
+        },
+        (failure, stdout, stderr) => {
+          resolve({ ok: failure === null, stdout, stderr })
+        }
+      )
+    })
+}
+
+export function createWorkspaceService({
+  openExternal,
+  runner = spawnRunner()
+}: {
+  /** The OS browser, which only main may reach. */
+  readonly openExternal: (url: string) => void
+  readonly runner?: CommandRunner
+}): RealWorkspaceService {
   const listeners = new Set<WorkspaceEventListener>()
   const runs = new Map<RunId, Run>()
+  // One collection per workspace at a time: a second caller joins the first
+  // rather than starting a second `gh` stampede.
+  const collecting = new Map<string, Promise<BranchBoardAnswer>>()
   let minted = 0
 
   function emit(event: WorkspaceEvent): void {
@@ -88,6 +131,26 @@ export function createWorkspaceService(): RealWorkspaceService {
 
     async stopRun(runId: RunId): Promise<void> {
       runs.get(runId)?.kill()
+    },
+
+    branchBoard(workspacePath: string): Promise<BranchBoardAnswer> {
+      const joined = collecting.get(workspacePath)
+      if (joined !== undefined) return joined
+      const collection = collectBoard(runner, workspacePath).finally(() => {
+        collecting.delete(workspacePath)
+      })
+      collecting.set(workspacePath, collection)
+      return collection
+    },
+
+    async openUrl(url: string): Promise<void> {
+      // The renderer hands over text; what it names is checked here, where the
+      // capability actually is.
+      const wanted = URL.parse(url)
+      if (wanted === null || wanted.protocol !== 'https:') {
+        throw new Error('Crucible opens https links only.')
+      }
+      openExternal(wanted.toString())
     },
 
     onEvent(listener: WorkspaceEventListener): Unsubscribe {

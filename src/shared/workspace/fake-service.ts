@@ -1,5 +1,7 @@
+import { cannedBoard } from './fake-board'
 import { rankFiles } from './match'
 import type {
+  BranchBoardAnswer,
   RunId,
   Unsubscribe,
   WorkspaceEvent,
@@ -59,11 +61,17 @@ const ENDLESS_CHUNKS: readonly string[] = [
 // drive the stream themselves.
 const DEFAULT_PAUSE_MS = 220
 
+export interface FakeWorkspaceService extends WorkspaceService {
+  /** Every link the fake was asked to open, and opened nothing for. */
+  readonly openedUrls: readonly string[]
+}
+
 export function createFakeWorkspaceService({
   pauseMs = DEFAULT_PAUSE_MS
 }: {
   readonly pauseMs?: number
-} = {}): WorkspaceService {
+} = {}): FakeWorkspaceService {
+  const openedUrls: string[] = []
   const listeners = new Set<WorkspaceEventListener>()
   const running = new Map<RunId, { stop(): void }>()
   let minted = 0
@@ -109,8 +117,20 @@ export function createFakeWorkspaceService({
   }
 
   return {
+    openedUrls,
+
     async searchFiles(_workspacePath: string, query: string): Promise<readonly string[]> {
       return rankFiles(CANNED_FILES, query)
+    },
+
+    // Both board variants are drivable with no git, no gh and no cost: the
+    // hosted one by default, the git-only one for a marker-word path.
+    async branchBoard(workspacePath: string): Promise<BranchBoardAnswer> {
+      return { kind: 'board', board: cannedBoard(workspacePath, Date.now()) }
+    },
+
+    async openUrl(url: string): Promise<void> {
+      openedUrls.push(url)
     },
 
     async startRun(_workspacePath: string, command: string): Promise<RunId> {

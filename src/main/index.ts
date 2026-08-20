@@ -88,7 +88,9 @@ const { adapter, flavor } = selectAdapter(
 
 // One flavor decision governs every seam, so a fake-flavor launch reads no
 // folder, starts no process and serves canned commands.
-const workspace = selectWorkspaceService(flavor, log)
+const workspace = selectWorkspaceService(flavor, log, (url: string) => {
+  void electronShell.openExternal(url)
+})
 const commands = selectCommandService(flavor, log, app.getAppPath())
 
 // Installed only: install-stable replaces the bundle in place, so watching

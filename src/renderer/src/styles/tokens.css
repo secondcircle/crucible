@@ -11,6 +11,10 @@
   --user: #2c2230;
   --think-bg: #161018;
   --error-bg: #1d1113;
+  /* what an overlay dims the window behind it to */
+  --overlay: rgb(15 11 15 / 86%);
+  /* a pill for something the branch is not: present, but off */
+  --absent-line: #2f262d;
 
   --ink: #e8dfe2;
   --dim: #9b8a94;
@@ -22,8 +26,16 @@
   --accent: #e07a4f;
   --accent2: #f0a37c;
   --ok: #7fb069;
+  --ok-line: #47603a;
   --error: #d96a5a;
+  --warn: #d9a441;
   --thinking: #b08cc9;
+  --absent-ink: #4a3f47;
+  /* merged is its own color: neither running, nor failing, nor open */
+  --merged: #c9a2f0;
+  --merged-line: #5c3f75;
+  /* the chip's lit border, which is the only thing that says "look here" */
+  --lit: #5c4436;
 
   --font: -apple-system, 'Segoe UI', system-ui, sans-serif;
   --mono: ui-monospace, 'SF Mono', Menlo, monospace;

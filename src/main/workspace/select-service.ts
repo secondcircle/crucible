@@ -12,11 +12,17 @@ export interface SelectedWorkspaceService {
 
 // One flavor decision governs both seams, so a fake-adapter launch reads no
 // folder and starts no process either.
-export function selectWorkspaceService(flavor: Flavor, log: LogSink): SelectedWorkspaceService {
+export function selectWorkspaceService(
+  flavor: Flavor,
+  log: LogSink,
+  // The OS browser, which only main may reach: the real service opens links
+  // with it and the fake opens nothing at all.
+  openExternal: (url: string) => void
+): SelectedWorkspaceService {
   log.append({ source: 'main', event: 'workspace_service_selected', service: flavor })
 
   if (flavor !== 'sdk') return { service: createFakeWorkspaceService(), dispose: () => {} }
 
-  const service = createWorkspaceService()
+  const service = createWorkspaceService({ openExternal })
   return { service, dispose: () => service.dispose() }
 }

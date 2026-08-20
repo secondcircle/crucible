@@ -15,6 +15,7 @@ export function TopBar({
   onResetSession,
   onOpenSettings,
   onOpenUsage,
+  board,
   update
 }: {
   readonly session?: SessionState
@@ -29,6 +30,13 @@ export function TopBar({
   readonly onOpenSettings: () => void
   /** The cost chip, which lands on the same sheet's Usage tab. */
   readonly onOpenUsage: () => void
+  // The branch board's whole resting surface: absent until a collection has
+  // answered with a board for this workspace.
+  readonly board?: {
+    readonly landed: number
+    readonly needYou: number
+    readonly onOpen: () => void
+  }
   /** A newer installed build, waiting. One click restarts into it. */
   readonly update?: { readonly commit: string; readonly onRestart: () => void }
 }): React.JSX.Element {
@@ -67,6 +75,21 @@ export function TopBar({
 
       {/* Everything from here is right-aligned, as mocked. */}
       <span className="spacer" />
+
+      {/* Lit exactly while something needs you, so it is not permanently on. */}
+      {board === undefined ? null : (
+        <button
+          className={`tchip${board.needYou > 0 ? ' lit' : ''}`}
+          aria-label="Branch board"
+          onClick={board.onOpen}
+        >
+          <span className="g" aria-hidden="true">
+            ⑂
+          </span>{' '}
+          <b>{board.landed} landed</b>
+          {board.needYou > 0 ? <u> · {board.needYou} need you</u> : null}
+        </button>
+      )}
 
       {/* Restarting mid-turn drops that turn, so the person decides when. */}
       {update === undefined ? null : (

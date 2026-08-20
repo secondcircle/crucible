@@ -11,6 +11,8 @@
   flex-direction: column;
   /* What the chat column keeps whatever the divider is dragged to. */
   min-width: 320px;
+  /* The branch board covers this column and nothing else. */
+  position: relative;
 }
 
 /* Empty states: one sentence and the one thing to do. */

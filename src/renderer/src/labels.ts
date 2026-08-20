@@ -29,6 +29,46 @@ export function relativeTime(iso: string, now = Date.now()): string {
   return days === 1 ? 'yesterday' : `${days}d ago`
 }
 
+/** How long ago a board was collected: `40s`, `3m`, `2h`. */
+export function boardAge(collectedAt: string, now = Date.now()): string {
+  const at = new Date(collectedAt).getTime()
+  if (Number.isNaN(at)) return ''
+  const seconds = Math.max(0, Math.round((now - at) / 1000))
+  if (seconds < 60) return `${seconds}s`
+  const minutes = Math.floor(seconds / 60)
+  if (minutes < 60) return `${minutes}m`
+  return `${Math.floor(minutes / 60)}h`
+}
+
+const MONTHS = [
+  'Jan',
+  'Feb',
+  'Mar',
+  'Apr',
+  'May',
+  'Jun',
+  'Jul',
+  'Aug',
+  'Sep',
+  'Oct',
+  'Nov',
+  'Dec'
+]
+
+const DAY_MS = 24 * 60 * 60 * 1000
+
+// A branch's age: days while the number still means something, then the date
+// it was last touched, and the year once that date is ambiguous.
+export function branchAge(touchedAt: string, now = Date.now()): string {
+  const when = new Date(touchedAt)
+  const at = when.getTime()
+  if (Number.isNaN(at)) return ''
+  const days = Math.floor(Math.max(0, now - at) / DAY_MS)
+  if (days < 7) return `${days}d`
+  const date = `${when.getDate()} ${MONTHS[when.getMonth()]}`
+  return days > 365 ? `${date} ${when.getFullYear()}` : date
+}
+
 // The meter's percentage, and nothing at all until the adapter has reported
 // real usage: one reading, so the top bar and the Usage tab cannot disagree.
 export function contextPercent(

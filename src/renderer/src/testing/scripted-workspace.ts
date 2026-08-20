@@ -1,4 +1,5 @@
 import type {
+  BranchBoardAnswer,
   RunId,
   Unsubscribe,
   WorkspaceEvent,
@@ -20,12 +21,27 @@ export interface ScriptedWorkspace extends WorkspaceService {
   output(runId: RunId, chunk: string): void
   /** An absent exit code is a run that was stopped rather than exiting. */
   end(runId: RunId, exitCode?: number): void
+
+  // What `branchBoard` answers, per workspace path. A path with no answer set
+  // is a folder that is not a git repository, which is a normal answer.
+  readonly boards: Map<string, BranchBoardAnswer>
+  /** Set where a test wants a collection main could not carry out. */
+  boardRefusal?: string
+  // Held open where a test drives the waiting state: the promise settles when
+  // the test says so.
+  holdBoard?: boolean
+  /** Settles a held collection with whatever the map holds now. */
+  settleBoard(): void
+  /** Every link this service was asked to open, and opened nothing for. */
+  readonly openedUrls: readonly string[]
 }
 
 export function createScriptedWorkspace(files: readonly string[] = []): ScriptedWorkspace {
   const listeners = new Set<WorkspaceEventListener>()
   const calls: Array<{ op: string; args: readonly unknown[] }> = []
   const started: Array<{ runId: RunId; command: string }> = []
+  const openedUrls: string[] = []
+  let held: (() => void) | undefined
   let minted = 0
 
   function emit(event: WorkspaceEvent): void {
@@ -36,6 +52,33 @@ export function createScriptedWorkspace(files: readonly string[] = []): Scripted
     calls,
     files,
     started,
+    boards: new Map<string, BranchBoardAnswer>(),
+    openedUrls,
+
+    branchBoard(workspacePath: string): Promise<BranchBoardAnswer> {
+      calls.push({ op: 'branchBoard', args: [workspacePath] })
+      if (service.boardRefusal !== undefined) {
+        return Promise.reject(new Error(service.boardRefusal))
+      }
+      const answer = (): BranchBoardAnswer =>
+        service.boards.get(workspacePath) ?? { kind: 'noRepository' }
+      if (service.holdBoard !== true) return Promise.resolve(answer())
+      return new Promise<BranchBoardAnswer>((resolve) => {
+        held = () => resolve(answer())
+      })
+    },
+
+    settleBoard(): void {
+      const settle = held
+      held = undefined
+      settle?.()
+    },
+
+    openUrl(url: string): Promise<void> {
+      calls.push({ op: 'openUrl', args: [url] })
+      openedUrls.push(url)
+      return Promise.resolve()
+    },
 
     searchFiles(workspacePath: string, query: string): Promise<readonly string[]> {
       calls.push({ op: 'searchFiles', args: [workspacePath, query] })

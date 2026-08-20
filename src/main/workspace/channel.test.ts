@@ -90,6 +90,13 @@ function stubService(): StubService {
     async stopRun(runId: string) {
       asked.push({ op: 'stopRun', args: [runId] })
     },
+    async branchBoard(workspacePath: string) {
+      asked.push({ op: 'branchBoard', args: [workspacePath] })
+      return { kind: 'noRepository' as const }
+    },
+    async openUrl(url: string) {
+      asked.push({ op: 'openUrl', args: [url] })
+    },
     onEvent(listener: WorkspaceEventListener) {
       listeners.add(listener)
       return () => listeners.delete(listener)
@@ -139,6 +146,20 @@ describe('what crosses the workspace channel', () => {
 
     await request({ op: 'stopRun', args: ['run-1'] })
     expect(stub.asked.at(-1)).toEqual({ op: 'stopRun', args: ['run-1'] })
+  })
+
+  it('carries the board and the link across, each by its own name', async () => {
+    expect(await request({ op: 'branchBoard', args: ['/repos/crucible'] })).toEqual({
+      ok: true,
+      value: { kind: 'noRepository' }
+    })
+
+    await request({ op: 'openUrl', args: ['https://github.com/secondcircle/crucible/pull/4'] })
+
+    expect(stub.asked).toEqual([
+      { op: 'branchBoard', args: ['/repos/crucible'] },
+      { op: 'openUrl', args: ['https://github.com/secondcircle/crucible/pull/4'] }
+    ])
   })
 
   it('answers a refusal as a value, with the sentence written for a person', async () => {
