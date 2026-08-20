@@ -42,12 +42,19 @@ function shipped(): ReturnType<typeof createCommandService> {
 }
 
 describe('the built-in commands', () => {
-  it('are exactly /align, at the built-in origin, with its hint', async () => {
+  it('are exactly /align and /quick-align, at the built-in origin, with their hints', async () => {
     expect(await shipped().list(workspace)).toEqual([
       {
         name: 'align',
         description:
           'Grill an idea into shared understanding — glossary entries and ADRs as they crystallize, an intent brief on the confirming yes.',
+        argumentHint: '[subject]',
+        origin: 'built-in'
+      },
+      {
+        name: 'quick-align',
+        description:
+          'Fast functional alignment — settle the end-user experience in a handful of questions, leave the technical shape to the implementation.',
         argumentHint: '[subject]',
         origin: 'built-in'
       }
@@ -103,6 +110,29 @@ describe('the built-in commands', () => {
       '~/.pi',
       '<repo>'
     ]) {
+      expect(text).not.toContain(gone)
+    }
+  })
+
+  it('expands /quick-align whole: the ritual, the brief, the veto section', async () => {
+    const withSubject = await shipped().expand(workspace, '/quick-align blank screen after summarize')
+    const text = withSubject.kind === 'command' ? withSubject.text : ''
+
+    expect(withSubject).toMatchObject({ kind: 'command', origin: 'built-in' })
+    expect(text).toContain('The subject: blank screen after summarize')
+    expect(text).toContain('Do you agree we are fully aligned?')
+    expect(text).toContain('<workspace>/.crucible/align/<YYMMDD>-<slug>.md')
+    expect(text).toContain('## Decided without asking — veto anything here')
+  })
+
+  it('keeps /quick-align ignorant of /align, sub-agents and π', async () => {
+    const expansion = await shipped().expand(workspace, '/quick-align')
+    const text = expansion.kind === 'command' ? expansion.text : ''
+
+    // Its own name and the brief path both contain "align", so match /align
+    // not preceded by "quick-" or ".crucible".
+    expect(text).not.toMatch(/(?<!quick-)(?<!\.crucible)\/align/)
+    for (const gone of ['sub-agent', '~/.pi', '<repo>']) {
       expect(text).not.toContain(gone)
     }
   })
