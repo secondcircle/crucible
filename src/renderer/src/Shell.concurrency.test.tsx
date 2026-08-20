@@ -5,24 +5,35 @@
 import { act, fireEvent, render, screen } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 import type { ShellSnapshot } from '../../shared/agent/port'
-import { sessionLabel } from './labels'
 import { Shell } from './Shell'
 import { createScriptedPort, type ScriptedPort } from './testing/scripted-port'
 import { createScriptedWorkspace } from './testing/scripted-workspace'
 import { createScriptedCommands } from './testing/scripted-commands'
 import { settled } from './testing/settled'
 
-// The label is a local-time format, so the expected names are derived from the
-// same helper the sidebar uses rather than written out in one timezone.
-const FIRST = sessionLabel({ createdAt: '2026-08-19T14:14:00.000Z' })
-const SECOND = sessionLabel({ createdAt: '2026-08-19T15:20:00.000Z' })
+// Each session is named by its title, which is what the sidebar shows and what
+// a person tells two running sessions apart by.
+const FIRST = 'Wiring the composer to the agent port'
+const SECOND = 'Fixing the context panel divider drag'
 
 const TWO_SESSIONS: ShellSnapshot = {
   workspaces: [{ id: 'w1', name: 'crucible', path: '/repos/crucible' }],
   activeWorkspaceId: 'w1',
   sessions: [
-    { id: 's1', workspaceId: 'w1', createdAt: '2026-08-19T14:14:00.000Z', working: false },
-    { id: 's2', workspaceId: 'w1', createdAt: '2026-08-19T15:20:00.000Z', working: false }
+    {
+      id: 's1',
+      workspaceId: 'w1',
+      createdAt: '2026-08-19T14:14:00.000Z',
+      title: FIRST,
+      working: false
+    },
+    {
+      id: 's2',
+      workspaceId: 'w1',
+      createdAt: '2026-08-19T15:20:00.000Z',
+      title: SECOND,
+      working: false
+    }
   ],
   activeSessionId: 's1'
 }

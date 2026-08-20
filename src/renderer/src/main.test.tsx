@@ -10,6 +10,7 @@ import type { CommandRequest, CommandResult } from '../../shared/commands/channe
 import type { WorkspaceRequest, WorkspaceResult } from '../../shared/workspace/channels'
 import type { WorkspaceEvent } from '../../shared/workspace/service'
 import { createScriptedCommands, type ScriptedCommands } from './testing/scripted-commands'
+import { sessionsShown } from './testing/sidebar'
 import { createScriptedPort, oneSession, type ScriptedPort } from './testing/scripted-port'
 import { createScriptedWorkspace, type ScriptedWorkspace } from './testing/scripted-workspace'
 
@@ -117,7 +118,7 @@ describe('the renderer entry point', () => {
 
     // Nothing here handed the renderer a port, so a seeded workspace and
     // session on screen mean the snapshot crossed the preload surface.
-    await screen.findByRole('button', { name: /^Session · / })
+    await sessionsShown()
     expect(screen.getByRole('button', { name: 'crucible' })).toBeInTheDocument()
 
     // The request path: what is typed here reaches the port as a prompt.

@@ -317,10 +317,19 @@
   gap: 8px;
   margin-top: 8px;
   flex-wrap: wrap;
+  /* A single flex item cannot wrap within itself, so without this one wide
+     thumbnail would push the row past the message column. */
+  min-width: 0;
 }
 
+/* Width is capped and height follows, never the reverse: a 1512x112 strip
+   fits the column instead of scrolling the whole chat sideways. */
 .msg .thumb {
-  height: 72px;
+  max-width: 100%;
+  max-height: 200px;
+  width: auto;
+  height: auto;
+  object-fit: contain;
   border-radius: 6px;
   border: 1px solid var(--line);
 }

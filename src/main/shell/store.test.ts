@@ -124,6 +124,51 @@ describe('what survives a relaunch', () => {
     })
   })
 
+  it('carries a session’s title, last activity and titling spend through', () => {
+    const first = createShellStore(file)
+    const workspace = first.addWorkspace('/repos/crucible')
+    const session = first.addSession({
+      workspaceId: workspace.id,
+      createdAt: 'now',
+      title: 'Removing the composer hint bar',
+      lastActivityAt: 'later',
+      titlingSpend: 0.02
+    })
+
+    expect(createShellStore(file).session(session.id)).toEqual({
+      id: session.id,
+      workspaceId: workspace.id,
+      createdAt: 'now',
+      title: 'Removing the composer hint bar',
+      lastActivityAt: 'later',
+      titlingSpend: 0.02
+    })
+  })
+
+  // A store written before sessions had titles loads exactly as it did, and
+  // the session simply has none.
+  it('loads a session with no title, activity or spend of its own', () => {
+    const written = join(directory, 'shell-state.json')
+    writeFileSync(
+      written,
+      JSON.stringify({
+        version: 1,
+        workspaces: [{ id: 'w', path: '/repos/crucible' }],
+        sessions: [
+          { id: 'older', workspaceId: 'w', createdAt: 'now' },
+          { id: 'nonsense', workspaceId: 'w', createdAt: 'now', title: 7, titlingSpend: 'lots' }
+        ],
+        activeSessionByWorkspace: {}
+      })
+    )
+
+    const store = createShellStore(written)
+
+    expect(store.session('older')).toEqual({ id: 'older', workspaceId: 'w', createdAt: 'now' })
+    expect(store.session('nonsense')?.title).toBeUndefined()
+    expect(store.session('nonsense')?.titlingSpend).toBeUndefined()
+  })
+
   // Absent reads as not restorable, which is the safe way to load a stamp this
   // build cannot vouch for.
   it('loads a flavor that is not a launch flavor, or has no token, as absent', () => {

@@ -9,6 +9,7 @@ import { Shell } from './Shell'
 import { createScriptedPort, oneSession, type ScriptedPort } from './testing/scripted-port'
 import { createScriptedWorkspace } from './testing/scripted-workspace'
 import { createScriptedCommands } from './testing/scripted-commands'
+import { sessionRows, sessionsShown } from './testing/sidebar'
 import { settled } from './testing/settled'
 
 const TREE: SessionTree = {
@@ -67,7 +68,7 @@ async function shell(
       workspace={createScriptedWorkspace()}
       commands={createScriptedCommands()}
     />)
-  await screen.findAllByRole('button', { name: /^Session · / })
+  await sessionsShown()
   await settled()
   return port
 }
@@ -322,7 +323,7 @@ describe('a jump', () => {
     expect(screen.getByRole('log')).toHaveTextContent('Scaffold the resume overlay component.')
     expect(box()).toHaveValue('Hook the overlay up to ⌘O.')
     // In place: no new sidebar entry, and no guard dialog either.
-    expect(screen.getAllByRole('button', { name: /^Session · / })).toHaveLength(1)
+    expect(sessionRows()).toHaveLength(1)
     expect(screen.queryByRole('dialog', { name: /Invalidate/ })).toBeNull()
     expect(screen.getByRole('status')).toHaveTextContent('Jumped —')
   })

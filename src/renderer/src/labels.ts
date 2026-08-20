@@ -1,12 +1,7 @@
-import type { SessionState } from '../../shared/agent/port'
-
-// One format in one place, so the sidebar and the top bar cannot drift into
-// two names for one session.
-export function sessionLabel(session: Pick<SessionState, 'createdAt'>): string {
-  const at = new Date(session.createdAt)
-  if (Number.isNaN(at.getTime())) return 'Session'
-  return `Session · ${at.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}`
-}
+// The small display formats, in one place so two components cannot drift into
+// two spellings of one fact. A session's name is not among them: a small model
+// writes the session title, and the sidebar shows it with `relativeTime`
+// trailing the words.
 
 /** The clock time a tree node carries: `2:04 PM`, and nothing when unknown. */
 export function clockTime(iso: string): string {

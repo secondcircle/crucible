@@ -50,6 +50,9 @@ export interface ShellOptions {
   readonly pickFolder: () => Promise<string | null>
   // Lets an agent-driven check reach a chattable state without an OS dialog.
   readonly seedWorkspacePath?: string
+  // A titling pass nobody asked for and nobody is shown: its failure goes to
+  // the run log through here and nowhere else.
+  readonly onTitlingFailure?: (cause: unknown) => void
 }
 
 // What this shell put into the conversation itself and therefore owes an
@@ -89,7 +92,8 @@ export function createShell({
   flavor,
   panel,
   pickFolder,
-  seedWorkspacePath
+  seedWorkspacePath,
+  onTitlingFailure = () => {}
 }: ShellOptions): Shell {
   const listeners = new Set<PortEventListener>()
   const live = new Map<SessionId, LiveTurn>()
@@ -105,6 +109,10 @@ export function createShell({
   // Removing a session stops its turn, and a stop hands the queue back, which
   // a session on its way out has no composer left to receive.
   const removing = new Set<SessionId>()
+  // At most one titling pass per session at a time. `again` is every trigger
+  // that arrived during one, coalesced into a single follow-up pass; `stale`
+  // is a pass whose conversation was replaced while it ran.
+  const titling = new Map<SessionId, { again: boolean; stale: boolean }>()
   const bindings = new Map<SessionId, Promise<Binding>>()
   let turns = 0
 
@@ -125,10 +133,14 @@ export function createShell({
         id: session.id,
         workspaceId: session.workspaceId,
         createdAt: session.createdAt,
+        ...(session.title === undefined ? {} : { title: session.title }),
+        ...(session.lastActivityAt === undefined
+          ? {}
+          : { lastActivityAt: session.lastActivityAt }),
         model: session.model,
         thinkingLevel: session.thinkingLevel,
         working: live.has(session.id),
-        ...(reported === undefined ? {} : { usage: reported }),
+        ...(reported === undefined ? {} : { usage: withTitlingSpend(session.id, reported) }),
         ...(queued(queue) ? { queue } : {}),
         ...(tabs === undefined ? {} : { panel: tabs })
       }
@@ -148,6 +160,71 @@ export function createShell({
 
   function emitState(): void {
     emit({ type: 'state', snapshot: snapshot() })
+  }
+
+  // What the session's `$` chip reads: the conversation's dollars plus what
+  // naming it cost. A dash stays a dash, because ignorance is not
+  // under-reporting.
+  function withTitlingSpend(
+    id: SessionId,
+    reported: { usedTokens: number; contextWindow: number; cost?: number }
+  ): { usedTokens: number; contextWindow: number; cost?: number } {
+    const spend = store.session(id)?.titlingSpend ?? 0
+    if (reported.cost === undefined || spend === 0) return reported
+    return { ...reported, cost: reported.cost + spend }
+  }
+
+  /** Stamped on every moment the sidebar's relative time should count from. */
+  function touch(id: SessionId): void {
+    if (store.session(id) === undefined) return
+    store.updateSession(id, { lastActivityAt: new Date().toISOString() })
+  }
+
+  // The conversation a live pass is reading is about to be replaced, so
+  // whatever it comes back with belongs to nothing, and the triggers it
+  // gathered belong to nothing either.
+  function forgetTitle(id: SessionId): void {
+    const running = titling.get(id)
+    if (running !== undefined) {
+      running.stale = true
+      running.again = false
+    }
+    store.updateSession(id, { title: undefined, titlingSpend: undefined })
+  }
+
+  // Titling is agent-side work behind the port; when to do it is the shell's.
+  // A pass that fails is logged and otherwise ignored: the last good title
+  // stays, and nothing flashes back to the untitled state.
+  function requestTitle(id: SessionId): void {
+    const running = titling.get(id)
+    if (running !== undefined) {
+      running.again = true
+      return
+    }
+    const pass = { again: false, stale: false }
+    titling.set(id, pass)
+    void adapter
+      .titleConversation(id)
+      .then((titled) => {
+        // A pass answering nothing changes nothing at all.
+        if (titled === undefined) return
+        // Nor does one that names a conversation this session no longer has.
+        if (pass.stale) return
+        const session = store.session(id)
+        if (session === undefined) return
+        store.updateSession(id, {
+          title: titled.title,
+          // The titler's dollars are the session's: hiding them would make the
+          // meter under-report what was really spent.
+          titlingSpend: (session.titlingSpend ?? 0) + (titled.spend?.cost ?? 0)
+        })
+        emitState()
+      })
+      .catch(onTitlingFailure)
+      .finally(() => {
+        titling.delete(id)
+        if (pass.again && store.session(id) !== undefined) requestTitle(id)
+      })
   }
 
   function refuse(message: string): never {
@@ -204,8 +281,12 @@ export function createShell({
           usage.delete(id)
           queues.delete(id)
           panel.reset(id)
+          forgetTitle(id)
         }
         emitState()
+        // A conversation that came back without a stored title earns one from
+        // what it already holds.
+        if (store.session(id)?.title === undefined) requestTitle(id)
         return bound
       })
       .catch((cause: unknown) => {
@@ -240,6 +321,11 @@ export function createShell({
   function endTurn(sessionId: SessionId, turn: LiveTurn): void {
     live.delete(sessionId)
     turn.settled(turn.cancelled ? 'stopped' : 'ended')
+    // However the turn ended, the conversation says something new about what
+    // this session is about — unless the session itself is on its way out.
+    if (removing.has(sessionId)) return
+    touch(sessionId)
+    requestTitle(sessionId)
   }
 
   // A message this shell put into the conversation itself is announced right
@@ -248,6 +334,10 @@ export function createShell({
     if (turn.started) return
     turn.started = true
     const turnId = turn.turnId
+    // The new user message is content enough for a first or refreshed title,
+    // so a working session is not stuck on the untitled state for the turn.
+    touch(sessionId)
+    requestTitle(sessionId)
     emit({ type: 'turn_started', sessionId, turnId })
     const announce = turn.announce
     if (announce === undefined) return
@@ -641,6 +731,7 @@ export function createShell({
       // A queue has nowhere to be restored to once the entry holding it is
       // gone.
       queues.delete(id)
+      titling.delete(id)
       // Removing a session forgets its tabs with it: the persisted copy went
       // out with the session record.
       panel.forget(id)
@@ -663,6 +754,9 @@ export function createShell({
       // to saying nothing rather than keeping the old session's numbers.
       usage.delete(id)
       queues.delete(id)
+      // The conversation the title described is gone, and so is what naming it
+      // cost: the row reads untitled again until the fresh one earns a title.
+      forgetTitle(id)
       // A fresh conversation never inherits a ghost panel, so the tabs and the
       // turn counter go with the old one.
       panel.reset(id)
@@ -699,7 +793,9 @@ export function createShell({
       })
       if (existing !== undefined) {
         store.activateSession(existing.id)
+        touch(existing.id)
         emitState()
+        if (existing.title === undefined) requestTitle(existing.id)
         return existing.id
       }
 
@@ -722,7 +818,10 @@ export function createShell({
         emitState()
         refuse(displaySafeMessage(cause, 'That conversation could not be resumed.'))
       }
+      touch(stored.id)
       emitState()
+      // A resumed conversation has everything a title needs and no stored one.
+      requestTitle(stored.id)
       return stored.id
     },
 
@@ -790,22 +889,33 @@ export function createShell({
       const workspace = store.workspace(session.workspaceId)
       if (workspace === undefined) return undefined
       const token = restorableToken(session)
-      return adapter.sessionUsage({
+      const summed = await adapter.sessionUsage({
         sessionId: id,
         workspacePath: workspace.path,
         ...(token === undefined ? {} : { token })
       })
+      const spend = session.titlingSpend ?? 0
+      if (summed === undefined || spend === 0) return summed
+      // The four per-kind lines stay the conversation's own, so a total that
+      // exceeds their sum by the titling spend is correct and deliberate.
+      return { ...summed, totalCost: summed.totalCost + spend }
     },
 
+    // Allowed while the session works: the model applies to the next turn, and
+    // nothing about the live one changes. Only the thinking level, whose change
+    // invalidates the prompt cache, waits for the turn to be over.
     async setModel(sessionId: SessionId, model: ModelId): Promise<void> {
       requireSession(sessionId)
-      // Read again after the bind, because a turn can start while a first-time
-      // bind is in flight.
-      if (live.has(sessionId)) refuse('That session is working. Stop it first.')
       await ensureBound(sessionId)
-      if (live.has(sessionId)) refuse('That session is working. Stop it first.')
-      await adapter.setModel(sessionId, model)
-      store.updateSession(sessionId, { model })
+      const applied = await adapter.setModel(sessionId, model)
+      // The level the adapter reports after the switch, because the new model
+      // may not support the one the session was on. Crucible names none.
+      store.updateSession(sessionId, {
+        model,
+        ...(applied.thinkingLevel === undefined
+          ? {}
+          : { thinkingLevel: applied.thinkingLevel })
+      })
       store.setLastModel(model)
       emitState()
     },

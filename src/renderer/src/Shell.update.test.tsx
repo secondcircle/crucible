@@ -13,6 +13,7 @@ import { Shell } from './Shell'
 import { createScriptedPort, oneSession } from './testing/scripted-port'
 import { createScriptedCommands } from './testing/scripted-commands'
 import { createScriptedWorkspace } from './testing/scripted-workspace'
+import { sessionsShown } from './testing/sidebar'
 import { settled } from './testing/settled'
 
 const MODEL = { id: 'fake/deterministic', label: 'Fake', thinkingLevels: ['off', 'low'] }
@@ -52,7 +53,7 @@ async function shellWith(appUpdate?: AppUpdateService): Promise<void> {
       appUpdate={appUpdate}
     />
   )
-  await screen.findByRole('button', { name: /^Session · / })
+  await sessionsShown()
   await settled()
 }
 

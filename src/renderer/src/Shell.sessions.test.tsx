@@ -8,6 +8,7 @@ import { Shell } from './Shell'
 import { createScriptedPort, oneSession, type ScriptedPort } from './testing/scripted-port'
 import { createScriptedWorkspace } from './testing/scripted-workspace'
 import { createScriptedCommands } from './testing/scripted-commands'
+import { sessionRows, sessionsShown } from './testing/sidebar'
 import { settled } from './testing/settled'
 
 const MODEL = { id: 'fake/deterministic', label: 'Fake', thinkingLevels: ['off', 'low'] }
@@ -20,15 +21,12 @@ async function shellWithSession(): Promise<ScriptedPort> {
       workspace={createScriptedWorkspace()}
       commands={createScriptedCommands()}
     />)
-  await screen.findByRole('button', { name: /^Session · / })
+  await sessionsShown()
   await settled()
   return port
 }
 
 const ops = (port: ScriptedPort): string[] => port.calls.map((call) => call.op)
-
-const sessionRows = (): HTMLElement[] =>
-  screen.queryAllByRole('button', { name: /^Session · \d/ })
 
 describe('workspaces', () => {
   it('opens the folder picker, and changes nothing when it is cancelled', async () => {
@@ -128,7 +126,7 @@ describe('sessions', () => {
   it('shows a neutral placeholder label and offers no way to rename it', async () => {
     await shellWithSession()
 
-    expect(sessionRows()[0].textContent).toMatch(/^Session · \d/)
+    expect(sessionRows()[0].textContent).toMatch(/^Wiring the composer/)
     expect(screen.queryByRole('button', { name: /rename/i })).toBeNull()
     expect(screen.queryByRole('textbox', { name: /name/i })).toBeNull()
   })
@@ -137,7 +135,7 @@ describe('sessions', () => {
     const port = await shellWithSession()
 
     await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: /^Remove Session · / }))
+      fireEvent.click(screen.getByRole('button', { name: /^Remove Wiring the composer/ }))
     })
 
     expect(port.calls).toContainEqual({ op: 'removeSession', args: ['s1'] })
@@ -307,22 +305,51 @@ describe('resume', () => {
 })
 
 describe('what the top bar says', () => {
-  it('is the session, the workspace and the model, all real', async () => {
+  // Everything left of the Tree button was a second copy of something already
+  // on screen, so the bar says none of it.
+  it('repeats nothing the sidebar or the composer chip already says', async () => {
     await shellWithSession()
 
     const header = screen.getByRole('banner')
-    expect(header.textContent).toMatch(/Session · \d/)
-    expect(header.textContent).toContain('crucible')
-    expect(header.textContent).toContain('Fake')
+    expect(header.textContent).not.toContain('Wiring the composer')
+    expect(header.textContent).not.toContain('crucible')
+    expect(header.textContent).not.toContain('Fake')
+    expect(within(header).queryByLabelText('Agent working')).toBeNull()
   })
 
-  it('shows working state only while the session works', async () => {
+  it('starts at the Tree button and keeps the right-hand cluster', async () => {
+    await shellWithSession()
+
+    const header = screen.getByRole('banner')
+    const controls = within(header).getAllByRole('button').map((button) => button.getAttribute('aria-label'))
+    expect(controls[0]).toBe('Session tree')
+    expect(controls).toEqual(['Session tree', 'Session cost', 'Settings', 'Session menu'])
+  })
+
+  it('keeps the same shape with no session at all', async () => {
     const port = await shellWithSession()
 
-    expect(screen.queryByLabelText('Agent working')).toBeNull()
+    await act(async () => {
+      await port.removeSession('s1')
+    })
+
+    const header = screen.getByRole('banner')
+    expect(
+      within(header).getAllByRole('button').map((button) => button.getAttribute('aria-label'))
+    ).toEqual(['Settings'])
+    expect(header.textContent).not.toContain('No session')
+  })
+
+  it('leaves the working state to the sidebar row', async () => {
+    const port = await shellWithSession()
+
     await act(async () => {
       await port.prompt('s1', 'go')
     })
-    expect(screen.getByLabelText('Agent working')).toBeInTheDocument()
+
+    expect(screen.queryByLabelText('Agent working')).toBeNull()
+    expect(
+      screen.getByRole('button', { name: 'Wiring the composer to the agent port (working)' })
+    ).toBeInTheDocument()
   })
 })

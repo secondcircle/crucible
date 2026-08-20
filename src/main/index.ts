@@ -130,7 +130,17 @@ const shell = withLogging(
     flavor,
     panel,
     pickFolder,
-    seedWorkspacePath: seedWorkspacePath()
+    seedWorkspacePath: seedWorkspacePath(),
+    // Nobody asked for a title, so nobody is told it failed: the run log is
+    // the whole of the report.
+    onTitlingFailure: (cause) => {
+      log.append({
+        source: 'main',
+        event: 'titling_failed',
+        adapter: flavor,
+        message: cause instanceof Error ? cause.message : String(cause)
+      })
+    }
   }),
   log,
   flavor

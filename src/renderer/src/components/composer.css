@@ -106,11 +106,16 @@
   border-radius: 2px;
 }
 
+/* Live state only: no keyboard hint lives here, and the row reserves its
+   height in every state, so an idle composer is quiet without anything above
+   or below it moving when the working, bash or held-back state lands. */
 .esc {
   text-align: center;
   font-size: 11.5px;
   color: var(--faint);
   margin-top: 8px;
+  min-height: 21px;
+  line-height: 21px;
 }
 
 .esc .workingnote {
@@ -255,17 +260,25 @@ kbd {
   margin-bottom: 8px;
 }
 
+/* Capped in both directions: a wide screenshot is clipped inside the chip
+   rather than stretching the row it sits in. */
 .imgchip {
   position: relative;
   border: 1px solid var(--line);
   border-radius: 6px;
   overflow: hidden;
   height: 52px;
+  max-width: 156px;
   display: block;
+  flex: none;
 }
 
+/* The chip's own `overflow: hidden` does the clipping, so a wide image is cut
+   off at the cap instead of widening anything. */
 .imgchip img {
   height: 100%;
+  width: auto;
+  max-width: none;
   display: block;
 }
 
@@ -366,10 +379,6 @@ kbd {
 }
 
 .modebadge.command {
-  color: var(--thinking);
-}
-
-.esc .cmdnote {
   color: var(--thinking);
 }
 

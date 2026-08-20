@@ -35,6 +35,10 @@ export type ViewItem =
       readonly output: string
       readonly ok?: boolean
       readonly running: boolean
+      // Argument characters streamed so far. Present only before the call
+      // begins running, which is what the pending readout counts; the real
+      // summary replaces it the moment execution starts.
+      readonly argChars?: number
     }
   | {
       readonly kind: 'bashRun'
@@ -253,7 +257,57 @@ function heard(state: ShellState, event: PortEvent, at: number): ShellState {
         items: appendThinking(view.items, event.delta, at)
       })
 
-    case 'tool_started':
+    // The model has committed to the call: the element exists from here, with
+    // a growing count of streamed arguments and never a line of their JSON.
+    case 'tool_call_started':
+      return withView(state, sessionId, {
+        ...view,
+        items: [
+          ...settle(view.items, at),
+          {
+            kind: 'tool',
+            callId: event.callId,
+            name: event.name,
+            summary: '',
+            output: '',
+            running: true,
+            argChars: 0
+          }
+        ]
+      })
+
+    case 'tool_call_args':
+      return withView(state, sessionId, {
+        ...view,
+        items: mapCall(view.items, event.callId, (tool) => ({
+          // Monotonic, so a frame that arrives out of order cannot make the
+          // readout count backwards.
+          ...tool,
+          argChars: Math.max(tool.argChars ?? 0, event.chars)
+        }))
+      })
+
+    case 'tool_started': {
+      // The same element, upgraded in place: a call that announced itself
+      // while its arguments streamed is not appended a second time.
+      const announced = view.items.some(
+        (item) => item.kind === 'tool' && item.callId === event.callId
+      )
+      if (announced) {
+        return withView(state, sessionId, {
+          ...view,
+          // Rebuilt rather than spread, so the argument count is genuinely gone
+          // and the real summary takes its slot.
+          items: mapCall(view.items, event.callId, (tool) => ({
+            kind: 'tool',
+            callId: tool.callId,
+            name: event.name,
+            summary: event.summary,
+            output: tool.output,
+            running: true
+          }))
+        })
+      }
       return withView(state, sessionId, {
         ...view,
         items: [
@@ -268,6 +322,7 @@ function heard(state: ShellState, event: PortEvent, at: number): ShellState {
           }
         ]
       })
+    }
 
     case 'tool_output':
       return withView(state, sessionId, {

@@ -36,19 +36,42 @@ export function ContextPanel({
   // Set for as long as a drag is under way, so a panel that goes away
   // mid-drag takes its listeners with it.
   const endDrag = useRef<(() => void) | undefined>(undefined)
+  const divider = useRef<HTMLDivElement>(null)
 
   useEffect(() => () => endDrag.current?.(), [])
 
-  function startDrag(): void {
+  function startDrag(pressed: React.MouseEvent): void {
     if (endDrag.current !== undefined) return
+    // Without this the press begins a native selection drag, which is what
+    // takes the col-resize cursor away and highlights text while resizing.
+    pressed.preventDefault()
+    const body = document.body
+    const selection = body.style.userSelect
+    body.style.userSelect = 'none'
+    // An exhibit frame is a window of its own and would take the pointer the
+    // moment the drag passed over it, stranding the divider mid-drag.
+    const panel = divider.current?.nextElementSibling as HTMLElement | null
+    const pointers = panel?.style.pointerEvents ?? ''
+    if (panel !== null && panel !== undefined) panel.style.pointerEvents = 'none'
 
     function onMove(moved: MouseEvent): void {
-      const room = window.innerWidth - MIN_CHAT
-      onResize(Math.max(MIN_PANEL, Math.min(window.innerWidth - moved.clientX, room)))
+      // Measured from the row the panel is really in, which also holds the
+      // sidebar and this divider. Treating the window as chat plus panel lets
+      // the panel claim width the layout cannot give it: the divider then pins
+      // while the surplus is clipped off the right edge, and dragging back
+      // does nothing until that hidden width is spent.
+      const line = divider.current?.getBoundingClientRect().width ?? 0
+      const right = divider.current?.parentElement?.getBoundingClientRect().right ?? 0
+      const chat = divider.current?.previousElementSibling ?? null
+      const chatLeft = chat === null ? 0 : chat.getBoundingClientRect().left
+      const room = Math.max(MIN_PANEL, right - chatLeft - line - MIN_CHAT)
+      onResize(Math.max(MIN_PANEL, Math.min(right - moved.clientX, room)))
     }
 
     function onUp(): void {
       endDrag.current = undefined
+      body.style.userSelect = selection
+      if (panel !== null && panel !== undefined) panel.style.pointerEvents = pointers
       window.removeEventListener('mousemove', onMove)
       window.removeEventListener('mouseup', onUp)
     }
@@ -66,6 +89,7 @@ export function ContextPanel({
         role="separator"
         aria-label="Resize context panel"
         aria-orientation="vertical"
+        ref={divider}
         onMouseDown={startDrag}
       />
 

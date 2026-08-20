@@ -750,14 +750,36 @@ describe('models and thinking levels', () => {
     await expect(shell.setThinkingLevel(sessionId, 'xhigh')).rejects.toThrow()
   })
 
-  it('refuses a change while that session is working', async () => {
+  it('refuses a thinking change while that session is working', async () => {
     const { sessionId } = await withSession()
     const turn = shell.prompt(sessionId, 'hello')
 
     await expect(shell.setThinkingLevel(sessionId, 'high')).rejects.toThrow(/working/i)
-    await expect(shell.setModel(sessionId, 'fake/deterministic')).rejects.toThrow(/working/i)
 
     await turn
+  })
+
+  // The model ring switches mid-turn, and a model change costs nothing until
+  // the next turn uses it.
+  it('takes a model change while that session is working', async () => {
+    const { sessionId } = await withSession()
+    const turn = shell.prompt(sessionId, 'hello')
+
+    await shell.setModel(sessionId, 'fake/deterministic')
+    expect(sessionOf(await shell.snapshot(), sessionId)?.model).toBe('fake/deterministic')
+
+    await turn
+  })
+
+  // Whatever level \u03c0 lands on for the new model is what the session gets:
+  // Crucible carries none of its own across the switch.
+  it('folds the level the adapter reports after a model change into the snapshot', async () => {
+    const { sessionId } = await withSession()
+    await shell.setThinkingLevel(sessionId, 'high')
+
+    await shell.setModel(sessionId, 'fake/deterministic')
+
+    expect(sessionOf(await shell.snapshot(), sessionId)?.thinkingLevel).toBe('high')
   })
 })
 

@@ -1,3 +1,4 @@
+import { tokens } from '../labels'
 import type { ViewItem } from './shell-state'
 
 // A derivation over the flat item list rather than a second shape the reducer
@@ -101,6 +102,14 @@ function describe(calls: readonly ToolItem[], startedAt: number): ToolChain {
     state,
     label
   }
+}
+
+// What a call says about itself on one line. Before it runs that is the count
+// of arguments streamed so far, in the meter's own shorthand; from execution
+// start it is the real summary. Half-parsed JSON is never shown.
+export function callSummary(call: ToolItem): string {
+  if (call.argChars === undefined) return call.summary
+  return `arguments · ${tokens(call.argChars)}`
 }
 
 /** `3 bash · 2 read`, or nothing at all until the first call has landed. */
