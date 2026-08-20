@@ -51,8 +51,10 @@ boilerplate run; each block below is roughly one align + build.)
 - @ file mentions, image paste, drag-drop attachments
 - Export / import / share
 - Prompt templates, skills UI, themes, settings window (beyond login + what the chips cover)
-- `!bash` composer commands — likely never (TUI-ism)
-- Slash commands — never; every command is a GUI affordance (ruled)
+- `!bash` composer commands — ruled back in (2026-08-19 align); mechanism designed there
+- Slash commands — re-ruled 2026-08-19: every capability gets a GUI affordance
+  (mouse/dictation-friendly); typed shortcuts may exist as accelerators, never
+  as the only path
 - Detach windows (pattern agreed, built when the context/workflow regions arrive)
 - Workflow surface, context pane — Crucible-specific, own track, not π parity
 

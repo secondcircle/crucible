@@ -1,0 +1,384 @@
+<!doctype html>
+<!-- Mock I — the session tree, full overlay over the transcript region.
+     Interactive: type in the search box to filter nodes; click any node to
+     open its action card; "Continue from here" / "Continue with summary"
+     simulate the jump; press L with a node selected to toggle a label;
+     Esc closes the overlay (reopen with the Tree button in the top bar). -->
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Mock I — session tree</title>
+<style>
+  /* tokens, verbatim from src/renderer/src/styles/tokens.css */
+  :root {
+    --bg: #191419; --bg2: #211a20; --panel: #241c23; --panel2: #2e242d;
+    --line: #3a2e38; --code: #120e12; --code-deep: #0d0a0d; --user: #2c2230;
+    --think-bg: #161018; --error-bg: #1d1113;
+    --ink: #e8dfe2; --dim: #9b8a94; --faint: #6b5d66;
+    --code-ink: #d7c9b8; --output-ink: #cbbfa4; --on-accent: #1c120c;
+    --accent: #e07a4f; --accent2: #f0a37c; --ok: #7fb069; --error: #d96a5a;
+    --thinking: #b08cc9;
+    --font: -apple-system, 'Segoe UI', system-ui, sans-serif;
+    --mono: ui-monospace, 'SF Mono', Menlo, monospace;
+    --radius: 8px; --radius-lg: 12px; --column: 680px;
+  }
+  * { box-sizing: border-box; margin: 0; }
+  html, body { height: 100%; }
+  body {
+    background: var(--bg); color: var(--ink);
+    font: 14px/1.55 var(--font); overflow: hidden;
+    display: flex; flex-direction: column;
+  }
+  button, input { font: inherit; color: inherit; }
+  button { cursor: pointer; }
+  ::-webkit-scrollbar { width: 10px; }
+  ::-webkit-scrollbar-thumb { background: var(--line); border-radius: 6px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+
+  .mockbar {
+    flex: none; display: flex; align-items: center; gap: 10px;
+    padding: 8px 16px; border-bottom: 1px solid var(--line);
+    font-size: 11.5px; color: var(--faint);
+  }
+
+  /* ——— app top bar ——— */
+  .topbar {
+    flex: none; display: flex; align-items: center; gap: 14px;
+    padding: 10px 20px; border-bottom: 1px solid var(--line);
+    background: var(--bg2);
+  }
+  .topbar .title { font-size: 13px; color: var(--ink); }
+  .topbar .meta { font-size: 11.5px; color: var(--faint); }
+  .treebtn {
+    margin-left: auto; display: flex; gap: 7px; align-items: center;
+    background: var(--panel); border: 1px solid var(--line);
+    border-radius: 7px; padding: 5px 12px; font-size: 12.5px; color: var(--dim);
+  }
+  .treebtn:hover { color: var(--ink); border-color: var(--dim); }
+  .treebtn.active { color: var(--accent2); border-color: var(--accent); }
+  .treebtn .hint { color: var(--faint); font-size: 10.5px; }
+  .ctx { font-size: 11.5px; color: var(--faint); }
+
+  /* ——— transcript behind the overlay ——— */
+  .stage { position: relative; flex: 1; min-height: 0; display: flex; }
+  .chat { flex: 1; overflow-y: auto; padding: 28px 0; }
+  .msg { max-width: var(--column); margin: 0 auto 20px; padding: 0 24px; }
+  .msg .who {
+    font-size: 11px; text-transform: uppercase; letter-spacing: 0.1em;
+    color: var(--faint); margin-bottom: 6px;
+  }
+  .msg.agent .who { color: var(--accent); }
+  .msg.user .bubble {
+    background: var(--user); border: 1px solid var(--line);
+    border-radius: 10px; padding: 10px 14px;
+  }
+
+  /* ——— the tree overlay ——— */
+  .overlay {
+    position: absolute; inset: 0; background: var(--bg);
+    display: flex; flex-direction: column;
+  }
+  .overlay.closed { display: none; }
+
+  .treehead {
+    flex: none; max-width: var(--column); width: 100%; margin: 0 auto;
+    padding: 18px 24px 10px; display: flex; align-items: center; gap: 12px;
+  }
+  .treehead h1 {
+    font-size: 13px; font-weight: 600; letter-spacing: 0.08em;
+    text-transform: uppercase; color: var(--accent);
+  }
+  .treehead .esc { margin-left: auto; font-size: 11px; color: var(--faint); }
+
+  .search {
+    flex: none; max-width: var(--column); width: 100%; margin: 0 auto;
+    padding: 0 24px 14px;
+  }
+  .search input {
+    width: 100%; background: var(--panel); border: 1px solid var(--line);
+    border-radius: var(--radius); padding: 8px 12px; font-size: 13px;
+    color: var(--ink); outline: none;
+  }
+  .search input:focus { border-color: var(--accent); }
+  .search .count { font-size: 11px; color: var(--faint); margin-top: 5px; }
+
+  .nodes { flex: 1; overflow-y: auto; padding-bottom: 40px; }
+  .rail { max-width: var(--column); margin: 0 auto; padding: 0 24px; }
+
+  /* a user-message node */
+  .node { position: relative; padding-left: 22px; margin-bottom: 2px; }
+  .node::before {
+    content: ''; position: absolute; left: 7px; top: 0; bottom: 0;
+    width: 2px; background: var(--line);
+  }
+  .node.onpath::before { background: var(--accent); opacity: 0.55; }
+  .node .dot {
+    position: absolute; left: 2px; top: 14px; width: 12px; height: 12px;
+    border-radius: 50%; background: var(--bg); border: 2px solid var(--faint);
+  }
+  .node.onpath .dot { border-color: var(--accent); }
+  .node.leaf .dot { background: var(--accent); border-color: var(--accent); }
+
+  .nodecard {
+    display: block; width: 100%; text-align: left;
+    background: var(--panel); border: 1px solid var(--line);
+    border-radius: var(--radius); padding: 8px 12px; margin: 4px 0;
+    color: var(--ink); font-size: 13px;
+  }
+  .nodecard:hover { border-color: var(--dim); }
+  .node.selected .nodecard { border-color: var(--accent); }
+  .node.offpath .nodecard { color: var(--dim); background: var(--bg2); }
+  .nodetext {
+    overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+  }
+  .noderow { display: flex; gap: 8px; align-items: center; margin-top: 4px; }
+  .label {
+    font-size: 10.5px; padding: 1px 8px; border-radius: 9px;
+    border: 1px solid var(--accent); color: var(--accent2);
+    text-transform: uppercase; letter-spacing: 0.06em;
+  }
+  .youarehere {
+    font-size: 10.5px; color: var(--on-accent); background: var(--accent);
+    padding: 1px 8px; border-radius: 9px; text-transform: uppercase;
+    letter-spacing: 0.06em;
+  }
+  .when { margin-left: auto; font-size: 10.5px; color: var(--faint); }
+
+  /* the connective tissue between user nodes */
+  .between {
+    position: relative; padding-left: 22px;
+    font-size: 11px; color: var(--faint); padding-top: 2px; padding-bottom: 2px;
+  }
+  .between::before {
+    content: ''; position: absolute; left: 7px; top: 0; bottom: 0;
+    width: 2px; background: var(--line);
+  }
+  .between.onpath::before { background: var(--accent); opacity: 0.55; }
+
+  /* a branch that leaves the active path */
+  .fork { position: relative; padding-left: 22px; }
+  .fork::before {
+    content: ''; position: absolute; left: 7px; top: 0; bottom: 0;
+    width: 2px; background: var(--accent); opacity: 0.55;
+  }
+  .forkbody {
+    margin: 2px 0 6px 18px; padding: 2px 0 2px 0;
+    border-left: 2px solid var(--line); border-radius: 2px;
+  }
+  .forkbody .node { margin-left: 8px; }
+  .forkbody .node::before { display: none; }
+  .forkbody .node .dot { display: none; }
+  .forktag {
+    font-size: 10.5px; color: var(--faint); text-transform: uppercase;
+    letter-spacing: 0.08em; margin: 2px 0 2px 10px;
+  }
+
+  /* ——— action card ——— */
+  .actions {
+    display: none; margin: 2px 0 10px 0; padding: 10px 12px;
+    background: var(--panel2); border: 1px solid var(--line);
+    border-radius: var(--radius);
+  }
+  .node.selected .actions { display: block; }
+  .actions .row { display: flex; gap: 8px; flex-wrap: wrap; }
+  .act {
+    background: var(--panel); border: 1px solid var(--line);
+    border-radius: 7px; padding: 5px 12px; font-size: 12.5px; color: var(--ink);
+  }
+  .act:hover { border-color: var(--accent); color: var(--accent2); }
+  .act .k { color: var(--faint); font-size: 10.5px; margin-left: 6px; }
+  .actnote { font-size: 11px; color: var(--faint); margin-top: 7px; }
+
+  .footer {
+    flex: none; border-top: 1px solid var(--line); background: var(--bg2);
+    padding: 7px 24px; font-size: 11px; color: var(--faint);
+    display: flex; gap: 18px; justify-content: center;
+  }
+
+  /* jump toast */
+  .toast {
+    position: absolute; left: 50%; bottom: 26px; transform: translateX(-50%);
+    background: var(--panel2); border: 1px solid var(--accent);
+    color: var(--ink); border-radius: var(--radius); padding: 9px 16px;
+    font-size: 12.5px; display: none;
+  }
+</style>
+</head>
+<body>
+
+<div class="mockbar">Mock I — session tree · full overlay · click a node for actions · type to search · Esc closes</div>
+
+<div class="topbar">
+  <span class="title">Aug 19 · 2:04 PM</span>
+  <span class="meta">~/repos/crucible</span>
+  <button class="treebtn active" id="treebtn">
+    ⑂ Tree <span class="hint">esc esc</span>
+  </button>
+  <span class="ctx">context 38%</span>
+</div>
+
+<div class="stage">
+  <div class="chat">
+    <div class="msg user"><div class="who">You</div><div class="bubble">Now wire the resume overlay to real history search.</div></div>
+    <div class="msg agent"><div class="who">Agent</div><div>Done — the overlay now queries searchHistory through the port…</div></div>
+  </div>
+
+  <div class="overlay" id="overlay">
+    <div class="treehead">
+      <h1>Session tree</h1>
+      <span class="esc">esc to close</span>
+    </div>
+    <div class="search">
+      <input id="q" placeholder="Search this session…" autofocus />
+      <div class="count" id="count"></div>
+    </div>
+
+    <div class="nodes"><div class="rail" id="rail">
+
+      <div class="node onpath" data-text="scaffold the resume overlay component">
+        <span class="dot"></span>
+        <button class="nodecard"><div class="nodetext">Scaffold the resume overlay component with a search field and result list.</div>
+          <div class="noderow"><span class="when">1:12 PM</span></div></button>
+        <div class="actions"><div class="row">
+          <button class="act jump">Continue from here <span class="k">⏎</span></button>
+          <button class="act sum">Continue with summary <span class="k">s</span></button>
+          <button class="act lbl">Label <span class="k">l</span></button>
+        </div><div class="actnote">Continuing from a user message puts it back in the composer, unsent — the conversation stands at the moment before you pressed enter.</div></div>
+      </div>
+      <div class="between onpath">assistant · 2 edit · 1 bash · tests green</div>
+
+      <div class="node onpath" data-text="hook the overlay up to cmd o and make results keyboard navigable">
+        <span class="dot"></span>
+        <button class="nodecard"><div class="nodetext">Hook the overlay up to ⌘O and make the results keyboard-navigable.</div>
+          <div class="noderow"><span class="label">checkpoint</span><span class="when">1:31 PM</span></div></button>
+        <div class="actions"><div class="row">
+          <button class="act jump">Continue from here <span class="k">⏎</span></button>
+          <button class="act sum">Continue with summary <span class="k">s</span></button>
+          <button class="act lbl">Remove label <span class="k">l</span></button>
+        </div><div class="actnote">Continuing from a user message puts it back in the composer, unsent.</div></div>
+      </div>
+      <div class="between onpath">assistant · 4 edit · 2 bash</div>
+
+      <!-- a branch point: an abandoned line hangs off the active path -->
+      <div class="fork">
+        <div class="forktag">⑂ branch · abandoned 1:58 PM</div>
+        <div class="forkbody">
+          <div class="node offpath" data-text="try a modal dialog instead of the overlay">
+            <button class="nodecard"><div class="nodetext">Actually, try a modal dialog instead of the overlay.</div>
+              <div class="noderow"><span class="when">1:44 PM</span></div></button>
+            <div class="actions"><div class="row">
+              <button class="act jump">Continue from here <span class="k">⏎</span></button>
+              <button class="act sum">Continue with summary <span class="k">s</span></button>
+              <button class="act lbl">Label <span class="k">l</span></button>
+            </div><div class="actnote">This leaves the current path and continues the abandoned branch. Nothing is lost — the tree keeps every path.</div></div>
+          </div>
+          <div class="between">assistant · 3 edit · reverted</div>
+          <div class="node offpath" data-text="no revert that go back to the overlay">
+            <button class="nodecard"><div class="nodetext">No — revert that, go back to the overlay.</div>
+              <div class="noderow"><span class="when">1:55 PM</span></div></button>
+            <div class="actions"><div class="row">
+              <button class="act jump">Continue from here <span class="k">⏎</span></button>
+              <button class="act sum">Continue with summary <span class="k">s</span></button>
+              <button class="act lbl">Label <span class="k">l</span></button>
+            </div></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="node onpath" data-text="wire the resume overlay to real history search">
+        <span class="dot"></span>
+        <button class="nodecard"><div class="nodetext">Now wire the resume overlay to real history search.</div>
+          <div class="noderow"><span class="when">2:01 PM</span></div></button>
+        <div class="actions"><div class="row">
+          <button class="act jump">Continue from here <span class="k">⏎</span></button>
+          <button class="act sum">Continue with summary <span class="k">s</span></button>
+          <button class="act lbl">Label <span class="k">l</span></button>
+        </div></div>
+      </div>
+      <div class="between onpath">assistant · 1 edit · working…</div>
+
+      <div class="node onpath leaf" data-text="current point">
+        <span class="dot"></span>
+        <button class="nodecard"><div class="nodetext">Current point</div>
+          <div class="noderow"><span class="youarehere">you are here</span><span class="when">2:04 PM</span></div></button>
+      </div>
+
+    </div></div>
+
+    <div class="footer">
+      <span>↑↓ move</span><span>⏎ continue</span><span>s summarize</span><span>l label</span><span>esc close</span>
+    </div>
+    <div class="toast" id="toast"></div>
+  </div>
+</div>
+
+<script>
+  const overlay = document.getElementById('overlay');
+  const treebtn = document.getElementById('treebtn');
+  const toast = document.getElementById('toast');
+  const q = document.getElementById('q');
+  const count = document.getElementById('count');
+  const nodes = [...document.querySelectorAll('.node')];
+
+  // select a node → action card
+  nodes.forEach(n => {
+    const card = n.querySelector('.nodecard');
+    card.addEventListener('click', () => {
+      nodes.forEach(m => m !== n && m.classList.remove('selected'));
+      n.classList.toggle('selected');
+    });
+  });
+
+  // actions
+  document.querySelectorAll('.act.jump').forEach(b => b.addEventListener('click', e => {
+    e.stopPropagation(); close('Jumped — transcript now shows the path to this point; your message is back in the composer.');
+  }));
+  document.querySelectorAll('.act.sum').forEach(b => b.addEventListener('click', e => {
+    e.stopPropagation(); close('Jumped with summary — the abandoned branch was summarized into context.');
+  }));
+  document.querySelectorAll('.act.lbl').forEach(b => b.addEventListener('click', e => {
+    e.stopPropagation();
+    const row = b.closest('.node').querySelector('.noderow');
+    const existing = row.querySelector('.label');
+    if (existing) { existing.remove(); b.firstChild.textContent = 'Label '; }
+    else {
+      const chip = document.createElement('span'); chip.className = 'label';
+      chip.textContent = 'checkpoint'; row.prepend(chip);
+      b.firstChild.textContent = 'Remove label ';
+    }
+  }));
+
+  // search filters user nodes
+  q.addEventListener('input', () => {
+    const s = q.value.trim().toLowerCase();
+    let shown = 0;
+    nodes.forEach(n => {
+      const hit = !s || (n.dataset.text || '').includes(s);
+      n.style.display = hit ? '' : 'none';
+      if (hit) shown++;
+    });
+    document.querySelectorAll('.between, .fork > .forktag').forEach(el =>
+      el.style.display = s ? 'none' : '');
+    count.textContent = s ? shown + ' matching point' + (shown === 1 ? '' : 's') : '';
+  });
+
+  function close(msg) {
+    overlay.classList.add('closed'); treebtn.classList.remove('active');
+    if (msg) {
+      toast.textContent = msg;
+      toast.style.display = 'block';
+      document.querySelector('.stage').appendChild(toast);
+      setTimeout(() => toast.style.display = 'none', 3200);
+    }
+  }
+  treebtn.addEventListener('click', () => {
+    overlay.classList.toggle('closed');
+    treebtn.classList.toggle('active', !overlay.classList.contains('closed'));
+  });
+  window.addEventListener('keydown', e => {
+    if (e.key === 'Escape') close();
+  });
+</script>
+</body>
+</html>
