@@ -64,7 +64,9 @@ export function withLogging(shell: Shell, log: LogSink, adapter: string): Shell 
     activateWorkspace: op('activateWorkspace', (id) => shell.activateWorkspace(id)),
     removeWorkspace: op('removeWorkspace', (id) => shell.removeWorkspace(id)),
 
-    createSession: op('createSession', (workspaceId) => shell.createSession(workspaceId)),
+    createSession: op('createSession', (workspaceId, options) =>
+      shell.createSession(workspaceId, options)
+    ),
     activateSession: op('activateSession', (id) => shell.activateSession(id)),
     removeSession: op('removeSession', (id) => shell.removeSession(id)),
     resetSession: op('resetSession', (id) => shell.resetSession(id)),

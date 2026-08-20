@@ -106,6 +106,10 @@ function stubService(): StubService {
       asked.push({ op: 'branchBoard', args: [workspacePath] })
       return { kind: 'noRepository' as const }
     },
+    async issueBoard(workspacePath: string) {
+      asked.push({ op: 'issueBoard', args: [workspacePath] })
+      return { kind: 'noIssueHost' as const }
+    },
     async openUrl(url: string) {
       asked.push({ op: 'openUrl', args: [url] })
     },

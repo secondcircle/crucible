@@ -56,7 +56,8 @@ export function createIpcClient(): AgentPort {
     activateWorkspace: (id: WorkspaceId) => call<void>('activateWorkspace', id),
     removeWorkspace: (id: WorkspaceId) => call<void>('removeWorkspace', id),
 
-    createSession: (workspaceId: WorkspaceId) => call<SessionId>('createSession', workspaceId),
+    createSession: (workspaceId: WorkspaceId, options?: { readonly issue?: string }) =>
+      call<SessionId>('createSession', workspaceId, options),
     activateSession: (id: SessionId) => call<void>('activateSession', id),
     removeSession: (id: SessionId) => call<void>('removeSession', id),
     resetSession: (id: SessionId) => call<void>('resetSession', id),

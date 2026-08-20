@@ -382,14 +382,16 @@ describe('when the board collects', () => {
     await act(async () => {
       await vi.advanceTimersByTimeAsync(60_000)
     })
-    expect(workspace.calls.length).toBe(before + 1)
+    // Two questions on the tick, one per board: they poll on the same rhythm
+    // and neither waits on the other.
+    expect(workspace.calls.length).toBe(before + 2)
 
     // An unfocused window collects nothing at all.
     await act(async () => {
       fireEvent.blur(window)
       await vi.advanceTimersByTimeAsync(120_000)
     })
-    expect(workspace.calls.length).toBe(before + 1)
+    expect(workspace.calls.length).toBe(before + 2)
   })
 })
 

@@ -1,5 +1,6 @@
 import type {
   BranchBoardAnswer,
+  IssueBoardAnswer,
   RunId,
   Unsubscribe,
   WorkspaceEvent,
@@ -40,6 +41,16 @@ export interface ScriptedWorkspace extends WorkspaceService {
   holdBoard?: boolean
   /** Settles a held collection with whatever the map holds now. */
   settleBoard(): void
+
+  // What `issueBoard` answers, per workspace path. A path with no answer set
+  // is a folder with no issue host, which is a normal answer.
+  readonly issues: Map<string, IssueBoardAnswer>
+  /** Set where a test wants a collection main could not carry out. */
+  issueRefusal?: string
+  /** Held the same way the branch collection is, for the waiting state. */
+  holdIssues?: boolean
+  /** Settles a held issue collection with whatever the map holds now. */
+  settleIssues(): void
   /** Every link this service was asked to open, and opened nothing for. */
   readonly openedUrls: readonly string[]
 }
@@ -50,6 +61,7 @@ export function createScriptedWorkspace(files: readonly string[] = []): Scripted
   const started: Array<{ runId: RunId; command: string }> = []
   const openedUrls: string[] = []
   let held: (() => void) | undefined
+  let heldIssues: (() => void) | undefined
   const worktrees: Array<(created: WorktreeCreation) => void> = []
   let minted = 0
 
@@ -80,6 +92,27 @@ export function createScriptedWorkspace(files: readonly string[] = []): Scripted
     settleBoard(): void {
       const settle = held
       held = undefined
+      settle?.()
+    },
+
+    issues: new Map<string, IssueBoardAnswer>(),
+
+    issueBoard(workspacePath: string): Promise<IssueBoardAnswer> {
+      calls.push({ op: 'issueBoard', args: [workspacePath] })
+      if (service.issueRefusal !== undefined) {
+        return Promise.reject(new Error(service.issueRefusal))
+      }
+      const answer = (): IssueBoardAnswer =>
+        service.issues.get(workspacePath) ?? { kind: 'noIssueHost' }
+      if (service.holdIssues !== true) return Promise.resolve(answer())
+      return new Promise<IssueBoardAnswer>((resolve) => {
+        heldIssues = () => resolve(answer())
+      })
+    },
+
+    settleIssues(): void {
+      const settle = heldIssues
+      heldIssues = undefined
       settle?.()
     },
 

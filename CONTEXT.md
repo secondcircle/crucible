@@ -138,6 +138,30 @@ grouped by whether the work has landed, and of the host pull requests that
 name the user. It reports; it never deletes or checks out anything.
 _Avoid_: git panel, branch manager, PR dashboard.
 
+**Issue board**:
+The workspace-scoped view of the issues you could pick up in that repository,
+read beside a pane showing one of them in full, and the place work on an issue
+starts. It reports and starts sessions; it never closes, assigns, labels or
+comments.
+_Avoid_: ticket board, issue list, backlog.
+
+**Issue**:
+One unit of tracked work on the issue host, whatever that host calls it — a
+GitHub issue, later a Jira ticket. Crucible's word for all of them.
+_Avoid_: ticket, card, task.
+
+**Issue host**:
+The service an issue board reads a workspace's issues from. GitHub Issues
+through `gh` today; the board is one host-shaped seam, so others follow
+without a new board.
+_Avoid_: tracker, ticketing system, provider, integration.
+
+**Picked up**:
+An issue that already has work against it in this workspace — a session
+started from it, or an open pull request naming it. Grouped apart on the
+issue board, never hidden.
+_Avoid_: taken, claimed, in progress.
+
 **Landed**:
 A branch whose work is already in the trunk — either its commits are
 ancestors of the trunk, or the host records its pull request as merged. The

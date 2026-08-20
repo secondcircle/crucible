@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { elapsedTime } from './labels'
+import { elapsedTime, issueAge } from './labels'
 
 // The sidebar's running counter. Seconds while a turn is short, m:ss for as
 // long as anyone watches the seconds, hours and minutes after that.
@@ -30,5 +30,36 @@ describe('elapsedTime', () => {
   it('floors at zero and says nothing about a time it cannot read', () => {
     expect(elapsedTime(new Date(now + 5000).toISOString(), now)).toBe('0s')
     expect(elapsedTime('not a time', now)).toBe('')
+  })
+})
+
+// The issue board's age column, three characters wide at most.
+describe('issueAge', () => {
+  const now = Date.parse('2026-08-20T10:00:00.000Z')
+  const HOUR = 60 * 60 * 1000
+  const DAY = 24 * HOUR
+  const ago = (ms: number): string => new Date(now - ms).toISOString()
+
+  it('counts minutes, then hours, on the day the issue moved', () => {
+    expect(issueAge(ago(0), now)).toBe('0m')
+    expect(issueAge(ago(40 * 60 * 1000), now)).toBe('40m')
+    expect(issueAge(ago(6 * HOUR), now)).toBe('6h')
+    expect(issueAge(ago(23 * HOUR), now)).toBe('23h')
+  })
+
+  it('counts days for a fortnight, which is as long as a day still means one', () => {
+    expect(issueAge(ago(DAY), now)).toBe('1d')
+    expect(issueAge(ago(13 * DAY), now)).toBe('13d')
+  })
+
+  it('counts weeks, then years, past that', () => {
+    expect(issueAge(ago(14 * DAY), now)).toBe('2w')
+    expect(issueAge(ago(90 * DAY), now)).toBe('12w')
+    expect(issueAge(ago(400 * DAY), now)).toBe('1y')
+  })
+
+  it('floors at zero and says nothing about a time it cannot read', () => {
+    expect(issueAge(new Date(now + 5000).toISOString(), now)).toBe('0m')
+    expect(issueAge('not a time', now)).toBe('')
   })
 })

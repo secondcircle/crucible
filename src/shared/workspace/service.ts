@@ -74,6 +74,75 @@ export interface BoardRow {
   }
 }
 
+// The issue board's vocabulary. An issue is one unit of tracked work on the
+// issue host, whatever that host calls it (CONTEXT.md).
+
+export type IssueBoardAnswer =
+  // No repository, or one whose remote no issue host answers for. ⌘I is dead
+  // here, exactly as ⌘B is in a plain folder.
+  | { readonly kind: 'noIssueHost' }
+  // gh is missing, unauthenticated or could not answer. The board opens and
+  // says this sentence rather than showing half a list.
+  | { readonly kind: 'unreachable'; readonly reason: string }
+  | { readonly kind: 'board'; readonly board: IssueBoardSnapshot }
+
+export interface IssueBoardSnapshot {
+  /** ISO time collection finished; "refreshed Ns ago" derives from it. */
+  readonly collectedAt: string
+  /** "owner/name", which is what a reference is built from. */
+  readonly repoLabel: string
+  readonly host: { readonly kind: 'github' }
+  /** The authenticated host login, which is what "you" means on this board. */
+  readonly login: string
+  readonly rows: readonly IssueRow[]
+}
+
+export type IssueGroupId =
+  | 'assignedToYou'
+  | 'mentionsYou'
+  | 'unclaimed'
+  | 'pickedUp'
+  | 'assignedToOthers'
+
+export interface IssueLabel {
+  readonly name: string
+  /** Six hex digits, no `#`, as the host gives it. Absent where it gave none. */
+  readonly color?: string
+}
+
+export interface IssueComment {
+  readonly login: string
+  readonly at: string
+  readonly body: string
+}
+
+export interface IssueRow {
+  readonly group: IssueGroupId
+  readonly number: number
+  /** `crucible#128` — what ⌘C copies and what the first message carries. */
+  readonly reference: string
+  readonly title: string
+  readonly url: string
+  readonly labels: readonly IssueLabel[]
+  /** Every assignee the host reports; empty means unclaimed. */
+  readonly assignees: readonly string[]
+  readonly authorLogin: string
+  readonly createdAt: string
+  readonly updatedAt: string
+  readonly comments: number
+  /** The whole body as the host holds it; empty where the issue has none. */
+  readonly body: string
+  /** The newest comment, which is the one the reading pane shows. */
+  readonly latestComment?: IssueComment
+  // An open pull request that names this issue: one of the two ways an issue
+  // is already picked up, the other being a session here.
+  readonly pr?: {
+    readonly number: number
+    readonly state: 'open' | 'draft'
+    readonly url: string
+  }
+}
+
 // What one creation attempt produced. A failure is a value rather than a
 // throw, because the whole of the output has to reach the screen intact.
 export type WorktreeCreation =
@@ -110,6 +179,9 @@ export interface WorkspaceService {
   // Serialized per workspace: a call while one is in flight joins it rather
   // than starting another. A failed collection rejects; nothing is fabricated.
   branchBoard(workspacePath: string): Promise<BranchBoardAnswer>
+  // Serialized per workspace the same way, and separately: the two boards ask
+  // the host different questions and neither waits on the other.
+  issueBoard(workspacePath: string): Promise<IssueBoardAnswer>
   /** Opens an https URL in the OS browser. Main validates the scheme. */
   openUrl(url: string): Promise<void>
 

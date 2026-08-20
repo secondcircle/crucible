@@ -47,6 +47,9 @@ export interface StoredSession {
   // Present only for a worktree session; absent means the workspace's own
   // checkout. Removing the session leaves the directory exactly where it is.
   readonly worktree?: SessionWorktree
+  // The issue this session was started on, as the issue board's reference. It
+  // is written once, at creation, and is what makes an issue picked up.
+  readonly issue?: string
   // The mark is on sessions that have never received a message, so a record
   // written before this field existed loads locked, which is the safe way
   // round: unlocking one would let a flip abandon a real conversation.
