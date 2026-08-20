@@ -3,6 +3,8 @@ import type { UpdateReady } from '../../shared/app-update/service'
 import type { PortRequest, PortResult } from '../../shared/agent/channels'
 import type { PortEvent } from '../../shared/agent/port'
 import type { CommandRequest, CommandResult } from '../../shared/commands/channels'
+import type { QuotaRequest, QuotaResult } from '../../shared/quota/channels'
+import type { QuotaSnapshot } from '../../shared/quota/types'
 import type { WorkspaceRequest, WorkspaceResult } from '../../shared/workspace/channels'
 import type { WorkspaceEvent } from '../../shared/workspace/service'
 
@@ -32,6 +34,12 @@ export interface CrucibleAppUpdate {
   onEvent(listener: (event: UpdateReady) => void): () => void
 }
 
+/** The quota half: ask for the cache or a refresh, hear every refresh's result. */
+export interface CrucibleQuota {
+  request(request: QuotaRequest): Promise<QuotaResult>
+  onEvent(listener: (snapshot: QuotaSnapshot) => void): () => void
+}
+
 declare global {
   interface Window {
     crucible?: {
@@ -39,6 +47,7 @@ declare global {
       workspace?: CrucibleWorkspace
       commands?: CrucibleCommands
       appUpdate?: CrucibleAppUpdate
+      quota?: CrucibleQuota
     }
   }
 }
@@ -75,4 +84,12 @@ export function appUpdateBridge(): CrucibleAppUpdate {
     throw new Error('renderer: window.crucible.appUpdate is missing — the preload did not load')
   }
   return appUpdate
+}
+
+export function quotaBridge(): CrucibleQuota {
+  const quota = window.crucible?.quota
+  if (quota === undefined) {
+    throw new Error('renderer: window.crucible.quota is missing — the preload did not load')
+  }
+  return quota
 }

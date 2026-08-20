@@ -9,6 +9,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { REQUEST_CHANNEL } from '../shared/agent/channels'
 import { EXHIBIT_SCHEME } from '../shared/agent/exhibit-url'
 import { COMMAND_REQUEST_CHANNEL } from '../shared/commands/channels'
+import { QUOTA_REQUEST_CHANNEL } from '../shared/quota/channels'
 import { WORKSPACE_REQUEST_CHANNEL } from '../shared/workspace/channels'
 import type { LogRecord } from './log/sink'
 
@@ -142,9 +143,13 @@ describe('what a launch does', () => {
       'app_starting',
       'adapter_selected',
       'workspace_service_selected',
-      'command_service_selected'
+      'command_service_selected',
+      'quota_service_selected'
     ])
     expect(records()[1]).toMatchObject({ adapter: 'fake' })
+    // One flavor decision governs every seam: the fake launch reads no
+    // credential and never touches the machine's quota cache.
+    expect(records()[4]).toMatchObject({ event: 'quota_service_selected', service: 'canned' })
     expect(harness.windowsCreated).toBe(0)
   })
 
@@ -164,11 +169,13 @@ describe('what a launch does', () => {
     // it, the workspace service and the command service.
     expect(harness.ipcHandlers.has(WORKSPACE_REQUEST_CHANNEL)).toBe(true)
     expect(harness.ipcHandlers.has(COMMAND_REQUEST_CHANNEL)).toBe(true)
+    expect(harness.ipcHandlers.has(QUOTA_REQUEST_CHANNEL)).toBe(true)
     expect(events()).toEqual([
       'app_starting',
       'adapter_selected',
       'workspace_service_selected',
       'command_service_selected',
+      'quota_service_selected',
       'app_ready',
       'window_created'
     ])

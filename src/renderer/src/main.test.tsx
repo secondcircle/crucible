@@ -81,6 +81,14 @@ function pageWithPreload(
       appUpdate: {
         request: async (): Promise<{ ok: true; value: null }> => ({ ok: true, value: null }),
         onEvent: (): (() => void) => () => {}
+      },
+      // Nothing cached and nothing to fetch, so the strip renders no block.
+      quota: {
+        request: async (): Promise<{ ok: true; value: unknown }> => ({
+          ok: true,
+          value: { providers: {}, fetchedAt: Date.now() }
+        }),
+        onEvent: (): (() => void) => () => {}
       }
     },
     configurable: true

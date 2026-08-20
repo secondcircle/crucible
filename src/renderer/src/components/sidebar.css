@@ -1,3 +1,6 @@
+/* The list scrolls inside the sidebar rather than the sidebar scrolling, so
+   the quota strip and Add workspace stay at the foot however long the list
+   grows. */
 .side {
   width: 248px;
   flex: none;
@@ -5,7 +8,7 @@
   border-right: 1px solid var(--line);
   display: flex;
   flex-direction: column;
-  overflow-y: auto;
+  overflow: hidden;
 }
 
 .side .brand {
@@ -47,6 +50,9 @@
   list-style: none;
   padding: 0;
   margin: 0;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
 }
 
 .ws {
@@ -167,7 +173,7 @@
 }
 
 .addws {
-  margin: auto 12px 14px;
+  margin: 8px 12px 14px;
   padding: 7px;
   border: 1px dashed var(--line);
   border-radius: var(--radius);

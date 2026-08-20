@@ -1,5 +1,7 @@
 import type { ShellSnapshot, SessionId, WorkspaceId } from '../../../shared/agent/port'
 import { sessionLabel } from '../labels'
+import type { QuotaView } from '../quota/use-quota'
+import { QuotaStrip } from './QuotaStrip'
 import './sidebar.css'
 
 // A row's working state is in its accessible name and not the colored dot
@@ -12,7 +14,8 @@ export function Sidebar({
   onRemoveWorkspace,
   onActivateSession,
   onRemoveSession,
-  onResume
+  onResume,
+  quota
 }: {
   readonly snapshot: ShellSnapshot
   readonly onNewSession: () => void
@@ -22,6 +25,9 @@ export function Sidebar({
   readonly onActivateSession: (id: SessionId) => void
   readonly onRemoveSession: (id: SessionId) => void
   readonly onResume: () => void
+  // The quota strip's data. Absent without a quota service, and then no strip
+  // renders at all.
+  readonly quota?: QuotaView
 }): React.JSX.Element {
   const { workspaces, activeWorkspaceId, sessions, activeSessionId } = snapshot
 
@@ -108,6 +114,10 @@ export function Sidebar({
           )
         })}
       </ul>
+
+      {/* Pinned at the foot: the workspace list above scrolls, this and Add
+          workspace stay put. */}
+      {quota === undefined ? null : <QuotaStrip snapshot={quota.snapshot} now={quota.now} />}
 
       <button className="addws" onClick={onAddWorkspace}>
         ＋ Add workspace

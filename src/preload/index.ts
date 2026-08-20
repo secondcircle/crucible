@@ -19,6 +19,13 @@ import {
   type CommandResult
 } from '../shared/commands/channels'
 import {
+  QUOTA_EVENT_CHANNEL,
+  QUOTA_REQUEST_CHANNEL,
+  type QuotaRequest,
+  type QuotaResult
+} from '../shared/quota/channels'
+import type { QuotaSnapshot } from '../shared/quota/types'
+import {
   WORKSPACE_EVENT_CHANNEL,
   WORKSPACE_REQUEST_CHANNEL,
   type WorkspaceRequest,
@@ -64,6 +71,16 @@ contextBridge.exposeInMainWorld('crucible', {
   commands: {
     request: (request: CommandRequest): Promise<CommandResult> =>
       ipcRenderer.invoke(COMMAND_REQUEST_CHANNEL, request)
+  },
+
+  // Global provider quota: the strip asks, main's single store answers, and
+  // every window hears the result of every refresh.
+  quota: {
+    request: (request: QuotaRequest): Promise<QuotaResult> =>
+      ipcRenderer.invoke(QUOTA_REQUEST_CHANNEL, request),
+
+    onEvent: (listener: (snapshot: QuotaSnapshot) => void): (() => void) =>
+      forwarder(QUOTA_EVENT_CHANNEL, listener)
   },
 
   // The installed app's update seam: one question, one event, one restart.
