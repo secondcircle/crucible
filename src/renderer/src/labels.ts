@@ -4,6 +4,10 @@ import type { SessionWorktree } from '../../shared/agent/port'
 // two spellings of one fact. `sessionLabel` is gone: the model writes the
 // title now.
 
+// What a session with no title yet is called, wherever it is named: the
+// sidebar row and the banner a finished session posts say the same words.
+export const UNTITLED = 'New session'
+
 // The branch when it is known, and the directory's own name when a script made
 // a worktree whose branch could not be read.
 export function worktreeLabel(worktree: SessionWorktree): string {

@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client'
 import { createIpcClient } from './agent/ipc-client'
 import { createAppUpdateClient } from './app-update/ipc-client'
 import { createCommandClient } from './commands/ipc-client'
+import { createNeedsYouClient } from './needs-you/ipc-client'
 import { createQuotaClient } from './quota/ipc-client'
 import { Shell } from './Shell'
 import { createWorkspaceClient } from './workspace/ipc-client'
@@ -22,6 +23,7 @@ function mountApp(): void {
         commands={createCommandClient()}
         appUpdate={createAppUpdateClient()}
         quota={createQuotaClient()}
+        needsYou={createNeedsYouClient()}
       />
     </StrictMode>
   )

@@ -317,7 +317,15 @@ export function createScriptedPort(initial: Partial<ShellSnapshot> = {}): Script
 
     activateSession(id: SessionId): Promise<void> {
       calls.push({ op: 'activateSession', args: [id] })
-      snapshot = { ...snapshot, activeSessionId: id }
+      // A session carries its workspace with it, exactly as main's store does:
+      // landing on a session in another workspace switches to that workspace
+      // rather than leaving the rail contradicting itself.
+      const landed = snapshot.sessions.find((session) => session.id === id)
+      snapshot = {
+        ...snapshot,
+        activeSessionId: id,
+        ...(landed === undefined ? {} : { activeWorkspaceId: landed.workspaceId })
+      }
       emitState()
       return Promise.resolve()
     },

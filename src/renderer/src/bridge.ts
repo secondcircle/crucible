@@ -3,6 +3,7 @@ import type { UpdateReady } from '../../shared/app-update/service'
 import type { PortRequest, PortResult } from '../../shared/agent/channels'
 import type { PortEvent } from '../../shared/agent/port'
 import type { CommandRequest, CommandResult } from '../../shared/commands/channels'
+import type { NeedsYouRequest, NeedsYouResult } from '../../shared/needs-you/channels'
 import type { QuotaRequest, QuotaResult } from '../../shared/quota/channels'
 import type { QuotaSnapshot } from '../../shared/quota/types'
 import type { WorkspaceRequest, WorkspaceResult } from '../../shared/workspace/channels'
@@ -39,6 +40,11 @@ export interface CrucibleQuota {
   onEvent(listener: (snapshot: QuotaSnapshot) => void): () => void
 }
 
+/** The needs-you half. One member: main announces nothing back. */
+export interface CrucibleNeedsYou {
+  request(request: NeedsYouRequest): Promise<NeedsYouResult>
+}
+
 declare global {
   interface Window {
     crucible?: {
@@ -47,6 +53,7 @@ declare global {
       commands?: CrucibleCommands
       appUpdate?: CrucibleAppUpdate
       quota?: CrucibleQuota
+      needsYou?: CrucibleNeedsYou
     }
   }
 }
@@ -91,4 +98,12 @@ export function quotaBridge(): CrucibleQuota {
     throw new Error('renderer: window.crucible.quota is missing — the preload did not load')
   }
   return quota
+}
+
+export function needsYouBridge(): CrucibleNeedsYou {
+  const needsYou = window.crucible?.needsYou
+  if (needsYou === undefined) {
+    throw new Error('renderer: window.crucible.needsYou is missing — the preload did not load')
+  }
+  return needsYou
 }

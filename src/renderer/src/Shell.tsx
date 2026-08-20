@@ -8,12 +8,14 @@ import type {
   SessionId,
   SessionState,
   SessionTree as Tree,
+  ShellSnapshot,
   ThinkingLevel,
   WorkspaceId
 } from '../../shared/agent/port'
 import type { AppUpdateService } from '../../shared/app-update/service'
 import type { CommandInfo, CommandService } from '../../shared/commands/service'
 import { commandFragment } from '../../shared/commands/template'
+import type { NeedsYouService } from '../../shared/needs-you/service'
 import { boardCounts } from '../../shared/workspace/classify-board'
 import { issueCounts, withSessions } from '../../shared/workspace/classify-issues'
 import type { QuotaService } from '../../shared/quota/service'
@@ -40,9 +42,18 @@ import { Sidebar } from './components/Sidebar'
 import { TopBar } from './components/TopBar'
 import { Transcript } from './components/Transcript'
 import { readAttachment, refuse } from './images'
-import { contextPercent } from './labels'
+import { contextPercent, UNTITLED } from './labels'
 import { useQuota } from './quota/use-quota'
 import { useAuth } from './settings/use-auth'
+import {
+  askingCount,
+  finishedUnwatched,
+  forgetGone,
+  nextAsking,
+  withMark,
+  withoutMark,
+  type Marks
+} from './state/needs-you'
 import { knownEmpty, NOTHING_YET, reduce } from './state/shell-state'
 import './shell.css'
 
@@ -73,7 +84,8 @@ export function Shell({
   workspace: service,
   commands,
   appUpdate,
-  quota
+  quota,
+  needsYou: needsYouService
 }: {
   readonly port: AgentPort
   readonly workspace: WorkspaceService
@@ -86,6 +98,10 @@ export function Shell({
   // Beside the port, never behind it: quota is global, session-free provider
   // data. Without this service no quota strip renders at all.
   readonly quota?: QuotaService
+  // The two needs-you channels outside the window. Without it the sidebar mark
+  // and the Tab walk work exactly as they do with it, and nothing reaches the
+  // dock or the notification centre.
+  readonly needsYou?: NeedsYouService
 }): React.JSX.Element {
   const [state, dispatch] = useReducer(reduce, NOTHING_YET)
   const quotaHold = useQuota(quota)
@@ -168,6 +184,12 @@ export function Shell({
   const [invocations, setInvocations] = useState<
     Readonly<Record<SessionId, Readonly<Record<string, string>>>>
   >({})
+  // Sessions whose turn ended while nobody was looking at them. This launch's
+  // memory and no longer: nothing runs while Crucible is closed, so there is
+  // nothing to remember across a restart.
+  const [marks, setMarks] = useState<Marks>(() => new Set<SessionId>())
+  /** The session the user is on, as of the last time that changed. */
+  const [landedOn, setLandedOn] = useState<SessionId | undefined>(undefined)
   // Open, and which tab: renderer state, per window, never persisted.
   const [settings, setSettings] = useState<{
     readonly open: boolean
@@ -180,6 +202,14 @@ export function Shell({
   // Read by a creation that outlived the click: what the sidebar holds now,
   // rather than what it held when the flip started.
   const sessionsNow = useRef<readonly SessionState[]>([])
+  // The same trick for the port's subscription, which is set up once and must
+  // not be torn down and rebuilt every time the sidebar changes.
+  const railNow = useRef<ShellSnapshot>(NOTHING_YET.snapshot)
+  // Whether this window has focus, which is what "not looking" is measured
+  // against. Seeded true and corrected by the events rather than read from
+  // `document.hasFocus()`: at mount the window has not been shown yet, and a
+  // window nobody has left is a window the user is at.
+  const windowFocused = useRef(true)
   /** Sessions with a send under way, still waiting on its expansion. */
   const sending = useRef<Set<SessionId>>(new Set())
   // Restoring a queued message puts the caret back where the words are.
@@ -236,6 +266,29 @@ export function Shell({
     setFailure(cause instanceof Error ? cause.message : String(cause))
   }, [])
 
+  // A turn ended in a session nobody was watching, so that session needs the
+  // user. The mark is the document's; whether it also leaves the window is
+  // main's call, because main is what knows whether this window has focus.
+  const finished = useCallback(
+    (sessionId: SessionId): void => {
+      const rail = railNow.current
+      const unwatched = finishedUnwatched(sessionId, {
+        activeSessionId: rail.activeSessionId,
+        windowFocused: windowFocused.current
+      })
+      if (!unwatched) return
+      setMarks((current) => withMark(current, sessionId))
+      if (needsYouService === undefined) return
+      const done = rail.sessions.find((candidate) => candidate.id === sessionId)
+      const where = rail.workspaces.find((candidate) => candidate.id === done?.workspaceId)
+      if (done === undefined || where === undefined) return
+      void needsYouService
+        .announce({ sessionId, workspace: where.name, title: done.title ?? UNTITLED })
+        .catch(() => {})
+    },
+    [needsYouService]
+  )
+
   // A workspace whose session is working is left alone: no collection runs
   // against a repository an agent may be mid-turn in.
   const workingWorkspaces = useMemo(
@@ -272,7 +325,7 @@ export function Shell({
   // Nothing renders that is not backed by real state: no chip before the first
   // answer, and none at all for a folder that is not a repository.
   const counts = board === undefined ? undefined : boardCounts(board)
-  const needYou = useMemo(() => {
+  const boardNeedYou = useMemo(() => {
     const perWorkspace: Record<WorkspaceId, number> = {}
     for (const [id, entry] of Object.entries(boards)) {
       if (entry.answer?.kind !== 'board') continue
@@ -308,6 +361,25 @@ export function Shell({
   }, [issueEntry?.answer, issueSessions])
   const issues = issueAnswer?.kind === 'board' ? issueCounts(issueAnswer.board) : undefined
 
+  // A mark for a session that has left the sidebar is not a mark: what is
+  // shown, counted and walked is what the snapshot still holds.
+  const asking = useMemo(() => forgetGone(marks, snapshot.sessions), [marks, snapshot.sessions])
+  const waitingCount = askingCount(snapshot.sessions, asking)
+  // Landing on a session is the whole of what clears its mark, whether the
+  // user typed anything there or not. Hovering it and scrolling past it do
+  // not: a mark any glance-like signal clears is a mark nobody trusts.
+  //
+  // Landing is the arrival and not the standing: a turn that ends in the
+  // session already on screen while Crucible is behind another app marks it,
+  // and only the window taking focus takes that mark off again.
+  //
+  // Adjusted in the render the snapshot arrives in, as the board's open state
+  // is, rather than in an effect that would show the mark for a frame on the
+  // very session being opened.
+  if (activeSessionId !== landedOn) {
+    setLandedOn(activeSessionId)
+    if (activeSessionId !== undefined) setMarks(withoutMark(marks, activeSessionId))
+  }
   /** ⌘B does nothing where there is no board to open, and no chip exists. */
   const boardReachable = activeWorkspaceId !== undefined && boardAnswer?.kind !== 'noRepository'
   // A workspace that turns out not to be a repository has no board to show, so
@@ -374,6 +446,17 @@ export function Shell({
       ) {
         refreshQuota()
       }
+      // A session that starts working again is not finished, whatever it was a
+      // moment ago: the mark comes off and is re-earned when this turn ends.
+      if (event.type === 'turn_started') {
+        setMarks((current) => withoutMark(current, event.sessionId))
+      }
+      // Finished is a turn that ended and a turn that errored. Not one the
+      // user stopped with Escape: that one is already known about, and marking
+      // it would leave something to go and clear after every deliberate stop.
+      if (event.type === 'turn_ended' || event.type === 'turn_error') {
+        finished(event.sessionId)
+      }
     })
     void port
       .snapshot()
@@ -384,11 +467,42 @@ export function Shell({
       .then((listed) => dispatch({ type: 'models', models: listed }))
       .catch(report)
     return stop
-  }, [port, report, restore, refreshQuota])
+  }, [port, report, restore, refreshQuota, finished])
 
   useEffect(() => {
     sessionsNow.current = snapshot.sessions
-  }, [snapshot.sessions])
+    railNow.current = snapshot
+  }, [snapshot])
+
+  // Not looking is per window, so a turn that ended behind another app marked
+  // even the session on screen. Coming back is genuinely looking at it, and
+  // that session's mark comes off with nothing else clicked.
+  useEffect(() => {
+    function onFocus(): void {
+      windowFocused.current = true
+      const looking = railNow.current.activeSessionId
+      if (looking === undefined) return
+      setMarks((current) => withoutMark(current, looking))
+    }
+    function onBlur(): void {
+      windowFocused.current = false
+    }
+    window.addEventListener('focus', onFocus)
+    window.addEventListener('blur', onBlur)
+    return () => {
+      window.removeEventListener('focus', onFocus)
+      window.removeEventListener('blur', onBlur)
+    }
+  }, [])
+
+  // Two channels outside the window, and main decides whether either is heard:
+  // it is what knows whether Crucible has focus, and what owns the dock.
+  useEffect(() => {
+    if (needsYouService === undefined) return
+    // A refusal here changes nothing on screen: the sidebar mark is the
+    // channel that matters and it never left the document.
+    void needsYouService.waiting(waitingCount).catch(() => {})
+  }, [needsYouService, waitingCount])
 
   // Asked once per workspace folder. A question that could not be answered
   // leaves the chip absent, which is what a non-git workspace looks like too.
@@ -495,6 +609,20 @@ export function Shell({
     if (activeSessionId === undefined || !working) return
     void port.cancel(activeSessionId).catch(report)
   }, [activeSessionId, working, port, report])
+
+  // Landing on a session, however it was reached: a click in the rail, or Tab
+  // walking to the next one asking.
+  const activateSession = useCallback(
+    (id: SessionId): void => {
+      setPopover('none')
+      setTreeOpen(false)
+      // A failed creation belongs to the moment it was read in: switching
+      // sessions is the user done with it.
+      setWorktreeOutput(undefined)
+      void port.activateSession(id).catch(report)
+    },
+    [port, report]
+  )
 
   const openTree = useCallback((): void => {
     const id = activeSessionId
@@ -708,6 +836,51 @@ export function Shell({
     popover
   ])
 
+  // The Tab walk. Plain Tab is Crucible's key now: it takes the topmost
+  // session asking, in rail order, crossing into the next workspace when this
+  // one is clear. Landing clears that session's mark, so pressing it again and
+  // again empties the queue from the top down.
+  //
+  // The cost is keyboard focus traversal, which this takes from the document.
+  // Every surface genuinely operated by focus keeps the key: a modal, the
+  // sheet, a popover, the board, the tree, and the composer's own completions,
+  // which have already called preventDefault by the time this runs.
+  useEffect(() => {
+    function onKeyDown(pressed: KeyboardEvent): void {
+      if (pressed.key !== 'Tab') return
+      // Shift-Tab is the model ring and stays exactly as it was.
+      if (pressed.shiftKey || pressed.metaKey || pressed.ctrlKey || pressed.altKey) return
+      if (pressed.defaultPrevented) return
+      if (liveLogin !== undefined || settings.open || question !== undefined) return
+      if (popover !== 'none' || browsingCommands || fileToken !== undefined) return
+      if (boardOpen || issuesOpen || treeOpen) return
+      pressed.preventDefault()
+      const next = nextAsking(snapshot, asking)
+      // Nothing asking, nothing happens: no wrap to an arbitrary session and
+      // no beep.
+      if (next === undefined) return
+      // Cleared here rather than on arrival, so the pip is gone in the frame
+      // the key was pressed and not a round trip later (ADR 0010).
+      setMarks((current) => withoutMark(current, next.id))
+      activateSession(next.id)
+    }
+    document.addEventListener('keydown', onKeyDown)
+    return () => document.removeEventListener('keydown', onKeyDown)
+  }, [
+    snapshot,
+    asking,
+    activateSession,
+    liveLogin,
+    settings.open,
+    question,
+    popover,
+    browsingCommands,
+    fileToken,
+    boardOpen,
+    issuesOpen,
+    treeOpen
+  ])
+
   // Paste and drag are the only ways in, and they do nothing with no session
   // to attach to.
   useEffect(() => {
@@ -917,15 +1090,6 @@ export function Shell({
   function removeWorkspace(id: WorkspaceId): void {
     setPopover('none')
     void port.removeWorkspace(id).catch(report)
-  }
-
-  function activateSession(id: SessionId): void {
-    setPopover('none')
-    setTreeOpen(false)
-    // A failed creation belongs to the moment it was read in: switching
-    // sessions is the user done with it.
-    setWorktreeOutput(undefined)
-    void port.activateSession(id).catch(report)
   }
 
   // The two choices and nothing between them: the checkout, or a worktree made
@@ -1301,7 +1465,8 @@ export function Shell({
     >
       <Sidebar
         snapshot={snapshot}
-        needYou={needYou}
+        needsYou={asking}
+        boardNeedYou={boardNeedYou}
         onNewSession={newSession}
         onAddWorkspace={addWorkspace}
         onActivateWorkspace={activateWorkspace}

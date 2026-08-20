@@ -86,11 +86,25 @@
   background: var(--panel);
 }
 
-/* The count of what is asking for you in that workspace, absent at zero. */
+/* The board's count of branches and pull requests, absent at zero. Outlined,
+   because the filled pill beside it means sessions. */
 .ws .n {
   font: 10px var(--mono);
   color: var(--accent2);
   border: 1px solid var(--line);
+  border-radius: 9px;
+  padding: 0 5px;
+  flex: none;
+}
+
+/* How many sessions in that workspace are waiting on you. Filled, so a
+   collapsed or scrolled-past workspace carries the same weight the pips in its
+   rows would have. */
+.ws .wsn {
+  font: 10px var(--mono);
+  font-weight: 600;
+  color: var(--bg);
+  background: var(--accent2);
   border-radius: 9px;
   padding: 0 5px;
   flex: none;
@@ -297,7 +311,9 @@
 }
 
 .ws:hover .n,
-.ws:focus-within .n {
+.ws:focus-within .n,
+.ws:hover .wsn,
+.ws:focus-within .wsn {
   visibility: hidden;
 }
 
@@ -317,8 +333,36 @@
 .sessrow:hover .elapsed,
 .sessrow:focus-within .elapsed,
 .sessrow:hover .typing,
-.sessrow:focus-within .typing {
+.sessrow:focus-within .typing,
+.sessrow:hover .pip,
+.sessrow:focus-within .pip {
   visibility: hidden;
+}
+
+/* The third row state: the turn ended and nobody saw it. Three cues at once
+   and not one of them is motion — the pip, the title out of dim into full ink,
+   and the time in amber. The slab and the blinking dots are spoken for, so
+   this state borrows neither.
+
+   Centered against the block rather than flushed to the rail's right edge: the
+   pip is 6px and the time under it is about 24px, so a shared right edge left
+   the dot hanging off the end of the number. */
+.pip {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent2);
+  box-shadow: 0 0 7px rgba(240, 163, 124, 0.75);
+  flex: none;
+  align-self: center;
+}
+
+.sessrow.asking .sess {
+  color: var(--ink);
+}
+
+.sessrow.asking .rowend small {
+  color: var(--accent2);
 }
 
 /* The slab carries being-looked-at; the title only gains weight and full ink,

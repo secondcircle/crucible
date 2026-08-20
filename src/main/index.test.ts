@@ -9,6 +9,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { REQUEST_CHANNEL } from '../shared/agent/channels'
 import { EXHIBIT_SCHEME } from '../shared/agent/exhibit-url'
 import { COMMAND_REQUEST_CHANNEL } from '../shared/commands/channels'
+import { NEEDS_YOU_REQUEST_CHANNEL } from '../shared/needs-you/channels'
 import { QUOTA_REQUEST_CHANNEL } from '../shared/quota/channels'
 import { WORKSPACE_REQUEST_CHANNEL } from '../shared/workspace/channels'
 import type { LogRecord } from './log/sink'
@@ -170,6 +171,7 @@ describe('what a launch does', () => {
     expect(harness.ipcHandlers.has(WORKSPACE_REQUEST_CHANNEL)).toBe(true)
     expect(harness.ipcHandlers.has(COMMAND_REQUEST_CHANNEL)).toBe(true)
     expect(harness.ipcHandlers.has(QUOTA_REQUEST_CHANNEL)).toBe(true)
+    expect(harness.ipcHandlers.has(NEEDS_YOU_REQUEST_CHANNEL)).toBe(true)
     expect(events()).toEqual([
       'app_starting',
       'adapter_selected',
@@ -177,6 +179,9 @@ describe('what a launch does', () => {
       'command_service_selected',
       'quota_service_selected',
       'app_ready',
+      // Per window rather than per launch: the dock badge and the banners
+      // follow one window's focus.
+      'needs_you_service_selected',
       'window_created'
     ])
   })
