@@ -1,11 +1,7 @@
 // @vitest-environment node
 //
-// A run offered to a live turn the adapter could not take ('idle' — the
-// window the SDK adapter documents between a prompt being accepted and π
-// starting to stream) waits that turn out. When the wait ends because the
-// user stopped the turn, the run must stay local and the share must answer
-// 'dropped': "Never delivered after a stop: nothing auto-fires at a plan the
-// user killed" (spec §3.1, Q14 carried; §45's 'dropped' drawer state).
+// A run that waited out a turn the user stopped stays local, because nothing
+// may fire at a plan the user killed.
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'

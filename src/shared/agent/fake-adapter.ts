@@ -580,8 +580,8 @@ export function createFakeAdapter({
       return true
     }
 
-    // The same boundary a steering message lands at, which is what Q23 asked
-    // for. The caller learns of the delivery from the promise it is holding.
+    // The same boundary a steering message lands at. The caller learns of the
+    // delivery from the promise it is holding.
     async function deliverShares(): Promise<boolean> {
       while (bound.shares.length > 0) {
         await beat()

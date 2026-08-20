@@ -1,9 +1,6 @@
 // This module imports nothing on purpose, exactly as the agent port does: it
-// is the second seam the renderer shares with main, and it must stay free of
-// both Electron and Node.
-//
-// What lives here are OS facts about a workspace folder — its files, and
-// commands run in it — which ADR 0005 keeps off the agent port.
+// is the second seam the renderer shares with main, and any import here could
+// smuggle Electron or Node across.
 
 export type RunId = string
 
@@ -21,11 +18,7 @@ export type Unsubscribe = () => void
 export const FILE_RESULT_LIMIT = 50
 
 export interface WorkspaceService {
-  /**
-   * Workspace-relative paths. Case-insensitive subsequence match, so an empty
-   * query matches everything. Gitignore-aware, and `.git` is always excluded.
-   * Deterministic ordering, capped at `FILE_RESULT_LIMIT`.
-   */
+  /** Workspace-relative, gitignore-aware, and ordered the same way every time. */
   searchFiles(workspacePath: string, query: string): Promise<readonly string[]>
 
   /** Starts a bash run at the workspace root. Output arrives as events. */

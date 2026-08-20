@@ -39,7 +39,7 @@ contextBridge.exposeInMainWorld('crucible', {
   },
 
   // Beside the agent, never behind it: file search and bash runs are OS facts
-  // about the workspace folder (ADR 0005).
+  // about the workspace folder.
   workspace: {
     request: (request: WorkspaceRequest): Promise<WorkspaceResult> =>
       ipcRenderer.invoke(WORKSPACE_REQUEST_CHANNEL, request),

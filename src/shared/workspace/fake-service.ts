@@ -8,12 +8,11 @@ import type {
 } from './service'
 
 // The workspace service's fake flavor: no folder is read and no process is
-// started, so an agent-driven check can walk file search and bash runs end to
-// end for free. Imports neither Electron nor Node, exactly as the fake adapter
-// does.
+// started, so an agent-driven check costs nothing. Imports neither Electron
+// nor Node, exactly as the fake adapter does.
 
-// In the spirit of Mock J's list: enough real-looking depth that the popover's
-// filename-bright, directory-dim grammar is exercisable.
+// Enough real-looking depth that the popover's filename-bright,
+// directory-dim grammar is exercisable.
 export const CANNED_FILES: readonly string[] = [
   'AGENTS.md',
   'CONTEXT.md',

@@ -129,11 +129,8 @@ describe('a restored conversation', () => {
   })
 })
 
-// The event that says a shared run reached the conversation. π announces a
-// steered custom message as `message_end` at the boundary that takes it and
-// persists it from that same announcement; the entry landing emits nothing at
-// all. Watching anything else is watching for an event that never comes, and a
-// run the model already answered would be reported back as still local.
+// Watching any other event is watching for one that never comes, which would
+// report an answered run as still local.
 describe('the delivery point of a shared run', () => {
   it('is the message_end \u03c0 emits at the boundary that took it', () => {
     expect(

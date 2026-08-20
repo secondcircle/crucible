@@ -17,10 +17,9 @@ export interface Attachment {
 /** The token under the caret, or nothing when the caret is not in one. */
 const FILE_TOKEN = /@([\w./-]*)$/
 
-/** At most this many rows render, exactly as the mock shows. */
 const FILE_ROWS = 7
 
-/** Any number of leading `!` is the same grammar, so `!!` never differs (Q25). */
+/** Any number of leading `!` is the same grammar, so `!!` never differs. */
 function bashCommandOf(draft: string): string | undefined {
   if (!draft.startsWith('!')) return undefined
   return draft.replace(/^!+/, '').trim()
@@ -127,7 +126,7 @@ export function Composer({
   }
 
   // Plain text in the draft, matching π: nothing is attached and nothing is
-  // read (Q9/Q20).
+  // read.
   function insertPath(path: string): void {
     const box = boxRef?.current ?? null
     const caret = box === null ? draft.length : (box.selectionStart ?? draft.length)
@@ -231,10 +230,9 @@ export function Composer({
           }}
           ref={boxRef}
           onKeyDown={(pressed) => {
-            // While the popover is open Enter belongs to it and never sends
-            // (§25), the empty state included: §24 keeps the popover open on
-            // `No files match`. With nothing to insert, Enter closes the
-            // popover rather than sending a draft nobody can unsend.
+            // While the popover is open Enter belongs to it, the empty state
+            // included: with nothing to insert it closes the popover rather
+            // than sending a draft nobody can unsend.
             if (filesOpen) {
               if (shown.length === 0) {
                 if (pressed.key === 'Enter' && !pressed.shiftKey) {

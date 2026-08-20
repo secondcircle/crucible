@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 //
 // `@` searches the workspace and inserts a path as plain text. Nothing is
-// attached, nothing is read, and nothing crosses the agent port (Q9/Q20).
+// attached, nothing is read, and nothing crosses the agent port.
 import { act, fireEvent, render, screen } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 import { Shell } from './Shell'
@@ -92,8 +92,7 @@ describe('the @ popover', () => {
       fireEvent.keyDown(box(), { key: 'Enter' })
     })
 
-    // Spec §25: while the popover is open, Enter never sends the message. The
-    // empty state is still the popover, open.
+    // The empty state is still the popover, open, so Enter still belongs to it.
     expect(port.calls.map((call) => call.op)).not.toContain('prompt')
   })
 

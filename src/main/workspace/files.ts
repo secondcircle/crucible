@@ -12,11 +12,7 @@ const ALWAYS_SKIPPED = '.git'
 /** A folder this big is a mistake to walk, not a workspace to search. */
 const WALK_LIMIT = 20_000
 
-/**
- * Every file git would call tracked or untracked-but-not-ignored, workspace
- * relative and `/`-separated. Falls back to a walk that honors `.gitignore`
- * when the folder is not a git repository, or when git cannot answer.
- */
+/** Workspace-relative and `/`-separated, whichever of the two paths answers. */
 export async function listFiles(workspacePath: string): Promise<readonly string[]> {
   const tracked = await gitFiles(workspacePath)
   return tracked ?? walk(workspacePath)

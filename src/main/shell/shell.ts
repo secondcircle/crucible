@@ -48,10 +48,8 @@ type Announcement =
   | { readonly kind: 'text'; readonly text: string }
   | { readonly kind: 'bashRun'; readonly run: BashRunShare }
 
-// Why a turn stopped being live, told to whoever waited it out. 'stopped' is
-// every end the user asked for (stop, reset, removal, shutdown); everything
-// else, including a turn that failed, is 'ended'. Work parked on a turn has to
-// know the difference: nothing may auto-fire at a plan the user killed.
+// 'stopped' is every end the user asked for. Work parked on a turn has to know
+// the difference: nothing may auto-fire at a plan the user killed.
 type TurnOutcome = 'ended' | 'stopped'
 
 interface LiveTurn {
@@ -340,10 +338,8 @@ export function createShell({
       const turn = live.get(sessionId)
       if (turn === undefined) break
       if (await offerToTurn(sessionId, kind, text, turn)) return
-      // That turn will take nothing more, so the message waits it out and is
-      // offered again to whatever is live next. A message the user typed is
-      // never lost, whichever way the turn ended: a stop leaves it as the next
-      // prompt rather than dropping the only copy of the text.
+      // Waited out and offered again, because a message the user typed is
+      // never lost whichever way the turn ended.
       await turn.over
     }
 
@@ -385,12 +381,8 @@ export function createShell({
           return 'delivered'
         }
       }
-      // No live run at the adapter took it, so the run waits this turn out,
-      // and why the turn ended is the whole answer. A turn that ended on its
-      // own leaves the run to whatever is live next, or to a turn of its own.
-      // A turn the user stopped takes the run down with it: the run stays
-      // local and nothing fires at a plan the user killed. That rule is this
-      // shell's own, and it holds whatever an adapter answered.
+      // A turn the user stopped takes the run down with it, whatever an
+      // adapter answered: nothing fires at a plan the user killed.
       if ((await turn.over) === 'stopped') return 'dropped'
     }
 

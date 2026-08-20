@@ -28,7 +28,7 @@ import './shell.css'
 
 // The port arrives as a prop, which is the seam a component test drives, and
 // why no component reaches for `window.crucible` itself. The workspace service
-// arrives the same way, beside it and never behind it (ADR 0005).
+// arrives the same way, beside it and never behind it.
 
 /** At most one is open at a time. */
 type Popover = 'none' | 'model' | 'thinking' | 'sessionMenu' | 'resume'
@@ -37,7 +37,7 @@ type Question =
   | { readonly kind: 'reset'; readonly sessionId: SessionId }
   | { readonly kind: 'thinking'; readonly sessionId: SessionId; readonly level: ThinkingLevel }
 
-/** Two Escapes this far apart are the tree's accelerator (Q4/Q16). */
+/** Two Escapes this far apart are the tree's accelerator. */
 const DOUBLE_ESCAPE_MS = 500
 
 /** A confirmation, not an error: it says what just happened and goes away. */
@@ -499,7 +499,7 @@ export function Shell({
   }
 
   // In place: same session, same sidebar identity, and no cache guard, because
-  // invalidating the cache is the point of the action (Q8/Q18).
+  // invalidating the cache is the point of the action.
   function jump(ref: string, summarize: boolean): void {
     const id = activeSessionId
     if (id === undefined) return

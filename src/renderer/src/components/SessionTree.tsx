@@ -3,11 +3,11 @@ import type { SessionTree as Tree, TreeNode } from '../../../shared/agent/port'
 import { clockTime } from '../labels'
 import './session-tree.css'
 
-// The full overlay over the transcript region (Mock I). It reads a tree it was
-// handed and never interprets a `ref`: what a node is called on the other side
-// of the port is the adapter's business.
+// The full overlay over the transcript region. It reads a tree it was handed
+// and never interprets a `ref`: what a node is called on the other side of the
+// port is the adapter's business.
 
-/** What the label input starts on when a node has no label yet (Q24). */
+/** What the label input starts on when a node has no label yet. */
 const DEFAULT_LABEL = 'checkpoint'
 
 type Row =
@@ -36,7 +36,7 @@ export function SessionTree({
   onClose
 }: {
   readonly tree: Tree
-  /** Continuing is refused while the session works; browsing never is (Q26). */
+  /** Continuing is refused while the session works; browsing never is. */
   readonly working: boolean
   readonly onJump: (ref: string, summarize: boolean) => void
   /** An absent label clears it. */
@@ -62,7 +62,7 @@ export function SessionTree({
   const visible = rows.flatMap((row) => (row.kind === 'node' ? [row.node.ref] : []))
   const matches = filtering ? visible.length : undefined
 
-  // Autofocused on open, so typing filters straight away (Mock I).
+  // Autofocused on open, so typing filters straight away.
   useEffect(() => {
     search.current?.focus()
   }, [])
@@ -79,9 +79,7 @@ export function SessionTree({
     onJump(ref, summarize)
   }
 
-  // The card's third action, whichever name it is wearing: a labeled node is
-  // unlabeled in the one click the button promises (Mock I), an unlabeled one
-  // opens the input. The `l` key is this same action, so the two never differ
+  // The `l` key is this same action, so a key and a button can never differ
   // about what pressing it does.
   function labelAction(node: TreeNode): void {
     setSelected(node.ref)
@@ -349,7 +347,7 @@ function layout(
   function level(nodes: readonly TreeNode[], depth: number, at: number): void {
     const onPathRef = tree.path[at]
     // Off the path first, then the rail continues: what was abandoned hangs
-    // where it diverged (Mock I).
+    // where it diverged.
     for (const node of nodes) {
       if (node.ref !== onPathRef) fork(node, depth + 1)
     }

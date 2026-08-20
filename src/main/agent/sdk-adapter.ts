@@ -514,7 +514,7 @@ export function createSdkAdapter(): ConversationAdapter {
     },
 
     // π's own tree, read through π's own API: no session file is opened, parsed
-    // or written here (ADR 0004).
+    // or written here.
     async sessionTree(sessionId: SessionId): Promise<SessionTree> {
       return treeOf(requireBound(sessionId).session.sessionManager)
     },
@@ -596,15 +596,9 @@ export function createSdkAdapter(): ConversationAdapter {
     ): Promise<'delivered' | 'dropped' | 'idle'> {
       const bound = requireBound(sessionId)
       const { session } = bound
-      // A turn is live here for a moment before π starts streaming and for a
-      // moment after it stops. `steer(text)` spans that window because π queues
-      // the text either way; a custom message gets no such queue.
-      // `sendCustomMessage` steers only while π says it is streaming, and in the
-      // window it would append the run to the conversation outside every
-      // boundary instead, with no turn left to answer it. So the window answers
-      // 'idle' and the shell starts a turn of the run's own, which is what the
-      // user asked for either way. The same flag π checks, read in the tick it
-      // is acted on.
+      // Outside π's own streaming window a custom message would land outside
+      // every boundary, with no turn left to answer it, so the run is better
+      // off as a turn of its own.
       if (bound.running === undefined || !session.isStreaming) return Promise.resolve('idle')
       const message = bashRunMessage(run)
 

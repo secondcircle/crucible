@@ -10,7 +10,7 @@ export const ACCEPTED_TYPES: readonly string[] = [
   'image/webp'
 ]
 
-/** Per image, of original file bytes (Q11). */
+/** Per image, of original file bytes. */
 export const MAX_BYTES = 10 * 1024 * 1024
 
 export type Refusal = string

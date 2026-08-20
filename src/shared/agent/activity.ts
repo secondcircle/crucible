@@ -3,11 +3,7 @@ import type { TranscriptItem } from './port'
 // The dim line a session tree shows between two user messages. Both adapters
 // build it from real entries here, so one conversation never reads two ways.
 
-/**
- * `assistant · 2 edit · 1 bash`, or `undefined` when nothing followed the
- * message yet. Tool names keep the order they first ran in; nothing is
- * invented and nothing is rounded.
- */
+/** Counted off real entries: nothing is invented and nothing is rounded. */
 export function summarizeActivity(items: readonly TranscriptItem[]): string | undefined {
   const parts: string[] = []
   const tools = new Map<string, number>()

@@ -250,9 +250,7 @@ export interface AgentPort {
   /** The session's full branching history. Allowed while the session works. */
   sessionTree(id: SessionId): Promise<SessionTree>
   // A jump: continue in place from the moment before `ref` was sent. Refused
-  // while the session works, in the same refusal style as `setModel`.
-  // `editorText` is the jumped-to user message, returned to the composer
-  // unsent.
+  // while the session works. `editorText` comes back to the composer unsent.
   jump(
     id: SessionId,
     ref: string,
@@ -273,12 +271,8 @@ export interface AgentPort {
     images?: readonly ImageAttachment[]
   ): Promise<TurnId>
 
-  // Adds a bash run to the conversation. With a live turn it is delivered as a
-  // steering message at the next boundary between tool calls; idle, it becomes
-  // the next prompt and starts a turn. `'delivered'` means the run is in the
-  // conversation and `bash_run_shared` was emitted; `'dropped'` means the live
-  // turn stopped first and nothing entered the conversation. Never delivered
-  // after a stop: nothing fires at a plan the user killed.
+  // `'dropped'` means the live turn stopped before the run reached the
+  // conversation: nothing fires at a plan the user killed.
   shareBashRun(sessionId: SessionId, run: BashRunShare): Promise<'delivered' | 'dropped'>
 
   // Never lost and never refused: with no live turn to take it, the message is

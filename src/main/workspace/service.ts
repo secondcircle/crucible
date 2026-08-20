@@ -10,9 +10,7 @@ import type {
 import { listFiles } from './files'
 
 // The workspace service's real flavor: the one module that reads the user's
-// folders and starts their processes. Nothing agent-side is reachable from
-// here, and nothing here is reachable from the renderer except through the
-// workspace channel (ADR 0005).
+// folders and starts their processes, reachable only through its own channel.
 
 export interface RealWorkspaceService extends WorkspaceService {
   /** Kills whatever is still running, for app quit and for tests. */

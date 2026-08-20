@@ -2,9 +2,8 @@ import { useEffect, useRef } from 'react'
 import type { RunId } from '../../../shared/workspace/service'
 import './bash-drawer.css'
 
-// The drawer a bash run lands in (Mock J). It sits between the transcript and
-// the composer and belongs to the workspace, not to a session: switching
-// sessions inside the workspace leaves it exactly where it was.
+// The drawer a bash run lands in. It belongs to the workspace, not to a
+// session: switching sessions inside the workspace leaves it where it was.
 
 export interface RunView {
   /** Absent only in the moment between Run and the service answering. */

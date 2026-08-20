@@ -205,7 +205,7 @@ kbd {
   color: var(--accent2);
 }
 
-/* bash mode: the whole box says what pressing enter will do (Mock J) */
+/* bash mode: the whole box says what pressing enter will do */
 .cbox.bash {
   border-color: var(--accent);
   background: var(--code);
@@ -244,7 +244,6 @@ kbd {
   font: 11.5px var(--mono);
 }
 
-/* attachment chips, above the box and part of the session's draft */
 .chips {
   display: flex;
   gap: 8px;
@@ -285,7 +284,6 @@ kbd {
   background: var(--error);
 }
 
-/* the @ file popover, above the composer and as wide as it */
 .composer {
   position: relative;
 }
@@ -342,7 +340,6 @@ kbd {
   color: var(--faint);
 }
 
-/* the full-window drop veil */
 .veil {
   position: fixed;
   inset: 0;

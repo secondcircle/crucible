@@ -158,7 +158,6 @@
   }
 }
 
-/* The call running right now, said in one ellipsized line. */
 .live {
   overflow: hidden;
   text-overflow: ellipsis;
@@ -293,7 +292,6 @@
   color: var(--error);
 }
 
-/* thumbnails on a sent message: only images that were genuinely sent */
 .msg .thumbs {
   display: flex;
   gap: 8px;
@@ -307,7 +305,7 @@
   border: 1px solid var(--line);
 }
 
-/* a shared bash run, in the tool row's grammar (Mock J) */
+/* a shared bash run, in the tool row's grammar */
 .bashrow {
   max-width: var(--column);
   margin: 0 auto 16px;

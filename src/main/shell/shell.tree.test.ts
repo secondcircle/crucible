@@ -152,9 +152,7 @@ describe('sharing a bash run', () => {
     const sessionId = await withSession()
 
     // Nothing is awaited between these three, so the stop lands while the
-    // share is still reaching for its binding and the turn is gone by the
-    // time the share looks again. That is the other way a share can find
-    // itself with no turn: it must still stay local.
+    // share is still reaching for its binding.
     void shell.prompt(sessionId, 'first')
     const share = shell.shareBashRun(sessionId, RUN)
     await shell.cancel(sessionId)

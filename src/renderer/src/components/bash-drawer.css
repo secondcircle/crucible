@@ -1,4 +1,3 @@
-/* The bash run drawer (Mock J), above the composer and below the transcript. */
 .drawer {
   max-width: var(--column);
   width: 100%;

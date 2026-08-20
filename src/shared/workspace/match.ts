@@ -27,11 +27,8 @@ function tier(path: string, query: string): number {
   return 2
 }
 
-/**
- * The paths a query matches, best first and then alphabetically, capped. An
- * empty query matches everything. The order is total and deterministic: two
- * calls with the same folder answer identically.
- */
+// The order is total, so two calls over the same folder answer identically and
+// a test can pin one list.
 export function rankFiles(paths: readonly string[], query: string): readonly string[] {
   const wanted = query.trim()
   const matched =

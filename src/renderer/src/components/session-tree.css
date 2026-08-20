@@ -1,5 +1,5 @@
-/* The session tree overlay (Mock I): it replaces the transcript region and
-   nothing else — the composer below it keeps working. */
+/* The overlay replaces the transcript region and nothing else, so the
+   composer below it keeps working. */
 .tree {
   position: absolute;
   inset: 0;
@@ -183,7 +183,6 @@
   color: var(--faint);
 }
 
-/* the connective tissue between two user nodes */
 .between {
   position: relative;
   padding: 2px 0 2px 22px;
