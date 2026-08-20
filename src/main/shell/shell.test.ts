@@ -35,6 +35,7 @@ function build(options: { seedWorkspacePath?: string } = {}): void {
   shell = createShell({
     ...over(file),
     adapter,
+    flavor: 'fake',
     pickFolder: async () => picked,
     ...options
   })
@@ -439,6 +440,7 @@ describe('queued messages', () => {
     shell = createShell({
       ...over(file),
       adapter: flushing,
+      flavor: 'fake',
       pickFolder: async () => picked
     })
     events = []
@@ -467,6 +469,7 @@ describe('queued messages', () => {
     shell = createShell({
       ...over(file),
       adapter: refusing,
+      flavor: 'fake',
       pickFolder: async () => picked
     })
     events = []
@@ -610,6 +613,7 @@ describe('a turn accepted while its session is still binding', () => {
     shell = createShell({
       ...over(file),
       adapter: gated,
+      flavor: 'fake',
       pickFolder: async () => picked
     })
     events = []
@@ -673,6 +677,7 @@ describe('a turn accepted while its session is still binding', () => {
     shell = createShell({
       ...over(file),
       adapter: failing,
+      flavor: 'fake',
       pickFolder: async () => picked
     })
     events = []

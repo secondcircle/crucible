@@ -42,6 +42,7 @@ it('a cancel handled while the turn is still binding ends the turn as cancelled'
   const first = createShell({
     ...over(file),
     adapter: createFakeAdapter({ pauseMs: 0 }),
+    flavor: 'fake',
     pickFolder: async () => '/repos/crucible'
   })
   const workspaceId = await first.addWorkspace()
@@ -66,6 +67,7 @@ it('a cancel handled while the turn is still binding ends the turn as cancelled'
   shell = createShell({
     ...over(file),
     adapter: slowToBind,
+    flavor: 'fake',
     pickFolder: async () => null
   })
   const events: PortEvent[] = []

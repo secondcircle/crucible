@@ -91,6 +91,7 @@ const shell = withLogging(
   createShell({
     store,
     adapter,
+    flavor,
     panel,
     pickFolder,
     seedWorkspacePath: seedWorkspacePath()

@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname } from 'node:path'
 import type { ExhibitKind, ModelId, SessionId, ThinkingLevel, WorkspaceId } from '../../shared/agent/port'
+import type { Flavor } from '../agent/select-adapter'
 import type { StoredPanel, StoredPanelTab } from '../panel/model'
 
 // One store above both adapters, so the launch flavors can never disagree
@@ -23,6 +24,8 @@ export interface StoredSession {
   // Lets a later launch rebind this same sidebar identity to the same
   // conversation. Nothing outside the adapter interprets it.
   readonly token?: string
+  /** Absent on sessions persisted before tokens were stamped with a flavor. */
+  readonly tokenFlavor?: Flavor
   /** The last model and level the adapter reported for this session. */
   readonly model?: ModelId
   readonly thinkingLevel?: ThinkingLevel
@@ -219,13 +222,19 @@ function load(path: string): ShellStoreState {
         typeof session?.createdAt === 'string' &&
         workspaces.some((workspace) => workspace.id === session.workspaceId)
     )
-    // Unreadable panel data loads as absent: a lost tab is recoverable, a
-    // launch that will not start is not.
+    // Unreadable panel data, or a flavor this build cannot vouch for, loads as
+    // absent: a lost tab is recoverable, a launch that will not start is not.
     .map((session) => {
       const panel = readPanel((session as { panel?: unknown }).panel)
+      const tokenFlavor = readTokenFlavor(session)
       const rest = { ...session }
       delete rest.panel
-      return panel === undefined ? rest : { ...rest, panel }
+      delete rest.tokenFlavor
+      return {
+        ...rest,
+        ...(panel === undefined ? {} : { panel }),
+        ...(tokenFlavor === undefined ? {} : { tokenFlavor })
+      }
     })
   const activeSessionByWorkspace =
     typeof file.activeSessionByWorkspace === 'object' && file.activeSessionByWorkspace !== null
@@ -245,6 +254,15 @@ function load(path: string): ShellStoreState {
 
 function asArray<T>(value: unknown): T[] {
   return Array.isArray(value) ? (value as T[]) : []
+}
+
+const FLAVORS: readonly Flavor[] = ['fake', 'sdk']
+
+// A flavor is a stamp on a token, so it is kept only beside one.
+function readTokenFlavor(session: unknown): Flavor | undefined {
+  const { token, tokenFlavor } = session as { token?: unknown; tokenFlavor?: unknown }
+  if (typeof token !== 'string') return undefined
+  return FLAVORS.includes(tokenFlavor as Flavor) ? (tokenFlavor as Flavor) : undefined
 }
 
 const KINDS: readonly ExhibitKind[] = ['html', 'markdown']

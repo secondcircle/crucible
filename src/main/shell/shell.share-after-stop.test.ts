@@ -66,6 +66,7 @@ it('a run waiting out a turn the user stopped stays local and answers dropped', 
   shell = createShell({
     ...over(join(directory, 'shell-state.json')),
     adapter,
+    flavor: 'fake',
     pickFolder: async () => '/repos/crucible'
   })
   const events: PortEvent[] = []
