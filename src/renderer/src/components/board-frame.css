@@ -1,0 +1,173 @@
+/* The frame both boards share: the overlay, its heading, the sub-line that
+   dates it, the group headings and the footer that answers its keys. Neither
+   board owns it, so neither can drift the other's. */
+.board {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  background: var(--overlay);
+  backdrop-filter: blur(3px);
+  display: flex;
+  flex-direction: column;
+  padding: 30px 36px 22px;
+}
+
+/* It takes the focus so the keys are its own; the ring would say nothing. */
+.board:focus {
+  outline: none;
+}
+
+.bhead {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  margin-bottom: 4px;
+}
+
+.bhead h1 {
+  font-size: 17px;
+  font-weight: 600;
+  margin: 0;
+}
+
+.bhead .repo {
+  font: 12px var(--mono);
+  color: var(--dim);
+}
+
+.bhead .repo b {
+  color: var(--ink);
+}
+
+.bhead .x {
+  margin-left: auto;
+  background: none;
+  border: none;
+  color: var(--faint);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.bhead .x:hover {
+  color: var(--ink);
+}
+
+.board kbd {
+  font: 11px var(--mono);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 1px 5px;
+  color: var(--dim);
+}
+
+.bhead .x kbd {
+  margin-left: 5px;
+}
+
+.bsub {
+  font-size: 12px;
+  color: var(--faint);
+  margin-bottom: 16px;
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+
+.bsub .scopeword {
+  /* its own name: a bare .scope is the composer's command badge */
+  color: var(--faint);
+}
+
+.bsub .live {
+  color: var(--ok);
+}
+
+.bsub .link {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  color: var(--dim);
+  border-bottom: 1px dotted var(--line);
+}
+
+.bsub .link:hover {
+  color: var(--ink);
+}
+
+/* A refresh under way says so for its whole duration, and cannot be asked
+   for twice. */
+.bsub .refreshing {
+  color: var(--accent2);
+}
+
+.bsub .staleword {
+  color: var(--error);
+}
+
+.board .scroll {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding-right: 6px;
+}
+
+.board .reading {
+  color: var(--faint);
+  font-size: 12.5px;
+  padding: 10px 0;
+}
+
+.board .group {
+  margin-bottom: 24px;
+}
+
+.ghead {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin-bottom: 6px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--line);
+}
+
+.ghead h2 {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.13em;
+  font-weight: 600;
+  color: var(--dim);
+  flex: none;
+  margin: 0;
+}
+
+.ghead .cnt {
+  font: 11px var(--mono);
+  color: var(--faint);
+  flex: none;
+}
+
+.ghead .why {
+  font-size: 11.5px;
+  color: var(--faint);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bfoot {
+  padding-top: 11px;
+  margin-top: auto;
+  border-top: 1px solid var(--line);
+  font-size: 11.5px;
+  color: var(--faint);
+  display: flex;
+  gap: 16px;
+  align-items: center;
+}
+
+.bfoot .sp {
+  margin-left: auto;
+  font-size: 11px;
+}

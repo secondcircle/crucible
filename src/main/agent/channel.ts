@@ -140,6 +140,18 @@ async function invoke(shell: Shell, request: unknown): Promise<unknown> {
     return { path, ...(typeof branch === 'string' ? { branch } : {}) }
   }
 
+  // What a session was started on, where one was given. Anything that is not
+  // text is simply not an issue, so the session is an ordinary one.
+  function issue(position: number): { readonly issue?: string } | undefined {
+    const value = given[position]
+    const asked = (typeof value === 'object' && value !== null ? value : {}) as {
+      issue?: unknown
+    }
+    return typeof asked.issue === 'string' && asked.issue !== ''
+      ? { issue: asked.issue }
+      : undefined
+  }
+
   /** One of the two ways a login may run, named, or a refusal. */
   function method(position: number): AuthMethod {
     const value = given[position]
@@ -166,7 +178,7 @@ async function invoke(shell: Shell, request: unknown): Promise<unknown> {
     case 'removeWorkspace':
       return shell.removeWorkspace(text(0))
     case 'createSession':
-      return shell.createSession(text(0))
+      return shell.createSession(text(0), issue(1))
     case 'activateSession':
       return shell.activateSession(text(0))
     case 'removeSession':

@@ -16,6 +16,7 @@ export function TopBar({
   onResetSession,
   onOpenSettings,
   onOpenUsage,
+  issues,
   board,
   update
 }: {
@@ -29,6 +30,13 @@ export function TopBar({
   readonly onOpenSettings: () => void
   /** The cost chip, which lands on the same sheet's Usage tab. */
   readonly onOpenUsage: () => void
+  // The issue board's whole resting surface, on the same terms: absent until a
+  // collection has answered with a board for this workspace.
+  readonly issues?: {
+    readonly open: number
+    readonly yours: number
+    readonly onOpen: () => void
+  }
   // The branch board's whole resting surface: absent until a collection has
   // answered with a board for this workspace.
   readonly board?: {
@@ -63,6 +71,24 @@ export function TopBar({
 
       {/* Everything from here is right-aligned, as mocked. */}
       <span className="spacer" />
+
+      {/* Lit exactly while an issue is assigned to you: unclaimed ones are
+          everybody's, and counting them would light the chip forever. */}
+      {issues === undefined ? null : (
+        <button
+          className={`tchip${issues.yours > 0 ? ' lit' : ''}`}
+          aria-label="Issue board"
+          onClick={issues.onOpen}
+        >
+          <span className="g" aria-hidden="true">
+            ◎
+          </span>{' '}
+          <b>
+            {issues.open} issue{issues.open === 1 ? '' : 's'}
+          </b>
+          {issues.yours > 0 ? <u> · {issues.yours} yours</u> : null}
+        </button>
+      )}
 
       {/* Lit exactly while something needs you, so it is not permanently on. */}
       {board === undefined ? null : (

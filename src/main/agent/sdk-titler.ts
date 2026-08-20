@@ -12,11 +12,18 @@ export const TITLE_INSTRUCTION =
 /** Past this a message says nothing more about what the session is about. */
 const MESSAGE_LIMIT = 500
 
+// The instruction asks for 5-8 words. Well past that the model is talking
+// rather than naming — "I need more context to name this conversation" must
+// read as a failed pass, not become the title.
+const TITLE_WORD_LIMIT = 12
+
 /** About this much input is plenty to name a conversation by. */
 const INPUT_LIMIT = 4_000
 
-// Never tool output, thinking, summaries or bash runs: what the two speakers
-// said is what a session is about.
+// Never tool output, thinking or bash runs: what the two speakers said is
+// what a session is about. Summaries are the one exception — after a
+// compaction or a summarized branch jump the summary IS the conversation,
+// and without it the titler would read an almost empty session.
 //
 // `asked` is a prompt sent but not yet in the conversation the caller holds.
 // Without it the first title of a session would have nothing to read, and
@@ -29,6 +36,7 @@ export function titleInput(
   for (const item of items) {
     if (item.kind === 'user') lines.push(`user: ${clip(item.text)}`)
     else if (item.kind === 'assistant') lines.push(`assistant: ${clip(item.markdown)}`)
+    else if (item.kind === 'summary') lines.push(`summary: ${clip(item.text)}`)
   }
   // The conversation may have caught up with it in the meantime, and the same
   // message twice says no more than once.
@@ -42,8 +50,9 @@ export function titleInput(
   return input.trim() === '' ? undefined : input
 }
 
-// Absent when nothing survives the trimming, which the caller treats as a
-// failed pass.
+// Absent when nothing survives the trimming, or when the answer is too long
+// to be a name at all: either way the caller treats it as a failed pass and
+// the last good title stays.
 export function sanitizeTitle(reply: string): string | undefined {
   const first = reply.split('\n')[0] ?? ''
   const title = first
@@ -52,7 +61,8 @@ export function sanitizeTitle(reply: string): string | undefined {
     .replace(/["'“”‘’]+$/, '')
     .replace(/\s+/g, ' ')
     .trim()
-  return title === '' ? undefined : title
+  if (title === '') return undefined
+  return title.split(' ').length > TITLE_WORD_LIMIT ? undefined : title
 }
 
 function joined(lines: readonly string[]): string {

@@ -17,16 +17,20 @@ import type { CommandInfo, CommandService } from '../../shared/commands/service'
 import { commandFragment } from '../../shared/commands/template'
 import type { NeedsYouService } from '../../shared/needs-you/service'
 import { boardCounts } from '../../shared/workspace/classify-board'
+import { issueCounts, withSessions } from '../../shared/workspace/classify-issues'
 import type { QuotaService } from '../../shared/quota/service'
 import type {
   BoardRow,
+  IssueBoardAnswer,
+  IssueRow,
   RunId,
   WorkspaceEvent,
   WorkspaceService
 } from '../../shared/workspace/service'
-import { useBranchBoards } from './board/use-boards'
+import { useBranchBoards, useIssueBoards } from './board/use-boards'
 import { BashDrawer, type RunView } from './components/BashDrawer'
 import { BranchBoard } from './components/BranchBoard'
+import { IssueBoard, type IssueSession } from './components/IssueBoard'
 import { type Attachment, Composer, useElapsedSeconds } from './components/Composer'
 import { ConfirmDialog } from './components/ConfirmDialog'
 import { ContextPanel, PanelEdge } from './components/ContextPanel'
@@ -144,6 +148,11 @@ export function Shell({
   // The whole of the board's open state: only the chip and ⌘B put a workspace
   // here, and everything that closes the board takes it back out.
   const [boardFor, setBoardFor] = useState<WorkspaceId | undefined>(undefined)
+  /** The same, for the issue board. At most one of the two is ever open. */
+  const [issuesFor, setIssuesFor] = useState<WorkspaceId | undefined>(undefined)
+  // The issue an Align is starting a session on, while it is starting it. One
+  // at a time: a second click would make a second session on the same issue.
+  const [aligning, setAligning] = useState<string | undefined>(undefined)
   // The file popover's token, and the answer the workspace service gave for it.
   const [fileToken, setFileToken] = useState<string | undefined>(undefined)
   const [files, setFiles] = useState<
@@ -300,8 +309,17 @@ export function Shell({
     onFailure: report
   })
 
+  const { boards: issueBoards, refresh: refreshIssues } = useIssueBoards({
+    service,
+    workspaces: snapshot.workspaces,
+    activeWorkspaceId,
+    working: workingWorkspaces,
+    onFailure: report
+  })
+
   const boardEntry = activeWorkspaceId === undefined ? undefined : boards[activeWorkspaceId]
   const closeBoard = useCallback((): void => setBoardFor(undefined), [])
+  const closeIssues = useCallback((): void => setIssuesFor(undefined), [])
   const boardAnswer = boardEntry?.answer
   const board = boardAnswer?.kind === 'board' ? boardAnswer.board : undefined
   // Nothing renders that is not backed by real state: no chip before the first
@@ -315,6 +333,34 @@ export function Shell({
     }
     return perWorkspace
   }, [boards])
+  const issueEntry = activeWorkspaceId === undefined ? undefined : issueBoards[activeWorkspaceId]
+  // Sessions started on an issue in this workspace, by the reference they were
+  // started on: the board's other way of knowing an issue is picked up.
+  const issueSessions = useMemo(() => {
+    const found = new Map<string, IssueSession>()
+    for (const candidate of snapshot.sessions) {
+      if (candidate.workspaceId !== activeWorkspaceId || candidate.issue === undefined) continue
+      // The first one wins, which is the session the issue was picked up in.
+      if (found.has(candidate.issue)) continue
+      found.set(candidate.issue, {
+        id: candidate.id,
+        ...(candidate.title === undefined ? {} : { title: candidate.title })
+      })
+    }
+    return found
+  }, [snapshot.sessions, activeWorkspaceId])
+  // The host's answer with this workspace's sessions folded in, which is the
+  // only version anything downstream sees.
+  const issueAnswer: IssueBoardAnswer | undefined = useMemo(() => {
+    const collected = issueEntry?.answer
+    if (collected?.kind !== 'board') return collected
+    return {
+      kind: 'board',
+      board: withSessions(collected.board, new Set(issueSessions.keys()))
+    }
+  }, [issueEntry?.answer, issueSessions])
+  const issues = issueAnswer?.kind === 'board' ? issueCounts(issueAnswer.board) : undefined
+
   // A mark for a session that has left the sidebar is not a mark: what is
   // shown, counted and walked is what the snapshot still holds.
   const asking = useMemo(() => forgetGone(marks, snapshot.sessions), [marks, snapshot.sessions])
@@ -342,6 +388,12 @@ export function Shell({
   // Cleared in the same render, so a close cannot come back true when the
   // workspace is switched away from and back to.
   if (boardFor !== undefined && !boardOpen) setBoardFor(undefined)
+
+  /** ⌘I does nothing where the workspace has no issue host to read. */
+  const issuesReachable =
+    activeWorkspaceId !== undefined && issueAnswer?.kind !== 'noIssueHost'
+  const issuesOpen = issuesFor !== undefined && issuesFor === activeWorkspaceId && issuesReachable
+  if (issuesFor !== undefined && !issuesOpen) setIssuesFor(undefined)
 
   // What a completed login or logout changes above the port: the models the
   // credentials now reach.
@@ -622,11 +674,16 @@ export function Shell({
         setFileToken(undefined)
         return
       }
-      // The board closes after the dialogs, sheets and popovers, and before
-      // the session tree. While it is open Escape never cancels a turn.
+      // The boards close after the dialogs, sheets and popovers, and before
+      // the session tree. While one is open Escape never cancels a turn.
       if (boardOpen) {
         pressed.preventDefault()
         closeBoard()
+        return
+      }
+      if (issuesOpen) {
+        pressed.preventDefault()
+        closeIssues()
         return
       }
       if (treeOpen) {
@@ -656,6 +713,7 @@ export function Shell({
     popover,
     fileToken,
     boardOpen,
+    issuesOpen,
     treeOpen,
     activeSessionId,
     working,
@@ -665,7 +723,8 @@ export function Shell({
     closeLogin,
     settings.open,
     browsingCommands,
-    closeBoard
+    closeBoard,
+    closeIssues
   ])
 
   const openBoard = useCallback((): void => {
@@ -673,8 +732,17 @@ export function Shell({
     // The overlay is there in the same frame; the collection catches up under
     // it, and says "Reading branches…" until it does.
     setBoardFor(activeWorkspaceId)
+    // One overlay at a time: the two cover the same region.
+    setIssuesFor(undefined)
     refreshBoard(activeWorkspaceId)
   }, [activeWorkspaceId, refreshBoard])
+
+  const openIssues = useCallback((): void => {
+    if (activeWorkspaceId === undefined) return
+    setIssuesFor(activeWorkspaceId)
+    setBoardFor(undefined)
+    refreshIssues(activeWorkspaceId)
+  }, [activeWorkspaceId, refreshIssues])
 
   // ⌘B is the board's own key, and the affordance is absent rather than
   // silently broken where there is nothing to open.
@@ -698,6 +766,25 @@ export function Shell({
     document.addEventListener('keydown', onKeyDown)
     return () => document.removeEventListener('keydown', onKeyDown)
   }, [boardOpen, boardReachable, openBoard, closeBoard])
+
+  // ⌘I, on exactly the same terms: claimed where there is an issue board to
+  // open, and left to the OS where there is not (ADR 0010).
+  useEffect(() => {
+    function onKeyDown(pressed: KeyboardEvent): void {
+      if (pressed.key !== 'i' && pressed.key !== 'I') return
+      if (!pressed.metaKey && !pressed.ctrlKey) return
+      if (issuesOpen) {
+        pressed.preventDefault()
+        closeIssues()
+        return
+      }
+      if (!issuesReachable) return
+      pressed.preventDefault()
+      openIssues()
+    }
+    document.addEventListener('keydown', onKeyDown)
+    return () => document.removeEventListener('keydown', onKeyDown)
+  }, [issuesOpen, issuesReachable, openIssues, closeIssues])
   // The model ring. Nothing on screen names the key, and it works mid-turn
   // because the switch only reaches the next turn.
   useEffect(() => {
@@ -766,7 +853,7 @@ export function Shell({
       if (pressed.defaultPrevented) return
       if (liveLogin !== undefined || settings.open || question !== undefined) return
       if (popover !== 'none' || browsingCommands || fileToken !== undefined) return
-      if (boardOpen || treeOpen) return
+      if (boardOpen || issuesOpen || treeOpen) return
       pressed.preventDefault()
       const next = nextAsking(snapshot, asking)
       // Nothing asking, nothing happens: no wrap to an arbitrary session and
@@ -790,6 +877,7 @@ export function Shell({
     browsingCommands,
     fileToken,
     boardOpen,
+    issuesOpen,
     treeOpen
   ])
 
@@ -1294,6 +1382,68 @@ export function Shell({
     seedCaret.current = seeded.length
   }
 
+  // Nothing the issue board can do writes to the issue host. What it writes is
+  // a session of the user's own.
+
+  function openIssue(row: IssueRow): void {
+    setToast(`Opening ${row.reference} in your browser`)
+    void service.openUrl(row.url).catch(report)
+  }
+
+  function copyReference(reference: string): void {
+    setToast(`Copied ${reference}`)
+    void navigator.clipboard?.writeText(reference).catch(report)
+  }
+
+  // One click: a new session in this workspace, in a new worktree, with the
+  // interview already sent. The command is Crucible's own and expands in main
+  // before it crosses the port (ADR 0007).
+  function alignOn(row: IssueRow, kind: 'align' | 'quick-align'): void {
+    const workspaceId = activeWorkspaceId
+    const workspace = active
+    if (workspaceId === undefined || workspace === undefined || aligning !== undefined) return
+
+    setAligning(row.reference)
+    setFailure(undefined)
+    setWorktreeOutput(undefined)
+    closeIssues()
+
+    void (async () => {
+      const sessionId = await port.createSession(workspaceId, { issue: row.reference })
+      // The chip says the worktree is being made, in the session it is being
+      // made for, which is the one now on screen.
+      setFlipping((current) => [...current, sessionId])
+      try {
+        const created = await service.createWorktree(workspace.path)
+        if (!created.ok) {
+          // The session stays open holding the script's whole output, and the
+          // command is not sent. No silent fall back to the checkout: an
+          // interview would then run in the live working directory (ADR 0013).
+          setWorktreeOutput({ sessionId, output: created.output })
+          return
+        }
+        await port.setWorktree(
+          sessionId,
+          created.branch === undefined
+            ? { path: created.path }
+            : { path: created.path, branch: created.branch }
+        )
+      } finally {
+        setFlipping((current) => current.filter((waiting) => waiting !== sessionId))
+      }
+
+      // Reference, title and URL, and nothing else: the body goes stale, and
+      // the agent can read it with gh whenever it wants it.
+      const text = `/${kind} ${row.reference} — ${row.title}\n${row.url}`
+      expanded(sessionId, text, (delivered) => {
+        dispatch({ type: 'sent', sessionId, text: delivered, images: [] })
+        void port.prompt(sessionId, delivered).catch(report)
+      })
+    })()
+      .catch(report)
+      .finally(() => setAligning(undefined))
+  }
+
   function answer(): void {
     if (question === undefined) return
     const asked = question
@@ -1344,6 +1494,11 @@ export function Shell({
           onResetSession={resetSession}
           onOpenSettings={() => setSettings({ open: true, tab: 'providers' })}
           onOpenUsage={() => setSettings({ open: true, tab: 'usage' })}
+          issues={
+            issues === undefined
+              ? undefined
+              : { open: issues.open, yours: issues.yours, onOpen: openIssues }
+          }
           board={
             counts === undefined
               ? undefined
@@ -1478,6 +1633,27 @@ export function Shell({
             onCopy={copyBranchName}
             onAsk={askAboutBranches}
             onClose={closeBoard}
+          />
+        ) : null}
+
+        {issuesOpen ? (
+          <IssueBoard
+            answer={issueAnswer}
+            refreshing={issueEntry?.refreshing ?? false}
+            failure={issueEntry?.failure}
+            sessions={issueSessions}
+            aligning={aligning}
+            onRefresh={() => {
+              if (activeWorkspaceId !== undefined) refreshIssues(activeWorkspaceId)
+            }}
+            onAlign={alignOn}
+            onOpenSession={(sessionId) => {
+              closeIssues()
+              activateSession(sessionId)
+            }}
+            onOpenIssue={openIssue}
+            onCopy={copyReference}
+            onClose={closeIssues}
           />
         ) : null}
       </main>

@@ -1,5 +1,6 @@
 import type {
   BranchBoardAnswer,
+  IssueBoardAnswer,
   RunId,
   Unsubscribe,
   WorkspaceEventListener,
@@ -36,6 +37,7 @@ export function createWorkspaceClient(): WorkspaceService {
     stopRun: (runId: RunId) => call<void>('stopRun', runId),
     branchBoard: (workspacePath: string) =>
       call<BranchBoardAnswer>('branchBoard', workspacePath),
+    issueBoard: (workspacePath: string) => call<IssueBoardAnswer>('issueBoard', workspacePath),
     openUrl: (url: string) => call<void>('openUrl', url),
 
     onEvent(listener: WorkspaceEventListener): Unsubscribe {

@@ -1,0 +1,83 @@
+{
+  "data": {
+    "repository": {
+      "issues": {
+        "nodes": [
+          {
+            "number": 128,
+            "title": "Quota strip misaligns under the Add workspace button",
+            "url": "https://github.com/secondcircle/crucible/issues/128",
+            "body": "At 248px sidebar width the percent column wraps.\n\n## Steps\n\n1. Sign in with a plan reporting 3+ windows",
+            "createdAt": "2026-08-18T11:02:00Z",
+            "updatedAt": "2026-08-20T11:00:00Z",
+            "author": { "login": "ike" },
+            "assignees": { "nodes": [{ "login": "ike" }] },
+            "labels": {
+              "nodes": [
+                { "name": "bug", "color": "d73a4a" },
+                { "name": "ui", "color": "5319e7" }
+              ]
+            },
+            "comments": {
+              "totalCount": 3,
+              "nodes": [
+                {
+                  "createdAt": "2026-08-19T15:20:00Z",
+                  "body": "Reproduced on Max.",
+                  "author": { "login": "maya" }
+                }
+              ]
+            },
+            "timelineItems": { "nodes": [] }
+          },
+          {
+            "number": 124,
+            "title": "Should the standing prompt ship the communication style?",
+            "url": "https://github.com/secondcircle/crucible/issues/124",
+            "body": "Half of what @ike keeps re-typing is style.",
+            "createdAt": "2026-08-17T09:00:00Z",
+            "updatedAt": "2026-08-19T18:00:00Z",
+            "author": { "login": "maya" },
+            "assignees": { "nodes": [{ "login": "maya" }] },
+            "labels": { "nodes": [{ "name": "design", "color": "0075ca" }] },
+            "comments": { "totalCount": 0, "nodes": [] },
+            "timelineItems": { "nodes": [] }
+          },
+          {
+            "number": 117,
+            "title": "Worktree script failures should print the whole output",
+            "url": "https://github.com/secondcircle/crucible/issues/117",
+            "body": "",
+            "createdAt": "2026-08-08T09:00:00Z",
+            "updatedAt": "2026-08-12T09:00:00Z",
+            "author": { "login": "ike" },
+            "assignees": { "nodes": [] },
+            "labels": { "nodes": [] },
+            "comments": { "totalCount": 1, "nodes": [] },
+            "timelineItems": {
+              "nodes": [
+                {
+                  "source": {
+                    "number": 118,
+                    "url": "https://github.com/secondcircle/crucible/pull/118",
+                    "state": "CLOSED",
+                    "isDraft": false
+                  }
+                },
+                {
+                  "source": {
+                    "number": 130,
+                    "url": "https://github.com/secondcircle/crucible/pull/130",
+                    "state": "OPEN",
+                    "isDraft": true
+                  }
+                },
+                { "source": {} }
+              ]
+            }
+          }
+        ]
+      }
+    }
+  }
+}

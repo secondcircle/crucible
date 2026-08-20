@@ -1,0 +1,351 @@
+/* The list on the left, one issue read in full on the right. */
+@import './board-frame.css';
+
+/* Narrows the list that is already on screen; it asks the host nothing. */
+.issues .filter {
+  margin-left: auto;
+}
+
+.issues .filter input {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  color: var(--ink);
+  font: 12px var(--mono);
+  padding: 3px 9px;
+  width: 190px;
+  outline: none;
+}
+
+.issues .filter input:focus {
+  border-color: var(--accent);
+}
+
+.issues .filter input::placeholder {
+  color: var(--absent-ink);
+}
+
+/* The footer is the board's own row; the split takes what is left. */
+.issues .split {
+  flex: 1;
+  display: flex;
+  gap: 20px;
+  min-height: 0;
+}
+
+.issues .scroll {
+  min-width: 0;
+}
+
+/* One set of tracks for every row, so they line up down the whole board
+   however long one title is. The title holds a floor and everything after it
+   gives way, because a board of ages and label chips with no titles is not a
+   board. */
+.issues .row {
+  display: grid;
+  grid-template-columns:
+    46px /* number */
+    minmax(96px, 1fr) /* title */
+    minmax(0, 132px) /* labels */
+    minmax(0, 52px) /* who is on it */
+    40px /* age */
+    minmax(0, 116px); /* comments, pull request or session */
+  align-items: center;
+  column-gap: 12px;
+  padding: 7px 10px;
+  border-radius: var(--radius);
+  border: 1px solid transparent;
+}
+
+/* In a narrow window the six tracks and the reading pane cannot both have
+   what they want, so the assignee column goes: within a group everyone in it
+   is the same person anyway, and the pane beside the list names them. */
+@media (width <= 1400px) {
+  .issues .row {
+    grid-template-columns:
+      46px
+      minmax(120px, 1fr)
+      minmax(0, 104px)
+      40px
+      minmax(0, 96px);
+  }
+
+  .issues .who2 {
+    display: none;
+  }
+}
+
+.issues .row:hover {
+  background: var(--panel);
+  border-color: var(--line);
+}
+
+.issues .row.focused {
+  background: var(--panel);
+  border-color: var(--accent);
+}
+
+.issues .row.taken .ttl {
+  color: var(--dim);
+}
+
+.issues .num {
+  font: 12.5px var(--mono);
+  color: var(--faint);
+}
+
+.issues .ttl,
+.issues .who2,
+.issues .state {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.issues .ttl {
+  font-size: 13px;
+  color: var(--ink);
+}
+
+.issues .who2 {
+  font: 11px var(--mono);
+  color: var(--faint);
+}
+
+.issues .age {
+  font-size: 11.5px;
+  color: var(--faint);
+  text-align: right;
+}
+
+.issues .state {
+  font-size: 11px;
+  color: var(--faint);
+  text-align: right;
+}
+
+.issues .state.pr {
+  color: var(--ok);
+}
+
+.issues .state.sess {
+  color: var(--accent2);
+}
+
+/* A label wears the host's own colour, so the board reads the way the
+   repository does. */
+.labels {
+  display: flex;
+  gap: 4px;
+  overflow: hidden;
+}
+
+.labels i {
+  font: 10px var(--mono);
+  font-style: normal;
+  letter-spacing: 0.04em;
+  border-radius: 4px;
+  padding: 0 5px;
+  border: 1px solid var(--line);
+  color: var(--dim);
+  white-space: nowrap;
+}
+
+/* ---------- the reading pane ---------- */
+
+.issues .read {
+  /* Wide enough to read a paragraph in, and never so wide that the list it
+     belongs to has no room to be a list. */
+  width: clamp(300px, 34%, 430px);
+  flex: none;
+  background: var(--bg2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.issues .read .nothing {
+  margin: auto;
+  color: var(--faint);
+  font-size: 12.5px;
+}
+
+.issues .rhead {
+  padding: 14px 16px 10px;
+  border-bottom: 1px solid var(--line);
+}
+
+.issues .rnum {
+  font: 11.5px var(--mono);
+  color: var(--faint);
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.issues .rnum b {
+  color: var(--dim);
+  font-weight: 600;
+}
+
+.issues .rnum .st {
+  border: 1px solid var(--ok-line);
+  color: var(--ok);
+  border-radius: 4px;
+  padding: 0 5px;
+  font-size: 10px;
+}
+
+.issues .rhead h3 {
+  font-size: 15px;
+  line-height: 1.4;
+  margin: 6px 0 8px;
+  font-weight: 600;
+}
+
+.issues .rmeta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  font-size: 11.5px;
+  color: var(--faint);
+  align-items: center;
+}
+
+.issues .rmeta b {
+  color: var(--dim);
+  font-weight: 600;
+}
+
+.issues .rbody {
+  padding: 14px 16px;
+  overflow-y: auto;
+  flex: 1;
+  min-height: 0;
+  font-size: 13px;
+  color: var(--dim);
+}
+
+/* The pane is narrow, so the shared markdown measure would leave it airless. */
+.issues .rbody .markdown {
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.issues .rbody .fade {
+  color: var(--faint);
+  font-size: 12px;
+}
+
+.issues .rbody .cmt {
+  border-top: 1px solid var(--line);
+  padding-top: 10px;
+  margin-top: 12px;
+}
+
+.issues .rbody .cwho {
+  font-size: 11.5px;
+  color: var(--accent2);
+  margin-bottom: 4px;
+}
+
+.issues .rbody .cmt.more {
+  color: var(--faint);
+  font-size: 12px;
+  border: none;
+  padding-top: 6px;
+}
+
+/* Said where the actions are, because it is what changes them. */
+.issues .taken-note {
+  padding: 8px 14px;
+  border-top: 1px solid var(--line);
+  font-size: 11.5px;
+  color: var(--accent2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.issues .taken-note b {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+/* The two that start work stay on one line; the link to the browser drops
+   below them rather than squeezing them. */
+.issues .rfoot {
+  border-top: 1px solid var(--line);
+  padding: 12px 14px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.issues .rfoot button {
+  white-space: nowrap;
+  font: 12.5px var(--font);
+  border: 1px solid var(--line);
+  background: var(--panel);
+  color: var(--dim);
+  border-radius: var(--radius);
+  padding: 6px 12px;
+}
+
+.issues .rfoot button:hover:not(:disabled) {
+  color: var(--ink);
+  border-color: var(--accent);
+}
+
+.issues .rfoot button:disabled {
+  opacity: 0.55;
+}
+
+.issues .rfoot button.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--on-accent);
+  font-weight: 700;
+}
+
+.issues .rfoot .browse {
+  margin-left: auto;
+  color: var(--faint);
+  font-size: 11.5px;
+  border: none;
+  background: none;
+  padding: 0;
+}
+
+.issues .rfoot .k {
+  font: 10px var(--mono);
+  color: var(--on-accent);
+  opacity: 0.6;
+  margin-left: 5px;
+}
+
+.issues .rfoot button:not(.primary) .k {
+  color: var(--faint);
+  opacity: 1;
+}
+
+.issues .bfoot {
+  flex-wrap: wrap;
+  row-gap: 4px;
+}
+
+.issues .bfoot code {
+  font: 11px var(--mono);
+}
+
+.ghead.assignedToYou h2 {
+  color: var(--accent2);
+}
+
+.ghead.pickedUp h2 {
+  color: var(--ok);
+}

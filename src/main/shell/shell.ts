@@ -151,6 +151,7 @@ export function createShell({
         // show an elapsed time for a session that has stopped.
         ...(turn === undefined ? {} : { workingSince: turn.startedAt }),
         ...(session.worktree === undefined ? {} : { worktree: session.worktree }),
+        ...(session.issue === undefined ? {} : { issue: session.issue }),
         // Absent in the record means a session past its first message, which
         // is what a record written before the mark existed has to read as.
         fresh: session.fresh === true,
@@ -763,7 +764,10 @@ export function createShell({
       emitState()
     },
 
-    async createSession(workspaceId: WorkspaceId): Promise<SessionId> {
+    async createSession(
+      workspaceId: WorkspaceId,
+      options?: { readonly issue?: string }
+    ): Promise<SessionId> {
       const workspace = store.workspace(workspaceId)
       if (workspace === undefined) refuse('That workspace is no longer open.')
 
@@ -772,7 +776,10 @@ export function createShell({
         createdAt: new Date().toISOString(),
         // One click of New session lands on the checkout, and the choice is
         // open until the first message.
-        fresh: true
+        fresh: true,
+        // Recorded at creation and never changed: which issue this session was
+        // started on is a fact about how it began.
+        ...(options?.issue === undefined ? {} : { issue: options.issue })
       })
       try {
         const bound = await adapter.bind({

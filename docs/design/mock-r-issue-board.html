@@ -1,0 +1,432 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Mock R — Issue board (⌘I)</title>
+<style>
+  :root{
+    --bg:#191419; --bg2:#211a20; --panel:#241c23; --line:#3a2e38;
+    --ink:#e8dfe2; --dim:#9b8a94; --faint:#6b5d66;
+    --accent:#e07a4f; --accent2:#f0a37c; --ok:#7fb069; --bad:#c95f5f; --warn:#d9a441;
+    --user:#2c2230; --mono:ui-monospace,'SF Mono',Menlo,monospace;
+  }
+  *{box-sizing:border-box;margin:0}
+  body{background:var(--bg);color:var(--ink);font:14px/1.55 -apple-system,'Segoe UI',sans-serif;height:100vh;display:flex;overflow:hidden}
+  /* ---------- sidebar ---------- */
+  .side{width:248px;flex:none;background:var(--bg2);border-right:1px solid var(--line);display:flex;flex-direction:column}
+  .brand{padding:16px 16px 10px;font-weight:700;letter-spacing:.06em;font-size:15px}
+  .brand em{color:var(--accent);font-style:normal}
+  .newchat{margin:6px 12px 14px;padding:8px;border:1px solid var(--line);border-radius:8px;background:var(--panel);color:var(--ink);text-align:center;font-size:13px;cursor:pointer}
+  .wslabel{padding:4px 16px;font-size:10.5px;text-transform:uppercase;letter-spacing:.12em;color:var(--faint)}
+  .ws{padding:7px 16px;font-size:13px;color:var(--dim);cursor:pointer;display:flex;align-items:center;gap:8px}
+  .ws .dot{width:7px;height:7px;border-radius:50%;background:var(--faint);flex:none}
+  .ws.active{color:var(--ink);background:var(--panel)}
+  .ws.active .dot{background:var(--accent);box-shadow:0 0 6px var(--accent)}
+  .sessions{margin:2px 0 10px;border-left:1px solid var(--line);margin-left:22px}
+  .sess{padding:5px 12px;font-size:12.5px;color:var(--dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:flex;align-items:center;gap:6px}
+  .sess.active{color:var(--accent2)}
+  .sess .wt{color:var(--accent);font-size:11px}
+  .sess .work{width:6px;height:6px;border-radius:50%;background:var(--accent);box-shadow:0 0 6px var(--accent);flex:none}
+  .side .foot{margin-top:auto;padding:12px 16px;border-top:1px solid var(--line);font-size:12px;color:var(--dim)}
+  /* ---------- main ---------- */
+  .main{flex:1;display:flex;flex-direction:column;min-width:0;position:relative}
+  .top{display:flex;align-items:center;gap:10px;padding:10px 20px;border-bottom:1px solid var(--line);font-size:12.5px;color:var(--dim)}
+  .top .title{color:var(--ink);font-weight:600;font-size:13.5px}
+  .grow{margin-left:auto}
+  .tchip{font-size:12px;color:var(--dim);border:1px solid var(--line);border-radius:14px;padding:3px 10px;cursor:pointer;display:flex;gap:7px;align-items:center;background:var(--panel)}
+  .tchip:hover{color:var(--ink);border-color:var(--accent)}
+  .tchip .g{color:var(--accent)}
+  .tchip b{color:var(--dim);font-weight:600}
+  .tchip u{color:var(--accent2);font-weight:600;text-decoration:none}
+  .tchip.lit{border-color:#5c4436}
+  .chat{flex:1;overflow-y:auto;padding:24px 0}
+  .msg{max-width:660px;margin:0 auto 22px;padding:0 22px}
+  .msg .who{font-size:11px;text-transform:uppercase;letter-spacing:.1em;color:var(--faint);margin-bottom:6px}
+  .msg.user .bubble{background:var(--user);border:1px solid var(--line);border-radius:10px;padding:10px 14px}
+  .msg.user .bubble .cmd{font:12.5px var(--mono);color:var(--accent2)}
+  .msg.user .bubble .sub{font-size:12px;color:var(--dim);margin-top:6px}
+  .msg.agent .who{color:var(--accent)}
+  .msg p{margin-bottom:8px}
+  .tool{display:flex;gap:8px;align-items:center;font:12px var(--mono);color:var(--dim);background:#120e12;border:1px solid var(--line);border-left:3px solid var(--ok);border-radius:6px;padding:7px 12px;margin:10px 0}
+  .composer{max-width:660px;width:100%;margin:0 auto;padding:0 22px 16px}
+  .cbox{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px 14px 10px}
+  .cbox .ph{color:var(--faint);height:40px}
+  .crow{display:flex;align-items:center;gap:8px;margin-top:6px}
+  .chip{font-size:12px;color:var(--dim);border:1px solid var(--line);border-radius:14px;padding:3px 10px}
+  .chip b{color:var(--ink);font-weight:600}
+  .chip .g{color:var(--accent)}
+  .send{margin-left:auto;background:var(--accent);color:#1c120c;border:none;border-radius:8px;padding:6px 14px;font-weight:700}
+
+  .callout{position:absolute;top:44px;right:22px;display:flex;flex-direction:column;align-items:flex-end;gap:2px;pointer-events:none;z-index:5}
+  .callout .arrow{color:var(--accent);font-size:20px;line-height:1;margin-right:74px}
+  .callout .note{font-size:11.5px;color:var(--accent2);background:var(--bg2);border:1px solid #5c4436;border-radius:7px;padding:6px 10px;max-width:300px;line-height:1.45}
+  .callout .note kbd{font:10.5px var(--mono);border:1px solid var(--line);border-radius:4px;padding:1px 4px;color:var(--dim)}
+
+  /* ---------- the board overlay ---------- */
+  .board{position:absolute;inset:0;background:rgba(15,11,15,.88);display:flex;flex-direction:column;padding:26px 30px 18px;backdrop-filter:blur(3px)}
+  .bhead{display:flex;align-items:baseline;gap:12px;margin-bottom:4px}
+  .bhead h1{font-size:17px;font-weight:600}
+  .bhead .repo{font:12px var(--mono);color:var(--dim)}
+  .bhead .repo b{color:var(--ink)}
+  .bhead .x{margin-left:auto;color:var(--faint);font-size:12px;cursor:pointer;white-space:nowrap}
+  .bhead .x kbd{font:11px var(--mono);border:1px solid var(--line);border-radius:4px;padding:1px 5px;color:var(--dim);margin-left:5px}
+  .bsub{font-size:12px;color:var(--faint);margin-bottom:12px;display:flex;gap:12px;align-items:center}
+  .bsub .live{color:var(--ok)}
+  .bsub a{color:var(--dim);text-decoration:none;border-bottom:1px dotted var(--line);cursor:pointer}
+  .bsub a:hover{color:var(--ink)}
+  .bsub .filter{margin-left:auto}
+  .bsub .filter input{background:var(--panel);border:1px solid var(--line);border-radius:7px;color:var(--ink);font:12px var(--mono);padding:3px 9px;width:190px;outline:none}
+  .bsub .filter input::placeholder{color:#4a3f47}
+
+  /* the split: scannable list, one issue read in full beside it */
+  .split{flex:1;display:flex;gap:20px;min-height:0}
+  .scroll{flex:1;overflow-y:auto;overflow-x:hidden;padding-right:6px;min-width:0}
+
+  .group{margin-bottom:22px}
+  .ghead{display:flex;align-items:baseline;gap:10px;margin-bottom:4px;padding-bottom:6px;border-bottom:1px solid var(--line)}
+  .ghead h2{font-size:11px;text-transform:uppercase;letter-spacing:.13em;font-weight:600;color:var(--dim);flex:none}
+  .ghead .cnt{font:11px var(--mono);color:var(--faint);flex:none}
+  .ghead .why{font-size:11.5px;color:var(--faint);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .ghead.mine h2{color:var(--accent2)}
+  .ghead.taken h2{color:var(--ok)}
+
+  /* every track fixed, so rows line up down the whole board */
+  .row{
+    display:grid;
+    grid-template-columns:46px minmax(0,1fr) 132px 52px 40px 116px;
+    align-items:center;
+    column-gap:12px;
+    padding:7px 10px;border-radius:8px;border:1px solid transparent;cursor:pointer;
+  }
+  .row:hover{background:var(--panel);border-color:var(--line)}
+  .row.focused{background:var(--panel);border-color:#5c4436}
+  .row.taken .ttl{color:var(--dim)}
+  .num{font:12.5px var(--mono);color:var(--faint)}
+  .ttl{font-size:13px;color:var(--ink);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .labels{display:flex;gap:4px;overflow:hidden}
+  .labels i{font-style:normal;font:10px var(--mono);letter-spacing:.04em;border-radius:4px;padding:0 5px;border:1px solid var(--line);color:var(--dim);white-space:nowrap}
+  .labels i.bug{color:#e08a8a;border-color:#5f3a3a}
+  .labels i.feat{color:#8fc4e0;border-color:#3f5a66}
+  .labels i.p1{color:var(--warn);border-color:#5c4a2a}
+  .who2{font:11px var(--mono);color:var(--faint);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .who2 b{color:var(--dim);font-weight:600}
+  .age{font-size:11.5px;color:var(--faint);text-align:right}
+  .state{font-size:11px;text-align:right;color:var(--faint);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .state.pr{color:var(--ok)}
+  .state.sess{color:var(--accent2)}
+
+  /* ---------- the reading pane ---------- */
+  .read{width:430px;flex:none;background:var(--bg2);border:1px solid var(--line);border-radius:12px;display:flex;flex-direction:column;min-height:0}
+  .rhead{padding:14px 16px 10px;border-bottom:1px solid var(--line)}
+  .rhead .rnum{font:11.5px var(--mono);color:var(--faint);display:flex;gap:8px;align-items:center}
+  .rhead .rnum .st{border:1px solid #47603a;color:var(--ok);border-radius:4px;padding:0 5px;font-size:10px}
+  .rhead h3{font-size:15px;line-height:1.4;margin:6px 0 8px;font-weight:600}
+  .rmeta{display:flex;flex-wrap:wrap;gap:6px 10px;font-size:11.5px;color:var(--faint);align-items:center}
+  .rmeta b{color:var(--dim);font-weight:600}
+  .rbody{padding:14px 16px;overflow-y:auto;flex:1;font-size:13px;line-height:1.6;color:var(--dim);min-height:0}
+  .rbody h4{font-size:12px;text-transform:uppercase;letter-spacing:.1em;color:var(--faint);margin:14px 0 6px;font-weight:600}
+  .rbody p{margin-bottom:10px}
+  .rbody ul{margin:0 0 10px 18px}
+  .rbody li{margin-bottom:4px}
+  .rbody code{font:12px var(--mono);color:var(--accent2)}
+  .rbody pre{background:#120e12;border:1px solid var(--line);border-radius:6px;padding:8px 10px;font:11.5px var(--mono);color:var(--dim);overflow-x:auto;margin-bottom:10px}
+  .rbody .cmt{border-top:1px solid var(--line);padding-top:10px;margin-top:12px}
+  .rbody .cmt .cwho{font-size:11.5px;color:var(--accent2);margin-bottom:4px}
+  .rbody .cmt.more{color:var(--faint);font-size:12px;border:none;padding-top:6px}
+  .rbody .fade{color:var(--faint);font-size:12px}
+  .rfoot{border-top:1px solid var(--line);padding:12px 14px;display:flex;gap:8px;align-items:center}
+  .rfoot button{font:12.5px -apple-system,'Segoe UI',sans-serif;border:1px solid var(--line);background:var(--panel);color:var(--dim);border-radius:8px;padding:6px 12px;cursor:pointer}
+  .rfoot button:hover{color:var(--ink);border-color:var(--accent)}
+  .rfoot button.primary{background:var(--accent);border-color:var(--accent);color:#1c120c;font-weight:700}
+  .rfoot .browse{margin-left:auto;color:var(--faint);font-size:11.5px;border:none;background:none;cursor:pointer}
+  .rfoot .k{font:10px var(--mono);color:#1c120c;opacity:.6;margin-left:5px}
+  .rfoot button:not(.primary) .k{color:var(--faint);opacity:1}
+  .taken-note{padding:8px 14px;border-top:1px solid var(--line);font-size:11.5px;color:var(--accent2);background:#241c2340}
+
+  .bfoot{padding-top:10px;margin-top:12px;border-top:1px solid var(--line);font-size:11.5px;color:var(--faint);display:flex;gap:15px;align-items:center}
+  .bfoot kbd{font:11px var(--mono);border:1px solid var(--line);border-radius:4px;padding:1px 5px;color:var(--dim)}
+  .bfoot .sp{margin-left:auto;font-size:11px}
+  .empty{color:var(--faint);font-size:12.5px;padding:12px}
+
+  .vswitch{position:fixed;bottom:8px;left:50%;transform:translateX(-50%);z-index:99;display:flex;border:1px solid var(--line);border-radius:8px;overflow:hidden;font-size:11px;background:var(--bg2)}
+  .vswitch button{background:none;border:none;color:var(--dim);padding:5px 12px;cursor:pointer;font:inherit;border-right:1px solid var(--line);white-space:nowrap}
+  .vswitch button:last-child{border-right:none}
+  .vswitch button.on{background:var(--accent);color:#1c120c;font-weight:700}
+  .hide{display:none !important}
+</style></head><body>
+
+<nav class="side">
+  <div class="brand"><em>◆</em> CRUCIBLE</div>
+  <button class="newchat">New session</button>
+  <div class="wslabel">Workspaces</div>
+  <div class="ws active"><span class="dot"></span> <span>crucible</span></div>
+  <div class="sessions">
+    <div class="sess v-started"><span class="work"></span><span class="wt">⑂</span>#128 quota strip alignment</div>
+    <div class="sess active">compaction economics</div>
+    <div class="sess">roster parking review</div>
+  </div>
+  <div class="ws"><span class="dot"></span> pi-extensions</div>
+  <div class="ws"><span class="dot"></span> resume-site</div>
+  <div class="side foot"><span>ike</span></div>
+</nav>
+
+<main class="main">
+  <div class="top">
+    <span class="title v-rest v-split v-all v-none">compaction economics</span>
+    <span class="title v-started hide">#128 quota strip alignment</span>
+    <span>crucible · main</span>
+    <div class="grow"></div>
+    <div class="tchip lit v-rest v-split v-all v-started"><span class="g">◎</span> <b>3 issues</b> · <u>2 yours</u></div>
+    <div class="tchip v-rest v-split v-all v-started"><span class="g">⑂</span> <b>4 landed</b></div>
+    <span style="color:var(--faint)">34% ctx</span>
+  </div>
+
+  <div class="chat">
+    <div class="v-rest v-split v-all v-none">
+      <div class="msg user"><div class="who">You</div><div class="bubble">Where did the quota strip's reset time come from?</div></div>
+      <div class="msg agent"><div class="who">Agent · Opus 5</div>
+        <p>Straight from the provider payload — Crucible fixes neither the count of windows nor their labels.</p>
+      </div>
+    </div>
+
+    <div class="v-started hide">
+      <div class="msg user"><div class="who">You</div>
+        <div class="bubble">
+          <div class="cmd">/quick-align crucible#128 — Quota strip misaligns under the Add workspace button</div>
+          <div class="sub">https://github.com/secondcircle/crucible/issues/128</div>
+        </div>
+      </div>
+      <div class="msg agent"><div class="who">Agent · Opus 5 · think: high</div>
+        <div class="tool">▸ gh — issue view 128 --json title,body,comments</div>
+        <div class="tool">▸ Read — CONTEXT.md, docs/adr/</div>
+        <p>Read the issue and what this workspace has settled. One question before I write anything…</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="composer">
+    <div class="cbox">
+      <div class="ph">Message the agent…</div>
+      <div class="crow">
+        <div class="chip">⌾ <b>Opus 5</b></div>
+        <div class="chip">think: <b>high</b></div>
+        <div class="chip v-started hide"><span class="g">⑂</span> <b>worktree</b> crucible/wt-2f9c</div>
+        <button class="send">Send</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="callout v-rest">
+    <div class="arrow">▲</div>
+    <div class="note">One more chip beside the branch one. Counts what is assigned to you. Click it, or <kbd>⌘I</kbd>, for the issue board.</div>
+  </div>
+
+  <div class="callout v-started hide" style="top:auto;bottom:110px;right:26px">
+    <div class="note">Align on #128 made all of this in one click: new session, new worktree, default model and thinking, command already sent.</div>
+  </div>
+
+  <!-- ================= THE BOARD ================= -->
+  <section class="board v-split v-all v-none hide">
+    <div class="bhead">
+      <h1>Issues</h1>
+      <span class="repo v-split v-all">secondcircle/crucible · GitHub Issues</span>
+      <span class="repo v-none hide">~/repos/resume-site · no issue host connected</span>
+      <span class="x">Close <kbd>esc</kbd></span>
+    </div>
+    <div class="bsub">
+      <span><span class="live">●</span> refreshed 12s ago</span>
+      <span class="v-split v-none">yours and unclaimed</span><span class="v-all hide">everyone's</span>
+      <a class="v-split">show everyone's</a>
+      <a class="v-all hide">show yours only</a>
+      <a class="v-split v-all">refresh now</a>
+      <span class="filter v-split v-all"><input placeholder="filter…"></span>
+    </div>
+
+    <div class="split">
+      <div class="scroll">
+        <p class="empty v-none hide">No issue host here. This folder's repository has no GitHub remote <code style="font:12px var(--mono)">gh</code> can reach, so there is nothing to list.</p>
+
+        <div class="group v-split v-all">
+          <div class="ghead mine">
+            <h2>Assigned to you</h2><span class="cnt">2</span>
+            <span class="why">open issues this host says are yours</span>
+          </div>
+          <div class="row focused">
+            <span class="num">#128</span>
+            <span class="ttl">Quota strip misaligns under the Add workspace button</span>
+            <span class="labels"><i class="bug">bug</i><i>ui</i></span>
+            <span class="who2">you</span>
+            <span class="age">2d</span>
+            <span class="state">3 comments</span>
+          </div>
+          <div class="row">
+            <span class="num">#131</span>
+            <span class="ttl">Session tree: jumping from a tool chain loses the collapse state</span>
+            <span class="labels"><i class="bug">bug</i></span>
+            <span class="who2">you</span>
+            <span class="age">5d</span>
+            <span class="state">1 comment</span>
+          </div>
+        </div>
+
+        <div class="group v-split v-all">
+          <div class="ghead">
+            <h2>Mentions you</h2><span class="cnt">1</span>
+            <span class="why">your name is in it and it is not yours</span>
+          </div>
+          <div class="row">
+            <span class="num">#124</span>
+            <span class="ttl">Should the standing prompt ship the communication style?</span>
+            <span class="labels"><i class="feat">design</i></span>
+            <span class="who2"><b>maya</b></span>
+            <span class="age">1d</span>
+            <span class="state">7 comments</span>
+          </div>
+        </div>
+
+        <div class="group v-split v-all">
+          <div class="ghead">
+            <h2>Unclaimed</h2><span class="cnt">3</span>
+            <span class="why">open, nobody assigned — free to pick up</span>
+          </div>
+          <div class="row">
+            <span class="num">#133</span>
+            <span class="ttl">Bash run output should keep ANSI colour in the conversation</span>
+            <span class="labels"><i class="feat">feature</i></span>
+            <span class="who2">—</span>
+            <span class="age">6h</span>
+            <span class="state">no comments</span>
+          </div>
+          <div class="row">
+            <span class="num">#119</span>
+            <span class="ttl">Model ring skips a model the adapter listed under two ids</span>
+            <span class="labels"><i class="bug">bug</i><i class="p1">p1</i></span>
+            <span class="who2">—</span>
+            <span class="age">9d</span>
+            <span class="state">2 comments</span>
+          </div>
+          <div class="row">
+            <span class="num">#102</span>
+            <span class="ttl">Context panel tabs survive a session reset and shouldn't</span>
+            <span class="labels"><i class="bug">bug</i></span>
+            <span class="who2">—</span>
+            <span class="age">3w</span>
+            <span class="state">no comments</span>
+          </div>
+        </div>
+
+        <div class="group v-split v-all">
+          <div class="ghead taken">
+            <h2>Already picked up</h2><span class="cnt">2</span>
+            <span class="why">a session here started on it, or a pull request names it</span>
+          </div>
+          <div class="row taken">
+            <span class="num">#126</span>
+            <span class="ttl">Quota meters need a pace tick on weekly windows</span>
+            <span class="labels"><i class="feat">feature</i></span>
+            <span class="who2">you</span>
+            <span class="age">4d</span>
+            <span class="state sess">session</span>
+          </div>
+          <div class="row taken">
+            <span class="num">#117</span>
+            <span class="ttl">Worktree script failures should print the whole output</span>
+            <span class="labels"><i class="bug">bug</i></span>
+            <span class="who2">you</span>
+            <span class="age">8d</span>
+            <span class="state pr">PR #130 open</span>
+          </div>
+        </div>
+
+        <div class="group v-all hide">
+          <div class="ghead">
+            <h2>Assigned to others</h2><span class="cnt">2</span>
+            <span class="why">someone else's to answer — here so you see the whole board</span>
+          </div>
+          <div class="row taken">
+            <span class="num">#134</span>
+            <span class="ttl">Sidebar drag-reorder for sessions</span>
+            <span class="labels"><i class="feat">feature</i></span>
+            <span class="who2"><b>maya</b></span>
+            <span class="age">3h</span>
+            <span class="state">4 comments</span>
+          </div>
+          <div class="row taken">
+            <span class="num">#121</span>
+            <span class="ttl">Installer log rotates into the repo root</span>
+            <span class="labels"><i class="bug">bug</i></span>
+            <span class="who2"><b>dev</b></span>
+            <span class="age">11d</span>
+            <span class="state">no comments</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- reading pane: whatever the arrows are on -->
+      <aside class="read v-split v-all">
+        <div class="rhead">
+          <div class="rnum"><span>#128</span><span class="st">open</span><span>opened 2d ago by <b style="color:var(--dim)">ike</b></span></div>
+          <h3>Quota strip misaligns under the Add workspace button</h3>
+          <div class="rmeta">
+            <span class="labels"><i class="bug">bug</i><i>ui</i></span>
+            <span>assignee <b>you</b></span>
+            <span>updated 4h ago</span>
+          </div>
+        </div>
+        <div class="rbody">
+          <p>At 248px sidebar width the quota strip's percent column wraps, and the reset instant lands under the <b>Add workspace</b> button instead of beside its meter. Only shows with three or more windows, so the Max plan hits it and Pro doesn't.</p>
+          <h4>Steps</h4>
+          <ul>
+            <li>Sign in with a plan reporting 3+ windows</li>
+            <li>Leave the sidebar at its default width</li>
+            <li>Watch the bottom of the sidebar</li>
+          </ul>
+          <p>Suspect the strip is sizing from the meter label rather than the strip, so a long window label (<code>weekly · opus</code>) pushes past the fold:</p>
+          <pre>.qstrip { grid-template-columns: auto 1fr auto; }</pre>
+          <p>Pace tick placement is unaffected — it rides the fill, not the label.</p>
+          <div class="cmt">
+            <div class="cwho">maya · 1d ago</div>
+            <p>Reproduced on Max. Also happens at any sidebar width under ~270px, so it isn't the default that's special.</p>
+          </div>
+          <div class="cmt more">2 more comments · <a style="color:var(--dim)">read on GitHub</a></div>
+        </div>
+        <div class="rfoot">
+          <button class="primary">Align<span class="k">⏎</span></button>
+          <button>Quick align<span class="k">⇧⏎</span></button>
+          <button class="browse">Open on GitHub ⌘⏎</button>
+        </div>
+      </aside>
+
+      <aside class="read v-none hide" style="align-items:center;justify-content:center">
+        <span class="empty">Nothing to read.</span>
+      </aside>
+    </div>
+
+    <div class="bfoot">
+      <span><kbd>⌘I</kbd> close</span>
+      <span><kbd>↑↓</kbd> read the next one</span>
+      <span><kbd>⏎</kbd> align</span>
+      <span><kbd>⇧⏎</kbd> quick align</span>
+      <span><kbd>⌘⏎</kbd> open on GitHub</span>
+      <span><kbd>⌘C</kbd> copy <code style="font:11px var(--mono)">#128</code></span>
+      <span class="sp">GitHub Issues via <code style="font:11px var(--mono)">gh</code> · nothing here is closed, assigned or commented for you</span>
+    </div>
+  </section>
+
+</main>
+
+<div class="vswitch">
+  <button class="on" onclick="setV('rest')">1 · Resting</button>
+  <button onclick="setV('split')">2 · Board · yours and unclaimed</button>
+  <button onclick="setV('all')">3 · Board · everyone's</button>
+  <button onclick="setV('none')">4 · Board · no issue host</button>
+  <button onclick="setV('started')">5 · After Align on #128</button>
+</div>
+<script>
+const V=['rest','split','all','none','started'];
+function setV(v){
+  document.querySelectorAll('[class*="v-"]').forEach(e=>{
+    if(V.some(k=>e.classList.contains('v-'+k))) e.classList.toggle('hide', !e.classList.contains('v-'+v));
+  });
+  document.querySelectorAll('.vswitch button').forEach((b,i)=>b.classList.toggle('on', i===V.indexOf(v)));
+}
+setV('rest');
+</script>
+</body></html>

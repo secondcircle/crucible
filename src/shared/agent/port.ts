@@ -84,6 +84,9 @@ export interface SessionState {
   readonly lastActivityAt?: string
   /** Present only for a worktree session; absent means the checkout. */
   readonly worktree?: SessionWorktree
+  // The issue this session was started on, as `crucible#128`. Set once, at
+  // creation, by the issue board's Align; absent on every other session.
+  readonly issue?: string
   // True until the conversation's first message, and restored by a session
   // reset. The one condition under which the worktree may still be changed.
   readonly fresh: boolean
@@ -376,7 +379,12 @@ export interface AgentPort {
   /** Forgets the workspace in Crucible; the OS folder is untouched. */
   removeWorkspace(id: WorkspaceId): Promise<void>
 
-  createSession(workspaceId: WorkspaceId): Promise<SessionId>
+  // `issue` records what the session was started on and nothing more: it is
+  // what lets the issue board say an issue is already picked up.
+  createSession(
+    workspaceId: WorkspaceId,
+    options?: { readonly issue?: string }
+  ): Promise<SessionId>
   activateSession(id: SessionId): Promise<void>
   /** Forgets the sidebar entry only; adapter persistence stays. */
   removeSession(id: SessionId): Promise<void>

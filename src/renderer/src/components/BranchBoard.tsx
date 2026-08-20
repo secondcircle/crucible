@@ -176,7 +176,13 @@ export function BranchBoard({
   }, [order, focusedName, chosen, hasSession, onAsk, onOpenPr, onCopy])
 
   return (
-    <section className="board" role="dialog" aria-label="Branch board" tabIndex={-1} ref={overlay}>
+    <section
+      className="board branches"
+      role="dialog"
+      aria-label="Branch board"
+      tabIndex={-1}
+      ref={overlay}
+    >
       <div className="bhead">
         <h1>Branches</h1>
         {board === undefined ? null : (

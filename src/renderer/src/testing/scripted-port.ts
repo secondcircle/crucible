@@ -281,8 +281,16 @@ export function createScriptedPort(initial: Partial<ShellSnapshot> = {}): Script
       return Promise.resolve()
     },
 
-    createSession(workspaceId: WorkspaceId): Promise<SessionId> {
-      calls.push({ op: 'createSession', args: [workspaceId] })
+    createSession(
+      workspaceId: WorkspaceId,
+      options?: { readonly issue?: string }
+    ): Promise<SessionId> {
+      // The options are recorded only where they were given, so an ordinary
+      // New session reads as the one-argument call it is.
+      calls.push({
+        op: 'createSession',
+        args: options === undefined ? [workspaceId] : [workspaceId, options]
+      })
       const id = `s-${(minted += 1)}`
       snapshot = {
         ...snapshot,
@@ -296,6 +304,7 @@ export function createScriptedPort(initial: Partial<ShellSnapshot> = {}): Script
             // One click of New session lands on the checkout, with the choice
             // still open.
             fresh: true,
+            ...(options?.issue === undefined ? {} : { issue: options.issue }),
             model: port.models[0]?.id,
             thinkingLevel: port.models[0]?.thinkingLevels[0]
           }

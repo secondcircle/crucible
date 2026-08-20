@@ -7,7 +7,7 @@ import type { TranscriptItem } from '../../shared/agent/port'
 import { sanitizeTitle, TITLE_INSTRUCTION, titleInput } from './sdk-titler'
 
 describe('what the titler sees', () => {
-  it('is the user and assistant messages of its own session, and nothing else', () => {
+  it('is what the two speakers said and the summaries standing in for it', () => {
     const items: TranscriptItem[] = [
       { kind: 'user', text: 'rebuild the composer footer' },
       { kind: 'thinking', text: 'the mock says the row keeps its height' },
@@ -23,12 +23,24 @@ describe('what the titler sees', () => {
 
     expect(input).toContain('user: rebuild the composer footer')
     expect(input).toContain('assistant: The hints are gone')
+    expect(input).toContain('summary: the branch so far')
     expect(input).not.toContain('the mock says')
     expect(input).not.toContain('composer.css')
     expect(input).not.toContain('npm test')
-    expect(input).not.toContain('the branch so far')
     expect(input).not.toContain('that turn failed')
   })
+
+  it('can name a compacted conversation by its summary alone', () => {
+    // Right after a compaction the summary may be all there is: the titler
+    // reading nothing here is how a session once earned the title "I need
+    // more context to name this conversation".
+    const input = titleInput([
+      { kind: 'summary', text: 'we rebuilt the sidebar tree and its tests' }
+    ])
+
+    expect(input).toBe('summary: we rebuilt the sidebar tree and its tests')
+  })
+
 
   it('keeps the conversation oldest first', () => {
     const input =
@@ -113,5 +125,19 @@ describe('what is made of the answer', () => {
     expect(sanitizeTitle('')).toBeUndefined()
     expect(sanitizeTitle('   \n  ')).toBeUndefined()
     expect(sanitizeTitle('""')).toBeUndefined()
+  })
+
+  it('is absent when the model talked instead of naming', () => {
+    expect(
+      sanitizeTitle(
+        'I need more context to name this conversation. Could you tell me what it is about?'
+      )
+    ).toBeUndefined()
+  })
+
+  it('still allows a name a few words past the ask', () => {
+    expect(sanitizeTitle('Fixing the titler so a refusal never becomes a title')).toBe(
+      'Fixing the titler so a refusal never becomes a title'
+    )
   })
 })

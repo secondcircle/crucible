@@ -1,6 +1,10 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { WorkspaceId, WorkspaceState } from '../../../shared/agent/port'
-import type { BranchBoardAnswer, WorkspaceService } from '../../../shared/workspace/service'
+import type {
+  BranchBoardAnswer,
+  IssueBoardAnswer,
+  WorkspaceService
+} from '../../../shared/workspace/service'
 
 // Snapshots live only as long as this document does: a board is a fact about a
 // repository as it stands, so a persisted one would be a lie.
@@ -8,32 +12,61 @@ import type { BranchBoardAnswer, WorkspaceService } from '../../../shared/worksp
 /** While the window is focused, and never otherwise. */
 export const POLL_MS = 60_000
 
-export interface BoardEntry {
+export interface BoardEntry<Answer> {
   /** The last answer that arrived; a failure leaves the previous one standing. */
-  readonly answer?: BranchBoardAnswer
+  readonly answer?: Answer
   /** What the last collection failed with, cleared by the next good one. */
   readonly failure?: string
   readonly refreshing: boolean
 }
 
-export function useBranchBoards({
-  service,
-  workspaces,
-  activeWorkspaceId,
-  working,
-  onFailure
-}: {
+export interface Boards<Answer> {
+  readonly boards: Readonly<Record<WorkspaceId, BoardEntry<Answer>>>
+  readonly refresh: (workspaceId: WorkspaceId) => void
+}
+
+interface Wanted<Answer> {
   readonly service: WorkspaceService
   readonly workspaces: readonly WorkspaceState[]
   readonly activeWorkspaceId?: WorkspaceId
   /** Workspaces with a session working: their collections wait. */
   readonly working: ReadonlySet<WorkspaceId>
   readonly onFailure: (message: string) => void
-}): {
-  readonly boards: Readonly<Record<WorkspaceId, BoardEntry>>
-  readonly refresh: (workspaceId: WorkspaceId) => void
-} {
-  const [boards, setBoards] = useState<Readonly<Record<WorkspaceId, BoardEntry>>>({})
+  /** The one question this board asks of a workspace. */
+  readonly ask: (service: WorkspaceService, workspacePath: string) => Promise<Answer>
+}
+
+export function useBranchBoards(
+  wanted: Omit<Wanted<BranchBoardAnswer>, 'ask'>
+): Boards<BranchBoardAnswer> {
+  return useBoards({ ...wanted, ask: askBranches })
+}
+
+export function useIssueBoards(
+  wanted: Omit<Wanted<IssueBoardAnswer>, 'ask'>
+): Boards<IssueBoardAnswer> {
+  return useBoards({ ...wanted, ask: askIssues })
+}
+
+// Module-level, so the hook's effects depend on something stable rather than
+// on a function rebuilt every render.
+const askBranches = (service: WorkspaceService, path: string): Promise<BranchBoardAnswer> =>
+  service.branchBoard(path)
+
+const askIssues = (service: WorkspaceService, path: string): Promise<IssueBoardAnswer> =>
+  service.issueBoard(path)
+
+// One collection rhythm for both boards: the active workspace first, then the
+// rest one at a time, on focus and on the poll.
+function useBoards<Answer>({
+  service,
+  workspaces,
+  activeWorkspaceId,
+  working,
+  onFailure,
+  ask
+}: Wanted<Answer>): Boards<Answer> {
+  const [boards, setBoards] = useState<Readonly<Record<WorkspaceId, BoardEntry<Answer>>>>({})
   // What a collection reads when it runs, rather than what was true when the
   // trigger was wired up.
   const latest = useRef({ workspaces, activeWorkspaceId, working })
@@ -62,7 +95,7 @@ export function useBranchBoards({
         [workspaceId]: { ...current[workspaceId], refreshing: true }
       }))
       try {
-        const answer = await service.branchBoard(workspace.path)
+        const answer = await ask(service, workspace.path)
         setBoards((current) => ({ ...current, [workspaceId]: { answer, refreshing: false } }))
       } catch (cause) {
         const message = cause instanceof Error ? cause.message : String(cause)
@@ -77,7 +110,7 @@ export function useBranchBoards({
         inFlight.current.delete(workspaceId)
       }
     },
-    [service, onFailure]
+    [service, onFailure, ask]
   )
 
   // Active first, then the rest one at a time, so the badges stay honest
@@ -123,5 +156,5 @@ export function useBranchBoards({
     [collect]
   )
 
-  return { boards, refresh }
+  return useMemo(() => ({ boards, refresh }), [boards, refresh])
 }
