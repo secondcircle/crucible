@@ -148,6 +148,25 @@ a full override; π's stock prompt is never used. One role exists today: the
 interactive coding agent.
 _Avoid_: system prompt (the composed whole), base prompt.
 
+**Quota strip**:
+The block at the foot of the sidebar, above Add workspace, showing how much of
+each provider subscription this machine has spent. Global: one per app, not per
+workspace and not per session.
+_Avoid_: usage strip, usage panel (the Settings sheet's Usage tab means session
+tokens and cost), limits, meters panel.
+
+**Quota meter**:
+One window of one plan in the quota strip — a short label, a percent used, and
+the instant it resets. A provider has as many as its plan reports; nothing in
+Crucible fixes the count or the labels.
+_Avoid_: window (the payload's word, ambiguous beside the context window),
+bar, gauge.
+
+**Pace tick**:
+The hairline on a weekly quota meter marking where an even burn would have put
+you by now. Fill past the tick means spending faster than the window elapses.
+_Avoid_: velocity, burn rate, forecast, projection line.
+
 **Standing prompt**:
 The text appended to every agent Crucible starts, whatever its role prompt
 says — things true of every agent regardless of its job. Day one it is the
