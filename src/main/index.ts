@@ -91,6 +91,9 @@ const shell = withLogging(
   createShell({
     store,
     adapter,
+    // The launch's own flavor: what stamps the tokens this launch mints, and
+    // what a stored token has to match to be offered back.
+    flavor,
     panel,
     pickFolder,
     seedWorkspacePath: seedWorkspacePath()

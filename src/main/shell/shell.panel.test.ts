@@ -29,6 +29,7 @@ function build(pauseMs = 0): void {
     store,
     panel,
     adapter: createFakeAdapter({ pauseMs }),
+    flavor: 'fake',
     pickFolder: async () => workspace
   })
   events = []

@@ -105,6 +105,52 @@ describe('what survives a relaunch', () => {
     })
   })
 
+  it('carries a token’s flavor through beside the token itself', () => {
+    const first = createShellStore(file)
+    const workspace = first.addWorkspace('/repos/crucible')
+    const session = first.addSession({
+      workspaceId: workspace.id,
+      createdAt: 'now',
+      token: 'opaque-1',
+      tokenFlavor: 'sdk'
+    })
+
+    expect(createShellStore(file).session(session.id)).toEqual({
+      id: session.id,
+      workspaceId: workspace.id,
+      createdAt: 'now',
+      token: 'opaque-1',
+      tokenFlavor: 'sdk'
+    })
+  })
+
+  // A flavor is what says whose token this is, so one this build cannot vouch
+  // for is dropped: absent reads as “not restorable”, which is the honest
+  // answer.
+  it('loads a flavor that is not a launch flavor, or has no token, as absent', () => {
+    const written = join(directory, 'shell-state.json')
+    writeFileSync(
+      written,
+      JSON.stringify({
+        version: 1,
+        workspaces: [{ id: 'w', path: '/repos/crucible' }],
+        sessions: [
+          { id: 'misspelled', workspaceId: 'w', createdAt: 'now', token: 't', tokenFlavor: 'SDK' },
+          { id: 'stamp-only', workspaceId: 'w', createdAt: 'now', tokenFlavor: 'fake' },
+          { id: 'intact', workspaceId: 'w', createdAt: 'now', token: 't', tokenFlavor: 'fake' }
+        ],
+        activeSessionByWorkspace: {}
+      })
+    )
+
+    const store = createShellStore(written)
+
+    expect(store.session('misspelled')?.tokenFlavor).toBeUndefined()
+    expect(store.session('misspelled')?.token).toBe('t')
+    expect(store.session('stamp-only')?.tokenFlavor).toBeUndefined()
+    expect(store.session('intact')?.tokenFlavor).toBe('fake')
+  })
+
   it('loads panel data that does not read as panel data as absent', () => {
     // The rest of the record is intact, so only the panel is lost: a version
     // bump would have thrown the whole sidebar away instead.
@@ -227,15 +273,25 @@ describe('sessions', () => {
   it('keeps the identity and changes the token when a session is rebound', () => {
     const store = createShellStore(file)
     const workspace = store.addWorkspace('/repos/crucible')
-    const session = store.addSession({ workspaceId: workspace.id, createdAt: 'now', token: 'old' })
+    const session = store.addSession({
+      workspaceId: workspace.id,
+      createdAt: 'now',
+      token: 'old',
+      tokenFlavor: 'sdk'
+    })
 
-    store.updateSession(session.id, { token: 'new', model: 'fake/deterministic' })
+    store.updateSession(session.id, {
+      token: 'new',
+      tokenFlavor: 'fake',
+      model: 'fake/deterministic'
+    })
 
     expect(createShellStore(file).session(session.id)).toEqual({
       id: session.id,
       workspaceId: workspace.id,
       createdAt: 'now',
       token: 'new',
+      tokenFlavor: 'fake',
       model: 'fake/deterministic'
     })
   })

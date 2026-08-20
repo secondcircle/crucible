@@ -41,6 +41,7 @@ beforeEach(() => {
     store,
     panel: createPanelModel({ persistence: storePanelPersistence(store) }),
     adapter,
+    flavor: 'fake',
     pickFolder: async () => WORKSPACE
   })
   events = []

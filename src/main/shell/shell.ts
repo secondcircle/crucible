@@ -26,8 +26,9 @@ import type {
   WorkspaceId
 } from '../../shared/agent/port'
 import { displaySafeMessage } from '../agent/adapter-error'
+import type { Flavor } from '../agent/select-adapter'
 import type { PanelModel } from '../panel/model'
-import type { ShellStore } from './store'
+import type { ShellStore, StoredSession } from './store'
 
 // Turn guards and ordering live here rather than in the UI or an adapter, so
 // they hold whoever is behind the port.
@@ -40,6 +41,9 @@ export interface Shell extends AgentPort {
 export interface ShellOptions {
   readonly store: ShellStore
   readonly adapter: ConversationAdapter
+  // The launch flavor the adapter came from. A token is meaningful only to the
+  // flavor that minted it, and this is what the shell compares against.
+  readonly flavor: Flavor
   // The same model the adapter's panel tools call, so panel state crosses the
   // port from here and from nowhere else.
   readonly panel: PanelModel
@@ -83,6 +87,7 @@ function queued(queue: QueueState | undefined): boolean {
 export function createShell({
   store,
   adapter,
+  flavor,
   panel,
   pickFolder,
   seedWorkspacePath
@@ -158,6 +163,14 @@ export function createShell({
     return { workspacePath: workspace.path }
   }
 
+  // A token is the minting adapter's own string, so it is offered back only to
+  // that adapter. A foreign flavor, or a token stored before this contract
+  // existed, reads as no token at all.
+  function restorableToken(session: StoredSession | undefined): string | undefined {
+    if (session?.token === undefined) return undefined
+    return session.tokenFlavor === flavor ? session.token : undefined
+  }
+
   // The promise is remembered rather than the result, so two callers racing
   // for the same session bind it once.
   function ensureBound(id: SessionId): Promise<Binding> {
@@ -166,22 +179,34 @@ export function createShell({
 
     const { workspacePath } = requireSession(id)
     const session = store.session(id)
+    const token = restorableToken(session)
+    // A token this adapter cannot restore is dropped here, once: the bind that
+    // follows opens a fresh conversation behind the same sidebar identity.
+    const dropped = session?.token !== undefined && token === undefined
     const binding = adapter
       .bind({
         sessionId: id,
         workspacePath,
-        token: session?.token,
+        token,
         preferredModel: session?.model ?? store.state.lastModel,
         preferredThinkingLevel: session?.thinkingLevel
       })
       .then((bound) => {
         // After a rebind the adapter's word wins: what it says it restored is
-        // what the store then says.
+        // what the store then says, stamped with the flavor that minted it.
         store.updateSession(id, {
           token: bound.token,
+          tokenFlavor: flavor,
           model: bound.model,
           thinkingLevel: bound.thinkingLevel
         })
+        // Session-reset semantics for the identity that just lost its
+        // conversation: nothing of the old one survives as a ghost.
+        if (dropped) {
+          usage.delete(id)
+          queues.delete(id)
+          panel.reset(id)
+        }
         emitState()
         return bound
       })
@@ -580,6 +605,7 @@ export function createShell({
         bindings.set(stored.id, Promise.resolve(bound))
         store.updateSession(stored.id, {
           token: bound.token,
+          tokenFlavor: flavor,
           model: bound.model,
           thinkingLevel: bound.thinkingLevel
         })
@@ -631,6 +657,7 @@ export function createShell({
       bindings.set(id, Promise.resolve(bound))
       store.updateSession(id, {
         token: bound.token,
+        tokenFlavor: flavor,
         model: bound.model,
         thinkingLevel: bound.thinkingLevel
       })
@@ -663,13 +690,15 @@ export function createShell({
       if (workspace === undefined) refuse('That workspace is no longer open.')
 
       // Whether two opaque tokens name the same conversation is the adapter's
-      // question, not this module's.
-      const existing = store.state.sessions.find(
-        (session) =>
+      // question, and only about the tokens it minted itself.
+      const existing = store.state.sessions.find((session) => {
+        const token = restorableToken(session)
+        return (
           session.workspaceId === workspaceId &&
-          session.token !== undefined &&
-          adapter.sameConversation(session.token, ref)
-      )
+          token !== undefined &&
+          adapter.sameConversation(token, ref)
+        )
+      })
       if (existing !== undefined) {
         store.activateSession(existing.id)
         emitState()
@@ -686,6 +715,7 @@ export function createShell({
         bindings.set(stored.id, Promise.resolve(bound))
         store.updateSession(stored.id, {
           token: bound.token,
+          tokenFlavor: flavor,
           model: bound.model,
           thinkingLevel: bound.thinkingLevel
         })
@@ -755,16 +785,18 @@ export function createShell({
     },
 
     // Curated sessions only, bound or not: the token is the adapter's own
-    // string and stays opaque on the way through.
+    // string and stays opaque on the way through. A foreign one is not this
+    // adapter's to be asked about, so the request carries none.
     async sessionUsage(id: SessionId): Promise<SessionUsage | undefined> {
       const session = store.session(id)
       if (session === undefined) return undefined
       const workspace = store.workspace(session.workspaceId)
       if (workspace === undefined) return undefined
+      const token = restorableToken(session)
       return adapter.sessionUsage({
         sessionId: id,
         workspacePath: workspace.path,
-        ...(session.token === undefined ? {} : { token: session.token })
+        ...(token === undefined ? {} : { token })
       })
     },
 

@@ -50,6 +50,7 @@ beforeEach(() => {
   shell = createShell({
     ...over(join(directory, 'shell-state.json')),
     adapter,
+    flavor: 'fake',
     pickFolder: async () => WORKSPACE
   })
   events = []
