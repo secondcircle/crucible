@@ -83,6 +83,20 @@ describe('the @ popover', () => {
     expect(rows()).toEqual([])
   })
 
+  it('never sends on Enter while the popover is open, even with no match', async () => {
+    const { port } = await shell()
+    await type('@zzzz')
+    expect(screen.getByText('No files match')).toBeInTheDocument()
+
+    await act(async () => {
+      fireEvent.keyDown(box(), { key: 'Enter' })
+    })
+
+    // Spec §25: while the popover is open, Enter never sends the message. The
+    // empty state is still the popover, open.
+    expect(port.calls.map((call) => call.op)).not.toContain('prompt')
+  })
+
   it('inserts the workspace-relative path as plain text on Enter', async () => {
     const { port } = await shell()
     await type('look at @comp')
