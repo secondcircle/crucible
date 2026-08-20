@@ -60,6 +60,10 @@ export function BranchBoard({
   const [focused, setFocused] = useState<string | undefined>(undefined)
   const [selected, setSelected] = useState<readonly string[]>([])
   const [now, setNow] = useState(() => Date.now())
+  // What the last keystroke did, when it did nothing visible on its own. The
+  // footer is where this board answers its keys, so a refusal answers there
+  // too rather than passing in silence (ADR 0010).
+  const [said, setSaid] = useState<string | undefined>(undefined)
   const overlay = useRef<HTMLElement>(null)
 
   const hosted = board?.host?.reachable === true
@@ -129,6 +133,7 @@ export function BranchBoard({
           Math.min(order.length - 1, at + (pressed.key === 'ArrowDown' ? 1 : -1))
         )
         setFocused(order[next]?.name)
+        setSaid(undefined)
         return
       }
       if (pressed.key === 'Enter' && (pressed.metaKey || pressed.ctrlKey)) {
@@ -139,9 +144,16 @@ export function BranchBoard({
       }
       if (pressed.key === 'Enter') {
         claim()
-        // A row with no pull request does nothing; its cell already reads
-        // "no PR", which is the control saying it cannot act.
-        if (row?.pr !== undefined) onOpenPr(row)
+        if (row === undefined) return
+        // The "no PR" cell cannot carry this on its own: a git-only board
+        // drops that whole track, so on those rows Enter would answer with
+        // nothing at all.
+        if (row.pr === undefined) {
+          setSaid(`${row.name} has no pull request to open`)
+          return
+        }
+        setSaid(undefined)
+        onOpenPr(row)
         return
       }
       if (pressed.key === ' ') {
@@ -266,6 +278,9 @@ export function BranchBoard({
           </span>
         ) : null}
         <span>
+          <kbd>space</kbd> select
+        </span>
+        <span>
           <kbd>⌘C</kbd> copy branch name
         </span>
         {chosen.length === 0 ? null : (
@@ -275,7 +290,7 @@ export function BranchBoard({
           </span>
         )}
         <span className="sp">
-          {hosted ? 'git + GitHub via gh' : 'git only'} · nothing here is deleted for you
+          {said ?? `${hosted ? 'git + GitHub via gh' : 'git only'} · nothing here is deleted for you`}
         </span>
       </div>
     </section>

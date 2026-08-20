@@ -487,12 +487,18 @@ export function Shell({
     function onKeyDown(pressed: KeyboardEvent): void {
       if (pressed.key !== 'b' && pressed.key !== 'B') return
       if (!pressed.metaKey && !pressed.ctrlKey) return
-      pressed.preventDefault()
       if (boardOpen) {
+        pressed.preventDefault()
         closeBoard()
         return
       }
-      if (boardReachable) openBoard()
+      // Only claim the key where there is a board to open. The shortcut is
+      // global, so someone who learned it in a repository will press it in a
+      // plain folder too, and swallowing it there leaves the app looking
+      // broken rather than looking like it has no board (ADR 0010).
+      if (!boardReachable) return
+      pressed.preventDefault()
+      openBoard()
     }
     document.addEventListener('keydown', onKeyDown)
     return () => document.removeEventListener('keydown', onKeyDown)
