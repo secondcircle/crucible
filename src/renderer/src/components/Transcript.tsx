@@ -40,10 +40,8 @@ export function Transcript({
     if (following.current) pin()
   })
 
-  // Effects only see React renders. Content can also grow between them — a
-  // settled message swapping in taller than its stream, a font arriving — so
-  // while following, any resize of the content or the viewport re-pins.
-  // jsdom has no ResizeObserver; the render-time pins above still cover tests.
+  // Content also grows between React renders, when a settled message swaps in
+  // taller than its stream or a font arrives, so any resize re-pins.
   const empty = items.length === 0
   useEffect(() => {
     if (typeof ResizeObserver === 'undefined') return
@@ -192,7 +190,6 @@ function Chain({ chain }: { readonly chain: ToolChain }): React.JSX.Element {
   )
 }
 
-// Every tool renders the same way; per-tool renderings are later work.
 function Call({ call }: { readonly call: ToolItem }): React.JSX.Element {
   const [open, setOpen] = useState(false)
   const tail = useRef<HTMLPreElement>(null)

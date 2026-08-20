@@ -41,21 +41,17 @@ export interface ShellOptions {
 interface LiveTurn {
   readonly turnId: TurnId
   started: boolean
-  // False for the whole of the bind that precedes the run: the session is
-  // working to everyone above the port while the adapter has never heard of
-  // the turn.
+  // False for the whole of the bind: the session is working above the port
+  // while the adapter has never heard of the turn.
   dispatched: boolean
-  // A dispatched turn is stopped by the adapter and says so itself; an
-  // undispatched one is ended here, and this mark keeps it from being
-  // dispatched afterwards.
+  // An undispatched turn is ended here rather than by the adapter, and this
+  // mark keeps it from being dispatched afterwards.
   cancelled: boolean
-  // Set when this turn carries a message nobody echoed — a steer or a
-  // follow-up that found no turn to queue into — which is then announced
-  // right after the turn starts.
+  // Set when this turn carries a message nobody echoed, which is then
+  // announced right after the turn starts.
   readonly announce?: string
   /** Resolves when the shell stops treating this turn as live. */
   readonly over: Promise<void>
-  /** Resolves `over`; called wherever the turn leaves the live map. */
   settled(): void
 }
 
@@ -75,9 +71,8 @@ export function createShell({
   // Folded from `queue_changed` exactly as usage is, so the strip renders from
   // the snapshot and survives both a session switch and a renderer reload.
   const queues = new Map<SessionId, QueueState>()
-  // Sessions on their way out of the sidebar. Removing one stops its turn, and
-  // a stop is a cancel, which hands the queue back — but a session that is
-  // being removed has no composer left to hand it to.
+  // Removing a session stops its turn, and a stop hands the queue back, which
+  // a session on its way out has no composer left to receive.
   const removing = new Set<SessionId>()
   const bindings = new Map<SessionId, Promise<Binding>>()
   let turns = 0
@@ -273,10 +268,8 @@ export function createShell({
     return turnId
   }
 
-  // True when the adapter took the message into the live turn. Everything that
-  // can go wrong on the way — a bind that fails, a turn that ended while the
-  // bind was in flight, an adapter with no run to queue into — answers false,
-  // and the message goes on to the next turn rather than down with this one.
+  // False whenever the message did not reach the live turn, so the caller can
+  // offer it to the next turn rather than lose it with this one.
   async function offerToTurn(
     sessionId: SessionId,
     kind: QueuedKind,
@@ -294,17 +287,14 @@ export function createShell({
           : await adapter.followUp(sessionId, text)
       return answer === 'queued'
     } catch {
-      // A bind that fails is the turn's failure, and the turn reports it as its
-      // own `turn_error`. Repeating it as a rejection here would refuse the
-      // message and destroy the only copy of the text there is: the composer
-      // has already cleared its draft.
+      // The turn already reports a failed bind as its own error, and refusing
+      // here would destroy the only copy of the text: the draft is cleared.
       return false
     }
   }
 
-  // Never lost and never refused: the message is queued into the live turn,
-  // or, when there is no live turn that will take it, it becomes the next
-  // prompt and is announced as a user message itself.
+  // Never lost and never refused: with no live turn to take it, the message
+  // becomes the next prompt and is announced as a user message itself.
   async function queueMessage(
     sessionId: SessionId,
     kind: QueuedKind,
@@ -316,18 +306,16 @@ export function createShell({
       const turn = live.get(sessionId)
       if (turn === undefined) break
       if (await offerToTurn(sessionId, kind, text, turn)) return
-      // That turn is over as far as the conversation is concerned — ended,
-      // failing, or never dispatched at all — so the message waits it out and
-      // is offered again to whatever is live next.
+      // That turn will take nothing more, so the message waits it out and is
+      // offered again to whatever is live next.
       await turn.over
     }
 
     beginTurn(sessionId, text, text)
   }
 
-  // A turn is live from the moment its prompt is accepted, which on the SDK
-  // flavor is seconds before its bind resolves; until the adapter is running
-  // it there is nothing there to cancel, so it ends here instead.
+  // A turn is live from the moment its prompt is accepted, seconds before its
+  // bind resolves; until the adapter runs it there is nothing there to cancel.
   async function stop(id: SessionId): Promise<void> {
     const turn = live.get(id)
     if (turn === undefined) return
@@ -360,9 +348,8 @@ export function createShell({
     }
     if (event.type === 'queue_flushed') {
       queues.delete(event.sessionId)
-      // A session on its way out, or already out, has nowhere to restore a
-      // message to: its queue goes silently, and the removal emits the state
-      // that follows it.
+      // A session on its way out has nowhere to restore a message to, and the
+      // removal emits the state that follows it.
       if (removing.has(event.sessionId) || store.session(event.sessionId) === undefined) return
       emit(event)
       emitState()
@@ -494,9 +481,8 @@ export function createShell({
     },
 
     async removeSession(id: SessionId): Promise<void> {
-      // Marked before the stop, because a stop is a cancel and a cancel hands
-      // the queue back; removal is the one case where that hand-back has
-      // nowhere to land.
+      // Marked before the stop, because a stop hands the queue back and
+      // removal is the one case where that hand-back has nowhere to land.
       removing.add(id)
       try {
         await stop(id)
@@ -527,8 +513,7 @@ export function createShell({
         thinkingLevel: bound.thinkingLevel
       })
       // The fresh conversation has reported nothing yet, so the meter goes back
-      // to saying nothing rather than keeping the old session's numbers. The
-      // stop above already handed any queued message back to the composer.
+      // to saying nothing rather than keeping the old session's numbers.
       usage.delete(id)
       queues.delete(id)
       emitState()

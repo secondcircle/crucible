@@ -1,8 +1,7 @@
 // @vitest-environment node
 //
-// The reducer is pure, so the two rules a delivered message has to obey are
-// provable without a DOM: it lands where it was delivered, and a stale one
-// changes nothing.
+// The reducer is pure, so a delivered message's two rules are provable without
+// a DOM: it lands where it was delivered, and a stale one changes nothing.
 import { describe, expect, it } from 'vitest'
 import type { PortEvent } from '../../../shared/agent/port'
 import { NOTHING_YET, reduce, type ShellState } from './shell-state'

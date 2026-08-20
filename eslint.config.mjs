@@ -18,13 +18,11 @@ export default tseslint.config(
     languageOptions: { globals: globals.browser }
   },
   {
-    // The bare pattern covers every extension ESLint already scans; the
-    // explicit `.jsx` one is what adds JSX files to the scan at all. A fence
-    // that depends on how a module is spelled is not a fence.
+    // The explicit `.jsx` pattern is what brings JSX files into the scan at
+    // all: a fence that depends on how a module is spelled is not a fence.
     files: ['src/renderer/**', 'src/renderer/**/*.jsx'],
-    // A direct-import check only. Transitivity is covered by the shape of the
-    // tree, and evasion is review's business; what this catches is the honest
-    // reach for the SDK where the port was the thing to use.
+    // Direct imports only. This catches the honest reach for the SDK where the
+    // port was the thing to use, not a determined evasion of it.
     rules: {
       'no-restricted-imports': [
         'error',

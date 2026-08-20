@@ -7,9 +7,8 @@ import type {
   TurnId
 } from '../../../shared/agent/port'
 
-// Time is an input, never a reading: the caller stamps each event, so the
-// reducer stays pure and React may replay it under StrictMode without elapsed
-// times drifting.
+// Time is an input, never a reading: the caller stamps each event, so React
+// may replay this reducer under StrictMode without elapsed times drifting.
 
 export type ViewItem =
   | { readonly kind: 'user'; readonly text: string }
@@ -41,9 +40,8 @@ export interface SessionView {
   readonly turn?: { readonly turnId: TurnId; readonly startedAt: number }
 }
 
-// An unfetched view's items are `[]` whatever its conversation holds, so
-// emptiness and ignorance look alike until `loaded` tells them apart. Callers
-// guarding a destructive change must read ignorance as "not empty".
+// An unfetched view's items are `[]` whatever its conversation holds, so a
+// caller guarding a destructive change must read ignorance as "not empty".
 export function knownEmpty(view: SessionView | undefined): boolean {
   return view?.loaded === true && view.items.length === 0
 }
@@ -207,9 +205,8 @@ function heard(state: ShellState, event: PortEvent, at: number): ShellState {
         ...view,
         items: mapCall(view.items, event.callId, (tool) => ({
           ...tool,
-          // The final output is the whole of it, which is not always what the
-          // chunks added up to: a tool that streamed nothing still has a
-          // result.
+          // The final output is not always what the chunks added up to: a tool
+          // that streamed nothing still has a result.
           output: event.output === '' ? tool.output : event.output,
           ok: event.ok,
           running: false

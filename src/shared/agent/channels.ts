@@ -1,6 +1,5 @@
-// Preload and main have to agree on these letter for letter, and a mismatch is
-// silent in TypeScript until an operation goes unanswered in a running app, so
-// neither side writes the strings itself.
+// Preload and main have to agree letter for letter, and a mismatch is silent
+// until an operation goes unanswered in a running app.
 
 export const REQUEST_CHANNEL = 'crucible:request'
 
@@ -13,9 +12,8 @@ export interface PortRequest {
   readonly args: readonly unknown[]
 }
 
-// A refusal is a value rather than a throw, because Electron rewraps a
-// handler's throw into "Error invoking remote method …", putting plumbing in
-// front of a sentence written for a person.
+// A value rather than a throw, because Electron rewraps a handler's throw into
+// "Error invoking remote method …", hiding the sentence written for a person.
 export type PortResult =
   | { readonly ok: true; readonly value: unknown }
   | { readonly ok: false; readonly message: string }

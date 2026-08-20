@@ -1,8 +1,7 @@
 // @vitest-environment jsdom
 //
-// Tool calls and thinking are the two regions most tempting to fake, so nothing
-// here may appear without the event that earns it. Calls render only as chains
-// now, so what a collapsed row says about them is pinned here too.
+// Tool calls and thinking are the two regions most tempting to fake, so
+// nothing here may appear without the event that earns it.
 import { act, fireEvent, render, screen } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 import { Shell } from './Shell'
@@ -245,8 +244,8 @@ describe('thinking', () => {
     act(() => port.thinking('s1', 'weighing the two shapes'))
     act(() => port.text('s1', 'The decorator wins.'))
 
-    // A single dim element: the trace remains, and no "thought" toggle exists,
-    // so nothing collapses and the transcript never shifts under the reader.
+    // No "thought" toggle exists, so nothing collapses and the transcript
+    // never shifts under the reader.
     expect(screen.getByText('weighing the two shapes')).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /thought/ })).toBeNull()
   })

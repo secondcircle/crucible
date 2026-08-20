@@ -57,7 +57,6 @@
   animation: breathe 1s infinite;
 }
 
-/* thinking — dim, collapsed by default */
 .think {
   max-width: var(--column);
   margin: 0 auto 10px;
@@ -90,7 +89,6 @@
   white-space: pre-wrap;
 }
 
-/* tool chains — one collapsed row per run of consecutive calls */
 .chain {
   max-width: var(--column);
   margin: 0 auto 10px;
@@ -142,8 +140,7 @@
 }
 
 /* A count that just went up pulses once, so a landing call is visible from the
-   collapsed row. Only a chain with work left in it ticks: a settled one has
-   nothing to announce. */
+   collapsed row. A settled chain has nothing left to announce. */
 .counts .n.tick {
   display: inline-block;
   animation: tick 0.45s ease-out;
@@ -185,7 +182,6 @@
   margin: 2px 0 0 14px;
 }
 
-/* tool calls — a chain's own rows, with bounded output when open or running */
 .tool {
   margin-bottom: 2px;
 }
@@ -271,7 +267,6 @@
   }
 }
 
-/* the quiet stopped marker */
 .stopped {
   max-width: var(--column);
   margin: 0 auto 16px;

@@ -1,6 +1,5 @@
-/* The window is created with this same background and shown only once it can
-   paint, so these rules and the window's own have to agree or a launch flashes
-   white. */
+/* The window is created with this same background, so these rules and the
+   window's own have to agree or a launch flashes white. */
 @import './tokens.css';
 
 * {

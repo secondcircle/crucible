@@ -5,9 +5,7 @@ import type { Shell } from '../shell/shell'
 import { displaySafeMessage } from './adapter-error'
 
 // Plumbing only: every rule about turns, guards and ordering lives in the
-// shell, which is what lets that behavior be tested without Electron. A
-// refusal crosses as a value rather than a throw, so the sentence the shell
-// wrote is the sentence the renderer gets.
+// shell, which is what lets that behavior be tested without Electron.
 export interface AgentChannel {
   // Already wired to the window's own close, so a caller needs it only for app
   // quit and for tests.

@@ -4,9 +4,6 @@ import './topbar.css'
 
 // The meter shows a dash until the adapter reports real usage: a context meter
 // that guesses is worse than one that admits it does not know yet.
-//
-// Whether the session menu is open is the shell's state, not this component's,
-// because Escape has to close it before it cancels anything.
 export function TopBar({
   session,
   workspace,

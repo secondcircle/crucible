@@ -1,10 +1,7 @@
 import type { ViewItem } from './shell-state'
 
-// Grouping is a derivation over the flat, ordered item list rather than a
-// second shape the reducer has to keep in step: every maximal run of
-// consecutive tool calls is one chain, anything else ends it, and nothing is
-// reordered. Live items and restored ones are the same items, so a restored
-// transcript groups exactly as the stream did.
+// A derivation over the flat item list rather than a second shape the reducer
+// has to keep in step, so a restored transcript groups as the stream did.
 
 export type ToolItem = Extract<ViewItem, { kind: 'tool' }>
 
@@ -78,9 +75,8 @@ function describe(calls: readonly ToolItem[], startedAt: number): ToolChain {
       live = call
       continue
     }
-    // A call joins its count when it ends, whichever way it ended. One that
-    // was cut off with its turn never ended at all, and no outcome is invented
-    // for it here.
+    // A call cut off with its turn never ended at all, and no outcome is
+    // invented for it here.
     if (call.ok === undefined) {
       cutOff = true
       continue

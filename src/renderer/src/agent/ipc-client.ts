@@ -16,12 +16,8 @@ import type {
   WorkspaceId
 } from '../../../shared/agent/port'
 
-// The one module in the renderer that may name `window.crucible`, and it holds
-// no state of its own: correlation, guards and staleness are all main's now
-// that every event carries the session it belongs to.
-//
-// It subscribes once and fans out, so a component may subscribe and unsubscribe
-// freely without losing events.
+// The one module in the renderer that may name `window.crucible`. It holds no
+// state: correlation, guards and staleness are all main's.
 
 /** The preload surface, as the renderer sees it: one object, two members. */
 interface CrucibleAgent {

@@ -18,7 +18,7 @@ import { knownEmpty, NOTHING_YET, reduce } from './state/shell-state'
 import './shell.css'
 
 // The port arrives as a prop, which is the seam a component test drives, and
-// why nothing else under `src/renderer` names `window.crucible`.
+// why no component reaches for `window.crucible` itself.
 
 /** At most one is open at a time. */
 type Popover = 'none' | 'model' | 'thinking' | 'sessionMenu' | 'resume'
@@ -66,9 +66,8 @@ export function Shell({ port }: { port: AgentPort }): React.JSX.Element {
     })
   }, [])
 
-  // Subscribe before anything is asked for: events may arrive before the
-  // promise of the operation that caused them resolves, and there is no
-  // backlog to catch up on afterwards.
+  // Subscribed before anything is asked for: events can arrive before the
+  // operation that caused them resolves, and there is no backlog to catch up.
   useEffect(() => {
     const stop = port.onEvent((event) => {
       // The clock is read here rather than in the reducer, which stays pure so
@@ -129,7 +128,6 @@ export function Shell({ port }: { port: AgentPort }): React.JSX.Element {
         pressed.preventDefault()
         cancel()
       }
-      // Escape with nothing open and nothing running does nothing.
     }
     document.addEventListener('keydown', onKeyDown)
     return () => document.removeEventListener('keydown', onKeyDown)
@@ -184,8 +182,7 @@ export function Shell({ port }: { port: AgentPort }): React.JSX.Element {
       .dequeue(id, kind, text)
       .then((removed) => {
         // A false answer means the message was delivered or flushed while the
-        // click was in flight, and the state event that follows has already
-        // taken the entry off the strip.
+        // click was in flight, and the state event already took the entry off.
         if (!removed) return
         restore(id, text)
         box.current?.focus()
@@ -302,7 +299,6 @@ export function Shell({ port }: { port: AgentPort }): React.JSX.Element {
     <div
       className="shell"
       onMouseDown={(clicked) => {
-        // A click outside an open chip popover or the session menu closes it.
         if (popover === 'none' || popover === 'resume') return
         if ((clicked.target as HTMLElement).closest('.chipwrap, .sessionmenu') !== null) return
         setPopover('none')

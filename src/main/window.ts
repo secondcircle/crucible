@@ -3,10 +3,6 @@ import { BrowserWindow, shell as osShell } from 'electron'
 
 // The window is not shown until it can paint, and its background matches the
 // document's, so a launch never flashes white.
-//
-// Navigation and new windows are denied outright: that is what makes rendering
-// a link written by an agent safe, since nothing can replace the app with a
-// web page.
 
 /** The one place main names a color. */
 const EMBER_BACKGROUND = '#191419'
@@ -30,7 +26,8 @@ export function createMainWindow(): BrowserWindow {
 
   window.on('ready-to-show', () => window.show())
 
-  // An external address goes to the OS browser; everything else goes nowhere.
+  // Denied outright, so no link an agent writes can replace the app with a web
+  // page; an external address is handed to the OS browser instead.
   window.webContents.setWindowOpenHandler(({ url }) => {
     openExternally(url)
     return { action: 'deny' }

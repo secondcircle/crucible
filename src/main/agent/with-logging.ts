@@ -1,9 +1,8 @@
 import type { Shell } from '../shell/shell'
 import type { LogSink } from '../log/sink'
 
-// Logging is a decorator at the port seam so no adapter and no component has
-// to remember to log. The adapter's name is passed in rather than asked of the
-// adapter, which would make every adapter aware it is being logged.
+// A decorator at the port seam, so no adapter and no component has to remember
+// to log, and no adapter is aware it is being logged.
 export function withLogging(shell: Shell, log: LogSink, adapter: string): Shell {
   shell.onEvent((event) => {
     // The event's own `type` names the record, so the log reads back as the
@@ -12,9 +11,8 @@ export function withLogging(shell: Shell, log: LogSink, adapter: string): Shell 
     log.append({ source: 'main', event: type, adapter, ...detail })
   })
 
-  // Arguments are logged verbatim, prompt text included: this is a local run
-  // log, and a turn that cannot be read back against what was asked tells a
-  // reader nothing.
+  // Arguments are logged verbatim, prompt text included: a local run log that
+  // cannot be read back against what was asked tells a reader nothing.
   function op<A extends unknown[], R>(
     name: string,
     run: (...args: A) => Promise<R>

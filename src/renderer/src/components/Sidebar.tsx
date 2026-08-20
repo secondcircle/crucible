@@ -2,7 +2,6 @@ import type { ShellSnapshot, SessionId, WorkspaceId } from '../../../shared/agen
 import { sessionLabel } from '../labels'
 import './sidebar.css'
 
-// Everything shown comes from the snapshot, so no membership rule lives here.
 // A row's working state is in its accessible name and not the colored dot
 // alone: the dot is the eye's version, the name is everybody else's.
 export function Sidebar({

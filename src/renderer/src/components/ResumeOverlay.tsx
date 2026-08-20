@@ -3,11 +3,8 @@ import type { HistoryMatch } from '../../../shared/agent/port'
 import { relativeTime } from '../labels'
 import './overlay.css'
 
-// The one place adapter-managed history is looked at, and only while this
-// overlay is open. A result shows a preview and a relative time, never a path
-// or anything else about how the conversation is stored.
-//
-// Escape is the shell's to handle, so closing this never touches live work.
+// The one place adapter-managed history is looked at. A result shows a preview
+// and a time, never a path or anything else about how it is stored.
 export function ResumeOverlay({
   onSearch,
   onChoose,

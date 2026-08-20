@@ -1,9 +1,7 @@
 // @vitest-environment node
 //
-// A turn is live from the moment its prompt is accepted, which is before its
-// bind resolves, and an SDK bind is seconds long. A stop landing in that window
-// has to end the turn here, or the user's Stop is inert and a paid turn streams
-// on.
+// A turn is live from the moment its prompt is accepted, seconds before an SDK
+// bind resolves, and a stop landing in that window has to end it anyway.
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -42,9 +40,8 @@ it('a cancel handled while the turn is still binding ends the turn as cancelled'
   const sessionId = await first.createSession(workspaceId)
   first.dispose()
 
-  // Second launch: same store, so the session rebinds lazily — through an
-  // adapter whose bind resolves only when the test says so, which is the shape
-  // of a real SDK bind.
+  // Second launch: same store, so the session rebinds lazily, through an
+  // adapter whose bind resolves only when the test says so.
   const inner = createFakeAdapter({ pauseMs: 0 })
   let releaseBind: (() => void) | undefined
   const gate = new Promise<void>((resolve) => {
@@ -73,7 +70,6 @@ it('a cancel handled while the turn is still binding ends the turn as cancelled'
   // Stop, while the bind is still in flight.
   await shell.cancel(sessionId)
 
-  // The bind completes afterwards.
   releaseBind?.()
   await settled()
 

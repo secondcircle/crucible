@@ -2,12 +2,7 @@ import { createElement, type ReactNode } from 'react'
 import './markdown.css'
 
 // Written by hand rather than pulled in so that no string from an agent can
-// ever become markup: there is no `dangerouslySetInnerHTML` and no HTML
-// parsing here, which is a property of the strategy rather than of a sanitizer
-// that could be misconfigured.
-//
-// Nesting beyond one level renders flat rather than as a wrong tree, and an
-// address that is not http, https or mailto renders as plain text.
+// become markup: no HTML is parsed here, and no sanitizer can be misconfigured.
 export function Markdown({ markdown }: { markdown: string }): React.JSX.Element {
   return <div className="markdown">{blocks(markdown)}</div>
 }

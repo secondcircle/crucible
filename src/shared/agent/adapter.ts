@@ -11,9 +11,8 @@ import type {
   Unsubscribe
 } from './port'
 
-// Crucible's identities go down and π's never come up: a session is named by
-// its Crucible id, and where its conversation lives is an opaque token nothing
-// above this seam interprets.
+// Crucible's identities go down and π's never come up: where a conversation
+// lives is an opaque token nothing above this seam interprets.
 
 export interface Binding {
   /** Opaque; the store persists it, and only this adapter reads it. */
@@ -146,16 +145,12 @@ export interface ConversationAdapter {
   setModel(sessionId: SessionId, model: ModelId): Promise<void>
   setThinkingLevel(sessionId: SessionId, level: ThinkingLevel): Promise<void>
 
-  // The turn id comes from above so nothing has to be correlated afterwards.
   // A rejection means the turn never ran, and the caller then owes it a
   // terminal event.
   prompt(sessionId: SessionId, turnId: TurnId, text: string): Promise<void>
 
-  // The `'idle'` answer is what closes the race between the caller's view of
-  // `working` and the adapter's: rather than let a message sit unheard in an
-  // idle conversation, the adapter says it queued nothing and the caller sends
-  // the text as a prompt instead.
-  /** 'idle' means nothing was queued because no run is live; the caller sends it as a prompt. */
+  // `'idle'` closes the race between the caller's view of `working` and the
+  // adapter's: nothing was queued, so the caller sends the text as a prompt.
   steer(sessionId: SessionId, text: string): Promise<'queued' | 'idle'>
   followUp(sessionId: SessionId, text: string): Promise<'queued' | 'idle'>
   /** Removes the first entry of that kind whose text matches. */

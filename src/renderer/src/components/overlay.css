@@ -94,7 +94,6 @@
   color: var(--faint);
 }
 
-/* guard dialog */
 .dialog {
   width: 420px;
   max-width: 90vw;

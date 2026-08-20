@@ -3,10 +3,7 @@ import type { ModelInfo, ThinkingLevel } from '../../../shared/agent/port'
 import './composer.css'
 
 // The textarea stays editable while the session works so the next instruction
-// can be drafted during a stop. Escape is deliberately not handled here: it
-// has an app-wide precedence this component cannot see.
-//
-// The missing attachment control and agent byline are omissions, not oversights.
+// can be drafted. Escape has an app-wide precedence this component cannot see.
 export function Composer({
   draft,
   disabled,

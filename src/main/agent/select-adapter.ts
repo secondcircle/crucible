@@ -12,8 +12,7 @@ export interface SelectedAdapter {
 }
 
 // The only reader of `CRUCIBLE_AGENT`, so no caller has to know the variable
-// exists. Falling back to the fake is silent by construction, which is why
-// every launch records what was asked for and what answered.
+// exists. The fallback to the fake is silent, so every launch records it.
 export function selectAdapter(log: LogSink): SelectedAdapter {
   const requested = process.env.CRUCIBLE_AGENT
   const asked = requested === undefined || requested === '' ? null : requested

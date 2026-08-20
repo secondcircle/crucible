@@ -1,8 +1,7 @@
 // @vitest-environment node
 //
-// The grouping rules are combinatorial — boundaries, mixed outcomes, calls cut
-// off with their turn — so they are proved here, once, on the pure function,
-// rather than one DOM assertion at a time.
+// The grouping rules are combinatorial, so they are proved here on the pure
+// function rather than one DOM assertion at a time.
 import { describe, expect, it } from 'vitest'
 import type { ViewItem } from './shell-state'
 import { countsText, groupIntoChains, type ToolChain } from './tool-chains'

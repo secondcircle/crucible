@@ -1,7 +1,5 @@
-// The only way a failure becomes text the port may carry, so that stacks, SDK
-// error objects and provider payloads stop here rather than in each module
-// that builds an event. A fallback is always returned, so an error line always
-// renders.
+// The only way a failure becomes text the port may carry, so stacks, SDK error
+// objects and provider payloads stop here rather than in each event builder.
 export function displaySafeMessage(cause: unknown, fallback = UNEXPLAINED): string {
   return displaySafeText(cause) ?? fallback
 }
@@ -11,7 +9,8 @@ const UNEXPLAINED = 'The agent failed without saying why.'
 /** Longer than any sentence a pane should print on one error line. */
 const SENTENCE_LIMIT = 200
 
-// What payloads and stacks carry and a one-line sentence never does.
+// Structure like this is what a payload or a stack carries and what a sentence
+// written for a person never does.
 const STRUCTURE = /[{}[\]<>]|\p{Cc}/u
 
 function displaySafeText(cause: unknown): string | undefined {

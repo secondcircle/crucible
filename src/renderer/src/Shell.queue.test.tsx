@@ -1,7 +1,6 @@
 // @vitest-environment jsdom
 //
-// What a person can send while the agent is working, and what happens to it:
-// nothing queued may show up in the transcript, and nothing queued may be lost
+// Nothing queued may show up in the transcript, and nothing queued may be lost
 // on the way back to the composer.
 import { act, fireEvent, render, screen } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'

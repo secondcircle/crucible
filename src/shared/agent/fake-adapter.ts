@@ -19,8 +19,7 @@ import type {
 } from './port'
 
 // Imports neither Electron nor the π SDK, so the same module serves the main
-// process, node tests and jsdom tests. Its history lives in memory and lasts
-// one launch, which is what keeps reset and resume observable at zero cost.
+// process and both test environments. Its history lasts one launch.
 
 export const FAKE_MODEL: ModelInfo = {
   id: 'fake/deterministic',
@@ -49,9 +48,8 @@ interface ScriptedCall {
   readonly chunks: readonly string[]
 }
 
-// Three consecutive calls under two names, one of them a failure, so a single
-// scripted turn exercises the multi-name counts and the failure marker of a
-// tool chain without a paid call.
+// Two names and one failure, so a single scripted turn exercises a tool
+// chain's multi-name counts and its failure marker without a paid call.
 const CHAIN: readonly ScriptedCall[] = [
   {
     name: 'bash',
@@ -160,7 +158,6 @@ interface Bound {
   conversation: Conversation
   model: ModelId
   thinkingLevel: ThinkingLevel
-  /** One per session, many per adapter. */
   running?: RunningTurn
   /** π's two queues, oldest first, undelivered only. */
   readonly steering: string[]
@@ -169,7 +166,6 @@ interface Bound {
 
 interface RunningTurn {
   readonly turnId: TurnId
-  /** Stops the script where it stands; nothing more is emitted for this turn. */
   abandon(reason: 'cancelled' | 'disposed'): void
 }
 
@@ -196,7 +192,6 @@ export function createFakeAdapter({
   readonly pauseMs?: number
 } = {}): ConversationAdapter {
   const listeners = new Set<AdapterEventListener>()
-  /** Every conversation this launch has seen, bound or not, by token. */
   const conversations = new Map<string, Conversation>()
   const sessions = new Map<SessionId, Bound>()
   const seeded = new Set<string>()
@@ -209,8 +204,7 @@ export function createFakeAdapter({
   }
 
   // The kind is in the token because canned conversations come back identical
-  // next launch while live ones are gone: a stale live token must match
-  // nothing rather than land on whatever was minted in the same order.
+  // next launch, so a stale live token has to match nothing rather than them.
   function mintToken(kind: 'canned' | 'live'): string {
     minted += 1
     return `fake-${kind}-${minted}`
@@ -232,7 +226,6 @@ export function createFakeAdapter({
     return conversation
   }
 
-  /** Laid down once per workspace, on first look. */
   function seed(workspacePath: string): void {
     if (seeded.has(workspacePath)) return
     seeded.add(workspacePath)
@@ -256,7 +249,6 @@ export function createFakeAdapter({
     })
   }
 
-  /** Hands every undelivered message back, steering first, and empties both queues. */
   function flushQueue(bound: Bound, sessionId: SessionId): void {
     const messages: QueuedMessage[] = [
       ...bound.steering.map((text): QueuedMessage => ({ kind: 'steering', text })),
@@ -325,9 +317,7 @@ export function createFakeAdapter({
 
     const conversation = bound.conversation
     const pending: TranscriptItem[] = [{ kind: 'user', text }]
-    /** The assistant block being streamed, settled at every block boundary. */
     let spoken = ''
-    /** Everything this turn produced, which is what the usage estimate reads. */
     let counted = text
 
     function settleSpoken(): void {
@@ -479,11 +469,8 @@ export function createFakeAdapter({
       if (!(await deliver('steering'))) return finish()
       if (!(await say(REPLY_DELTAS))) return finish()
 
-      // The pause before a turn ends is a window in which the session is still
-      // running, so a message can still be queued into it. The queues are read
-      // again after that pause, and only a beat nothing arrived in ends the
-      // turn: between the last read and `finish()` there is no await, so
-      // nothing can slip in behind the terminal event.
+      // The session is still running during this last pause, so the queues are
+      // read again and only a beat nothing arrived in ends the turn.
       for (;;) {
         if (!(await drain())) return finish()
         await beat()
@@ -496,8 +483,7 @@ export function createFakeAdapter({
     function finish(): void {
       if (stopped === 'disposed') {
         // The document that asked is gone, so the turn says nothing more at
-        // all, not even a terminal event, and there is nowhere left to restore
-        // a queue to.
+        // all, not even a terminal event.
         discardQueue(bound)
         bound.running = undefined
         return
@@ -645,9 +631,8 @@ export function createFakeAdapter({
       return run(bound, sessionId, turnId, text)
     },
 
-    // Nothing is queued into a session with no live run: the caller is told so
-    // and sends the text as a prompt instead, which is what keeps a message
-    // from sitting unheard in an idle conversation.
+    // Nothing is queued into a session with no live run, so the caller is told
+    // and can send the text as a prompt rather than leave it unheard.
     async steer(sessionId: SessionId, text: string): Promise<'queued' | 'idle'> {
       const bound = requireBound(sessionId)
       if (bound.running === undefined) return 'idle'

@@ -1,8 +1,7 @@
 // @vitest-environment node
 //
-// The flavor is chosen through the environment, the way a launch script chooses
-// it. One row is deliberately absent: asking for the SDK flavor would construct
-// the SDK adapter and open real sessions against the credentials on disk.
+// One row is deliberately absent: asking for the SDK flavor would construct
+// that adapter and open real sessions against the credentials on disk.
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { LogRecord } from '../log/sink'
 import { createMemorySink } from '../log/sink'

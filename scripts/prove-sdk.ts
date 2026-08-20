@@ -1,7 +1,5 @@
-// A script rather than a skipped test, because a skipped test invites someone
-// to un-skip it and spend money. One prompt, one turn, no retry loop, and its
-// stdout is written down as evidence, so it prints nothing that could carry a
-// credential.
+// A script rather than a skipped test, which invites someone to un-skip it and
+// spend money. Nothing it prints could carry a credential.
 import type { AdapterEvent } from '../src/shared/agent/adapter'
 import { createSdkAdapter } from '../src/main/agent/sdk-adapter.ts'
 
