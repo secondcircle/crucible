@@ -4,11 +4,21 @@
 // same assembly the running app uses.
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { withAgentContext } from './agent/system-context'
+import { DOCS_INDEX_PLACEHOLDER } from './agent/system-prompt'
 import { createCommandService } from './commands/service'
-import { readShippedAgentDoc, shippedCommandsPath } from './shipped'
+import {
+  readShippedRolePrompt,
+  readShippedStandingPrompt,
+  shippedCommandsPath,
+  shippedDocsIndexPath,
+  shippedSystemPrompt
+} from './shipped'
+
+// Word-bounded and case-insensitive, so "typing" passes and "~/.pi" does not:
+// the agent must not learn the name of the layer below it.
+const PI_BY_NAME = /\bpi\b/i
 
 // The app's own directory, which in dev is the repository: the same value
 // `app.getAppPath()` hands the composition root.
@@ -98,8 +108,11 @@ describe('the built-in commands', () => {
   })
 })
 
-describe('the shipped context doc', () => {
-  const doc = (): string => readShippedAgentDoc(APP) ?? ''
+describe('the shipped commands doc', () => {
+  // Read where the index says it is, which is the only way a session finds it
+  // now that no doc rides the system prompt.
+  const doc = (): string =>
+    readFileSync(join(dirname(shippedDocsIndexPath(APP)), 'commands.md'), 'utf8')
 
   it('names both Crucible folders, the built-in origin and the precedence', () => {
     expect(doc()).toContain('~/.crucible/commands/')
@@ -133,19 +146,87 @@ describe('the shipped context doc', () => {
     expect(text).not.toContain('docs/adr')
   })
 
-  it('is what the SDK adapter puts into a session\u2019s system context', () => {
-    const assembled = withAgentContext(['π says its own thing first'], doc())
+  it('is the file that ships, byte for byte', () => {
+    expect(doc()).toBe(readFileSync(join(APP, 'resources', 'agent-docs', 'commands.md'), 'utf8'))
+  })
+})
 
-    expect(assembled).toHaveLength(2)
-    expect(assembled[1]).toContain('# Crucible commands')
-    // The same loader serves every session of a workspace, so the doc is
-    // appended once however many sessions ask for it.
-    expect(withAgentContext(assembled, doc())).toHaveLength(2)
+describe('the shipped docs index', () => {
+  const index = (): string => readFileSync(shippedDocsIndexPath(APP), 'utf8')
+
+  it('names commands.md, and when to read it', () => {
+    expect(index()).toContain('commands.md')
+    expect(index()).toMatch(/asks about Crucible's commands/)
   })
 
-  it('is the file that ships, byte for byte', () => {
-    expect(doc()).toBe(
-      readFileSync(join(APP, 'resources', 'agent-docs', 'commands.md'), 'utf8')
+  it('says the docs it lists resolve beside itself', () => {
+    expect(index()).toMatch(/relative to this file/i)
+  })
+
+  it('names no \u03c0', () => {
+    expect(index()).not.toMatch(PI_BY_NAME)
+    expect(index()).not.toContain('\u03c0')
+  })
+})
+
+describe('the shipped role prompt', () => {
+  const role = (): string => readShippedRolePrompt(APP)
+
+  it('carries the two stock guidelines, in their own words', () => {
+    expect(role()).toContain('- Be concise in your responses')
+    expect(role()).toContain('- Show file paths clearly when working with files')
+  })
+
+  it('points at the docs index by placeholder, and only when the user asks', () => {
+    expect(role()).toContain(DOCS_INDEX_PLACEHOLDER)
+    expect(role()).toMatch(/read only when the user asks about Crucible/)
+    expect(role()).toMatch(/relative to the index file/)
+  })
+
+  it('names nothing of the layer below it', () => {
+    const text = role()
+    expect(text).not.toMatch(PI_BY_NAME)
+    for (const gone of ['\u03c0', '/opt/homebrew', '~/.pi', 'harness', 'TUI', 'skills', 'themes']) {
+      expect(text.toLowerCase()).not.toContain(gone.toLowerCase())
+    }
+  })
+})
+
+describe('the shipped standing prompt', () => {
+  const standing = (): string => readShippedStandingPrompt(APP)
+
+  it('is the communication style block, wrapped in its tags', () => {
+    const text = standing().trim()
+    expect(text.startsWith('<communication-style>')).toBe(true)
+    expect(text.endsWith('</communication-style>')).toBe(true)
+  })
+
+  it('is the legacy block itself, recognizable sentence by sentence', () => {
+    const text = standing()
+    expect(text).toContain('# Unslop')
+    expect(text).toContain('Edit text to remove AI patterns and add human voice.')
+    expect(text).toContain('**Em dash overuse.**')
+    expect(text).toContain('**Prefer the plain word.**')
+  })
+})
+
+describe('the system prompt a launch composes', () => {
+  it('substitutes the shipped index path and ends with the standing block', () => {
+    const composed = shippedSystemPrompt(APP)
+
+    expect(composed.startsWith('You are an expert coding assistant')).toBe(true)
+    expect(composed).toContain(shippedDocsIndexPath(APP))
+    expect(composed).not.toContain(DOCS_INDEX_PLACEHOLDER)
+    expect(composed.endsWith('</communication-style>')).toBe(true)
+  })
+
+  it('never says the name of the layer below it', () => {
+    expect(shippedSystemPrompt(APP)).not.toMatch(PI_BY_NAME)
+  })
+
+  it('names the file it ships and cannot read, rather than answering with less', () => {
+    expect(() => shippedSystemPrompt(workspace)).toThrow(
+      join(workspace, 'resources', 'prompts', 'role-coding-agent.md')
     )
   })
 })

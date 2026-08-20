@@ -72,12 +72,12 @@ names the milestone from `m1-parity-core.md`. **never** means ruled out.
 
 | π feature | π behavior | Crucible status |
 |---|---|---|
-| Skills | /skill:name | agent-side works now — stock π loads workspace skills through the SDK adapter (A17); UI exposure later |
+| Skills | /skill:name | not loaded — the SDK adapter reads no skills at all, in Crucible's agent dir or the workspace (ADR 0012); a Crucible-owned skill story is a later /align |
 | Extensions | TUI extension API | never — not portable; legacy-system extensions are explicitly not loaded (A17); Crucible features replace them natively |
 | Themes | /settings themes | later — Ember is the theme |
 | Settings | /settings UI + settings.json | **built** — gear in the top bar opens a modal sheet with two tabs, Providers and Usage; delivery pacing stays deferred. No settings file: the sheet's own state is per window and nothing about it is persisted |
 | Login / logout | provider auth | **built** — Providers tab lists every credentialed provider with its status, an Add provider picker covers the rest of π's catalog, and Crucible renders π's login flow (browser OAuth with a paste fallback, API-key entry). π owns the flow, the token exchange and the storage |
-| Agent-facing docs | AGENTS.md, skills | **built** — Crucible ships a context doc about commands inside the app, injected into every SDK adapter session's system context (ADR 0006) |
+| Agent-facing docs | AGENTS.md, skills | **built** — Crucible ships its agent docs inside the app behind an index (ADR 0006); the role prompt names the index and the agent reads a doc when asked, so no doc text rides the prompt (ADR 0012) |
 
 ## 7 · Instrumentation
 

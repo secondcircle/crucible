@@ -5,7 +5,7 @@ import { selectAdapter } from './agent/select-adapter'
 import { withLogging } from './agent/with-logging'
 import { type CommandChannel, serveCommandChannel } from './commands/channel'
 import { selectCommandService } from './commands/select-service'
-import { readShippedAgentDoc } from './shipped'
+import { shippedSystemPrompt } from './shipped'
 import { forwardRendererOutput } from './log/renderer-output'
 import { createFileSink } from './log/sink'
 import { registerExhibitScheme, serveExhibitScheme } from './panel/exhibit-scheme'
@@ -55,8 +55,10 @@ const { adapter, flavor } = selectAdapter(
   log,
   { tools: panel, exhibits: panelFixtures(app.getAppPath()) },
   {
-    // Shipped with the app and read once per launch.
-    agentDoc: readShippedAgentDoc(app.getAppPath()),
+    // Read and composed once per launch, and only when the sdk flavor is the
+    // one chosen. A file it ships and cannot read throws here, naming the file:
+    // no session starts on π's own prompt.
+    systemPrompt: () => shippedSystemPrompt(app.getAppPath()),
     // A login's browser is opened here; the renderer gets no such capability.
     openExternal: (url: string) => {
       void electronShell.openExternal(url)

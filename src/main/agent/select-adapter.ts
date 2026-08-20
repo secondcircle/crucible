@@ -12,20 +12,20 @@ export interface SelectedAdapter {
 }
 
 export interface SdkOptions {
-  // Read by the caller: the SDK adapter puts it into every session's system
-  // context.
-  readonly agentDoc?: string
+  /**
+   * The composed system prompt, asked for only when the sdk flavor is the one
+   * chosen. It throws rather than answering with less: a fake-flavor launch
+   * needs no prompt and must start without one, and an sdk-flavor launch that
+   * cannot read what it ships must not fall back to π's own prompt.
+   */
+  readonly systemPrompt: () => string
   /** Opening the OS browser during a login; only main can do it. */
   readonly openExternal?: (url: string) => void
 }
 
 // The only reader of `CRUCIBLE_AGENT`, so no caller has to know the variable
 // exists. The fallback to the fake is silent, so every launch records it.
-export function selectAdapter(
-  log: LogSink,
-  panel: FakePanel,
-  sdk: SdkOptions = {}
-): SelectedAdapter {
+export function selectAdapter(log: LogSink, panel: FakePanel, sdk: SdkOptions): SelectedAdapter {
   const requested = process.env.CRUCIBLE_AGENT
   const asked = requested === undefined || requested === '' ? null : requested
 
@@ -45,7 +45,7 @@ export function selectAdapter(
       flavor === 'sdk'
         ? createSdkAdapter({
             panel: panel.tools,
-            ...(sdk.agentDoc === undefined ? {} : { agentDoc: sdk.agentDoc }),
+            systemPrompt: sdk.systemPrompt(),
             ...(sdk.openExternal === undefined ? {} : { openExternal: sdk.openExternal })
           })
         : createFakeAdapter({ panel })

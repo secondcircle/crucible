@@ -16,10 +16,20 @@ function chooseWith(requested: string | undefined): {
 } {
   vi.stubEnv('CRUCIBLE_AGENT', requested)
   const sink = createMemorySink()
-  const { adapter, flavor } = selectAdapter(sink, {
-    tools: createPanelModel({ persistence: memoryPanelPersistence() }),
-    exhibits: panelFixtures(process.cwd())
-  })
+  const { adapter, flavor } = selectAdapter(
+    sink,
+    {
+      tools: createPanelModel({ persistence: memoryPanelPersistence() }),
+      exhibits: panelFixtures(process.cwd())
+    },
+    {
+      // Asked for only by the sdk flavor, which no test picks: a throw here is
+      // what proves the fake needs no prompt at all.
+      systemPrompt: () => {
+        throw new Error('A fake-flavor launch must never ask for a system prompt.')
+      }
+    }
+  )
   expect(sink.lines).toHaveLength(1)
 
   return {

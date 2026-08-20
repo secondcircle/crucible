@@ -1,0 +1,8 @@
+# Crucible documentation index
+
+Every doc listed here sits in the same directory as this index file. Resolve
+the paths below relative to this file's own directory, then read the one that
+matches what you were asked about.
+
+- `commands.md` — read this when the user asks about Crucible's commands, or
+  wants you to write a new one.
