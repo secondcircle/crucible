@@ -30,6 +30,9 @@ let holdBind: boolean
 let releaseBind: (() => void) | undefined
 /** Every held bind, oldest first, where a test needs to land them in order. */
 let heldBinds: Array<() => void>
+/** Set where a test wants a reset still landing while something else happens. */
+let holdReset: boolean
+let releaseReset: (() => void) | undefined
 
 function build(): void {
   const fake = createFakeAdapter({ pauseMs: 0 })
@@ -44,6 +47,18 @@ function build(): void {
         })
       }
       return fake.bind(request)
+    },
+    async reset(sessionId) {
+      // Held after the conversation has been replaced, which is where a slow
+      // reset actually sits: the adapter is done and the shell has not written
+      // it down yet.
+      const bound = await fake.reset(sessionId)
+      if (holdReset) {
+        await new Promise<void>((resolve) => {
+          releaseReset = resolve
+        })
+      }
+      return bound
     }
   }
   const store = createShellStore(file)
@@ -70,7 +85,9 @@ async function sessionOf(id: SessionId): Promise<SessionState> {
 }
 
 /** What the store on disk says, read the way a relaunch reads it. */
-function stored(id: SessionId): { fresh?: boolean; worktree?: { path: string } } | undefined {
+function stored(
+  id: SessionId
+): { fresh?: boolean; token?: string; worktree?: { path: string } } | undefined {
   return createShellStore(file).session(id)
 }
 
@@ -88,6 +105,8 @@ beforeEach(() => {
   holdBind = false
   releaseBind = undefined
   heldBinds = []
+  holdReset = false
+  releaseReset = undefined
   build()
 })
 
@@ -284,7 +303,7 @@ describe('while the rebind is in flight', () => {
     const flip = shell.setWorktree(sessionId, worktree())
     await settled()
 
-    await expect(shell.prompt(sessionId, 'too early')).rejects.toThrow(/settling where it works/)
+    await expect(shell.prompt(sessionId, 'too early')).rejects.toThrow(/still settling/)
 
     holdBind = false
     releaseBind?.()
@@ -312,12 +331,12 @@ describe('while the rebind is in flight', () => {
   })
 })
 
-describe('a conversation opened during the flip', () => {
+describe('a conversation opened around the flip', () => {
   // Anything that needs the conversation while the flip's rebind is in
   // flight — opening the session tree, changing the model, fetching the
-  // transcript — starts a second bind from the not-yet-updated record. When
-  // that stale bind lands after the flip's own, it must not hand the session
-  // back to the checkout conversation.
+  // transcript — would otherwise bind from the record the flip has not
+  // written yet, and hand the session back to the checkout conversation when
+  // that bind landed.
   it('does not point a worktree session back at the checkout conversation', async () => {
     const { sessionId } = await freshSession()
     holdBind = true
@@ -326,13 +345,10 @@ describe('a conversation opened during the flip', () => {
     await settled()
     const tree = shell.sessionTree(sessionId)
     await settled()
-    expect(heldBinds).toHaveLength(2)
+    const opened = heldBinds.length
 
-    // The flip's own rebind lands first; the stale bind lands after it.
-    heldBinds.shift()?.()
-    await settled()
     holdBind = false
-    heldBinds.shift()?.()
+    while (heldBinds.length > 0) heldBinds.shift()?.()
     await flip
     await tree
 
@@ -343,6 +359,91 @@ describe('a conversation opened during the flip', () => {
     expect(await sessionOf(sessionId)).toMatchObject({ worktree: worktree() })
     expect(await adapter.searchHistory(worktreePath, 'after the flip')).toHaveLength(1)
     expect(await adapter.searchHistory(WORKSPACE, 'after the flip')).toHaveLength(0)
+    // And it is rooted there because one conversation was opened, not two: the
+    // tree waited out the flip rather than opening its own at the directory
+    // the session was leaving.
+    expect(opened).toBe(1)
+  })
+
+  // The other order, just as reachable: a launch fetches the transcript of a
+  // restored session and the user flips before that bind has landed. The bind
+  // already in flight is rooted in the checkout.
+  it('does not let a bind started before the flip outlive it', async () => {
+    const { sessionId } = await freshSession()
+    // Relaunched, so nothing is bound and the transcript below has to bind.
+    shell.dispose()
+    build()
+    holdBind = true
+
+    const restored = shell.transcript(sessionId)
+    await settled()
+    const flip = shell.setWorktree(sessionId, worktree())
+    await settled()
+    const opened = heldBinds.length
+
+    holdBind = false
+    while (heldBinds.length > 0) heldBinds.shift()?.()
+    await restored
+    await flip
+
+    await shell.prompt(sessionId, 'a sentence said after the late flip')
+    await settled()
+
+    expect(await sessionOf(sessionId)).toMatchObject({ worktree: worktree() })
+    expect(await adapter.searchHistory(worktreePath, 'after the late flip')).toHaveLength(1)
+    expect(await adapter.searchHistory(WORKSPACE, 'after the late flip')).toHaveLength(0)
+    // The flip waited the checkout bind out instead of racing it.
+    expect(opened).toBe(1)
+  })
+
+  // A reset replaces the conversation as surely as a flip does, and a fresh
+  // session's reset asks no question, so the chip is live while it runs.
+  it('does not let a reset landing mid-flip disagree with the record', async () => {
+    const { sessionId } = await freshSession()
+    holdReset = true
+
+    const reset = shell.resetSession(sessionId)
+    await settled()
+    const flip = shell.setWorktree(sessionId, worktree())
+    await settled()
+
+    holdReset = false
+    releaseReset?.()
+    await reset
+    await flip
+
+    // Both landed, and the last word is the flip's: in the worktree, and still
+    // fresh, because a reset gives the choice back.
+    expect(await sessionOf(sessionId)).toMatchObject({ worktree: worktree(), fresh: true })
+
+    await shell.prompt(sessionId, 'a sentence said after both')
+    await settled()
+
+    const [landed] = await adapter.searchHistory(worktreePath, 'after both')
+    expect(landed).toBeDefined()
+    // The conversation the record holds is the one the words went into, so a
+    // relaunch opens that one and not the checkout conversation the reset made.
+    expect(stored(sessionId)?.token).toBe(landed.ref)
+  })
+
+  it('lets go of a bind whose session was removed while it was in flight', async () => {
+    const { sessionId } = await freshSession()
+    // Relaunched, so the transcript below has to bind.
+    shell.dispose()
+    build()
+    holdBind = true
+
+    const restored = shell.transcript(sessionId)
+    await settled()
+    await shell.removeSession(sessionId)
+    holdBind = false
+    while (heldBinds.length > 0) heldBinds.shift()?.()
+
+    await expect(restored).rejects.toThrow(/no longer open/)
+    expect(stored(sessionId)).toBeUndefined()
+    // Nothing was left holding a conversation for a session that is gone: the
+    // bind that landed too late let go of what it opened.
+    await expect(adapter.transcript(sessionId)).rejects.toThrow(/not bound/)
   })
 })
 
