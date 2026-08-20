@@ -75,6 +75,10 @@ export function createShell({
   // Folded from `queue_changed` exactly as usage is, so the strip renders from
   // the snapshot and survives both a session switch and a renderer reload.
   const queues = new Map<SessionId, QueueState>()
+  // Sessions on their way out of the sidebar. Removing one stops its turn, and
+  // a stop is a cancel, which hands the queue back — but a session that is
+  // being removed has no composer left to hand it to.
+  const removing = new Set<SessionId>()
   const bindings = new Map<SessionId, Promise<Binding>>()
   let turns = 0
 
@@ -269,8 +273,37 @@ export function createShell({
     return turnId
   }
 
+  // True when the adapter took the message into the live turn. Everything that
+  // can go wrong on the way — a bind that fails, a turn that ended while the
+  // bind was in flight, an adapter with no run to queue into — answers false,
+  // and the message goes on to the next turn rather than down with this one.
+  async function offerToTurn(
+    sessionId: SessionId,
+    kind: QueuedKind,
+    text: string,
+    turn: LiveTurn
+  ): Promise<boolean> {
+    try {
+      // A turn still binding has no adapter run behind it yet; waiting for the
+      // bind is what keeps a message queued during one from being lost.
+      await ensureBound(sessionId)
+      if (live.get(sessionId) !== turn) return false
+      const answer =
+        kind === 'steering'
+          ? await adapter.steer(sessionId, text)
+          : await adapter.followUp(sessionId, text)
+      return answer === 'queued'
+    } catch {
+      // A bind that fails is the turn's failure, and the turn reports it as its
+      // own `turn_error`. Repeating it as a rejection here would refuse the
+      // message and destroy the only copy of the text there is: the composer
+      // has already cleared its draft.
+      return false
+    }
+  }
+
   // Never lost and never refused: the message is queued into the live turn,
-  // or, when there is no live turn to queue it into, it becomes the next
+  // or, when there is no live turn that will take it, it becomes the next
   // prompt and is announced as a user message itself.
   async function queueMessage(
     sessionId: SessionId,
@@ -282,19 +315,11 @@ export function createShell({
     for (;;) {
       const turn = live.get(sessionId)
       if (turn === undefined) break
-      // A turn still binding has no adapter run behind it yet; waiting for the
-      // bind is what keeps a message queued during one from being lost.
-      await ensureBound(sessionId)
-      if (live.get(sessionId) === turn) {
-        const answer =
-          kind === 'steering'
-            ? await adapter.steer(sessionId, text)
-            : await adapter.followUp(sessionId, text)
-        if (answer === 'queued') return
-        // The adapter has no run to queue into after all, so this turn is over
-        // as far as the conversation is concerned: the message waits for it.
-        await turn.over
-      }
+      if (await offerToTurn(sessionId, kind, text, turn)) return
+      // That turn is over as far as the conversation is concerned — ended,
+      // failing, or never dispatched at all — so the message waits it out and
+      // is offered again to whatever is live next.
+      await turn.over
     }
 
     beginTurn(sessionId, text, text)
@@ -335,6 +360,10 @@ export function createShell({
     }
     if (event.type === 'queue_flushed') {
       queues.delete(event.sessionId)
+      // A session on its way out, or already out, has nowhere to restore a
+      // message to: its queue goes silently, and the removal emits the state
+      // that follows it.
+      if (removing.has(event.sessionId) || store.session(event.sessionId) === undefined) return
       emit(event)
       emitState()
       return
@@ -411,8 +440,13 @@ export function createShell({
       for (const session of sessions) {
         // Stopped rather than left running unseen; the conversation itself
         // stays in adapter history.
-        await stop(session.id)
-        adapter.release(session.id)
+        removing.add(session.id)
+        try {
+          await stop(session.id)
+          adapter.release(session.id)
+        } finally {
+          removing.delete(session.id)
+        }
         bindings.delete(session.id)
         usage.delete(session.id)
         queues.delete(session.id)
@@ -460,16 +494,24 @@ export function createShell({
     },
 
     async removeSession(id: SessionId): Promise<void> {
-      await stop(id)
-      // Removal forgets the sidebar entry only: the conversation is left where
-      // it is and can be resumed later.
-      adapter.release(id)
+      // Marked before the stop, because a stop is a cancel and a cancel hands
+      // the queue back; removal is the one case where that hand-back has
+      // nowhere to land.
+      removing.add(id)
+      try {
+        await stop(id)
+        // Removal forgets the sidebar entry only: the conversation is left
+        // where it is and can be resumed later.
+        adapter.release(id)
+        store.removeSession(id)
+      } finally {
+        removing.delete(id)
+      }
       bindings.delete(id)
       usage.delete(id)
       // A queue has nowhere to be restored to once the entry holding it is
       // gone.
       queues.delete(id)
-      store.removeSession(id)
       emitState()
     },
 

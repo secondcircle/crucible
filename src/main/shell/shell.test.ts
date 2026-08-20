@@ -7,7 +7,7 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import type { ConversationAdapter } from '../../shared/agent/adapter'
+import type { AdapterEventListener, ConversationAdapter } from '../../shared/agent/adapter'
 import { createFakeAdapter } from '../../shared/agent/fake-adapter'
 import type { PortEvent, SessionId, ShellSnapshot } from '../../shared/agent/port'
 import { createShell, type Shell } from './shell'
@@ -395,6 +395,91 @@ describe('queued messages', () => {
     await settled()
 
     expect((await shell.snapshot()).sessions).toEqual([])
+  })
+
+  // Removal stops the turn, and a stop is a cancel: both adapters hand the
+  // queue back on one. A removed session has no composer to hand it to, so the
+  // flush must not cross the port — the renderer would file the text under a
+  // session nothing can ever show again.
+  it('discards a removed session’s queue rather than handing it back to nothing', async () => {
+    const { sessionId } = await withSession()
+    const listeners = new Set<AdapterEventListener>()
+    const flushing: ConversationAdapter = {
+      ...adapter,
+      // Runs until it is cancelled, so the turn is genuinely dispatched when
+      // the removal reaches for it.
+      prompt(): Promise<void> {
+        return new Promise(() => {})
+      },
+      async cancel(id: SessionId): Promise<void> {
+        listeners.forEach((listener) =>
+          listener({
+            type: 'queue_flushed',
+            sessionId: id,
+            messages: [{ kind: 'steering', text: 'never delivered' }]
+          })
+        )
+        await adapter.cancel(id)
+      },
+      onEvent(listener) {
+        listeners.add(listener)
+        const off = adapter.onEvent(listener)
+        return () => {
+          listeners.delete(listener)
+          off()
+        }
+      }
+    }
+    shell.dispose()
+    shell = createShell({
+      store: createShellStore(file),
+      adapter: flushing,
+      pickFolder: async () => picked
+    })
+    events = []
+    shell.onEvent((event) => events.push(event))
+
+    await shell.prompt(sessionId, 'hello')
+    await settled()
+    await shell.removeSession(sessionId)
+    await settled()
+
+    expect(types()).not.toContain('queue_flushed')
+    expect((await shell.snapshot()).sessions).toEqual([])
+  })
+
+  // The other way the queueing path can fail: the bind is fine but the
+  // adapter itself refuses the message. The contract is the same — never lost,
+  // never refused — so the text waits out the turn and becomes the next
+  // prompt instead of coming back as a rejection.
+  it('does not lose a message the adapter refused to queue', async () => {
+    const { sessionId } = await withSession()
+    const refusing: ConversationAdapter = {
+      ...adapter,
+      async steer(): Promise<'queued' | 'idle'> {
+        throw new Error('that run is gone')
+      }
+    }
+    shell.dispose()
+    shell = createShell({
+      store: createShellStore(file),
+      adapter: refusing,
+      pickFolder: async () => picked
+    })
+    events = []
+    shell.onEvent((event) => events.push(event))
+    let steered: Promise<void> | undefined
+    atFirstCall(() => {
+      steered = shell.steer(sessionId, 'redirect')
+    })
+
+    await shell.prompt(sessionId, 'hello')
+    await settled()
+
+    await expect(steered).resolves.toBeUndefined()
+    expect(
+      events.some((event) => event.type === 'user_message' && event.text === 'redirect')
+    ).toBe(true)
   })
 
   it('answers false for a dequeue of something no longer queued', async () => {

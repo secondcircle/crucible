@@ -478,10 +478,18 @@ export function createFakeAdapter({
       if (!(await call(LONE_CALL, number + 1))) return finish()
       if (!(await deliver('steering'))) return finish()
       if (!(await say(REPLY_DELTAS))) return finish()
-      if (!(await drain())) return finish()
 
-      await beat()
-      if (stopped !== undefined) return finish()
+      // The pause before a turn ends is a window in which the session is still
+      // running, so a message can still be queued into it. The queues are read
+      // again after that pause, and only a beat nothing arrived in ends the
+      // turn: between the last read and `finish()` there is no await, so
+      // nothing can slip in behind the terminal event.
+      for (;;) {
+        if (!(await drain())) return finish()
+        await beat()
+        if (stopped !== undefined) return finish()
+        if (bound.steering.length === 0 && bound.followUp.length === 0) break
+      }
       finish()
     }
 
