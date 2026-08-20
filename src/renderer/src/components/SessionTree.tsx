@@ -79,10 +79,19 @@ export function SessionTree({
     onJump(ref, summarize)
   }
 
-  function openLabelInput(node: TreeNode): void {
+  // The card's third action, whichever name it is wearing: a labeled node is
+  // unlabeled in the one click the button promises (Mock I), an unlabeled one
+  // opens the input. The `l` key is this same action, so the two never differ
+  // about what pressing it does.
+  function labelAction(node: TreeNode): void {
     setSelected(node.ref)
+    if (node.label !== undefined) {
+      setLabelling(undefined)
+      onLabel(node.ref)
+      return
+    }
     setLabelling(node.ref)
-    setDraft(node.label ?? DEFAULT_LABEL)
+    setDraft(DEFAULT_LABEL)
   }
 
   function confirmLabel(ref: string): void {
@@ -118,7 +127,7 @@ export function SessionTree({
         if (pressed.key === 'l') {
           pressed.preventDefault()
           const node = find(tree.roots, selected)
-          if (node !== undefined) openLabelInput(node)
+          if (node !== undefined) labelAction(node)
         }
       }}
     >
@@ -221,7 +230,7 @@ export function SessionTree({
                       >
                         Continue with summary <span className="k">s</span>
                       </button>
-                      <button className="act" onClick={() => openLabelInput(node)}>
+                      <button className="act" onClick={() => labelAction(node)}>
                         {node.label === undefined ? 'Label' : 'Remove label'}{' '}
                         <span className="k">l</span>
                       </button>
@@ -243,17 +252,6 @@ export function SessionTree({
                         <button className="act" onClick={() => confirmLabel(node.ref)}>
                           Save label
                         </button>
-                        {node.label === undefined ? null : (
-                          <button
-                            className="act"
-                            onClick={() => {
-                              setLabelling(undefined)
-                              onLabel(node.ref)
-                            }}
-                          >
-                            Remove label
-                          </button>
-                        )}
                       </div>
                     ) : null}
 

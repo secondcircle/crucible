@@ -8,6 +8,7 @@ import type { TranscriptItem } from '../../shared/agent/port'
 import { Shell } from './Shell'
 import { createScriptedPort, oneSession, type ScriptedPort } from './testing/scripted-port'
 import { createScriptedWorkspace } from './testing/scripted-workspace'
+import { settled } from './testing/settled'
 
 const MODEL = { id: 'fake/deterministic', label: 'Fake', thinkingLevels: ['off', 'low', 'high'] }
 
@@ -33,6 +34,7 @@ async function shellStillFetching(): Promise<{ port: ScriptedPort; release: () =
 
   render(<Shell port={port} workspace={createScriptedWorkspace()} />)
   await screen.findByRole('button', { name: /^Session · / })
+  await settled()
   return { port, release }
 }
 

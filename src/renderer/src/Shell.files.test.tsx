@@ -7,6 +7,7 @@ import { describe, expect, it } from 'vitest'
 import { Shell } from './Shell'
 import { createScriptedPort, oneSession, type ScriptedPort } from './testing/scripted-port'
 import { createScriptedWorkspace, type ScriptedWorkspace } from './testing/scripted-workspace'
+import { settled } from './testing/settled'
 
 const FILES: readonly string[] = [
   'src/renderer/src/components/Composer.tsx',
@@ -22,6 +23,7 @@ async function shell(): Promise<{ port: ScriptedPort; workspace: ScriptedWorkspa
   const workspace = createScriptedWorkspace(FILES)
   render(<Shell port={port} workspace={workspace} />)
   await screen.findAllByRole('button', { name: /^Session · / })
+  await settled()
   return { port, workspace }
 }
 

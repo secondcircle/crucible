@@ -7,6 +7,7 @@ import { describe, expect, it } from 'vitest'
 import { Shell } from './Shell'
 import { createScriptedPort, oneSession, type ScriptedPort } from './testing/scripted-port'
 import { createScriptedWorkspace } from './testing/scripted-workspace'
+import { settled } from './testing/settled'
 
 const MODEL = { id: 'fake/deterministic', label: 'Fake', thinkingLevels: ['off', 'low'] }
 
@@ -15,6 +16,7 @@ async function shellWithSession(): Promise<ScriptedPort> {
   port.models = [MODEL]
   render(<Shell port={port} workspace={createScriptedWorkspace()} />)
   await screen.findByRole('button', { name: /^Session · / })
+  await settled()
   return port
 }
 

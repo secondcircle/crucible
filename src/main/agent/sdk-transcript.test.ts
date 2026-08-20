@@ -3,10 +3,15 @@
 // Fake messages of the shapes π stores, never a session, so this suite makes no
 // paid call.
 import { describe, expect, it } from 'vitest'
-import { toTranscript, type StoredMessage } from './sdk-transcript'
+import type { AgentSessionEvent } from '@earendil-works/pi-coding-agent'
+import { deliveredBashRunId, toTranscript, type StoredMessage } from './sdk-transcript'
 
 function messages(...stored: unknown[]): StoredMessage[] {
   return stored as StoredMessage[]
+}
+
+function delivered(event: unknown): string | undefined {
+  return deliveredBashRunId(event as AgentSessionEvent)
 }
 
 describe('a restored conversation', () => {
@@ -121,5 +126,50 @@ describe('a restored conversation', () => {
     expect(items).toEqual([
       { kind: 'bashRun', command: 'git status', output: 'clean\n', exitCode: 0 }
     ])
+  })
+})
+
+// The event that says a shared run reached the conversation. π announces a
+// steered custom message as `message_end` at the boundary that takes it and
+// persists it from that same announcement; the entry landing emits nothing at
+// all. Watching anything else is watching for an event that never comes, and a
+// run the model already answered would be reported back as still local.
+describe('the delivery point of a shared run', () => {
+  it('is the message_end \u03c0 emits at the boundary that took it', () => {
+    expect(
+      delivered({
+        type: 'message_end',
+        message: {
+          role: 'custom',
+          customType: 'crucible.bashRun',
+          content: 'the text the model saw',
+          details: { id: 'share-2', command: 'git status', output: 'clean\n', exitCode: 0 }
+        }
+      })
+    ).toBe('share-2')
+  })
+
+  it('is nothing else: not another run\u2019s message, not another kind of event', () => {
+    expect(
+      delivered({
+        type: 'message_start',
+        message: { role: 'custom', customType: 'crucible.bashRun', details: { id: 'share-2' } }
+      })
+    ).toBeUndefined()
+    expect(
+      delivered({
+        type: 'message_end',
+        message: { role: 'custom', customType: 'x', details: { id: 'share-2' } }
+      })
+    ).toBeUndefined()
+    expect(
+      delivered({ type: 'message_end', message: { role: 'assistant', stopReason: 'stop' } })
+    ).toBeUndefined()
+    expect(
+      delivered({
+        type: 'message_end',
+        message: { role: 'custom', customType: 'crucible.bashRun' }
+      })
+    ).toBeUndefined()
   })
 })

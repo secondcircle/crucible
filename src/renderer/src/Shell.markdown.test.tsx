@@ -7,6 +7,7 @@ import { describe, expect, it } from 'vitest'
 import { Shell } from './Shell'
 import { createScriptedPort, oneSession } from './testing/scripted-port'
 import { createScriptedWorkspace } from './testing/scripted-workspace'
+import { settled } from './testing/settled'
 
 const REPLY = [
   'Two adapters implement the agent port.\n\n',
@@ -22,6 +23,7 @@ async function replyWith(deltas: readonly string[]): Promise<void> {
   const port = createScriptedPort(oneSession())
   render(<Shell port={port} workspace={createScriptedWorkspace()} />)
   await screen.findByRole('button', { name: /^Session · / })
+  await settled()
 
   await act(async () => {
     await port.prompt('s1', 'compare the adapters')

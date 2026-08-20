@@ -8,6 +8,7 @@ import type { ShellSnapshot } from '../../shared/agent/port'
 import { Shell } from './Shell'
 import { createScriptedPort, oneSession, type ScriptedPort } from './testing/scripted-port'
 import { createScriptedWorkspace, type ScriptedWorkspace } from './testing/scripted-workspace'
+import { settled } from './testing/settled'
 
 const TWO_WORKSPACES: ShellSnapshot = {
   workspaces: [
@@ -30,6 +31,7 @@ async function shell(
   const workspace = createScriptedWorkspace()
   render(<Shell port={port} workspace={workspace} />)
   await screen.findAllByRole('button', { name: /^Session · / })
+  await settled()
   return { port, workspace }
 }
 

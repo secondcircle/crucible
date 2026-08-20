@@ -9,6 +9,7 @@ import { sessionLabel } from './labels'
 import { Shell } from './Shell'
 import { createScriptedPort, type ScriptedPort } from './testing/scripted-port'
 import { createScriptedWorkspace } from './testing/scripted-workspace'
+import { settled } from './testing/settled'
 
 // The label is a local-time format, so the expected names are derived from the
 // same helper the sidebar uses rather than written out in one timezone.
@@ -29,6 +30,7 @@ async function twoStreamingSessions(): Promise<ScriptedPort> {
   const port = createScriptedPort(TWO_SESSIONS)
   render(<Shell port={port} workspace={createScriptedWorkspace()} />)
   await screen.findByRole('button', { name: FIRST })
+  await settled()
 
   await act(async () => {
     await port.prompt('s1', 'the first')

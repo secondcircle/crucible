@@ -7,11 +7,13 @@ import { describe, expect, it } from 'vitest'
 import { Shell } from './Shell'
 import { createScriptedPort, oneSession, type ScriptedPort } from './testing/scripted-port'
 import { createScriptedWorkspace } from './testing/scripted-workspace'
+import { settled } from './testing/settled'
 
 async function streaming(): Promise<ScriptedPort> {
   const port = createScriptedPort(oneSession())
   render(<Shell port={port} workspace={createScriptedWorkspace()} />)
   await screen.findByRole('button', { name: /^Session · / })
+  await settled()
   await act(async () => {
     await port.prompt('s1', 'run the tests')
   })

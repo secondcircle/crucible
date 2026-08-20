@@ -38,6 +38,7 @@ import { displaySafeMessage } from './adapter-error.ts'
 import { createEventMapper } from './sdk-events.ts'
 import {
   BASH_RUN_TYPE,
+  deliveredBashRunId,
   toTranscript,
   userTextOf,
   type StoredMessage
@@ -594,8 +595,17 @@ export function createSdkAdapter(): ConversationAdapter {
       run: BashRunShare
     ): Promise<'delivered' | 'dropped' | 'idle'> {
       const bound = requireBound(sessionId)
-      if (bound.running === undefined) return Promise.resolve('idle')
       const { session } = bound
+      // A turn is live here for a moment before π starts streaming and for a
+      // moment after it stops. `steer(text)` spans that window because π queues
+      // the text either way; a custom message gets no such queue.
+      // `sendCustomMessage` steers only while π says it is streaming, and in the
+      // window it would append the run to the conversation outside every
+      // boundary instead, with no turn left to answer it. So the window answers
+      // 'idle' and the shell starts a turn of the run's own, which is what the
+      // user asked for either way. The same flag π checks, read in the tick it
+      // is acted on.
+      if (bound.running === undefined || !session.isStreaming) return Promise.resolve('idle')
       const message = bashRunMessage(run)
 
       return new Promise<'delivered' | 'dropped' | 'idle'>((resolve, reject) => {
@@ -606,13 +616,11 @@ export function createSdkAdapter(): ConversationAdapter {
             resolve(outcome)
           }
         }
-        // The entry landing in the session is the moment the run genuinely
-        // enters the conversation, which is the only honest delivery point.
+        // π announces the steered message at the boundary that takes it, and
+        // persists it from that same announcement: that is the moment the run
+        // genuinely enters the conversation, and the only honest delivery point.
         const stop = session.subscribe((event) => {
-          if (event.type !== 'entry_appended') return
-          const { entry } = event
-          if (entry.type !== 'custom_message' || entry.customType !== BASH_RUN_TYPE) return
-          if ((entry.details as { id?: unknown } | undefined)?.id !== message.details.id) return
+          if (deliveredBashRunId(event) !== message.details.id) return
           const at = bound.shares.indexOf(share)
           if (at !== -1) bound.shares.splice(at, 1)
           share.settle('delivered')

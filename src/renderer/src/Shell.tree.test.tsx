@@ -8,6 +8,7 @@ import type { SessionTree, TranscriptItem } from '../../shared/agent/port'
 import { Shell } from './Shell'
 import { createScriptedPort, oneSession, type ScriptedPort } from './testing/scripted-port'
 import { createScriptedWorkspace } from './testing/scripted-workspace'
+import { settled } from './testing/settled'
 
 const TREE: SessionTree = {
   roots: [
@@ -62,6 +63,7 @@ async function shell(
   port.trees.set('s1', options.tree ?? TREE)
   render(<Shell port={port} workspace={createScriptedWorkspace()} />)
   await screen.findAllByRole('button', { name: /^Session · / })
+  await settled()
   return port
 }
 
@@ -404,7 +406,7 @@ describe('labels', () => {
     expect(screen.getByText('before the rewrite')).toBeInTheDocument()
   })
 
-  it('clears the label when the input is emptied', async () => {
+  it('removes the label on the one click the button promises', async () => {
     const port = await shell()
     await open()
 
@@ -414,6 +416,40 @@ describe('labels', () => {
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: /Remove label/ }))
     })
+
+    expect(port.calls).toContainEqual({ op: 'setLabel', args: ['s1', 'n2', undefined] })
+    expect(screen.queryByText('checkpoint')).toBeNull()
+    // No editor stands between the button and what it says it does.
+    expect(screen.queryByLabelText('Label this point')).toBeNull()
+    // And the action now offers the other half of the toggle.
+    expect(screen.getByRole('button', { name: /^Label/ })).toBeInTheDocument()
+  })
+
+  it('removes it from the keyboard too, so l and the button never differ', async () => {
+    const port = await shell()
+    await open()
+
+    await act(async () => {
+      fireEvent.click(screen.getByText('Hook the overlay up to ⌘O.'))
+    })
+    await act(async () => {
+      fireEvent.keyDown(screen.getByRole('dialog', { name: 'Session tree' }), { key: 'l' })
+    })
+
+    expect(port.calls).toContainEqual({ op: 'setLabel', args: ['s1', 'n2', undefined] })
+    expect(screen.queryByText('checkpoint')).toBeNull()
+  })
+
+  it('clears rather than sets when the input is emptied', async () => {
+    const port = await shell()
+    await open()
+
+    await act(async () => {
+      fireEvent.click(screen.getByText('Scaffold the resume overlay component.'))
+    })
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /^Label/ }))
+    })
     await act(async () => {
       fireEvent.change(screen.getByLabelText('Label this point'), { target: { value: '  ' } })
     })
@@ -421,7 +457,6 @@ describe('labels', () => {
       fireEvent.click(screen.getByRole('button', { name: 'Save label' }))
     })
 
-    expect(port.calls).toContainEqual({ op: 'setLabel', args: ['s1', 'n2', undefined] })
-    expect(screen.queryByText('checkpoint')).toBeNull()
+    expect(port.calls).toContainEqual({ op: 'setLabel', args: ['s1', 'n1', undefined] })
   })
 })

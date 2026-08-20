@@ -9,6 +9,7 @@ import { sessionLabel } from './labels'
 import { Shell } from './Shell'
 import { createScriptedPort, oneSession, type ScriptedPort } from './testing/scripted-port'
 import { createScriptedWorkspace } from './testing/scripted-workspace'
+import { settled } from './testing/settled'
 
 const TWO_SESSIONS: ShellSnapshot = {
   workspaces: [{ id: 'w1', name: 'crucible', path: '/repos/crucible' }],
@@ -27,6 +28,7 @@ async function shellWithSession(
   port.models = [{ id: 'fake/deterministic', label: 'Fake', thinkingLevels: ['off', 'low'] }]
   render(<Shell port={port} workspace={createScriptedWorkspace()} />)
   await screen.findAllByRole('button', { name: /^Session · / })
+  await settled()
   return port
 }
 

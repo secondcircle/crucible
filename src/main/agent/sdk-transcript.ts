@@ -1,4 +1,4 @@
-import type { AgentSession } from '@earendil-works/pi-coding-agent'
+import type { AgentSession, AgentSessionEvent } from '@earendil-works/pi-coding-agent'
 import type { BashRunShare, ImageAttachment, TranscriptItem } from '../../shared/agent/port'
 // Spelled with its extension so this module can also be loaded by plain Node.
 import { displaySafeMessage } from './adapter-error.ts'
@@ -100,6 +100,24 @@ export function toTranscript(messages: readonly StoredMessage[]): TranscriptItem
   }
 
   return items
+}
+
+/**
+ * The id of the shared bash run this event just delivered, or nothing when the
+ * event is not that delivery.
+ *
+ * π delivers a steered custom message by emitting `message_start` and
+ * `message_end` for it at the boundary between tool calls, and persists it from
+ * the `message_end` it just emitted. The entry landing emits nothing at all, so
+ * this event is the only observable moment the run genuinely enters the
+ * conversation, and the only honest thing to call delivery.
+ */
+export function deliveredBashRunId(event: AgentSessionEvent): string | undefined {
+  if (event.type !== 'message_end') return undefined
+  const { message } = event
+  if (message.role !== 'custom' || message.customType !== BASH_RUN_TYPE) return undefined
+  const id = (message.details as { id?: unknown } | undefined)?.id
+  return typeof id === 'string' ? id : undefined
 }
 
 /** A run as this adapter wrote it, or nothing when the details are not one. */

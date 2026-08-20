@@ -8,6 +8,7 @@ import type { ShellSnapshot } from '../../shared/agent/port'
 import { Shell } from './Shell'
 import { createScriptedPort, oneSession, type ScriptedPort } from './testing/scripted-port'
 import { createScriptedWorkspace } from './testing/scripted-workspace'
+import { settled } from './testing/settled'
 
 const TWO_SESSIONS: ShellSnapshot = {
   workspaces: [{ id: 'w1', name: 'crucible', path: '/repos/crucible' }],
@@ -33,6 +34,7 @@ async function shell(snapshot: Partial<ShellSnapshot> = oneSession()): Promise<S
   } else {
     await screen.findByText('No workspace yet.')
   }
+  await settled()
   return port
 }
 
@@ -47,23 +49,27 @@ function clipboard(files: readonly File[]): Event {
   return pasted
 }
 
+// The bytes are read through promises this test does not own: jsdom's for the
+// file, then Crucible's for the base64. Counting ticks would be guessing at how
+// many that is, so the chain is settled against a task boundary instead.
+async function settle(): Promise<void> {
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 0))
+  })
+}
+
 async function paste(...files: readonly File[]): Promise<void> {
   await act(async () => {
     fireEvent(document, clipboard(files))
   })
-  // The bytes are read asynchronously; the chip follows on the next tick.
-  await act(async () => {
-    await Promise.resolve()
-  })
+  await settle()
 }
 
 async function drop(...files: readonly File[]): Promise<void> {
   await act(async () => {
     fireEvent.drop(window, { dataTransfer: { files } })
   })
-  await act(async () => {
-    await Promise.resolve()
-  })
+  await settle()
 }
 
 const chips = (): string[] =>
