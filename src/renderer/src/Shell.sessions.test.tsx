@@ -98,6 +98,45 @@ describe('workspaces', () => {
     expect(blank).toBeInTheDocument()
   })
 
+  it('keeps every workspace listed, and lists the sessions of all of them', async () => {
+    const port = createScriptedPort({
+      workspaces: [
+        { id: 'w1', name: 'crucible', path: '/repos/crucible' },
+        { id: 'w2', name: 'pi-extensions', path: '/repos/pi-extensions' },
+        { id: 'w3', name: 'empty', path: '/repos/empty' }
+      ],
+      activeWorkspaceId: 'w1',
+      sessions: [
+        { id: 's1', workspaceId: 'w1', createdAt: '2024-05-01T10:00:00.000Z', working: false },
+        { id: 's2', workspaceId: 'w2', createdAt: '2024-05-01T11:00:00.000Z', working: true }
+      ],
+      activeSessionId: 's1'
+    })
+    render(<Shell
+      port={port}
+      workspace={createScriptedWorkspace()}
+      commands={createScriptedCommands()}
+    />)
+    await screen.findByRole('button', { name: 'crucible' })
+
+    expect(sessionRows()).toHaveLength(2)
+    expect(screen.getByRole('button', { name: 'empty' })).toBeInTheDocument()
+
+    // The other workspace's session is still there after switching, working
+    // dot and all, and one click on it is enough to open it.
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'pi-extensions (working)' }))
+    })
+
+    expect(sessionRows()).toHaveLength(2)
+    const working = screen.getByRole('button', { name: /^Session · .*\(working\)$/ })
+    await act(async () => {
+      fireEvent.click(working)
+    })
+
+    expect(port.calls).toContainEqual({ op: 'activateSession', args: ['s2'] })
+  })
+
   it('removes a workspace with its sessions, leaving the folder alone', async () => {
     const port = await shellWithSession()
 

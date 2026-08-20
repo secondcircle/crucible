@@ -1,0 +1,314 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Mock — provider quota in the sidebar</title>
+<style>
+  :root{
+    --bg:#191419; --bg2:#211a20; --panel:#241c23; --panel2:#2e242d; --line:#3a2e38;
+    --ink:#e8dfe2; --dim:#9b8a94; --faint:#6b5d66;
+    --accent:#e07a4f; --accent2:#f0a37c; --ok:#7fb069; --error:#d96a5a;
+    --font:-apple-system,'Segoe UI',system-ui,sans-serif;
+    --mono:ui-monospace,'SF Mono',Menlo,monospace;
+    --radius:8px;
+  }
+  *{box-sizing:border-box;margin:0}
+  body{background:var(--bg);color:var(--ink);font:14px/1.55 var(--font);padding:28px 32px 60px}
+  h1{font-size:19px;font-weight:700;letter-spacing:.02em}
+  h2{font-size:13px;font-weight:600;color:var(--accent2);margin:32px 0 4px}
+  p.note{color:var(--dim);font-size:12.5px;max-width:820px;margin-bottom:14px}
+  p.note b{color:var(--ink);font-weight:600}
+  .row{display:flex;gap:26px;flex-wrap:wrap;align-items:flex-start}
+  .card{display:flex;flex-direction:column;gap:8px}
+  .cap{font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--faint)}
+  .cap b{color:var(--accent);font-weight:600;letter-spacing:.06em;text-transform:none;font-size:11.5px}
+
+  /* ---------- sidebar frame (real Ember measurements) ---------- */
+  .side{width:248px;background:var(--bg2);border:1px solid var(--line);
+        border-radius:6px;display:flex;flex-direction:column;overflow:hidden}
+  .side.tall{height:600px}
+  .brand{padding:16px 16px 10px;font-weight:700;letter-spacing:.06em;font-size:15px}
+  .brand em{color:var(--accent);font-style:normal}
+  .newsession{margin:6px 12px 14px;padding:8px;border:1px solid var(--line);border-radius:var(--radius);
+              background:var(--panel);color:var(--ink);text-align:center;font-size:13px}
+  .wslabel{padding:4px 16px;font-size:10.5px;text-transform:uppercase;letter-spacing:.12em;color:var(--faint)}
+  .ws{padding:7px 16px;font-size:13px;color:var(--dim);display:flex;align-items:center;gap:8px}
+  .ws .dot{width:7px;height:7px;border-radius:50%;background:var(--faint);flex:none}
+  .ws.active{color:var(--ink);background:var(--panel)}
+  .ws.active .dot{background:var(--accent);box-shadow:0 0 6px var(--accent)}
+  .ws.working .dot{background:var(--ok)}
+  .sessions{margin:2px 0 8px 22px;border-left:1px solid var(--line)}
+  .sess{padding:5px 12px;font-size:12.5px;color:var(--dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .sess.active{color:var(--accent2)}
+  .addws{margin:8px 12px 12px;padding:8px;border:1px dashed var(--line);border-radius:var(--radius);
+         background:none;color:var(--dim);text-align:center;font-size:12.5px}
+
+  /* ---------- the quota block ---------- */
+  .quota{margin-top:auto;border-top:1px solid var(--line);padding:9px 14px 6px}
+  .quota .qlabel{font-size:10.5px;text-transform:uppercase;letter-spacing:.12em;color:var(--faint);margin-bottom:7px}
+  .prov{margin-bottom:9px}
+  .prov:last-child{margin-bottom:2px}
+  .pname{display:flex;justify-content:space-between;align-items:baseline;font-size:11.5px;color:var(--dim)}
+  .pname .reset{font:10.5px var(--mono);color:var(--faint)}
+  .pname .reset .out{color:var(--accent)}
+  .pname .reset .out.crit{color:var(--error)}
+
+  .mrow{display:flex;align-items:center;gap:7px;font:11px var(--mono);
+        font-variant-numeric:tabular-nums;margin-top:3px}
+  .mrow .lbl{color:var(--faint);width:36px;flex:none;overflow:hidden}
+  .mrow .bar{flex:1;height:5px;border-radius:3px;background:var(--panel2);overflow:hidden;position:relative}
+  .mrow .bar i{display:block;height:100%;background:linear-gradient(90deg,var(--accent),var(--accent2))}
+  .mrow .bar i.warn{background:var(--accent)}
+  .mrow .bar i.crit{background:var(--error)}
+  /* the clock tick: where a perfectly even burn would have you right now */
+  .mrow .bar u{position:absolute;top:-1px;bottom:-1px;width:1px;
+               background:color-mix(in srgb,var(--ink) 62%,transparent)}
+  .mrow .num{width:32px;text-align:right;color:var(--dim)}
+  .mrow .num.warn{color:var(--accent)}
+  .mrow .num.crit{color:var(--error);font-weight:600}
+  .mrow .proj{color:var(--faint);width:44px;text-align:right}
+  .mrow .proj.over{color:var(--accent)}
+
+  .stale{opacity:.5}
+  .dash{color:var(--faint);font:11px var(--mono);margin-top:3px;display:block}
+
+  .legend{font-size:12px;color:var(--dim);max-width:250px;line-height:1.5}
+  .legend b{color:var(--ink);font-weight:600}
+  .keyline{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--dim);margin:2px 0}
+  .swatch{width:60px;height:5px;border-radius:3px;background:var(--panel2);position:relative;flex:none}
+  .swatch i{display:block;height:100%;background:var(--accent)}
+  .swatch u{position:absolute;top:-1px;bottom:-1px;width:1px;background:color-mix(in srgb,var(--ink) 62%,transparent)}
+</style></head><body>
+
+<h1>Provider quota — the left panel, variant B</h1>
+<p class="note">
+  Settled last round: every meter always visible, bars, providers alphabetical, pinned above
+  Add workspace. Two changes since: the countdown on the provider line is now the
+  <b>longest</b> live window (the weekly one, the only reset that matters), and the weekly
+  meters carry a pace signal. Percentages are <b>used</b>. The 5H meter never gets a pace
+  signal — you said you rarely come near it.
+</p>
+
+<div class="row">
+
+  <!-- ============ B1 ============ -->
+  <div class="card">
+    <div class="cap"><b>B1 — clock tick only</b></div>
+    <nav class="side tall">
+      <div class="brand"><em>◆</em> CRUCIBLE</div>
+      <button class="newsession">New session</button>
+      <div class="wslabel">Workspaces</div>
+      <div class="ws active working"><span class="dot"></span> crucible</div>
+      <div class="sessions">
+        <div class="sess active">quota strip alignment</div>
+        <div class="sess">electron boilerplate</div>
+      </div>
+      <div class="ws"><span class="dot"></span> pi-extensions</div>
+      <div class="ws"><span class="dot"></span> resume-site</div>
+
+      <div class="quota">
+        <div class="qlabel">Subscriptions</div>
+
+        <div class="prov">
+          <div class="pname"><span>Anthropic</span><span class="reset">⟳4d11</span></div>
+          <div class="mrow"><span class="lbl">5H</span><span class="bar"><i class="warn" style="width:73%"></i></span><span class="num warn">73%</span></div>
+          <div class="mrow"><span class="lbl">7D</span><span class="bar"><i style="width:54%"></i><u style="left:36%"></u></span><span class="num">54%</span></div>
+          <div class="mrow"><span class="lbl">FABLE</span><span class="bar"><i style="width:42%"></i><u style="left:36%"></u></span><span class="num">42%</span></div>
+        </div>
+
+        <div class="prov">
+          <div class="pname"><span>Codex</span><span class="reset">⟳3d04</span></div>
+          <div class="mrow"><span class="lbl">5H</span><span class="bar"><i class="crit" style="width:91%"></i></span><span class="num crit">!91%</span></div>
+          <div class="mrow"><span class="lbl">7D</span><span class="bar"><i class="warn" style="width:78%"></i><u style="left:54%"></u></span><span class="num warn">78%</span></div>
+        </div>
+
+        <div class="prov">
+          <div class="pname"><span>Grok</span><span class="reset">⟳5d02</span></div>
+          <div class="mrow"><span class="lbl">7D</span><span class="bar"><i style="width:31%"></i><u style="left:28%"></u></span><span class="num">31%</span></div>
+        </div>
+      </div>
+
+      <button class="addws">＋ Add workspace</button>
+    </nav>
+    <div class="legend">
+      One hairline per weekly bar: where an even burn would have you right now. Fill past the
+      tick means you are ahead of the clock. Anthropic is fine, Grok is fine, Codex is 24
+      points ahead of its week. Nothing new to read, just a mark to glance at.
+    </div>
+  </div>
+
+  <!-- ============ B2 ============ -->
+  <div class="card">
+    <div class="cap"><b>B2 — tick, plus a word when you'll run out</b> · recommended</div>
+    <nav class="side tall">
+      <div class="brand"><em>◆</em> CRUCIBLE</div>
+      <button class="newsession">New session</button>
+      <div class="wslabel">Workspaces</div>
+      <div class="ws active working"><span class="dot"></span> crucible</div>
+      <div class="sessions">
+        <div class="sess active">quota strip alignment</div>
+        <div class="sess">electron boilerplate</div>
+      </div>
+      <div class="ws"><span class="dot"></span> pi-extensions</div>
+      <div class="ws"><span class="dot"></span> resume-site</div>
+
+      <div class="quota">
+        <div class="qlabel">Subscriptions</div>
+
+        <div class="prov">
+          <div class="pname"><span>Anthropic</span><span class="reset">⟳4d11</span></div>
+          <div class="mrow"><span class="lbl">5H</span><span class="bar"><i class="warn" style="width:73%"></i></span><span class="num warn">73%</span></div>
+          <div class="mrow"><span class="lbl">7D</span><span class="bar"><i style="width:54%"></i><u style="left:36%"></u></span><span class="num">54%</span></div>
+          <div class="mrow"><span class="lbl">FABLE</span><span class="bar"><i style="width:42%"></i><u style="left:36%"></u></span><span class="num">42%</span></div>
+        </div>
+
+        <div class="prov">
+          <div class="pname"><span>Codex</span><span class="reset">⟳3d04 <span class="out">out Sat</span></span></div>
+          <div class="mrow"><span class="lbl">5H</span><span class="bar"><i class="crit" style="width:91%"></i></span><span class="num crit">!91%</span></div>
+          <div class="mrow"><span class="lbl">7D</span><span class="bar"><i class="warn" style="width:78%"></i><u style="left:54%"></u></span><span class="num warn">78%</span></div>
+        </div>
+
+        <div class="prov">
+          <div class="pname"><span>Grok</span><span class="reset">⟳5d02</span></div>
+          <div class="mrow"><span class="lbl">7D</span><span class="bar"><i style="width:31%"></i><u style="left:28%"></u></span><span class="num">31%</span></div>
+        </div>
+      </div>
+
+      <button class="addws">＋ Add workspace</button>
+    </nav>
+    <div class="legend">
+      Same tick, and one extra word on the provider line — but only when the straight-line
+      projection actually lands past 100% before the reset. Codex at this burn empties on
+      <b>Sat</b>, two days early. Providers on track say nothing at all, so the word appearing
+      <i>is</i> the signal.
+    </div>
+  </div>
+
+  <!-- ============ B3 ============ -->
+  <div class="card">
+    <div class="cap"><b>B3 — projected finish, always</b></div>
+    <nav class="side tall">
+      <div class="brand"><em>◆</em> CRUCIBLE</div>
+      <button class="newsession">New session</button>
+      <div class="wslabel">Workspaces</div>
+      <div class="ws active working"><span class="dot"></span> crucible</div>
+      <div class="sessions">
+        <div class="sess active">quota strip alignment</div>
+        <div class="sess">electron boilerplate</div>
+      </div>
+      <div class="ws"><span class="dot"></span> pi-extensions</div>
+      <div class="ws"><span class="dot"></span> resume-site</div>
+
+      <div class="quota">
+        <div class="qlabel">Subscriptions</div>
+
+        <div class="prov">
+          <div class="pname"><span>Anthropic</span><span class="reset">⟳4d11</span></div>
+          <div class="mrow"><span class="lbl">5H</span><span class="bar"><i class="warn" style="width:73%"></i></span><span class="num warn">73%</span></div>
+          <div class="mrow"><span class="lbl">7D</span><span class="bar" style="max-width:74px"><i style="width:54%"></i></span><span class="num">54%</span><span class="proj">→81%</span></div>
+          <div class="mrow"><span class="lbl">FABLE</span><span class="bar" style="max-width:74px"><i style="width:42%"></i></span><span class="num">42%</span><span class="proj">→63%</span></div>
+        </div>
+
+        <div class="prov">
+          <div class="pname"><span>Codex</span><span class="reset">⟳3d04</span></div>
+          <div class="mrow"><span class="lbl">5H</span><span class="bar"><i class="crit" style="width:91%"></i></span><span class="num crit">!91%</span></div>
+          <div class="mrow"><span class="lbl">7D</span><span class="bar" style="max-width:74px"><i class="warn" style="width:78%"></i></span><span class="num warn">78%</span><span class="proj over">→144%</span></div>
+        </div>
+
+        <div class="prov">
+          <div class="pname"><span>Grok</span><span class="reset">⟳5d02</span></div>
+          <div class="mrow"><span class="lbl">7D</span><span class="bar" style="max-width:74px"><i style="width:31%"></i></span><span class="num">31%</span><span class="proj">→111%</span></div>
+        </div>
+      </div>
+
+      <button class="addws">＋ Add workspace</button>
+    </nav>
+    <div class="legend">
+      The projection as a number on every weekly meter. Honest, and busy: three numbers per
+      row, the bar squeezed to make room, and Grok's <b>→111%</b> is arithmetic on four hours
+      of a five-day week — a number precise enough to be believed and too early to be true.
+    </div>
+  </div>
+
+</div>
+
+<h2>The pace arithmetic, in one line</h2>
+<p class="note">
+  Elapsed fraction of the window comes from the reset instant and the window's own length
+  (<b>7D</b> and <b>FABLE</b> are seven days). Projected finish is
+  <b>used ÷ elapsed</b>. No history, no sampling, no stored series — the same rough estimate
+  you would do in your head, done for you. It says nothing at all in the first day of a
+  window, where the divisor is small enough to produce nonsense.
+</p>
+<div class="keyline"><span class="swatch"><i style="width:54%"></i><u style="left:36%"></u></span> fill past the tick — burning faster than the week</div>
+<div class="keyline"><span class="swatch"><i style="width:31%"></i><u style="left:52%"></u></span> fill behind the tick — comfortably on track</div>
+
+<h2>The states</h2>
+<p class="note">
+  Every provider is in one of these. Nothing blinks, pulses, or pops a notification.
+</p>
+
+<div class="row">
+  <div class="card">
+    <div class="cap">signed out of Grok</div>
+    <div class="side">
+      <div class="quota" style="margin-top:0;border-top:none">
+        <div class="qlabel">Subscriptions</div>
+        <div class="prov">
+          <div class="pname"><span>Anthropic</span><span class="reset">⟳4d11</span></div>
+          <div class="mrow"><span class="lbl">5H</span><span class="bar"><i class="warn" style="width:73%"></i></span><span class="num warn">73%</span></div>
+          <div class="mrow"><span class="lbl">7D</span><span class="bar"><i style="width:54%"></i><u style="left:36%"></u></span><span class="num">54%</span></div>
+          <div class="mrow"><span class="lbl">FABLE</span><span class="bar"><i style="width:42%"></i><u style="left:36%"></u></span><span class="num">42%</span></div>
+        </div>
+        <div class="prov">
+          <div class="pname"><span>Codex</span><span class="reset">⟳3d04</span></div>
+          <div class="mrow"><span class="lbl">7D</span><span class="bar"><i style="width:61%"></i><u style="left:54%"></u></span><span class="num">61%</span></div>
+        </div>
+      </div>
+    </div>
+    <div class="legend">No credential, no row. A lapsed subscription simply disappears; it is
+      never a row saying <b>n/a</b>. Sign out of everything and the whole block goes, border
+      and heading included.</div>
+  </div>
+
+  <div class="card">
+    <div class="cap">last read failed / went old</div>
+    <div class="side">
+      <div class="quota" style="margin-top:0;border-top:none">
+        <div class="qlabel">Subscriptions</div>
+        <div class="prov stale">
+          <div class="pname"><span>Anthropic</span><span class="reset">·12m</span></div>
+          <div class="mrow"><span class="lbl">5H</span><span class="bar"><i style="width:73%"></i></span><span class="num">73%</span></div>
+          <div class="mrow"><span class="lbl">7D</span><span class="bar"><i style="width:54%"></i><u style="left:36%"></u></span><span class="num">54%</span></div>
+          <div class="mrow"><span class="lbl">FABLE</span><span class="bar"><i style="width:42%"></i><u style="left:36%"></u></span><span class="num">42%</span></div>
+        </div>
+        <div class="prov">
+          <div class="pname"><span>Codex</span><span class="reset">⟳3d04</span></div>
+          <div class="mrow"><span class="lbl">7D</span><span class="bar"><i style="width:61%"></i><u style="left:54%"></u></span><span class="num">61%</span></div>
+        </div>
+        <div class="prov">
+          <div class="pname"><span>Grok</span><span class="reset"></span></div>
+          <span class="dash">—</span>
+        </div>
+      </div>
+    </div>
+    <div class="legend">Dimmed <b>and</b> aged: a number the app has stopped trusting never
+      leaves you guessing how old it is. Past an hour it stops being evidence and drops to
+      <b>—</b>. One provider's outage never touches another's row.</div>
+  </div>
+
+  <div class="card">
+    <div class="cap">the work account, later</div>
+    <div class="side">
+      <div class="quota" style="margin-top:0;border-top:none">
+        <div class="qlabel">Subscriptions</div>
+        <div class="prov">
+          <div class="pname"><span>Anthropic</span><span class="reset">Nov 30</span></div>
+          <div class="mrow"><span class="lbl">SPEND</span><span class="bar"><i style="width:10%"></i><u style="left:63%"></u></span><span class="num" style="width:56px">$487</span></div>
+        </div>
+      </div>
+    </div>
+    <div class="legend">Not built now, not guessed at. A row is a provider name over a list of
+      meters, so a dollar meter is a new meter kind, not a new design — and the pace tick
+      works there unchanged.</div>
+  </div>
+</div>
+
+</body></html>

@@ -1,4 +1,4 @@
-import { join } from 'node:path'
+import { basename, join, sep } from 'node:path'
 import { app, BrowserWindow, dialog, shell as electronShell } from 'electron'
 import { type AgentChannel, serveAgentChannel } from './agent/channel'
 import { type AppUpdateChannel, serveAppUpdateChannel } from './app-update/channel'
@@ -36,7 +36,16 @@ if (app.isPackaged) {
   // The data firewall between the installed app and every dev launch: dev
   // state lives in Crucible-Dev, so no dev build can ever touch the installed
   // app's sessions. Set before anything reads `userData`.
-  app.setPath('userData', join(app.getPath('appData'), 'Crucible-Dev'))
+  //
+  // A run's worktree gets its own directory under that, because concurrent
+  // builds would otherwise write one another's sessions and config. Only
+  // Crucible-managed worktrees are suffixed, so the human's own checkout keeps
+  // the plain Crucible-Dev state it has always had. The matching per-checkout
+  // debug port lives in scripts/dev-port.sh.
+  const root = app.getAppPath()
+  const inRunWorktree = root.includes(`${sep}.crucible${sep}worktrees${sep}`)
+  const devState = inRunWorktree ? `Crucible-Dev-${basename(root)}` : 'Crucible-Dev'
+  app.setPath('userData', join(app.getPath('appData'), devState))
 }
 
 // One sink per launch, built here and passed everywhere: main is the sole
