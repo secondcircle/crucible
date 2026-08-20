@@ -57,15 +57,29 @@ export default tseslint.config(
     }
   },
   {
-    // These three are the renderer's only readers of the preload surface, so
-    // the fence would otherwise have nowhere to let them through.
+    // These four are the renderer's only readers of the preload surface, so
+    // the window.crucible fence lets them through — and only that fence. The
+    // dangerouslySetInnerHTML ban is restated rather than switched off with
+    // it, so widening this block can never quietly widen that one.
     files: [
       'src/renderer/src/bridge.ts',
       'src/renderer/src/agent/ipc-client.test.ts',
       'src/renderer/src/commands/ipc-client.test.ts',
       'src/renderer/src/workspace/ipc-client.test.ts'
     ],
-    rules: { 'no-restricted-syntax': 'off' }
+    rules: {
+      'no-restricted-syntax': [
+        'error',
+        {
+          selector: "JSXAttribute[name.name='dangerouslySetInnerHTML']",
+          message: DANGEROUS_HTML
+        },
+        {
+          selector: "Property[key.name='dangerouslySetInnerHTML']",
+          message: DANGEROUS_HTML
+        }
+      ]
+    }
   },
   {
     files: ['*.ts', '*.mjs', 'scripts/**/*.ts'],
