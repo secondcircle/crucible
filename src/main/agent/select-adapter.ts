@@ -12,8 +12,8 @@ export interface SelectedAdapter {
 }
 
 export interface SdkOptions {
-  // Crucible's shipped agent-facing doc (ADR 0006), read by the caller: the
-  // SDK adapter puts it into every session's system context.
+  // Read by the caller: the SDK adapter puts it into every session's system
+  // context.
   readonly agentDoc?: string
   /** Opening the OS browser during a login; only main can do it. */
   readonly openExternal?: (url: string) => void

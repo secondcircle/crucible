@@ -45,7 +45,7 @@ export function Settings({
   /** The login flow's whole state, held above so Escape can order the closes. */
   readonly auth: Auth
   readonly workspace?: WorkspaceState
-  /** Curated sessions of the active workspace, in sidebar order (ADR 0002). */
+  /** Curated sessions of the active workspace, in sidebar order. */
   readonly sessions: readonly SessionState[]
   readonly activeSessionId?: SessionId
   /** The meter's own percentage, which stays path-based. */
@@ -389,7 +389,7 @@ function PromptField({
 }
 
 // Fetched when the tab opens and again at every turn boundary in this
-// workspace, because nothing about usage is persisted anywhere (USE-5).
+// workspace, because nothing about usage is persisted anywhere.
 function UsagePane({
   port,
   workspace,

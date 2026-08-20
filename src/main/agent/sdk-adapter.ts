@@ -99,8 +99,7 @@ export function createSdkAdapter({
   // The same model the fake's scripts call and the same model the shell reads:
   // the tools registered below are its three behaviors and nothing more.
   readonly panel: PanelTools
-  // Crucible's agent-facing doc, shipped with the app (ADR 0006). It joins the
-  // system context of every session this adapter opens.
+  // Joins the system context of every session this adapter opens.
   readonly agentDoc?: string
   // Opening the OS browser is main's to do, and it is injected rather than
   // imported so this module still loads under plain Node for `prove:sdk`.
@@ -111,7 +110,7 @@ export function createSdkAdapter({
   const resources = new Map<string, Promise<WorkspaceResources>>()
   let sdkModule: Promise<Sdk> | undefined
   let modelRuntime: Promise<ModelRuntime> | undefined
-  // One at a time: a second login while one is live is refused (PROV-6).
+  // One at a time: a second login while one is live is refused.
   let liveLogin: LiveLogin | undefined
   let prompts = 0
 
@@ -158,7 +157,7 @@ export function createSdkAdapter({
         settingsManager,
         noExtensions: true,
         // π's own prompt folders are not read at all: commands are Crucible's,
-        // and one command system is the whole point of ADR 0007.
+        // and two command systems in one composer would be two grammars.
         noPromptTemplates: true,
         // Appended rather than overriding: π's own system prompt stands, and
         // Crucible's shipped doc joins it in every session of this workspace.
@@ -502,8 +501,8 @@ export function createSdkAdapter({
         const notice = toNotice(event)
         if (notice === undefined) return
         emit({ type: 'auth_notice', notice })
-        // The renderer gets no open-external capability of its own: the browser
-        // is opened here, in main (PROV-9).
+        // The renderer gets no open-external capability of its own, so the
+        // browser is opened here, in main.
         if (notice.kind === 'auth-url') openExternal?.(notice.url)
       }
     }

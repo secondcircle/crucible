@@ -20,9 +20,8 @@ export function Transcript({
   readonly items: readonly ViewItem[]
   /** Switching sessions starts the reader at the bottom of the new one again. */
   readonly sessionId: string
-  // Delivered text to the invocation that produced it, remembered by this
-  // document for this session. The port never learns commands exist (ADR
-  // 0007), so this mapping lives here and nowhere else.
+  // The port never learns commands exist, so this mapping lives in the
+  // document and nowhere else.
   readonly invocations?: ReadonlyMap<string, string>
 }): React.JSX.Element {
   const scroller = useRef<HTMLDivElement>(null)

@@ -1,12 +1,8 @@
 import type { CommandInfo } from './service'
 
-// The command file format and the `$`-argument grammar, in one place so the
-// real service, the fake and the popover can never drift into two readings of
-// the same file. Imports nothing but the seam's own types: main and the
-// renderer both load this module.
-//
-// The semantics deliberately copy π's prompt templates, so a file moves
-// between the two systems unchanged. The spec is Crucible's (ADR 0007).
+// One place, so the real service, the fake and the popover can never drift
+// into two readings of the same file. The semantics copy π's prompt templates,
+// so a file moves between the two systems unchanged.
 
 export interface CommandFile {
   /** The body with the frontmatter removed; substitution happens in it alone. */
@@ -19,7 +15,7 @@ const FENCE = '---'
 
 /**
  * Frontmatter is optional, and a block that does not parse costs only itself:
- * the body still expands and the command still lists (CMD-4).
+ * the body still expands and the command still lists.
  */
 export function parseCommandFile(text: string): CommandFile {
   const withoutBom = text.startsWith('\ufeff') ? text.slice(1) : text
@@ -76,7 +72,7 @@ export function describe(file: CommandFile): string {
 
 /**
  * The name and the argument string of a draft, or nothing when the draft is
- * not an invocation. The first character alone decides (COMP-1).
+ * not an invocation. The first character alone decides.
  */
 export function splitInvocation(draft: string): { name: string; args: string } | undefined {
   if (!draft.startsWith('/')) return undefined
@@ -89,7 +85,7 @@ export function splitInvocation(draft: string): { name: string; args: string } |
 
 /**
  * The command name still being typed, or nothing once the draft has moved on
- * to the arguments: the popover belongs to the name alone (COMP-2).
+ * to the arguments: the popover belongs to the name alone.
  */
 export function commandFragment(draft: string): string | undefined {
   if (!draft.startsWith('/')) return undefined
@@ -99,7 +95,7 @@ export function commandFragment(draft: string): string | undefined {
 
 /**
  * Whitespace separates, a double-quoted span is one token with the quotes
- * stripped, and everything else is literal (CMD-10).
+ * stripped, and everything else is literal.
  */
 export function tokenize(args: string): readonly string[] {
   const tokens: string[] = []
@@ -126,12 +122,12 @@ export function tokenize(args: string): readonly string[] {
   return tokens
 }
 
-// Every form CMD-11 names, and nothing else: text that resembles the grammar
-// without matching it stays literal, and there is no escaping in v1.
+// Text that resembles the grammar without matching it stays literal, and
+// there is no escaping in v1.
 const SUBSTITUTION =
   /\$(?:\{(?:(?<defaultOf>\d+):-(?<positionalDefault>[^}]*)|(?:@|ARGUMENTS):-(?<allDefault>[^}]*)|(?:@|ARGUMENTS):(?<from>\d+)(?::(?<length>\d+))?)\}|(?<positional>\d+)|(?:@|ARGUMENTS))/g
 
-/** The body with every `$`-form replaced from the tokens (CMD-11). */
+/** The body with every `$`-form replaced from the tokens. */
 export function substitute(body: string, tokens: readonly string[]): string {
   const all = tokens.join(' ')
 
@@ -156,14 +152,14 @@ export function substitute(body: string, tokens: readonly string[]): string {
   })
 }
 
-/** What crosses the agent port: body, substituted, trimmed (CMD-3). */
+/** What crosses the agent port: body, substituted, trimmed. */
 export function expandBody(file: CommandFile, args: string): string {
   return substitute(file.body, tokenize(args)).trim()
 }
 
 /**
- * The popover's filter: a case-insensitive subsequence of the command name
- * (COMP-2). Order is the service's, which is alphabetical.
+ * The popover's filter: a case-insensitive subsequence of the command name.
+ * Order is the service's, which is alphabetical.
  */
 export function filterCommands(
   commands: readonly CommandInfo[],

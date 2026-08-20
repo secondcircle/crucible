@@ -29,7 +29,7 @@ function bashCommandOf(draft: string): string | undefined {
   return draft.replace(/^!+/, '').trim()
 }
 
-/** What an origin badge says, in the words the glossary uses for the three origins. */
+/** What an origin badge says, in Crucible's own words for the three origins. */
 const ORIGIN_LABEL: Record<CommandInfo['origin'], string> = {
   workspace: 'workspace',
   user: 'user',
@@ -124,7 +124,7 @@ export function Composer({
   const selected = selection.of === files ? selection.at : 0
 
   // The first character decides which grammar the draft is in, and nothing
-  // else does (COMP-1).
+  // else does.
   const commandMode = draft.startsWith('/')
   const fragment = commandFragment(draft)
   const matches =
@@ -142,7 +142,7 @@ export function Composer({
   }
 
   // Nothing is sent and nothing is expanded here: the name goes into the draft
-  // with the space the arguments follow (COMP-4).
+  // with the space the arguments follow.
   function insertCommand(name: string): void {
     onDraft(`/${name} `)
     boxRef?.current?.focus()

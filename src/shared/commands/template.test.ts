@@ -1,7 +1,7 @@
 // @vitest-environment node
 //
 // The file format and the `$`-argument grammar, which both implementations
-// read through this one module. π's semantics, Crucible's spec (ADR 0007).
+// read through this one module.
 import { describe, expect, it } from 'vitest'
 import type { CommandInfo } from './service'
 import {

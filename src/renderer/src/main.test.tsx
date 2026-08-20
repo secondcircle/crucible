@@ -1,19 +1,7 @@
 // @vitest-environment jsdom
 //
-// The renderer's entry point is a module whose interface is what it does when
-// the browser loads it: it finds `#root` in the document the app ships and
-// mounts the shell there against the port it builds — the IPC client, always,
-// because the app has one path to an agent and it is the shipped one. So the
-// test loads it the way `index.html` does — import for effect, into a document
-// with the same `#root` — and asserts on what a person then sees.
-//
-// What stands in for main is the preload surface: `request`/`onEvent` over a
-// scripted port, dispatched by operation name exactly as main's channel does —
-// the op *is* the port method's name (channels.ts), so the stand-in needs no
-// second vocabulary either. It is installed with `Object.defineProperty`
-// rather than by assigning `window.crucible`: naming that property is the one
-// thing the import fence forbids the renderer, and this test is standing in
-// for the preload, not reaching past it.
+// The entry point is imported for effect, because loading it is the whole of
+// what it offers a caller.
 import { act, fireEvent, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { PortRequest, PortResult } from '../../shared/agent/channels'
@@ -50,9 +38,8 @@ function dispatch(port: ScriptedPort, { op, args }: PortRequest): Promise<unknow
 }
 
 /**
- * The preload surface a launched window has, over the three seams main serves:
- * the agent port, the workspace service and the command service. Failures
- * become `{ ok: false }` values exactly as the channels answer them.
+ * Failures become `{ ok: false }` values exactly as the channels answer them,
+ * so nothing here refuses in a way the real surface could not.
  */
 function pageWithPreload(
   port: ScriptedPort,
@@ -73,6 +60,8 @@ function pageWithPreload(
     }
   }
 
+  // Defined rather than assigned: naming that property is the one thing the
+  // import fence forbids the renderer, and this stands in for the preload.
   Object.defineProperty(window, 'crucible', {
     value: {
       agent: {

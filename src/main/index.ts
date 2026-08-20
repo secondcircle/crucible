@@ -50,8 +50,7 @@ const { adapter, flavor } = selectAdapter(
   log,
   { tools: panel, exhibits: panelFixtures(app.getAppPath()) },
   {
-    // What the agent is taught about Crucible, shipped with the app and read
-    // once per launch (ADR 0006).
+    // Shipped with the app and read once per launch.
     agentDoc: readShippedAgentDoc(app.getAppPath()),
     // A login's browser is opened here; the renderer gets no such capability.
     openExternal: (url: string) => {

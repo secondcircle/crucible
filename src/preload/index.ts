@@ -52,9 +52,8 @@ contextBridge.exposeInMainWorld('crucible', {
       forwarder(WORKSPACE_EVENT_CHANNEL, listener)
   },
 
-  // Beside the agent as well: a command is expanded before anything crosses
-  // the port, and the port never learns commands exist (ADR 0007). Questions
-  // only — the service announces nothing.
+  // Expanded before anything crosses the port, so the port never learns
+  // commands exist. Questions only: the service announces nothing.
   commands: {
     request: (request: CommandRequest): Promise<CommandResult> =>
       ipcRenderer.invoke(COMMAND_REQUEST_CHANNEL, request)

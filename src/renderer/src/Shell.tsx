@@ -61,9 +61,8 @@ export function Shell({
 }: {
   readonly port: AgentPort
   readonly workspace: WorkspaceService
-  // Beside the port, never behind it: a command is expanded here, in
-  // Crucible's own service, and the port never learns commands exist (ADR
-  // 0007).
+  // Beside the port, never behind it: a command is expanded here, and the
+  // port never learns commands exist.
   readonly commands: CommandService
 }): React.JSX.Element {
   const [state, dispatch] = useReducer(reduce, NOTHING_YET)
@@ -91,16 +90,15 @@ export function Shell({
   const [collapsed, setCollapsed] = useState<Readonly<Record<SessionId, boolean>>>({})
   const [panelWidth, setPanelWidth] = useState<number | undefined>(undefined)
   // The commands this workspace can reach, read fresh every time the popover
-  // opens, and the Escape that closed it (CMD-8, COMP-4).
+  // opens, and the Escape that closed it.
   const [commandList, setCommandList] = useState<readonly CommandInfo[] | undefined>(undefined)
   const [commandPopoverClosed, setCommandPopoverClosed] = useState(false)
-  // Delivered text back to the invocation that produced it, per session. The
-  // port never learns commands exist, so this memory is the document's and
-  // lasts exactly as long as it does (ROW-2, ROW-3).
+  // The port never learns commands exist, so this memory is the document's and
+  // lasts exactly as long as it does.
   const [invocations, setInvocations] = useState<
     Readonly<Record<SessionId, Readonly<Record<string, string>>>>
   >({})
-  // Open, and which tab: renderer state, per window, never persisted (SET-5).
+  // Open, and which tab: renderer state, per window, never persisted.
   const [settings, setSettings] = useState<{
     readonly open: boolean
     readonly tab: SettingsTab
@@ -154,7 +152,7 @@ export function Shell({
   }, [])
 
   // What a completed login or logout changes above the port: the models the
-  // credentials now reach (PROV-4).
+  // credentials now reach.
   const refetchModels = useCallback((): void => {
     void port
       .listModels()
@@ -261,7 +259,7 @@ export function Shell({
 
   // Read again every time the popover opens, so a command an agent wrote a
   // moment ago is in this very list. Closing forgets it, which is what makes
-  // the next opening a fresh read (CMD-8).
+  // the next opening a fresh read.
   useEffect(() => {
     if (!browsingCommands || workspacePath === undefined) return
     let current = true
@@ -309,7 +307,7 @@ export function Shell({
     function onKeyDown(pressed: KeyboardEvent): void {
       if (pressed.key !== 'Escape') return
       // A login dialog closes before the sheet behind it, and the sheet before
-      // anything else Escape already does (SET-4).
+      // anything else Escape already does.
       if (liveLogin !== undefined) {
         pressed.preventDefault()
         closeLogin()
@@ -428,7 +426,7 @@ export function Shell({
   function setDraft(text: string): void {
     if (activeSessionId === undefined) return
     // Editing reopens a popover Escape closed, and clears whatever the last
-    // send or expansion had to say (COMP-7).
+    // send or expansion had to say.
     setCommandPopoverClosed(false)
     setFailure(undefined)
     setDrafts((current) => ({ ...current, [activeSessionId]: text }))
@@ -466,20 +464,15 @@ export function Shell({
     }))
   }
 
-  // A command is expanded before anything crosses the port, and what crosses
-  // is ordinary text: the queue, the transcript and the port see the delivered
-  // words and nothing command-shaped (COMP-7).
+  // What crosses is ordinary text: the queue, the transcript and the port see
+  // the delivered words and nothing command-shaped.
   function expanded(id: SessionId, text: string, deliver: (text: string) => void): void {
     if (!text.startsWith('/') || active === undefined) {
       deliver(text)
       return
     }
-    // Plain text spends its draft in the handler that read it, so a repeated
-    // Enter finds nothing left to send. An expansion only clears the draft a
-    // round trip later, and every Enter, Send or Steer that lands meanwhile
-    // would read the same draft and send it again; keyboard auto-repeat lands
-    // several. So the send is claimed here instead, before the wait, in a ref
-    // because the next keydown can run before React re-renders.
+    // Claimed before the expansion's round trip, in a ref because the next
+    // keydown runs before React re-renders: a repeat must not send it twice.
     if (sending.current.has(id)) return
     sending.current.add(id)
     void commands

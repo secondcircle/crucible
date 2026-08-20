@@ -1,9 +1,8 @@
 // @vitest-environment jsdom
 //
 // `/` is Crucible's own grammar: the command service expands the invocation
-// and the agent port carries the delivered text alone (ADR 0007). Driven over
-// the scripted port and a scripted command client, so nothing here reads a
-// folder or costs anything.
+// and the agent port carries the delivered text alone. Driven over the
+// scripted port, so nothing here reads a folder or costs anything.
 import { act, fireEvent, render, screen } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 import { Shell } from './Shell'
@@ -277,10 +276,8 @@ describe('sending a command', () => {
     expect(sent(port, 'prompt')).toEqual(['s1', '/nothing like a command'])
   })
 
-  // Reviewer reproduction (review-1): the plain-text path clears the draft
-  // synchronously in the keydown handler, but a command clears it only when
-  // the expansion resolves. Enter repeating inside that window — keyboard
-  // auto-repeat over the real IPC round trip — sends the same command twice.
+  // A command clears the draft only once its expansion resolves, and keyboard
+  // auto-repeat lands several Enters inside that window.
   it('delivers the command once when Enter repeats before the expansion resolves', async () => {
     const { port } = await shell()
 
@@ -397,7 +394,7 @@ describe('the command row in the transcript', () => {
     })
 
     // What main serves back is the delivered text, which is all it ever
-    // stored: no command metadata is persisted anywhere (ROW-3).
+    // stored: no command metadata is persisted anywhere.
     port.transcripts.set('s1', [
       { kind: 'user', text: 'Interview me about the command system until we agree.' }
     ])

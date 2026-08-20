@@ -1,9 +1,8 @@
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 
-// The one module that knows where the app keeps the files it ships: the
-// built-in commands and the agent-facing docs (ADR 0006). Everything else
-// takes those as an injected path or as text.
+// The one module that knows where the app keeps the files it ships; everything
+// else takes those as an injected path or as text.
 
 const SHIPPED_DIRECTORY = 'resources'
 
@@ -17,9 +16,8 @@ export function shippedAgentDocPath(root: string): string {
 }
 
 /**
- * The context doc every SDK adapter session is taught from. An unreadable doc
- * is not worth failing a launch over: the session runs without it, and the
- * caller decides whether to say so.
+ * An unreadable doc is not worth failing a launch over: the session runs
+ * without it, and the caller decides whether to say so.
  */
 export function readShippedAgentDoc(root: string): string | undefined {
   try {

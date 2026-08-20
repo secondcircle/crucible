@@ -34,9 +34,8 @@ function number(value: number | undefined): number {
 }
 
 /**
- * Every usage-bearing message summed, whichever branch of the session tree it
- * sits on: money spent does not vanish on a jump (USE-2). `undefined` means
- * nothing has reported usage yet, which is what a dash is shown for.
+ * Every branch of the session tree is summed, because money spent does not
+ * vanish on a jump. `undefined` is what a dash is shown for.
  */
 export function sumUsage(usages: Iterable<StoredUsage | undefined>): SessionUsage | undefined {
   const input: Accumulator = { tokens: 0, cost: 0 }

@@ -1,8 +1,7 @@
 // @vitest-environment node
 //
-// What Crucible ships inside the app: the built-in commands and the doc every
-// SDK adapter session is taught from (ADR 0006). Read through the same service
-// and the same assembly the running app uses.
+// What Crucible ships inside the app, read through the same service and the
+// same assembly the running app uses.
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'

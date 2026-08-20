@@ -5,7 +5,7 @@ import { expandBody, splitInvocation } from './template'
 // Imports neither Electron nor Node, exactly as the fake adapter does.
 //
 // The canned set covers all three origins and both hint styles, so the
-// popover's badges, hints and filtering are drivable for free (CMD-16).
+// popover's badges, hints and filtering are drivable for free.
 
 interface CannedCommand extends CommandInfo {
   /** Real template text, expanded by the same code the real service uses. */

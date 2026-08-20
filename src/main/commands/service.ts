@@ -13,11 +13,9 @@ import {
   splitInvocation
 } from '../../shared/commands/template'
 
-// Reads folders and nothing else: the format, the grammar and the precedence
-// rule live in the shared template module, so the fake and this cannot drift.
-//
-// The three roots are injected, which is what lets a unit test point the whole
-// service at temp directories.
+// Reads folders and nothing else: the format and the grammar live in the
+// shared template module, so the fake and this cannot drift. The roots are
+// injected, which lets a test point the whole service at temp directories.
 
 export interface CommandRoots {
   /** The built-ins shipped with the app. */
@@ -56,8 +54,8 @@ export function createCommandService({
   roots,
   onUnreadable
 }: CommandServiceOptions): CommandService {
-  // Every call reads the folders again: a command an agent writes mid-session
-  // is in the very next popover (CMD-8).
+  // Every call reads the folders again, so a command an agent writes
+  // mid-session is in the very next popover.
   function discover(workspacePath: string): Map<string, Found> {
     const winners = new Map<string, Found>()
     for (const folder of foldersFor(roots, workspacePath)) {
@@ -124,7 +122,7 @@ export function createCommandService({
 }
 
 // Non-recursive, `*.md` only, and a missing folder contributes nothing: π's
-// rule, adopted (CMD-7). Discovery never creates a folder.
+// rule, adopted. Discovery never creates a folder.
 function markdownNames(folder: string): readonly string[] {
   let entries: readonly string[]
   try {

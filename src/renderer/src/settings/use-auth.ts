@@ -8,12 +8,8 @@ import type {
   ProviderState
 } from '../../../shared/agent/port'
 
-// π owns the flow, the token exchange and the storage; Crucible owns the
-// pixels. This hook is the renderer's whole memory of a login: the questions
-// that arrived, the answers that went back, and how it ended.
-//
-// It lives above the settings sheet because Escape's precedence is the
-// document's, and a component cannot see what else Escape could close.
+// Above the settings sheet because Escape's precedence is the document's, and
+// a component cannot see what else Escape could close.
 
 export interface AskedPrompt {
   readonly promptId: string
@@ -123,7 +119,7 @@ export function useAuth(port: AgentPort, onCredentialsChanged: () => void): Auth
   const startLogin = useCallback(
     (provider: ProviderState, method: AuthMethod): void => {
       // One at a time, said plainly rather than starting a second flow behind
-      // the first (PROV-6).
+      // the first.
       if (login !== undefined) {
         setFailure('A login is already under way. Finish or cancel it first.')
         return
@@ -138,7 +134,7 @@ export function useAuth(port: AgentPort, onCredentialsChanged: () => void): Auth
           setLogin(undefined)
           refresh()
           // The models a credential unlocks are reachable now, so the picker
-          // is refetched rather than left showing yesterday's list (PROV-4).
+          // is refetched rather than left showing yesterday's list.
           onCredentialsChanged()
         })
         .catch((cause: unknown) => {

@@ -1,9 +1,8 @@
 // Preload and main have to agree letter for letter here too, and a mismatch is
 // silent until an operation goes unanswered in a running app.
 //
-// One channel, not two: the command service answers questions and announces
-// nothing. Every `list` and `expand` reads the folders fresh (CMD-8), so there
-// is no cached state anyone would have to be told about.
+// One channel, not two: every call reads the folders fresh, so there is no
+// cached state anyone would have to be told about.
 
 export const COMMAND_REQUEST_CHANNEL = 'crucible:commands:request'
 

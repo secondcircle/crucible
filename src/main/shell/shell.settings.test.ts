@@ -1,8 +1,7 @@
 // @vitest-environment node
 //
 // Providers and usage ride the agent port because they are facts about the
-// agent side (PORT-1). Driven against the real fake adapter and a real store,
-// with no Electron and no IPC.
+// agent side. Driven against the real fake adapter and a real store.
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'

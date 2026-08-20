@@ -41,9 +41,8 @@ export const FAKE_MODEL: ModelInfo = {
 
 const CONTEXT_WINDOW = 200_000
 
-// What one scripted turn costs, in π's own per-message shape: Mock K's own
-// numbers, so one turn fills the cards exactly as the mock drew them. Fixed,
-// so the chip, the cards and both usage tables are checkable for free (USE-7).
+// What one scripted turn costs, in π's own per-message shape. Fixed, so the
+// chip, the cards and both usage tables are checkable for free.
 export const FAKE_TURN_USAGE = {
   input: { tokens: 4_210, cost: 0.06 },
   output: { tokens: 18_772, cost: 0.56 },
@@ -69,7 +68,7 @@ function dollars(cents: number): number {
   return Math.round(cents) / 100
 }
 
-/** The canned catalog: one of every status kind, in Mock K's spirit. */
+/** The canned catalog: one of every status kind. */
 const CANNED_PROVIDERS: readonly ProviderState[] = [
   {
     id: 'anthropic',
@@ -155,7 +154,7 @@ const LONE_CALL: ScriptedCall = {
 // what a test that is not about the panel wants.
 export interface FakePanel {
   readonly tools: PanelTools
-  /** Absolute paths; the fixtures ship in the repository. */
+  /** Absolute paths; nothing below this seam resolves one. */
   readonly exhibits: { readonly buildPlan: string; readonly benchmark: string }
 }
 

@@ -7,7 +7,7 @@ import type { LogSink } from '../log/sink'
 import { shippedCommandsPath } from '../shipped'
 import { createCommandService } from './service'
 
-/** `~/.crucible/commands`, the user origin's folder. Never created here. */
+/** Never created here: discovery only ever reads. */
 export function userCommandsPath(home = homedir()): string {
   return join(home, '.crucible', 'commands')
 }

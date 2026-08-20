@@ -1,13 +1,9 @@
-// The agent learns Crucible from docs shipped with the app (ADR 0006): every
-// SDK adapter session's system context carries them, because the installed app
-// may run on a machine with no Crucible source checkout.
-//
-// Pure, so the assembly can be tested without constructing an adapter.
+// Apart from the adapter and pure, so the assembly can be checked without
+// constructing one and paying for a call.
 
 /**
- * π's own appended system prompts, plus Crucible's shipped docs. An absent doc
- * changes nothing, and a doc already present is not added twice — sessions of
- * one workspace share a resource loader.
+ * A doc already present is not added twice: sessions of one workspace share a
+ * resource loader.
  */
 export function withAgentContext(
   base: readonly string[],
