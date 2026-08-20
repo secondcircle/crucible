@@ -1,7 +1,14 @@
 import { randomUUID } from 'node:crypto'
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname } from 'node:path'
-import type { ExhibitKind, ModelId, SessionId, ThinkingLevel, WorkspaceId } from '../../shared/agent/port'
+import type {
+  ExhibitKind,
+  ModelId,
+  SessionId,
+  SessionWorktree,
+  ThinkingLevel,
+  WorkspaceId
+} from '../../shared/agent/port'
 import type { Flavor } from '../agent/select-adapter'
 import type { StoredPanel, StoredPanelTab } from '../panel/model'
 
@@ -37,6 +44,13 @@ export interface StoredSession {
   /** The last model and level the adapter reported for this session. */
   readonly model?: ModelId
   readonly thinkingLevel?: ThinkingLevel
+  // Present only for a worktree session; absent means the workspace's own
+  // checkout. Removing the session leaves the directory exactly where it is.
+  readonly worktree?: SessionWorktree
+  // The mark is on sessions that have never received a message, so a record
+  // written before this field existed loads locked, which is the safe way
+  // round: unlocking one would let a flip abandon a real conversation.
+  readonly fresh?: boolean
   // The session's context panel. It lives inside the session record, so
   // removing the session forgets its tabs with it.
   readonly panel?: StoredPanel
@@ -169,7 +183,7 @@ export function createShellStore(
       save({
         ...state,
         sessions: state.sessions.map((session) =>
-          session.id === id ? { ...session, ...patch } : session
+          session.id === id ? pruned({ ...session, ...patch }) : session
         )
       })
     },
@@ -244,19 +258,25 @@ function load(path: string): ShellStoreState {
         typeof session.titlingSpend === 'number' && Number.isFinite(session.titlingSpend)
           ? session.titlingSpend
           : undefined
+      const worktree = readWorktree((session as { worktree?: unknown }).worktree)
       const rest = { ...session }
       delete rest.panel
       delete rest.tokenFlavor
       delete rest.title
       delete rest.lastActivityAt
       delete rest.titlingSpend
+      delete rest.worktree
+      delete rest.fresh
       return {
         ...rest,
         ...(panel === undefined ? {} : { panel }),
         ...(tokenFlavor === undefined ? {} : { tokenFlavor }),
         ...(title === undefined ? {} : { title }),
         ...(lastActivityAt === undefined ? {} : { lastActivityAt }),
-        ...(titlingSpend === undefined ? {} : { titlingSpend })
+        ...(titlingSpend === undefined ? {} : { titlingSpend }),
+        ...(worktree === undefined ? {} : { worktree }),
+        // Anything but the mark itself is a session past its first message.
+        ...((session as { fresh?: unknown }).fresh === true ? { fresh: true } : {})
       }
     })
   const activeSessionByWorkspace =
@@ -277,6 +297,25 @@ function load(path: string): ShellStoreState {
 
 function asArray<T>(value: unknown): T[] {
   return Array.isArray(value) ? (value as T[]) : []
+}
+
+// A patch value of `undefined` takes the field off rather than leaving a hole
+// where a field was, which is how a session goes back to the checkout.
+function pruned<T extends object>(record: T): T {
+  const kept = { ...record } as Record<string, unknown>
+  for (const [key, value] of Object.entries(kept)) {
+    if (value === undefined) delete kept[key]
+  }
+  return kept as T
+}
+
+// An unreadable worktree loads as absent: the session falls back to its
+// checkout, and the directory on disk is untouched either way.
+function readWorktree(value: unknown): SessionWorktree | undefined {
+  if (typeof value !== 'object' || value === null) return undefined
+  const { path, branch } = value as { path?: unknown; branch?: unknown }
+  if (typeof path !== 'string' || path === '') return undefined
+  return { path, ...(typeof branch === 'string' && branch !== '' ? { branch } : {}) }
 }
 
 const FLAVORS: readonly Flavor[] = ['fake', 'sdk']

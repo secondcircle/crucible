@@ -3,7 +3,7 @@
 // The flavor an agent-driven check drives: every answer is canned, so what
 // those checks rely on is pinned here.
 import { describe, expect, it } from 'vitest'
-import { CANNED_FILES, createFakeWorkspaceService } from './fake-service'
+import { CANNED_FILES, CANNED_WORKTREE_IDS, createFakeWorkspaceService } from './fake-service'
 import type { WorkspaceEvent } from './service'
 
 function watched(): {
@@ -41,6 +41,26 @@ describe('the fake workspace service', () => {
       'src/renderer/src/components/transcript.css',
       'src/renderer/src/components/Transcript.tsx'
     ])
+  })
+
+  it('calls every workspace a git one, so the worktree chip is there to drive', async () => {
+    const { service } = watched()
+
+    expect(await service.isGitWorkspace('/anywhere')).toBe(true)
+  })
+
+  it('makes a worktree out of nothing, on a canned branch, a different one each time', async () => {
+    const { service } = watched()
+
+    const first = await service.createWorktree('/repos/crucible')
+    const second = await service.createWorktree('/repos/crucible')
+
+    expect(first).toEqual({
+      ok: true,
+      path: `/repos/crucible/.crucible/worktrees/${CANNED_WORKTREE_IDS[0]}`,
+      branch: `crucible/${CANNED_WORKTREE_IDS[0]}`
+    })
+    expect(second).toMatchObject({ ok: true, branch: `crucible/${CANNED_WORKTREE_IDS[1]}` })
   })
 
   it('answers most commands with a short success', async () => {

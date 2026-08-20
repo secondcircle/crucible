@@ -17,6 +17,7 @@ import type {
   SessionState,
   SessionTree,
   SessionUsage,
+  SessionWorktree,
   ShellSnapshot,
   TabId,
   ThinkingLevel,
@@ -112,6 +113,10 @@ export function createShell({
   // At most one pass per session at a time, so triggers arriving during one
   // coalesce into a single follow-up rather than a queue of passes.
   const titling = new Map<SessionId, { again: boolean; stale: boolean }>()
+  // Sessions whose directory is being changed, each held until its rebind has
+  // landed. Nothing may start a turn in one meanwhile, and nothing may bind
+  // one: which directory the work would happen in is not settled yet.
+  const settling = new Map<SessionId, Promise<void>>()
   const bindings = new Map<SessionId, Promise<Binding>>()
   let turns = 0
 
@@ -139,6 +144,10 @@ export function createShell({
         model: session.model,
         thinkingLevel: session.thinkingLevel,
         working: live.has(session.id),
+        ...(session.worktree === undefined ? {} : { worktree: session.worktree }),
+        // Absent in the record means a session past its first message, which
+        // is what a record written before the mark existed has to read as.
+        fresh: session.fresh === true,
         ...(reported === undefined ? {} : { usage: withTitlingSpend(session.id, reported) }),
         ...(queued(queue) ? { queue } : {}),
         ...(tabs === undefined ? {} : { panel: tabs })
@@ -226,12 +235,14 @@ export function createShell({
     throw new Error(message)
   }
 
-  function requireSession(id: SessionId): { workspacePath: string } {
+  // The directory a session's work happens in: its worktree when it has one,
+  // and its workspace's checkout when it does not.
+  function requireSession(id: SessionId): { directory: string } {
     const session = store.session(id)
     if (session === undefined) refuse('That session is no longer open.')
     const workspace = store.workspace(session.workspaceId)
     if (workspace === undefined) refuse('That session has no workspace.')
-    return { workspacePath: workspace.path }
+    return { directory: session.worktree?.path ?? workspace.path }
   }
 
   // A token is the minting adapter's own string, so it is offered back only to
@@ -241,13 +252,68 @@ export function createShell({
     return session.tokenFlavor === flavor ? session.token : undefined
   }
 
-  // The promise is remembered rather than the result, so two callers racing
-  // for the same session bind it once.
+  // Replacing a session's conversation — a flip either way, a reset — holds the
+  // session for the whole of the change. The hold is taken before anything is
+  // let go of and released only once the new binding and the record agree, so
+  // nothing can bind the session from the record in between, and two of these
+  // never run at once for one session.
+  async function whileSettling<T>(id: SessionId, work: () => Promise<T>): Promise<T> {
+    const before = settling.get(id)
+    let settled: () => void = () => {}
+    const mine = new Promise<void>((resolve) => {
+      settled = resolve
+    })
+    // The tail of the queue for this session: it is over when everything
+    // waiting behind it is.
+    const tail = before === undefined ? mine : before.then(() => mine)
+    settling.set(id, tail)
+    try {
+      // Its turn, not a race: the conversation this one is about to replace is
+      // the one the operation before it left behind.
+      if (before !== undefined) await before
+      return await work()
+    } finally {
+      // Forgotten before the waiters run, and only while it is still the tail,
+      // so the next `ensureBound` binds rather than waiting on a hold nobody
+      // has.
+      if (settling.get(id) === tail) settling.delete(id)
+      settled()
+    }
+  }
+
+  // Waits out a bind already in flight, however it lands. Two binds in flight
+  // for one session is how a conversation ends up rooted in the directory the
+  // session just left, so a change of directory drains before it replaces.
+  async function drainBind(id: SessionId): Promise<void> {
+    try {
+      await bindings.get(id)
+    } catch {
+      // A bind that failed is nobody's binding, and its caller already heard
+      // about it.
+    }
+  }
+
+  // What every caller outside a hold uses: a session whose conversation is
+  // being replaced is waited out rather than bound from the record as it
+  // stands, which would open the conversation in the directory the session is
+  // leaving.
   function ensureBound(id: SessionId): Promise<Binding> {
     const already = bindings.get(id)
     if (already !== undefined) return already
 
-    const { workspacePath } = requireSession(id)
+    const held = settling.get(id)
+    if (held !== undefined) return held.then(() => ensureBound(id))
+    return bindNow(id)
+  }
+
+  // The promise is remembered rather than the result, so two callers racing
+  // for the same session bind it once. Called from inside a hold, where
+  // waiting for that hold would be waiting for itself.
+  function bindNow(id: SessionId): Promise<Binding> {
+    const already = bindings.get(id)
+    if (already !== undefined) return already
+
+    const { directory } = requireSession(id)
     const session = store.session(id)
     const token = restorableToken(session)
     // Dropped once, here: the bind below overwrites it, so the mismatch does
@@ -256,12 +322,20 @@ export function createShell({
     const binding = adapter
       .bind({
         sessionId: id,
-        workspacePath,
+        workspacePath: directory,
         token,
         preferredModel: session?.model ?? store.state.lastModel,
         preferredThinkingLevel: session?.thinkingLevel
       })
       .then((bound) => {
+        // Nothing kept this bind: the session was removed while it was in
+        // flight. It is let go of rather than left standing, because the
+        // adapter has just re-pointed the session at the conversation this
+        // bind opened.
+        if (bindings.get(id) !== binding) {
+          adapter.release(id)
+          refuse('That session is no longer open.')
+        }
         // After a rebind the adapter's word wins: what it says it restored is
         // what the store then says.
         store.updateSession(id, {
@@ -285,8 +359,9 @@ export function createShell({
         return bound
       })
       .catch((cause: unknown) => {
-        // A failed bind is not remembered: the next attempt tries again.
-        bindings.delete(id)
+        // A failed bind is not remembered: the next attempt tries again. Only
+        // this bind's own entry is forgotten; a later one is not its to drop.
+        if (bindings.get(id) === binding) bindings.delete(id)
         throw new Error(displaySafeMessage(cause, 'That conversation could not be opened.'))
       })
 
@@ -371,10 +446,22 @@ export function createShell({
     // Checked and claimed in the same tick, so nothing can slip between the
     // two.
     if (live.has(sessionId)) refuse('That session is already working.')
+    // A flip or a reset is deciding which conversation, in which directory,
+    // this message would go to. Refusing is what keeps it from going to the one
+    // being replaced.
+    if (settling.has(sessionId)) {
+      refuse('That session is still settling. Try again in a moment.')
+    }
 
     const turn = mintTurn(announce)
     const { turnId } = turn
     live.set(sessionId, turn)
+    // Every first message goes through here — a prompt, a shared run, or a
+    // queued message that became the next prompt — so this is where a session
+    // stops being fresh, and it is written down before the state goes out.
+    if (store.session(sessionId)?.fresh === true) {
+      store.updateSession(sessionId, { fresh: undefined })
+    }
     emitState()
 
     // Binding is part of running the turn rather than of accepting it, so a
@@ -675,7 +762,10 @@ export function createShell({
 
       const stored = store.addSession({
         workspaceId,
-        createdAt: new Date().toISOString()
+        createdAt: new Date().toISOString(),
+        // One click of New session lands on the checkout, and the choice is
+        // open until the first message.
+        fresh: true
       })
       try {
         const bound = await adapter.bind({
@@ -736,26 +826,38 @@ export function createShell({
     async resetSession(id: SessionId): Promise<void> {
       requireSession(id)
       await stop(id)
-      await ensureBound(id)
-      const bound = await adapter.reset(id)
-      bindings.set(id, Promise.resolve(bound))
-      store.updateSession(id, {
-        token: bound.token,
-        tokenFlavor: flavor,
-        model: bound.model,
-        thinkingLevel: bound.thinkingLevel
+      // A reset replaces the conversation too, so it holds the session while it
+      // runs: a flip landing in the middle would leave the record saying one
+      // directory and the binding rooted in another.
+      await whileSettling(id, async () => {
+        if (store.session(id) === undefined) return
+        // Bound at the session's own directory, so a reset session goes on
+        // working in its worktree.
+        await bindNow(id)
+        const bound = await adapter.reset(id)
+        bindings.set(id, Promise.resolve(bound))
+        store.updateSession(id, {
+          token: bound.token,
+          tokenFlavor: flavor,
+          model: bound.model,
+          thinkingLevel: bound.thinkingLevel,
+          // The identity keeps its worktree and gets its choice back: this is
+          // the one way a locked control unlocks.
+          fresh: true
+        })
+        // The fresh conversation has reported nothing yet, so the meter goes
+        // back to saying nothing rather than keeping the old session's numbers.
+        usage.delete(id)
+        queues.delete(id)
+        // The conversation the title described is gone, and so is what naming
+        // it cost: the row reads untitled again until the fresh one earns a
+        // title.
+        forgetTitle(id)
+        // A fresh conversation never inherits a ghost panel, so the tabs and
+        // the turn counter go with the old one.
+        panel.reset(id)
+        emitState()
       })
-      // The fresh conversation has reported nothing yet, so the meter goes back
-      // to saying nothing rather than keeping the old session's numbers.
-      usage.delete(id)
-      queues.delete(id)
-      // The conversation the title described is gone, and so is what naming it
-      // cost: the row reads untitled again until the fresh one earns a title.
-      forgetTitle(id)
-      // A fresh conversation never inherits a ghost panel, so the tabs and the
-      // turn counter go with the old one.
-      panel.reset(id)
-      emitState()
     },
 
     async transcript(id: SessionId): Promise<readonly TranscriptItem[]> {
@@ -794,6 +896,8 @@ export function createShell({
         return existing.id
       }
 
+      // No fresh mark: a resumed conversation is not fresh, and it starts on
+      // the checkout because nothing re-attaches a worktree.
       const stored = store.addSession({ workspaceId, createdAt: new Date().toISOString() })
       try {
         const bound = await adapter.resume({
@@ -886,7 +990,7 @@ export function createShell({
       const token = restorableToken(session)
       const summed = await adapter.sessionUsage({
         sessionId: id,
-        workspacePath: workspace.path,
+        workspacePath: session.worktree?.path ?? workspace.path,
         ...(token === undefined ? {} : { token })
       })
       const spend = session.titlingSpend ?? 0
@@ -894,6 +998,79 @@ export function createShell({
       // The four per-kind lines stay the conversation's own, so a total that
       // exceeds their sum by the titling spend is correct and deliberate.
       return { ...summed, totalCost: summed.totalCost + spend }
+    },
+
+    // The guard lives here rather than in the chip: whoever is behind the port
+    // is refused a change to a session that has already started.
+    async setWorktree(sessionId: SessionId, worktree?: SessionWorktree): Promise<void> {
+      const asked = store.session(sessionId)
+      if (asked === undefined) refuse('That session is no longer open.')
+      const workspace = store.workspace(asked.workspaceId)
+      if (workspace === undefined) refuse('That session has no workspace.')
+      if (asked.fresh !== true) {
+        refuse('That session has already started. Reset it to change where it works.')
+      }
+
+      const directory = worktree?.path ?? workspace.path
+      // The hold is taken first, in this same tick: from here until the record
+      // and the binding agree, nothing else binds this session or starts a turn
+      // in it.
+      await whileSettling(sessionId, async () => {
+        // A bind that was already in flight is waited out rather than raced. It
+        // was built from the directory the session is leaving, and letting it
+        // land after the rebind would hand the session back to that directory.
+        await drainBind(sessionId)
+        // Read again: the drained bind is what wrote the token and model this
+        // rebind now carries forward.
+        const session = store.session(sessionId)
+        if (session === undefined) return
+
+        // Let go of the conversation before rebinding, so the bind mints a
+        // fresh one rooted in the chosen directory. Only a fresh session can
+        // get here, so there is no conversation content to lose.
+        bindings.delete(sessionId)
+        adapter.release(sessionId)
+        let bound: Binding
+        try {
+          bound = await adapter.bind({
+            sessionId,
+            workspacePath: directory,
+            preferredModel: session.model ?? store.state.lastModel,
+            ...(session.thinkingLevel === undefined
+              ? {}
+              : { preferredThinkingLevel: session.thinkingLevel })
+          })
+        } catch (cause) {
+          // Nothing was written, so the session is exactly where it was; the
+          // next use binds it again from the token it still holds.
+          refuse(displaySafeMessage(cause, 'That conversation could not be opened.'))
+        }
+
+        // Removed while the rebind was in flight: nothing is written, and the
+        // conversation it just opened is let go of again. The worktree itself
+        // is left exactly where it is.
+        if (store.session(sessionId) === undefined) {
+          adapter.release(sessionId)
+          return
+        }
+
+        bindings.set(sessionId, Promise.resolve(bound))
+        // Written only now, after the rebind: a failed one leaves no half-moved
+        // session behind.
+        store.updateSession(sessionId, {
+          worktree,
+          token: bound.token,
+          tokenFlavor: flavor,
+          model: bound.model,
+          thinkingLevel: bound.thinkingLevel
+        })
+        // The conversation behind the identity is a new one, so nothing of the
+        // old one survives as a ghost.
+        usage.delete(sessionId)
+        queues.delete(sessionId)
+        panel.reset(sessionId)
+        emitState()
+      })
     },
 
     // Allowed mid-turn, because the model only reaches the next turn. The

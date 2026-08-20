@@ -107,13 +107,20 @@ describe('workspaces', () => {
       ],
       activeWorkspaceId: 'w1',
       sessions: [
-        { id: 's1', workspaceId: 'w1', createdAt: '2024-05-01T10:00:00.000Z', working: false },
+        {
+          id: 's1',
+          workspaceId: 'w1',
+          createdAt: '2024-05-01T10:00:00.000Z',
+          working: false,
+          fresh: false
+        },
         {
           id: 's2',
           workspaceId: 'w2',
           createdAt: '2024-05-01T11:00:00.000Z',
           working: true,
-          title: SESSION_TITLE
+          title: SESSION_TITLE,
+          fresh: false
         }
       ],
       activeSessionId: 's1'

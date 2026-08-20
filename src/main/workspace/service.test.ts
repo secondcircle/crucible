@@ -3,7 +3,16 @@
 // The one module that genuinely reads folders and starts processes, driven
 // against temp directories: no Electron, no renderer, no agent.
 import { execFileSync } from 'node:child_process'
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
@@ -22,6 +31,32 @@ function write(path: string, content = 'x'): void {
 
 function gitInit(): void {
   execFileSync('git', ['init', '-q'], { cwd: folder })
+}
+
+/** A HEAD to branch from, with an identity the machine need not have. */
+function gitCommit(): void {
+  execFileSync(
+    'git',
+    [
+      '-c',
+      'user.email=test@example.com',
+      '-c',
+      'user.name=Test',
+      'commit',
+      '-qm',
+      'first',
+      '--allow-empty'
+    ],
+    { cwd: folder }
+  )
+}
+
+/** The repo's own mechanism, exactly where Crucible looks for it. */
+function worktreeScript(body: string, { executable = true } = {}): void {
+  const path = join(folder, '.crucible', 'worktree')
+  mkdirSync(join(folder, '.crucible'), { recursive: true })
+  writeFileSync(path, body)
+  if (executable) chmodSync(path, 0o755)
 }
 
 /** Everything that happened to a run, once it is over. */
@@ -159,5 +194,165 @@ describe('a run', () => {
 
     await expect(service.stopRun(runId)).resolves.toBeUndefined()
     await expect(service.stopRun('run-does-not-exist')).resolves.toBeUndefined()
+  })
+})
+
+describe('whether a folder is a git workspace', () => {
+  it('is true inside a repository and inside a worktree of it', async () => {
+    gitInit()
+    gitCommit()
+    const made = await service.createWorktree(folder)
+    if (!made.ok) throw new Error(made.output)
+
+    expect(await service.isGitWorkspace(folder)).toBe(true)
+    expect(await service.isGitWorkspace(made.path)).toBe(true)
+  })
+
+  it('is false for an ordinary folder and for one that is not there', async () => {
+    expect(await service.isGitWorkspace(folder)).toBe(false)
+    expect(await service.isGitWorkspace(join(folder, 'nothing-here'))).toBe(false)
+  })
+})
+
+describe('creating a worktree with no script in the repository', () => {
+  beforeEach(() => {
+    gitInit()
+    gitCommit()
+  })
+
+  it('branches from HEAD under .crucible/worktrees, and says which branch', async () => {
+    const made = await service.createWorktree(folder)
+
+    if (!made.ok) throw new Error(made.output)
+    expect(made.branch).toMatch(/^crucible\/[0-9a-f]{6}$/)
+    expect(made.path).toBe(join(folder, '.crucible', 'worktrees', made.branch?.slice(9) ?? ''))
+    expect(existsSync(join(made.path, '.git'))).toBe(true)
+    expect(
+      execFileSync('git', ['-C', made.path, 'branch', '--show-current'], { encoding: 'utf8' }).trim()
+    ).toBe(made.branch)
+  })
+
+  it('makes the worktrees directory ignore itself, once', async () => {
+    const ignore = join(folder, '.crucible', 'worktrees', '.gitignore')
+
+    await service.createWorktree(folder)
+    expect(readFileSync(ignore, 'utf8')).toBe('*\n')
+
+    // A repository that wrote its own is left exactly as it is.
+    writeFileSync(ignore, 'mine\n')
+    await service.createWorktree(folder)
+    expect(readFileSync(ignore, 'utf8')).toBe('mine\n')
+  })
+
+  it('gives each session a worktree of its own', async () => {
+    const first = await service.createWorktree(folder)
+    const second = await service.createWorktree(folder)
+
+    if (!first.ok || !second.ok) throw new Error('both were supposed to succeed')
+    expect(second.path).not.toBe(first.path)
+    expect(second.branch).not.toBe(first.branch)
+  })
+})
+
+describe('when the fallback fails', () => {
+  it('hands back git’s own output as a value, named as git’s', async () => {
+    // Whatever git refuses — here, a folder it will not branch in at all —
+    // reaches the screen as git said it, and nothing is thrown.
+    const made = await service.createWorktree(folder)
+
+    expect(made.ok).toBe(false)
+    const output = made.ok ? '' : made.output
+    expect(output.split('\n')[0]).toMatch(/^git worktree add exited \d+$/)
+    expect(output.toLowerCase()).toContain('git repository')
+    // Nothing is cleaned up and nothing is invented: the directory it made
+    // for itself is still there.
+    expect(existsSync(join(folder, '.crucible', 'worktrees', '.gitignore'))).toBe(true)
+  })
+})
+
+describe('the repository’s own worktree script', () => {
+  beforeEach(() => {
+    gitInit()
+    gitCommit()
+  })
+
+  it('is the whole mechanism: its last line wins over everything it printed', async () => {
+    worktreeScript(
+      [
+        '#!/bin/sh',
+        'echo "preparing the worktree"',
+        'echo "installing" 1>&2',
+        'git worktree add -q -b feature/from-script "$PWD/from-script" 1>&2',
+        'echo "$PWD/from-script"',
+        ''
+      ].join('\n')
+    )
+
+    const made = await service.createWorktree(folder)
+
+    if (!made.ok) throw new Error(made.output)
+    // Whatever the script printed, verbatim: the temp folder resolves through
+    // a symlink here, and Crucible reports what it was told.
+    expect(made.path).toBe(join(realpathSync(folder), 'from-script'))
+    expect(made.branch).toBe('feature/from-script')
+    // The fallback never ran: no crucible/ branch and no worktrees directory.
+    expect(existsSync(join(folder, '.crucible', 'worktrees'))).toBe(false)
+  })
+
+  it('leaves the branch unknown when the worktree it reports has none', async () => {
+    const outside = mkdtempSync(join(tmpdir(), 'crucible-elsewhere-'))
+    try {
+      worktreeScript(`#!/bin/sh\necho "${outside}"\n`)
+
+      const made = await service.createWorktree(folder)
+
+      if (!made.ok) throw new Error(made.output)
+      expect(made.path).toBe(outside)
+      expect(made.branch).toBeUndefined()
+    } finally {
+      rmSync(outside, { recursive: true, force: true })
+    }
+  })
+
+  it('fails with its exit status and everything it printed', async () => {
+    worktreeScript(
+      ['#!/bin/sh', 'echo "checking the branch policy"', 'echo "no policy here" 1>&2', 'exit 3', ''].join('\n')
+    )
+
+    const made = await service.createWorktree(folder)
+
+    expect(made.ok).toBe(false)
+    const output = made.ok ? '' : made.output
+    expect(output.split('\n')[0]).toBe('.crucible/worktree exited 3')
+    expect(output).toContain('checking the branch policy')
+    expect(output).toContain('no policy here')
+  })
+
+  it('fails when what it reported is not a worktree', async () => {
+    worktreeScript(`#!/bin/sh\necho "somewhere/relative"\n`)
+
+    const made = await service.createWorktree(folder)
+
+    expect(made.ok).toBe(false)
+    expect(made.ok ? '' : made.output).toContain('somewhere/relative')
+  })
+
+  it('fails when it reported nothing at all', async () => {
+    worktreeScript(`#!/bin/sh\nexit 0\n`)
+
+    const made = await service.createWorktree(folder)
+
+    expect(made.ok).toBe(false)
+    expect(made.ok ? '' : made.output).toContain('without reporting a worktree path')
+  })
+
+  it('never falls through to git when the repository’s script cannot be run', async () => {
+    worktreeScript(`#!/bin/sh\necho "/tmp"\n`, { executable: false })
+
+    const made = await service.createWorktree(folder)
+
+    expect(made.ok).toBe(false)
+    expect(made.ok ? '' : made.output).toContain('.crucible/worktree is not executable')
+    expect(existsSync(join(folder, '.crucible', 'worktrees'))).toBe(false)
   })
 })

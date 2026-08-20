@@ -83,6 +83,18 @@ function stubService(): StubService {
       if (query === 'refuse me') throw new Error('That folder could not be read.')
       return ['src/shared/workspace/service.ts']
     },
+    async isGitWorkspace(workspacePath: string) {
+      asked.push({ op: 'isGitWorkspace', args: [workspacePath] })
+      return workspacePath !== '/tmp/not-a-repo'
+    },
+    async createWorktree(workspacePath: string) {
+      asked.push({ op: 'createWorktree', args: [workspacePath] })
+      return {
+        ok: true as const,
+        path: `${workspacePath}/.crucible/worktrees/9f3a2c`,
+        branch: 'crucible/9f3a2c'
+      }
+    },
     async startRun(workspacePath: string, command: string) {
       asked.push({ op: 'startRun', args: [workspacePath, command] })
       return 'run-1'
@@ -139,6 +151,25 @@ describe('what crosses the workspace channel', () => {
 
     await request({ op: 'stopRun', args: ['run-1'] })
     expect(stub.asked.at(-1)).toEqual({ op: 'stopRun', args: ['run-1'] })
+  })
+
+  it('carries the worktree questions across, answers and all', async () => {
+    expect(await request({ op: 'isGitWorkspace', args: ['/repos/crucible'] })).toEqual({
+      ok: true,
+      value: true
+    })
+    expect(await request({ op: 'isGitWorkspace', args: ['/tmp/not-a-repo'] })).toEqual({
+      ok: true,
+      value: false
+    })
+    expect(await request({ op: 'createWorktree', args: ['/repos/crucible'] })).toEqual({
+      ok: true,
+      value: {
+        ok: true,
+        path: '/repos/crucible/.crucible/worktrees/9f3a2c',
+        branch: 'crucible/9f3a2c'
+      }
+    })
   })
 
   it('answers a refusal as a value, with the sentence written for a person', async () => {

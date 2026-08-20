@@ -3,7 +3,8 @@ import type {
   Unsubscribe,
   WorkspaceEvent,
   WorkspaceEventListener,
-  WorkspaceService
+  WorkspaceService,
+  WorktreeCreation
 } from '../../../shared/workspace/service'
 import { rankFiles } from '../../../shared/workspace/match'
 
@@ -15,6 +16,13 @@ export interface ScriptedWorkspace extends WorkspaceService {
   files: readonly string[]
   /** Every run this service was asked to start, oldest first. */
   readonly started: ReadonlyArray<{ readonly runId: RunId; readonly command: string }>
+  /** What `isGitWorkspace` answers for any folder. */
+  git: boolean
+  // Held open until the test settles it, so the creating state stays put for
+  // as long as the assertions need it.
+  settleWorktree(created: WorktreeCreation): void
+  /** How many creations are still waiting to be settled. */
+  creating(): number
   /** The most recent run's id, which is the one a test drives. */
   lastRun(): RunId
   output(runId: RunId, chunk: string): void
@@ -26,6 +34,7 @@ export function createScriptedWorkspace(files: readonly string[] = []): Scripted
   const listeners = new Set<WorkspaceEventListener>()
   const calls: Array<{ op: string; args: readonly unknown[] }> = []
   const started: Array<{ runId: RunId; command: string }> = []
+  const worktrees: Array<(created: WorktreeCreation) => void> = []
   let minted = 0
 
   function emit(event: WorkspaceEvent): void {
@@ -37,13 +46,27 @@ export function createScriptedWorkspace(files: readonly string[] = []): Scripted
     files,
     started,
 
-    searchFiles(workspacePath: string, query: string): Promise<readonly string[]> {
-      calls.push({ op: 'searchFiles', args: [workspacePath, query] })
+    git: true,
+
+    searchFiles(directory: string, query: string): Promise<readonly string[]> {
+      calls.push({ op: 'searchFiles', args: [directory, query] })
       return Promise.resolve(rankFiles(service.files, query))
     },
 
-    startRun(workspacePath: string, command: string): Promise<RunId> {
-      calls.push({ op: 'startRun', args: [workspacePath, command] })
+    isGitWorkspace(workspacePath: string): Promise<boolean> {
+      calls.push({ op: 'isGitWorkspace', args: [workspacePath] })
+      return Promise.resolve(service.git)
+    },
+
+    createWorktree(workspacePath: string): Promise<WorktreeCreation> {
+      calls.push({ op: 'createWorktree', args: [workspacePath] })
+      return new Promise<WorktreeCreation>((resolve) => {
+        worktrees.push(resolve)
+      })
+    },
+
+    startRun(directory: string, command: string): Promise<RunId> {
+      calls.push({ op: 'startRun', args: [directory, command] })
       minted += 1
       const runId = `scripted-run-${minted}`
       started.push({ runId, command })
@@ -61,6 +84,14 @@ export function createScriptedWorkspace(files: readonly string[] = []): Scripted
         listeners.delete(listener)
       }
     },
+
+    settleWorktree(created: WorktreeCreation): void {
+      const settle = worktrees.shift()
+      if (settle === undefined) throw new Error('no worktree creation is waiting')
+      settle(created)
+    },
+
+    creating: () => worktrees.length,
 
     lastRun(): RunId {
       const last = started.at(-1)

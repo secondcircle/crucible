@@ -209,6 +209,19 @@
   background: var(--accent2);
 }
 
+/* the whole of the at-a-glance worktree signal: between the working dot and
+   the title, so the title's own clamp is undisturbed */
+.sess .wt {
+  flex: none;
+  color: var(--faint);
+  font-size: 11.5px;
+  margin-right: -2px;
+}
+
+.sess.active .wt {
+  color: var(--accent2);
+}
+
 .sess.untitled {
   color: var(--faint);
   font-style: italic;

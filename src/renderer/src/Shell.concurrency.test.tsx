@@ -25,14 +25,16 @@ const TWO_SESSIONS: ShellSnapshot = {
       workspaceId: 'w1',
       createdAt: '2026-08-19T14:14:00.000Z',
       title: FIRST,
-      working: false
+      working: false,
+      fresh: false
     },
     {
       id: 's2',
       workspaceId: 'w1',
       createdAt: '2026-08-19T15:20:00.000Z',
       title: SECOND,
-      working: false
+      working: false,
+      fresh: false
     }
   ],
   activeSessionId: 's1'

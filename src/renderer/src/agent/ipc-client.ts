@@ -12,6 +12,7 @@ import type {
   SessionId,
   SessionTree,
   SessionUsage,
+  SessionWorktree,
   ShellSnapshot,
   TabId,
   ThinkingLevel,
@@ -73,6 +74,13 @@ export function createIpcClient(): AgentPort {
     // there is, so a request reads as what was asked for.
     setLabel: (id: SessionId, ref: string, label?: string) =>
       label === undefined ? call<void>('setLabel', id, ref) : call<void>('setLabel', id, ref, label),
+
+    // Nothing optional is sent as an absent argument: with no worktree the
+    // request carries none, which is what a detach is.
+    setWorktree: (sessionId: SessionId, worktree?: SessionWorktree) =>
+      worktree === undefined
+        ? call<void>('setWorktree', sessionId)
+        : call<void>('setWorktree', sessionId, worktree),
 
     listModels: () => call<readonly ModelInfo[]>('listModels'),
 

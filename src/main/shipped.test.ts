@@ -181,12 +181,68 @@ describe('the shipped commands doc', () => {
   })
 })
 
+describe('the shipped worktrees doc', () => {
+  const doc = (): string =>
+    readFileSync(join(dirname(shippedDocsIndexPath(APP)), 'worktrees.md'), 'utf8')
+
+  it('gives the script contract whole: where, executable, no arguments, last line, exit 0', () => {
+    const text = doc()
+    expect(text).toContain('.crucible/worktree')
+    expect(text).toContain('chmod +x .crucible/worktree')
+    expect(text).toMatch(/last non-empty line/)
+    expect(text).toMatch(/absolute/)
+    expect(text).toMatch(/no arguments/)
+    expect(text).toMatch(/[Ee]xit 0/)
+    // Any language, and everything else is the script's own business.
+    expect(text).toMatch(/Any language/)
+  })
+
+  it('says what happens with no script, so an agent knows when one is needed', () => {
+    const text = doc()
+    expect(text).toContain('git worktree add')
+    expect(text).toContain('.crucible/worktrees/')
+    expect(text).toMatch(/crucible\/</)
+  })
+
+  it('says branch names are throwaway and renaming later is the agent’s job', () => {
+    const text = doc()
+    expect(text).toMatch(/throwaway/)
+    expect(text).toContain('git branch -m')
+  })
+
+  it('says Crucible never deletes a worktree, and how cleanup is done instead', () => {
+    const text = doc()
+    expect(text).toMatch(/never deletes/i)
+    expect(text).toContain('git worktree remove')
+    expect(text).toContain('git worktree prune')
+  })
+
+  it('names no π, and cites no path inside Crucible’s own repository', () => {
+    const text = doc()
+    expect(text).not.toMatch(PI_BY_NAME)
+    expect(text).not.toContain('\u03c0')
+    expect(text).not.toContain('src/')
+    expect(text).not.toContain('docs/adr')
+  })
+
+  it('is the file that ships, byte for byte', () => {
+    expect(doc()).toBe(
+      readFileSync(join(APP, 'resources', 'agent-docs', 'worktrees.md'), 'utf8')
+    )
+  })
+})
+
 describe('the shipped docs index', () => {
   const index = (): string => readFileSync(shippedDocsIndexPath(APP), 'utf8')
 
   it('names commands.md, and when to read it', () => {
     expect(index()).toContain('commands.md')
     expect(index()).toMatch(/asks about Crucible's commands/)
+  })
+
+  it('names worktrees.md, and when to read it', () => {
+    expect(index()).toContain('worktrees.md')
+    expect(index()).toMatch(/worktrees work with\s+Crucible/)
   })
 
   it('says the docs it lists resolve beside itself', () => {

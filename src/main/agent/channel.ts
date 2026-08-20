@@ -5,7 +5,8 @@ import type {
   BashRunShare,
   ImageAttachment,
   PortEvent,
-  QueuedKind
+  QueuedKind,
+  SessionWorktree
 } from '../../shared/agent/port'
 import type { Shell } from '../shell/shell'
 import { displaySafeMessage } from './adapter-error'
@@ -124,6 +125,21 @@ async function invoke(shell: Shell, request: unknown): Promise<unknown> {
     return value
   }
 
+  // Absent is a detach, which is how a session goes back to the checkout;
+  // anything else has to read as a worktree.
+  function worktree(position: number): SessionWorktree | undefined {
+    const value = given[position]
+    if (value === undefined || value === null) return undefined
+    const { path, branch } = (typeof value === 'object' ? value : {}) as {
+      path?: unknown
+      branch?: unknown
+    }
+    if (typeof path !== 'string' || path === '') {
+      throw new Error(`${op} needs a worktree where it was given none.`)
+    }
+    return { path, ...(typeof branch === 'string' ? { branch } : {}) }
+  }
+
   /** One of the two ways a login may run, named, or a refusal. */
   function method(position: number): AuthMethod {
     const value = given[position]
@@ -163,6 +179,8 @@ async function invoke(shell: Shell, request: unknown): Promise<unknown> {
       return shell.searchHistory(text(0), text(1))
     case 'resumeSession':
       return shell.resumeSession(text(0), text(1))
+    case 'setWorktree':
+      return shell.setWorktree(text(0), worktree(1))
     case 'listModels':
       return shell.listModels()
     case 'setModel':

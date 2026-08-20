@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react'
 import { MODEL_ALIASES } from '../../../shared/agent/known-models'
-import type { ModelInfo, ThinkingLevel } from '../../../shared/agent/port'
+import type { ModelInfo, SessionWorktree, ThinkingLevel } from '../../../shared/agent/port'
 import type { CommandInfo } from '../../../shared/commands/service'
 import { commandFragment, filterCommands } from '../../../shared/commands/template'
+import { worktreeLabel } from '../labels'
 import './composer.css'
 
 // The textarea stays editable while the session works so the next instruction
@@ -30,6 +31,16 @@ function bashCommandOf(draft: string): string | undefined {
   return draft.replace(/^!+/, '').trim()
 }
 
+// A glyph and a branch name read as neither on their own, so the accessible
+// name says where the session works in full, in the two words CONTEXT.md
+// defines: the checkout, or a worktree.
+function worktreeChipLabel(worktree: SessionWorktree | undefined, busy: boolean): string {
+  if (worktree === undefined) {
+    return busy ? 'Creating a worktree…' : 'This session works in the checkout'
+  }
+  return `This session works in worktree ${worktreeLabel(worktree)}`
+}
+
 /** What an origin badge says, in Crucible's own words for the three origins. */
 const ORIGIN_LABEL: Record<CommandInfo['origin'], string> = {
   workspace: 'workspace',
@@ -52,7 +63,12 @@ export function Composer({
   files,
   commands,
   workspaceName,
-  workspacePath,
+  sessionDirectory,
+  worktree,
+  worktreeShown,
+  worktreeBusy,
+  worktreeLocked,
+  worktreeOutput,
   boxRef,
   onDraft,
   onSend,
@@ -65,7 +81,8 @@ export function Composer({
   onSelectThinkingLevel,
   onRemoveAttachment,
   onFileToken,
-  onRunBash
+  onRunBash,
+  onToggleWorktree
 }: {
   readonly draft: string
   /** No workspace or no session: the composer is present but not usable. */
@@ -86,7 +103,18 @@ export function Composer({
   // list has not been read yet, which is not the same as an empty folder.
   readonly commands?: readonly CommandInfo[]
   readonly workspaceName?: string
-  readonly workspacePath?: string
+  /** Where a bash run starts: the session's worktree, or its checkout. */
+  readonly sessionDirectory?: string
+  /** Present only for a worktree session; absent means the checkout. */
+  readonly worktree?: SessionWorktree
+  /** False for a workspace that is not a git working tree: no chip at all. */
+  readonly worktreeShown: boolean
+  /** A creation, or the rebind a flip back needs, is under way. */
+  readonly worktreeBusy: boolean
+  /** Past its first message: the chip keeps its label and stops being one. */
+  readonly worktreeLocked: boolean
+  /** The last failed attempt's output; transient, and never stored. */
+  readonly worktreeOutput?: string
   /** Held above, because what restores a queued message also focuses it. */
   readonly boxRef?: React.RefObject<HTMLTextAreaElement | null>
   readonly onDraft: (draft: string) => void
@@ -106,6 +134,8 @@ export function Composer({
   // closes it. The search itself is the workspace service's, never the port's.
   readonly onFileToken: (token?: string) => void
   readonly onRunBash: (command: string) => void
+  /** Checkout to a new worktree, or a worktree back to the checkout. */
+  readonly onToggleWorktree: () => void
 }): React.JSX.Element {
   // The selection belongs to one result list: a fresh list is looked at from
   // the top rather than from wherever the last one had been left.
@@ -157,7 +187,9 @@ export function Composer({
   // Sending and queueing ask the same question of a draft, except that
   // steering and follow-up carry text only, so chips are held back.
   const heldBack = working && attachments.length > 0
-  const sendable = !disabled && draft.trim() !== '' && !heldBack
+  // Nothing is sent while a worktree is being made: the directory the message
+  // would be answered in is not settled yet.
+  const sendable = !disabled && draft.trim() !== '' && !heldBack && !worktreeBusy
   const runnable = !disabled && command !== undefined && command !== ''
 
   // Read from the element rather than from the draft prop: a keystroke is
@@ -269,7 +301,7 @@ export function Composer({
       <div className={`cbox${bash ? ' bash' : ''}${commandMode ? ' cmd' : ''}`}>
         {bash ? (
           <div className="modebadge">
-            bash <span className="cwd">· {workspacePath ?? ''}</span>
+            bash <span className="cwd">· {sessionDirectory ?? ''}</span>
           </div>
         ) : commandMode ? (
           <div className="modebadge command">command</div>
@@ -405,6 +437,47 @@ export function Composer({
             ) : null}
           </div>
 
+          {/* Absent entirely outside a git workspace, which is the whole of
+              what a non-git workspace sees of this. */}
+          {worktreeShown ? (
+            <button
+              className={`chip wt${worktree === undefined ? '' : ' on branch'}${
+                worktreeBusy ? ' busy' : ''
+              }`}
+              aria-label={worktreeChipLabel(worktree, worktreeBusy)}
+              // Working, and still where it was: a flip back keeps saying
+              // which worktree until the rebind behind it lands.
+              aria-busy={worktreeBusy}
+              // Locked and busy are both merely non-interactable: the chip's
+              // own rendering is the whole of the signal.
+              disabled={disabled || worktreeBusy || worktreeLocked}
+              onClick={onToggleWorktree}
+            >
+              {worktreeBusy && worktree === undefined ? (
+                <>
+                  <span className="g" aria-hidden="true">
+                    ⑂
+                  </span>
+                  creating worktree…
+                </>
+              ) : worktree === undefined ? (
+                <>
+                  <span className="g" aria-hidden="true">
+                    ◇
+                  </span>
+                  checkout
+                </>
+              ) : (
+                <>
+                  <span className="g" aria-hidden="true">
+                    ⑂
+                  </span>
+                  <b>{worktreeLabel(worktree)}</b>
+                </>
+              )}
+            </button>
+          ) : null}
+
           {/* One slot, one footprint: Send while idle becomes Stop while
               working, so nothing around it moves. Enter still steers. */}
           {bash ? (
@@ -423,6 +496,14 @@ export function Composer({
             </button>
           )}
         </div>
+
+        {/* What the script or git printed, verbatim: the session is already
+            back on the checkout by the time this is read. */}
+        {worktreeOutput === undefined ? null : (
+          <pre className="wtout" role="alert">
+            {worktreeOutput}
+          </pre>
+        )}
       </div>
 
       {/* Height is reserved in every state, idle included, so nothing above

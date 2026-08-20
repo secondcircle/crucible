@@ -21,6 +21,7 @@ import type {
   SessionState,
   SessionTree,
   SessionUsage,
+  SessionWorktree,
   ShellSnapshot,
   TabId,
   ThinkingLevel,
@@ -47,6 +48,12 @@ export interface ScriptedPort extends AgentPort {
   jumpText?: string
   /** Set where a test wants the refusal main gives a working session. */
   jumpRefusal?: string
+  /** Set where a test wants the refusal main gives a failed rebind. */
+  worktreeRefusal?: string
+  // Held open where a test wants the rebind still in flight: the change lands
+  // when the test says so, the way it lands when main's bind comes back.
+  holdWorktree?: boolean
+  settleWorktreeChange(): void
   /** How the next `shareBashRun` settles; delivered unless a test says else. */
   shareOutcome: 'delivered' | 'dropped'
   // Held open where a test wants the waiting state: the promise settles when
@@ -193,7 +200,7 @@ export function createScriptedPort(initial: Partial<ShellSnapshot> = {}): Script
       // announces it, because no caller echoed it.
       const turnId = `t-${(minted += 1)}`
       turns.set(sessionId, turnId)
-      changeSession(sessionId, (session) => ({ ...session, working: true }))
+      changeSession(sessionId, (session) => ({ ...session, working: true, fresh: false }))
       emit({ type: 'turn_started', sessionId, turnId })
       emit({ type: 'user_message', sessionId, turnId, text })
       emitState()
@@ -211,6 +218,7 @@ export function createScriptedPort(initial: Partial<ShellSnapshot> = {}): Script
   }
 
   let held: ((outcome: 'delivered' | 'dropped') => void) | undefined
+  let heldWorktree: (() => void) | undefined
   let login: { resolve: () => void; reject: (cause: Error) => void } | undefined
 
   const port: ScriptedPort = {
@@ -285,6 +293,9 @@ export function createScriptedPort(initial: Partial<ShellSnapshot> = {}): Script
             workspaceId,
             createdAt: NOW,
             working: false,
+            // One click of New session lands on the checkout, with the choice
+            // still open.
+            fresh: true,
             model: port.models[0]?.id,
             thinkingLevel: port.models[0]?.thinkingLevels[0]
           }
@@ -317,9 +328,58 @@ export function createScriptedPort(initial: Partial<ShellSnapshot> = {}): Script
     resetSession(id: SessionId): Promise<void> {
       calls.push({ op: 'resetSession', args: [id] })
       port.transcripts.set(id, [])
-      changeSession(id, (session) => ({ ...session, usage: undefined }))
+      // The identity keeps its worktree and gets its choice back, exactly as
+      // main resets one.
+      changeSession(id, (session) => ({ ...session, usage: undefined, fresh: true }))
       emitState()
       return Promise.resolve()
+    },
+
+    // Refused for a session that is not fresh, because the shell's guard is
+    // the contract and the chip is only its presentation.
+    setWorktree(sessionId: SessionId, worktree?: SessionWorktree): Promise<void> {
+      calls.push({
+        op: 'setWorktree',
+        args: worktree === undefined ? [sessionId] : [sessionId, worktree]
+      })
+      if (port.worktreeRefusal !== undefined) {
+        return Promise.reject(new Error(port.worktreeRefusal))
+      }
+      const found = snapshot.sessions.find((candidate) => candidate.id === sessionId)
+      if (found === undefined) {
+        return Promise.reject(new Error('That session is no longer open.'))
+      }
+      if (!found.fresh) {
+        return Promise.reject(
+          new Error('That session has already started. Reset it to change where it works.')
+        )
+      }
+      // Nothing is said until the change has landed, which is what makes the
+      // held case and the instant one behave the same way.
+      const land = (): void => {
+        changeSession(sessionId, (session) => {
+          const rest: SessionState = { ...session }
+          delete (rest as { worktree?: SessionWorktree }).worktree
+          return worktree === undefined ? rest : { ...rest, worktree }
+        })
+        emitState()
+      }
+      if (port.holdWorktree !== true) {
+        land()
+        return Promise.resolve()
+      }
+      return new Promise<void>((resolve) => {
+        heldWorktree = () => {
+          land()
+          resolve()
+        }
+      })
+    },
+
+    settleWorktreeChange(): void {
+      const settle = heldWorktree
+      heldWorktree = undefined
+      settle?.()
     },
 
     transcript(id: SessionId): Promise<readonly TranscriptItem[]> {
@@ -342,9 +402,17 @@ export function createScriptedPort(initial: Partial<ShellSnapshot> = {}): Script
       const id = `s-${(minted += 1)}`
       snapshot = {
         ...snapshot,
+        // A resumed conversation is not fresh and starts on the checkout.
         sessions: [
           ...snapshot.sessions,
-          { id, workspaceId, createdAt: NOW, working: false, model: port.models[0]?.id }
+          {
+            id,
+            workspaceId,
+            createdAt: NOW,
+            working: false,
+            fresh: false,
+            model: port.models[0]?.id
+          }
         ],
         activeSessionId: id
       }
@@ -475,7 +543,9 @@ export function createScriptedPort(initial: Partial<ShellSnapshot> = {}): Script
       })
       const turnId = `t-${(minted += 1)}`
       turns.set(sessionId, turnId)
-      changeSession(sessionId, (session) => ({ ...session, working: true }))
+      // The first accepted message is what ends freshness, exactly as the
+      // shell ends it.
+      changeSession(sessionId, (session) => ({ ...session, working: true, fresh: false }))
       emit({ type: 'turn_started', sessionId, turnId })
       emitState()
       return Promise.resolve(turnId)
@@ -654,6 +724,7 @@ export function oneSession(
         createdAt: NOW,
         title: SESSION_TITLE,
         working: false,
+        fresh: false,
         ...overrides
       }
     ],

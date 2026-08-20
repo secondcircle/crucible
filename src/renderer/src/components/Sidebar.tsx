@@ -14,7 +14,8 @@ const UNTITLED = 'New session'
 const TICK_MS = 30_000
 
 // A row's working state is in its accessible name and not the colored dot
-// alone: the dot is the eye's version, the name is everybody else's.
+// alone: the dot is the eye's version, the name is everybody else's. A
+// worktree session says so the same way, glyph and name together.
 //
 // Every workspace lists its sessions, active or not, because work in one
 // workspace keeps running while another is in front. Only the human removes a
@@ -92,12 +93,18 @@ export function Sidebar({
                 <ul className="sessions">
                   {own.map((session) => {
                     const title = session.title ?? UNTITLED
+                    // Knowing *that* a session is in a worktree is the whole
+                    // signal here; which worktree lives in the composer chip.
+                    const marks = [
+                      session.worktree === undefined ? undefined : 'worktree',
+                      session.working ? 'working' : undefined
+                    ].filter((mark): mark is string => mark !== undefined)
                     return (
                       <li key={session.id} className="sessrow">
                         <button
                           className={rowClass(session.id === activeSessionId, session.title)}
                           aria-current={session.id === activeSessionId ? 'true' : undefined}
-                          aria-label={session.working ? `${title} (working)` : title}
+                          aria-label={marks.length === 0 ? title : `${title} (${marks.join(', ')})`}
                           // Always set, so a title the two-line clamp cut off
                           // is readable in full without leaving the sidebar.
                           title={title}
@@ -111,6 +118,11 @@ export function Sidebar({
                               className={`dot${session.working ? ' working' : ''}`}
                               aria-hidden="true"
                             />
+                            {session.worktree === undefined ? null : (
+                              <span className="wt" aria-hidden="true">
+                                ⑂
+                              </span>
+                            )}
                             {title}
                           </span>
                         </button>

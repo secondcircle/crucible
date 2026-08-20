@@ -1,5 +1,15 @@
+import type { SessionWorktree } from '../../shared/agent/port'
+
 // The small display formats, in one place so two components cannot drift into
-// two spellings of one fact.
+// two spellings of one fact. `sessionLabel` is gone: the model writes the
+// title now.
+
+// The branch when it is known, and the directory's own name when a script made
+// a worktree whose branch could not be read.
+export function worktreeLabel(worktree: SessionWorktree): string {
+  if (worktree.branch !== undefined && worktree.branch !== '') return worktree.branch
+  return worktree.path.split('/').filter(Boolean).at(-1) ?? worktree.path
+}
 
 /** The clock time a tree node carries: `2:04 PM`, and nothing when unknown. */
 export function clockTime(iso: string): string {
