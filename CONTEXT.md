@@ -175,6 +175,14 @@ The hairline on a weekly quota meter marking where an even burn would have put
 you by now. Fill past the tick means spending faster than the window elapses.
 _Avoid_: velocity, burn rate, forecast, projection line.
 
+**Needs you**:
+The state of a session whose turn ended, or errored, while the user was not
+looking at it — marked in the sidebar until the user lands on that session,
+and walked by Tab. The branch board's count of branches and pull requests is a
+separate thing, spoken of as the board's need-you count.
+_Avoid_: unread, alert, attention flag, notification (the OS banner is one
+way a needs-you state is announced, not the state itself).
+
 **Standing prompt**:
 The text appended to every agent Crucible starts, whatever its role prompt
 says — things true of every agent regardless of its job. Day one it is the

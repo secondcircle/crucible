@@ -19,6 +19,11 @@ import {
   type CommandResult
 } from '../shared/commands/channels'
 import {
+  NEEDS_YOU_REQUEST_CHANNEL,
+  type NeedsYouRequest,
+  type NeedsYouResult
+} from '../shared/needs-you/channels'
+import {
   QUOTA_EVENT_CHANNEL,
   QUOTA_REQUEST_CHANNEL,
   type QuotaRequest,
@@ -81,6 +86,14 @@ contextBridge.exposeInMainWorld('crucible', {
 
     onEvent: (listener: (snapshot: QuotaSnapshot) => void): (() => void) =>
       forwarder(QUOTA_EVENT_CHANNEL, listener)
+  },
+
+  // The sidebar mark's two channels outside the window. One way only: main
+  // serves a clicked banner by activating the session, which the renderer
+  // hears about as an ordinary state event.
+  needsYou: {
+    request: (request: NeedsYouRequest): Promise<NeedsYouResult> =>
+      ipcRenderer.invoke(NEEDS_YOU_REQUEST_CHANNEL, request)
   },
 
   // The installed app's update seam: one question, one event, one restart.

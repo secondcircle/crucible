@@ -90,6 +90,11 @@ function pageWithPreload(
           value: { providers: {}, fetchedAt: Date.now() }
         }),
         onEvent: (): (() => void) => () => {}
+      },
+      // Accepts what the sidebar reports and shows none of it: this launch has
+      // no dock icon and no notification centre.
+      needsYou: {
+        request: async (): Promise<{ ok: true; value: unknown }> => ({ ok: true, value: null })
       }
     },
     configurable: true

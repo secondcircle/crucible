@@ -2,12 +2,11 @@ import { useEffect, useState } from 'react'
 import type { SessionId, ShellSnapshot, WorkspaceId } from '../../../shared/agent/port'
 // Titles are the model's now, so the row shows a title and a relative time;
 // sessionLabel is gone.
-import { elapsedTime, relativeTime } from '../labels'
+import { elapsedTime, relativeTime, UNTITLED } from '../labels'
+import type { Marks } from '../state/needs-you'
 import type { QuotaView } from '../quota/use-quota'
 import { QuotaStrip } from './QuotaStrip'
 import './sidebar.css'
-
-const UNTITLED = 'New session'
 
 // Relative times go stale on their own, so the rows are re-rendered on a slow
 // tick and "just now" cannot fossilize.
@@ -17,23 +16,27 @@ const TICK_MS = 30_000
 // ticks per second for as long as anything is working, and drops back after.
 const WORKING_TICK_MS = 1_000
 
-// Two states, two channels, so a rail full of running agents still says which
-// session you are in. Viewing is the slab: a filled row with an accent edge,
-// which holds still. Working is the right-hand block: a counter of how long
-// the turn has run, with three blinking dots under it, and it is the only
-// thing in the row that moves. Nothing in the title column carries state, so
-// every title starts on the same left edge.
+// Three states, three channels, so a rail full of running agents still says
+// which session you are in. Viewing is the slab: a filled row with an accent
+// edge, which holds still. Working is the right-hand block: a counter of how
+// long the turn has run, with three blinking dots under it, and it is the only
+// thing in the row that moves. Needs you is the third: an amber pip in that
+// same block, the title lifted out of dim into full ink, and the time in
+// amber. It is neither motion nor a slab, because those two channels are
+// spoken for. Nothing in the title column carries state, so every title starts
+// on the same left edge.
 //
 // A row's working state is in its accessible name and not the moving dots
-// alone: the dots are the eye's version, the name is everybody else's. A
-// worktree session says so the same way, glyph and name together.
+// alone: the dots are the eye's version, the name is everybody else's. Needing
+// you and being in a worktree say so the same way, mark and name together.
 //
 // Every workspace lists its sessions, active or not, because work in one
 // workspace keeps running while another is in front. Only the human removes a
 // session from the list. A workspace with no sessions still gets its row.
 export function Sidebar({
   snapshot,
-  needYou,
+  needsYou,
+  boardNeedYou,
   onNewSession,
   onAddWorkspace,
   onActivateWorkspace,
@@ -44,9 +47,12 @@ export function Sidebar({
   quota
 }: {
   readonly snapshot: ShellSnapshot
-  // The whole cross-workspace glance: one number per workspace, and nothing
-  // for a workspace whose board has not answered or has nothing asking.
-  readonly needYou: Readonly<Record<WorkspaceId, number>>
+  // Sessions whose turn ended while nobody was looking. In-memory only, and
+  // the document above decides what goes in and what comes out.
+  readonly needsYou: Marks
+  // A different count on the same row: the board's branches and pull requests,
+  // and nothing for a workspace whose board has not answered.
+  readonly boardNeedYou: Readonly<Record<WorkspaceId, number>>
   readonly onNewSession: () => void
   readonly onAddWorkspace: () => void
   readonly onActivateWorkspace: (id: WorkspaceId) => void
@@ -81,6 +87,10 @@ export function Sidebar({
           const own = sessions.filter((session) => session.workspaceId === workspace.id)
           const active = workspace.id === activeWorkspaceId
           const working = own.some((session) => session.working)
+          // The roll-up, so a collapsed or scrolled-past workspace still says
+          // how many of its sessions are waiting.
+          const asking = own.filter((session) => needsYou.has(session.id)).length
+          const board = boardNeedYou[workspace.id] ?? 0
 
           return (
             <li key={workspace.id}>
@@ -94,12 +104,20 @@ export function Sidebar({
                   <span className="dot" aria-hidden="true" />
                   {workspace.name}
                 </button>
-                {(needYou[workspace.id] ?? 0) > 0 ? (
+                {/* Sessions first and filled; the board's count after it and
+                    outlined. Two counts of two different things, told apart
+                    by weight rather than by position alone. */}
+                {asking > 0 ? (
                   <span
-                    className="n"
-                    title={`${needYou[workspace.id]} need you in ${workspace.name}`}
+                    className="wsn"
+                    title={`${asking} ${asking === 1 ? 'session' : 'sessions'} waiting on you in ${workspace.name}`}
                   >
-                    {needYou[workspace.id]}
+                    {asking}
+                  </span>
+                ) : null}
+                {board > 0 ? (
+                  <span className="n" title={`${board} need you in ${workspace.name}`}>
+                    {board}
                   </span>
                 ) : null}
                 <button
@@ -117,14 +135,19 @@ export function Sidebar({
                   {own.map((session) => {
                     const title = session.title ?? UNTITLED
                     const viewing = session.id === activeSessionId
+                    const asks = needsYou.has(session.id)
                     // Knowing *that* a session is in a worktree is the whole
                     // signal here; which worktree lives in the composer chip.
                     const marks = [
                       session.worktree === undefined ? undefined : 'worktree',
-                      session.working ? 'working' : undefined
+                      session.working ? 'working' : undefined,
+                      asks ? 'needs you' : undefined
                     ].filter((mark): mark is string => mark !== undefined)
                     return (
-                      <li key={session.id} className={`sessrow${viewing ? ' viewing' : ''}`}>
+                      <li
+                        key={session.id}
+                        className={`sessrow${viewing ? ' viewing' : ''}${asks ? ' asking' : ''}`}
+                      >
                         <button
                           className={rowClass(viewing, session.title)}
                           aria-current={viewing ? 'true' : undefined}
@@ -151,6 +174,9 @@ export function Sidebar({
                             plus the dots while working, and the × over both on
                             hover. Nothing here ever moves the title. */}
                         <span className="rowend">
+                          {/* Static: the pip sits where the dots sit while
+                              working, because the eye already looks there. */}
+                          {asks ? <span className="pip" aria-hidden="true" /> : null}
                           {session.working && session.workingSince !== undefined ? (
                             <>
                               <span className="elapsed" aria-hidden="true">

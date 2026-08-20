@@ -10,6 +10,9 @@ import { selectCommandService } from './commands/select-service'
 import { shippedSystemPrompt } from './shipped'
 import { forwardRendererOutput } from './log/renderer-output'
 import { createFileSink } from './log/sink'
+import { type NeedsYouChannel, serveNeedsYouChannel } from './needs-you/channel'
+import { selectNeedsYouService } from './needs-you/select-service'
+import type { LiveNeedsYouService } from './needs-you/service'
 import { registerExhibitScheme, serveExhibitScheme } from './panel/exhibit-scheme'
 import { type QuotaChannel, serveQuotaChannel } from './quota/channel'
 import { useQuotaCacheDir } from './quota/paths'
@@ -171,6 +174,8 @@ let workspaceChannel: WorkspaceChannel | undefined
 let commandChannel: CommandChannel | undefined
 let appUpdateChannel: AppUpdateChannel | undefined
 let quotaChannel: QuotaChannel | undefined
+let needsYouChannel: NeedsYouChannel | undefined
+let needsYou: LiveNeedsYouService | undefined
 
 function openWindow(reason?: 'activate'): void {
   const window = createMainWindow()
@@ -182,6 +187,14 @@ function openWindow(reason?: 'activate'): void {
   commandChannel = serveCommandChannel(commands, window)
   appUpdateChannel = serveAppUpdateChannel(appUpdate, window)
   quotaChannel = serveQuotaChannel(quota, window)
+  // Per window, because the dock badge and the banners follow that window's
+  // focus. A clicked banner is served here rather than in the renderer: the
+  // session is activated on the shell, and the sidebar hears about it as the
+  // ordinary state event it would get from a click in the rail.
+  needsYou = selectNeedsYouService(flavor, window, log, (sessionId) => {
+    void shell.activateSession(sessionId).catch(() => {})
+  })
+  needsYouChannel = serveNeedsYouChannel(needsYou, window)
   log.append(
     reason === undefined
       ? { source: 'main', event: 'window_created' }
@@ -217,6 +230,8 @@ app.on('will-quit', () => {
   commandChannel?.dispose()
   appUpdateChannel?.dispose()
   quotaChannel?.dispose()
+  needsYouChannel?.dispose()
+  needsYou?.dispose()
   appUpdate.dispose()
   workspace.dispose()
   log.append({ source: 'main', event: 'app_quitting' })
