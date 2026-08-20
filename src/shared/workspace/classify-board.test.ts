@@ -446,9 +446,8 @@ describe('the counts the chip and the badge show', () => {
   )
 
   it('counts your landed branches and the three signals that need you', () => {
-    // Failing checks, changes requested, and a review requested of you. The
-    // assigned row and the stale and local-only rows are on the board and in
-    // no count.
+    // Failing checks, changes requested and a review requested of you count;
+    // assigned, stale and local-only rows are listed and never counted.
     expect(boardCounts(classifyBoard(facts, NOW))).toEqual({ landed: 1, needYou: 3 })
   })
 

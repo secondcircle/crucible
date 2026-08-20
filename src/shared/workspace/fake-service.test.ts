@@ -76,7 +76,7 @@ describe('the fake workspace service', () => {
 
     expect(hosted.board.host).toEqual({ kind: 'github', reachable: true })
     expect(hosted.board.repoLabel).toBe('secondcircle/pi-extensions')
-    // Every group the mock populates, so all five are drivable at no cost.
+    // All five groups, so every one of them is drivable at no cost.
     expect(groups(hosted.board)).toEqual([
       'landed',
       'inFlight',

@@ -1,8 +1,7 @@
 import type { BoardRow, BranchBoardSnapshot } from './service'
 
-// The canned boards, mirroring the approved mock's populated data: the work
-// repository with a host, and the home repository without one. No git runs, no
-// gh runs, nothing costs anything.
+// Two canned boards, one with a host and one without, so both are drivable
+// with no git run, no gh run and no cost.
 
 /** A path holding this word gets the git-only board, as bash runs do. */
 const NO_HOST = 'nohost'
@@ -208,8 +207,7 @@ function workRows(at: (days: number) => string): readonly BoardRow[] {
       touchedAt: at(47)
     },
     {
-      // Somebody else's, so widening the scope in the fake flavor has
-      // something to reveal — which is what a shared origin looks like.
+      // Somebody else's, so widening the scope has something to reveal.
       group: 'stale',
       name: 'plan/plan-20260410-ueno',
       yours: false,

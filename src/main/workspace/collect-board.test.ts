@@ -1,8 +1,7 @@
 // @vitest-environment node
 //
-// The collector, driven from captured output: which commands it runs, in which
-// order, and what it does when one of them cannot answer. Nothing is spawned
-// here — the runner is the seam.
+// The collector, driven from captured output. Nothing is spawned here: the
+// runner is the seam.
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import type { BranchBoardSnapshot } from '../../shared/workspace/service'
@@ -49,8 +48,8 @@ const GIT_REPO: ReadonlyArray<[RegExp, CommandOutcome]> = [
 const GH: ReadonlyArray<[RegExp, CommandOutcome]> = [
   [/^gh api user/, ok('secondcircle\n')],
   [/^gh repo view/, ok('secondcircle/pi-extensions\n')],
-  // Nothing of that repository's is open: the three open-pull-request
-  // questions really did answer an empty list when this was captured.
+  // The three open-pull-request questions all answer an empty list here, which
+  // is what a repository with nothing open looks like.
   [/^gh pr list/, ok('[]')],
   [/^gh api graphql/, ok(fixture('gh-graphql-merged.json'))]
 ]
@@ -122,10 +121,8 @@ describe('how the host is asked', () => {
     const { ran } = await board([...GIT_REPO, ...GH])
     const ghRuns = ran.filter((run) => run.command === 'gh').map((run) => run.args.join(' '))
 
-    // Every list the collector asks for is a list of open pull requests, which
-    // is a human-sized thing. Whether a branch landed is never read off one:
-    // the newest hundred pull requests of a busy repository say nothing about a
-    // branch squash-merged a year ago.
+    // Only open pull requests are read off a bounded list, because the newest
+    // hundred say nothing about a branch squash-merged a year ago.
     const lists = ghRuns.filter((run) => run.startsWith('pr list'))
     expect(lists).toHaveLength(3)
     for (const list of lists) expect(list).toContain('--state open')
@@ -292,9 +289,8 @@ describe('a repository with a host that answers', () => {
   it('keeps out the branch whose tip moved after its pull request merged', async () => {
     const { board: answered } = await board([...GIT_REPO, ...GH])
 
-    // Real drift in that repository: #14 merged head b78022ac, and
-    // origin/issue-11-tier-aware-addendum stands at fc08b0e9. Two commits of
-    // that branch are in no trunk, so it is not finished work.
+    // The tip moved past the head that merged, so two commits of it are in no
+    // trunk and the work is not finished.
     expect(answered.rows.find((row) => row.name === 'issue-11-tier-aware-addendum')).toMatchObject(
       {
         group: 'inFlight',
@@ -310,7 +306,7 @@ describe('a repository with a host that answers', () => {
     expect(answered.rows.filter((row) => row.checkedOut).map((row) => row.name)).toEqual([
       'role-delegation'
     ])
-    // The one branch in that repository whose tip somebody else authored.
+    // The one branch whose tip somebody else authored.
     expect(answered.rows.filter((row) => !row.yours).map((row) => row.name)).toEqual([
       'backup-pre-surgery'
     ])

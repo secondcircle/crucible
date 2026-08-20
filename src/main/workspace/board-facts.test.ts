@@ -1,8 +1,8 @@
 // @vitest-environment node
 //
-// The parsing, against output captured from real repositories — including the
-// disagreement this feature exists for: `git branch -r --merged main` names
-// nothing in pi-extensions while `gh` reports four pull requests merged.
+// The parsing, against output captured from real repositories, including the
+// disagreement this feature exists for: git calls squash-merged branches
+// unmerged and the host does not.
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import {
@@ -136,8 +136,8 @@ describe('what gh says about pull requests', () => {
   })
 
   it('is the whole answer git could not give: merged work git calls unmerged', () => {
-    // `git branch -r --merged main` in that repository names nothing but the
-    // trunk, because every one of these landed as a squash.
+    // git names nothing but the trunk here, because every one of these landed
+    // as a squash.
     expect(MERGED_REMOTES.trim().split('\n').map((line) => line.trim())).toEqual([
       'origin/HEAD -> origin/main',
       'origin/main'
@@ -177,19 +177,19 @@ describe('what gh says about pull requests', () => {
   it('counts the check rollup as failed, running and passed', () => {
     const reviewed = parsePullRequests(REVIEWS)
 
-    // Three failures among eleven runs, from cli/cli #13788.
+    // Three failures among eleven runs.
     expect(reviewed.find((pr) => pr.number === 13788)?.checks).toEqual({
       failed: 3,
       running: 0,
       passed: 8
     })
-    // Twenty-one still going, from microsoft/vscode #331851.
+    // Still going, and counted apart from what has already passed.
     expect(reviewed.find((pr) => pr.number === 331851)?.checks).toEqual({
       failed: 0,
       running: 21,
       passed: 6
     })
-    // Skipped runs are neither failing nor still going, from cli/cli #14196.
+    // Skipped runs are neither failing nor still going.
     expect(reviewed.find((pr) => pr.number === 14196)?.checks).toEqual({
       failed: 0,
       running: 0,
@@ -238,8 +238,6 @@ describe('asking the host about branches by name', () => {
   })
 
   it('reads the merged record back by the head ref each answer carries', () => {
-    // Captured from `gh api graphql` against secondcircle/pi-extensions, asked
-    // about the eighteen branches in the for-each-ref capture.
     const merged = parseMergedByHead(MERGED_BY_HEAD)
 
     expect(merged.map((pr) => pr.number).sort((left, right) => left - right)).toEqual([
@@ -261,8 +259,8 @@ describe('asking the host about branches by name', () => {
       reviewers: [],
       assignees: []
     })
-    // #54 was closed unmerged on issue-9-id-namespacing, and a closed pull
-    // request is never collected at all.
+    // That branch's only pull request was closed unmerged, and the question
+    // asks for merged ones.
     expect(merged.some((pr) => pr.headRef === 'issue-9-id-namespacing')).toBe(false)
   })
 

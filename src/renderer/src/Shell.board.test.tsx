@@ -151,7 +151,7 @@ describe('opening and closing the board', () => {
       scripted.boards.set('/repos/crucible', { kind: 'board', board: hostedBoard() })
     })
 
-    // No chip yet, so ⌘B is the only way in — and it opens in the same frame.
+    // No chip yet, so ⌘B is the only way in, and it opens in the same frame.
     await press('b', { metaKey: true })
 
     expect(board()).not.toBeNull()
@@ -214,8 +214,8 @@ describe('opening and closing the board', () => {
     }, TWO_WORKSPACES)
     await open()
 
-    // Switching away closes the board; switching back must not reopen it —
-    // only the chip and ⌘B open the board.
+    // Switching away closes the board, and only the chip and ⌘B open it, so
+    // switching back must not.
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: 'resume-site' }))
     })

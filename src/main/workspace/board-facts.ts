@@ -1,8 +1,7 @@
 import type { BranchFact, ChecksFact, PullRequestFact } from '../../shared/workspace/classify-board'
 
-// Everything that turns `git` and `gh` output into facts, and nothing that
-// spawns either: the parsing is where the mistakes live, so it is pure and
-// tested against captured output.
+// Nothing here spawns `git` or `gh`: the parsing is where the mistakes live,
+// so it stays pure and drivable from captured output.
 
 /** The field separator the collector asks `for-each-ref` to use. */
 export const FIELD = '\t'
@@ -88,10 +87,9 @@ export function parseNameWithOwner(
 }
 
 /**
- * One row per branch: the local head and the `origin/` ref of the same short
- * name are the same branch, and the copy with the later commit is the one the
- * board judges — the question is whether work was added after a merge, and
- * whichever copy is further along is the one that answers it.
+ * A local head and the `origin/` ref of one short name are the same branch, and
+ * the later commit judges it: only the copy further along can show work added
+ * after a merge.
  */
 export function mergeBranches(
   refs: readonly RefFact[],
@@ -217,11 +215,8 @@ export function parsePullRequests(stdout: string): readonly PullRequestFact[] {
 }
 
 /**
- * One merged pull request per branch name, asked for by head ref rather than
- * taken off a list of the newest N: a branch squash-merged years ago is the
- * case the board exists for, and no volume of newer pull requests may hide it.
- * Aliases are what lets one request carry many branches; the answer is read by
- * the head ref each node carries, so their order means nothing.
+ * Asked by head ref rather than off a list of the newest N, so no volume of
+ * newer pull requests can hide a branch squash-merged years ago.
  */
 export function mergedByHeadQuery(
   owner: string,
@@ -322,9 +317,8 @@ const FAILED = new Set([
 const RUNNING = new Set(['QUEUED', 'IN_PROGRESS', 'PENDING', 'WAITING', 'REQUESTED', 'EXPECTED'])
 
 /**
- * The rollup holds check runs (a status and a conclusion) and status contexts
- * (a state). Nothing at all means the host reported nothing, which is not the
- * same as everything passing.
+ * Check runs carry a status and a conclusion, status contexts a state, and an
+ * empty rollup means the host reported nothing rather than everything passing.
  */
 function rollup(entries: readonly Record<string, unknown>[]): ChecksFact | undefined {
   if (entries.length === 0) return undefined
@@ -332,8 +326,6 @@ function rollup(entries: readonly Record<string, unknown>[]): ChecksFact | undef
   let running = 0
   let passed = 0
   for (const entry of entries) {
-    // A check run carries a status and, once it has one, a conclusion; a status
-    // context carries a state instead.
     const status = text(entry.status)
     const conclusion = text(entry.conclusion)
     const outcome = conclusion === '' ? text(entry.state) : conclusion

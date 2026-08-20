@@ -29,9 +29,8 @@ export interface BranchBoardSnapshot {
   readonly trunk: string
   /** "owner/name" where a host answered; the workspace path where none. */
   readonly repoLabel: string
-  // Absent: git-only repository. reachable:false: origin is a GitHub remote
-  // but gh could not answer this collection, so host groups are absent and
-  // landed fell back to ancestry.
+  // Absent where the repository has no host at all; unreachable where gh could
+  // not answer, which is why landed then falls back to ancestry.
   readonly host?: { readonly kind: 'github'; readonly reachable: boolean }
   readonly rows: readonly BoardRow[]
 }
@@ -48,7 +47,6 @@ export type BoardSignal =
   | { readonly kind: 'checksRunning' }
   | { readonly kind: 'checksPassed' }
   | { readonly kind: 'changesRequested' }
-  /** Your review was requested. */
   | { readonly kind: 'yourReview' }
   | { readonly kind: 'assignedToYou' }
   | { readonly kind: 'merged'; readonly byYou: boolean }
@@ -85,9 +83,8 @@ export interface WorkspaceService {
   /** Terminates the run's process tree. Harmless once the run has ended. */
   stopRun(runId: RunId): Promise<void>
 
-  // Collects and classifies one workspace's board. Serialized per workspace: a
-  // call while one is in flight joins it rather than starting another. A failed
-  // collection rejects; nothing fabricated is ever answered.
+  // Serialized per workspace: a call while one is in flight joins it rather
+  // than starting another. A failed collection rejects; nothing is fabricated.
   branchBoard(workspacePath: string): Promise<BranchBoardAnswer>
   /** Opens an https URL in the OS browser. Main validates the scheme. */
   openUrl(url: string): Promise<void>

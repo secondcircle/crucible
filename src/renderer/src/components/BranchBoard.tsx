@@ -7,9 +7,8 @@ import type {
 import { boardAge, branchAge } from '../labels'
 import './branch-board.css'
 
-// The board reports and never acts on the repository: there is no delete here,
-// no checkout, no push, and no control that could grow into one. Everything it
-// can do is in the footer legend.
+// The board reports and never acts on the repository: no delete, no checkout,
+// no push, and no control that could grow into one.
 
 /** The fixed order, and the only order. */
 const GROUPS: readonly BoardGroupId[] = [
@@ -110,9 +109,8 @@ export function BranchBoard({
     overlay.current?.focus()
   }, [])
 
-  // Every key the board acts on is taken in the capture phase and stopped
-  // there: an open board owns these keys, so a composer still holding the
-  // focus under the overlay can never see an Enter meant for a pull request.
+  // Capture phase, so a composer still holding the focus under the overlay can
+  // never see an Enter meant for a pull request.
   useEffect(() => {
     function onKeyDown(pressed: KeyboardEvent): void {
       const at = order.findIndex((row) => row.name === focusedName)

@@ -109,9 +109,8 @@ export function Shell({
   // A summarizing jump pays for an LLM call, so the tree says it is working.
   const [jumping, setJumping] = useState<'jump' | 'summarize' | undefined>(undefined)
   const [toast, setToast] = useState<string | undefined>(undefined)
-  // The workspace the board is open for, and the whole of the board's open
-  // state. Only the chip and ⌘B put a workspace here; everything that closes
-  // the board takes it back out, including a switch to another workspace.
+  // The whole of the board's open state: only the chip and ⌘B put a workspace
+  // here, and everything that closes the board takes it back out.
   const [boardFor, setBoardFor] = useState<WorkspaceId | undefined>(undefined)
   // The file popover's token, and the answer the workspace service gave for it.
   const [fileToken, setFileToken] = useState<string | undefined>(undefined)
@@ -228,10 +227,8 @@ export function Shell({
   // A workspace that turns out not to be a repository has no board to show, so
   // the overlay is gone in the frame the answer says so.
   const boardOpen = boardFor !== undefined && boardFor === activeWorkspaceId && boardReachable
-  // The board forgets that workspace in the same render, so a close is a close
-  // and not a predicate that can come back true: switching to another
-  // workspace and back leaves the board shut. The chip and ⌘B are the only two
-  // things that open it.
+  // Cleared in the same render, so a close cannot come back true when the
+  // workspace is switched away from and back to.
   if (boardFor !== undefined && !boardOpen) setBoardFor(undefined)
 
   // What a completed login or logout changes above the port: the models the
@@ -340,9 +337,8 @@ export function Shell({
     return () => clearTimeout(clear)
   }, [toast])
 
-  // Seeded text lands with the caret on the empty line under it, so the person
-  // types what they want done and nothing else. Applied once the draft it
-  // belongs to has rendered, which is the only moment the caret can be set.
+  // The caret can only be placed once the draft it belongs to has rendered,
+  // which is why this waits a frame rather than happening at the seeding.
   useEffect(() => {
     const caret = seedCaret.current
     if (caret === undefined) return
@@ -930,7 +926,7 @@ export function Shell({
       })
   }
 
-  // Three things the board can do, and nothing that touches the repository.
+  // Nothing the board can do touches the repository.
 
   function openPullRequest(row: BoardRow): void {
     const pr = row.pr

@@ -20,9 +20,8 @@ import {
   PR_FIELDS
 } from './board-facts'
 
-// The collector: which commands are run, in which order, and what is done with
-// what they say. The commands themselves arrive as a runner, so this whole
-// path is drivable from captured output and `npm test` spawns nothing.
+// The commands arrive as a runner rather than being spawned here, so this
+// whole path is drivable from captured output.
 
 /** A collection that cannot finish inside this fails rather than hanging. */
 export const COLLECTION_BUDGET_MS = 30_000
@@ -30,12 +29,8 @@ export const COLLECTION_BUDGET_MS = 30_000
 /** How long any single command may take. */
 const COMMAND_MS = 15_000
 
-/**
- * Bounds the three lists of *open* pull requests one person is part of, which
- * is a human-sized number. Nothing about landing is read off a list like this:
- * merged records are asked for by branch (see `readMerged`), so no volume of
- * newer pull requests can push an old squash merge out of sight.
- */
+// Bounds the three lists of open pull requests one person is part of, which is
+// human-sized. Nothing about landing is ever read off a list like this.
 const OPEN_PR_LIMIT = 100
 
 /** How many branches one merged-record request asks about. */
@@ -59,9 +54,8 @@ export interface CollectionClock {
 }
 
 /**
- * Collects and classifies one workspace's board. The only write it performs is
- * `git fetch --prune origin`, which touches remote-tracking refs and nothing
- * else — never the working tree, the index, or any local branch.
+ * The only write is `git fetch --prune origin`: remote-tracking refs and
+ * nothing else, never the working tree, the index or a local branch.
  */
 export async function collectBoard(
   runner: CommandRunner,
@@ -197,16 +191,8 @@ const UNREACHABLE: HostFacts = { reachable: false, pullRequests: [] }
 type Gh = (...args: readonly string[]) => Promise<CommandOutcome>
 
 /**
- * Everything gh knows, or nothing at all. A missing, unauthenticated or slow
+ * Everything gh knows, or nothing at all: a missing, unauthenticated or slow
  * gh leaves the board git-only and saying so, rather than half-populated.
- *
- * Three questions, exactly the three the board answers: which of your pull
- * requests are open, which open ones name you, and which of the branches in
- * front of you the host has already merged. The last is asked branch by
- * branch, so a landing is found however old its pull request is; the sweep is
- * bounded by this clone's branch count and batched, and if it cannot finish
- * inside the collection's budget the board says the host is unreachable rather
- * than filing a landed branch as stale.
  */
 async function readHost(
   runner: CommandRunner,
@@ -248,9 +234,8 @@ async function askHost(
   const open = await readOpen(gh, login)
   if (open === undefined) return undefined
 
-  // A branch whose pull request is open right now needs no merged record: it is
-  // in flight, and a merge that moved its tip is what keeps it out of Landed
-  // anyway.
+  // A branch with an open pull request is in flight whatever the merged record
+  // says, so asking for one would buy nothing.
   const answered = new Set(open.map((pr) => pr.headRef))
   const unanswered = branches
     .map((branch) => branch.name)

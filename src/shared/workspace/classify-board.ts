@@ -6,9 +6,9 @@ import type {
   BranchBoardSnapshot
 } from './service'
 
-// The board's judgment, and the only place it is made: facts in, grouped rows
-// out. Pure, so it can be tested directly and so no clock or process hides
-// inside an answer — the "now" staleness is measured against is an argument.
+// The board's judgment, and the only place it is made. Pure, so no clock or
+// process can hide inside an answer: the "now" staleness is measured against
+// arrives as an argument.
 
 /** Untouched longer than this, and never landed, is what stale means. */
 export const STALE_DAYS = 30
@@ -149,9 +149,8 @@ export function boardCounts(board: BranchBoardSnapshot): {
   readonly needYou: number
 } {
   const landed = board.rows.filter((row) => row.group === 'landed' && row.yours).length
-  // Exactly three signals count. Anything else on the board — assigned to you,
-  // stale, local only — is listed and never counted, so the chip is not
-  // permanently lit.
+  // Exactly three signals count. Everything else is listed and never counted,
+  // so the chip is not permanently lit.
   const needYou = board.rows.filter(
     (row) =>
       (row.yours &&
@@ -178,9 +177,8 @@ function branchRow(
     facts.userEmail !== undefined &&
     branch.authorEmail.toLowerCase() === facts.userEmail.toLowerCase()
 
-  // The host's record wins where a host answered, because a squash merge
-  // leaves no ancestry for git to find. A tip that moved past the merge point
-  // keeps the branch out: that work is not in the trunk.
+  // A squash merge leaves no ancestry for git to find, so the host's record
+  // wins; a tip past the merged head is work the trunk does not have.
   const landedByHost = merged !== undefined && merged.headTip === branch.tip
   const landedByAncestry = branch.ahead === 0
 
@@ -225,9 +223,8 @@ function branchRow(
   }
 
   const stale = at(branch.touchedAt) < staleBefore
-  // An open pull request is in flight at any age; only pull-request-less
-  // branches can go stale. What is left is pushed (in flight) or never pushed
-  // (local only).
+  // An open pull request is in flight at any age; only a branch without one
+  // can go stale.
   const group: BoardGroupId =
     open !== undefined ? 'inFlight' : stale ? 'stale' : branch.onOrigin ? 'inFlight' : 'localOnly'
 

@@ -1,5 +1,5 @@
-/* The board covers the main column — top bar, transcript and composer — and
-   leaves the sidebar where it is. Nothing here is a third permanent region. */
+/* The board covers the main column and leaves the sidebar where it is:
+   nothing here is a third permanent region. */
 .board {
   position: absolute;
   inset: 0;
@@ -166,7 +166,7 @@
 }
 
 /* Every column has its own track, so the review signal can never land on top
-   of the date the way it did in the flex version. */
+   of the date. */
 .board .row {
   position: relative;
   display: grid;

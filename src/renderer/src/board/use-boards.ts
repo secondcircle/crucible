@@ -2,9 +2,8 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import type { WorkspaceId, WorkspaceState } from '../../../shared/agent/port'
 import type { BranchBoardAnswer, WorkspaceService } from '../../../shared/workspace/service'
 
-// Where the board's refresh cadence lives. Snapshots are this document's
-// memory, keyed by workspace, and nothing here is persisted: a board is a fact
-// about a repository as it stands, and a remembered one would be a lie.
+// Snapshots live only as long as this document does: a board is a fact about a
+// repository as it stands, so a persisted one would be a lie.
 
 /** While the window is focused, and never otherwise. */
 export const POLL_MS = 60_000
@@ -39,9 +38,8 @@ export function useBranchBoards({
   // trigger was wired up.
   const latest = useRef({ workspaces, activeWorkspaceId, working })
   const inFlight = useRef<Set<WorkspaceId>>(new Set())
-  // Whether this window has the focus: read once at the start, because no
-  // focus event fires for a window that was already focused when it opened,
-  // and kept in step by the events after that.
+  // Seeded rather than left false, because no focus event fires for a window
+  // that already had the focus when it opened.
   const focused = useRef(document.hasFocus())
 
   useEffect(() => {
