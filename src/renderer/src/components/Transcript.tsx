@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { ViewItem } from '../state/shell-state'
 import { Markdown } from './Markdown'
 import './transcript.css'
@@ -14,19 +14,39 @@ export function Transcript({
   readonly sessionId: string
 }): React.JSX.Element {
   const scroller = useRef<HTMLDivElement>(null)
+  const content = useRef<HTMLOListElement>(null)
   const following = useRef(true)
 
-  useEffect(() => {
-    following.current = true
+  function pin(): void {
     const node = scroller.current
     if (node !== null) node.scrollTop = node.scrollHeight
+  }
+
+  // Layout effects pin before paint, so a grown transcript is never shown
+  // unpinned for a frame first.
+  useLayoutEffect(() => {
+    following.current = true
+    pin()
   }, [sessionId])
 
-  useEffect(() => {
-    const node = scroller.current
-    if (node === null || !following.current) return
-    node.scrollTop = node.scrollHeight
+  useLayoutEffect(() => {
+    if (following.current) pin()
   })
+
+  // Effects only see React renders. Content can also grow between them — a
+  // settled message swapping in taller than its stream, a font arriving — so
+  // while following, any resize of the content or the viewport re-pins.
+  // jsdom has no ResizeObserver; the render-time pins above still cover tests.
+  const empty = items.length === 0
+  useEffect(() => {
+    if (typeof ResizeObserver === 'undefined') return
+    const observer = new ResizeObserver(() => {
+      if (following.current) pin()
+    })
+    if (scroller.current !== null) observer.observe(scroller.current)
+    if (content.current !== null) observer.observe(content.current)
+    return () => observer.disconnect()
+  }, [sessionId, empty])
 
   function onScroll(): void {
     const node = scroller.current
@@ -46,7 +66,7 @@ export function Transcript({
 
   return (
     <div className="chat" ref={scroller} onScroll={onScroll} role="log" aria-label="Transcript">
-      <ol className="items">
+      <ol className="items" ref={content}>
         {items.map((item, index) => (
           // The transcript is append-only and never reordered, so position is
           // a stable key, and unlike an id it cannot be minted by a port.
@@ -80,7 +100,7 @@ function Item({ item }: { readonly item: ViewItem }): React.JSX.Element {
       )
 
     case 'thinking':
-      return <Thinking text={item.text} seconds={item.seconds} running={item.running} />
+      return <Thinking text={item.text} running={item.running} />
 
     case 'tool':
       return (
@@ -105,28 +125,18 @@ function Item({ item }: { readonly item: ViewItem }): React.JSX.Element {
   }
 }
 
+// A single dim element, no heading and no collapse: the header row stacked on
+// the visible trace bought nothing, and folding it caused layout shift.
 function Thinking({
   text,
-  seconds,
   running
 }: {
   readonly text: string
-  readonly seconds?: number
   readonly running: boolean
 }): React.JSX.Element {
-  const [open, setOpen] = useState(false)
-  const heading = running
-    ? 'thinking…'
-    : seconds === undefined
-      ? 'thought'
-      : `thought for ${seconds}s`
-
   return (
     <div className={`think${running ? ' running' : ''}`}>
-      <button className="thinkhead" aria-expanded={open} onClick={() => setOpen(!open)}>
-        <span aria-hidden="true">{open ? '▾' : '▸'}</span> {heading}
-      </button>
-      {open || running ? <div className="thinkbody">{text}</div> : null}
+      <div className="thinkbody">{text}</div>
     </div>
   )
 }

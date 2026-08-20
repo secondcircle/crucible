@@ -109,28 +109,26 @@ describe('tool calls', () => {
 })
 
 describe('thinking', () => {
-  it('appears only when a thinking event says so, dim and collapsed', async () => {
+  it('appears only when a thinking event says so', async () => {
     const port = await streaming()
 
-    expect(screen.queryByRole('button', { name: /thinking/ })).toBeNull()
+    expect(screen.queryByText('weighing the two shapes')).toBeNull()
 
     act(() => port.thinking('s1', 'weighing the two shapes'))
 
-    expect(screen.getByRole('button', { name: /thinking/ })).toBeInTheDocument()
+    expect(screen.getByText('weighing the two shapes')).toBeInTheDocument()
   })
 
-  it('shows a measured duration once it is over, and expands to the whole thought', async () => {
+  it('stays visible once the turn moves on, with no header row', async () => {
     const port = await streaming()
 
     act(() => port.thinking('s1', 'weighing the two shapes'))
     act(() => port.text('s1', 'The decorator wins.'))
 
-    const block = screen.getByRole('button', { name: /thought for \d+s/ })
-    expect(screen.queryByText('weighing the two shapes')).toBeNull()
-
-    fireEvent.click(block)
-
+    // A single dim element: the trace remains, and no "thought" toggle exists,
+    // so nothing collapses and the transcript never shifts under the reader.
     expect(screen.getByText('weighing the two shapes')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /thought/ })).toBeNull()
   })
 })
 
