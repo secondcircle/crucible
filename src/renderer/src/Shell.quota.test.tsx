@@ -212,7 +212,7 @@ describe('the quota strip', () => {
     expect(row.meters.map((shown) => shown.fill)).toEqual(['73%', '29%', '22%'])
   })
 
-  it('leaves out a scoped meter at zero the provider does not call binding', async () => {
+  it('renders a scoped meter at zero like any other, per Q1', async () => {
     const container = await shellWith(
       createScriptedQuota(
         snapshotOf({
@@ -226,7 +226,11 @@ describe('the quota strip', () => {
       )
     )
 
-    expect(readRow(rows(container)[0]).meters.map((shown) => shown.label)).toEqual(['7D'])
+    const shown = readRow(rows(container)[0]).meters
+    expect(shown.map((each) => each.label)).toEqual(['7D', 'FABLE'])
+    // An empty bar reads as 0% used, which is the good end of the scale.
+    expect(shown.map((each) => each.text)).toEqual(['29%', '0%'])
+    expect(shown.map((each) => each.fill)).toEqual(['29%', '0%'])
   })
 
   it('colors at 70 and at 90, and prefixes the red number with a !', async () => {

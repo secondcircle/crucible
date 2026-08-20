@@ -120,12 +120,6 @@ export function outWord(meters: readonly QuotaMeter[], now: number): string | un
   return `out ${new Date(earliest).toLocaleDateString(undefined, { weekday: 'short' })}`
 }
 
-// A scoped meter at exactly 0% and not called binding is a plan feature the
-// account has never used: a permanent empty bar the reader learns to skip.
-function noise(meter: QuotaMeter): boolean {
-  return meter.kind === 'weekly_scoped' && meter.usedPercent === 0 && meter.isActive !== true
-}
-
 function meterView(meter: QuotaMeter, index: number, now: number, stale: boolean): MeterView {
   // A stale row drops the emphasis: a number the app has stopped trusting does
   // not shout.
@@ -156,7 +150,10 @@ export function quotaRows(snapshot: QuotaSnapshot | undefined, now: number): rea
       // Dropped here too: the held snapshot ages between reads, and a
       // rolled-over percent is wrong rather than merely old.
       const live = quota.meters.filter((meter) => isLive(meter, now))
-      const shown = [...live.filter((meter) => !noise(meter))].sort(
+      // Every meter the plan reports, at every percent including zero: Q1
+      // asks for all of them visible at all times, and a row that comes and
+      // goes as a number crosses zero is harder to read than an empty bar.
+      const shown = [...live].sort(
         (left, right) => KIND_RANK[left.kind] - KIND_RANK[right.kind]
       )
 

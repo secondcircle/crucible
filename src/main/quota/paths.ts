@@ -1,11 +1,11 @@
-import { homedir } from 'node:os'
 import { join } from 'node:path'
 
-// The layout under the agent dir is an interop contract rather than Crucible's
-// own: other apps on this machine read and write these same files under the
-// same locks, so one fetch serves all of them and none pays twice for a minute.
-// Quota is a machine-global fact, so the dev/installed userData split does not
-// apply here.
+// The cache is Crucible's alone, under Crucible's own state directory, and so
+// it follows the dev/installed split like everything else there. Crucible
+// reads and writes nothing under `.pi`: π's directory is π's, and sharing a
+// file format with another app would be a contract nobody agreed to (ADR
+// 0015). Credentials still come through the π SDK's API, which is π asking
+// its own files on our behalf, not us reading them.
 
 /** A mismatch discards the file rather than parsing it. */
 export const CACHE_SCHEMA_VERSION = 1
@@ -22,19 +22,25 @@ export function isSafeProviderId(providerId: string): boolean {
   return SAFE_PROVIDER_ID.test(providerId) && !providerId.includes('..')
 }
 
-// Resolved here rather than imported from the SDK, so the read half stays
-// importable without loading π at all.
-function agentDir(): string {
-  const configured = process.env.PI_CODING_AGENT_DIR
-  if (configured !== undefined && configured !== '') {
-    return configured.startsWith('~') ? join(homedir(), configured.slice(1)) : configured
-  }
-  return join(homedir(), '.pi', 'agent')
+// Set once at startup from Electron's userData, so this module stays free of
+// both Electron and π and the read half remains importable on its own.
+let configured: string | undefined
+
+/** Called by main before any store or reader is built. */
+export function useQuotaCacheDir(dir: string): void {
+  configured = dir
 }
 
-/** `dir` overrides the location, which is how a test stays off the real cache. */
+/** `dir` is the cache directory itself, which is how a test stays off the real one. */
 export function quotaCacheDir(dir?: string): string {
-  return dir ?? join(agentDir(), 'usage')
+  if (dir !== undefined) return dir
+  if (configured === undefined) {
+    // Nobody has said where Crucible's state lives, so there is no honest
+    // answer. Guessing a path is how an app ends up writing somebody else's
+    // directory.
+    throw new Error('quota cache directory was never set: call useQuotaCacheDir first')
+  }
+  return join(configured, 'quota')
 }
 
 export function cacheFile(providerId: string, dir?: string): string {

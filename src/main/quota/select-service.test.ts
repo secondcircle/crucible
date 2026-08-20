@@ -7,6 +7,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { LogEntry, LogSink } from '../log/sink'
+import { useQuotaCacheDir } from './paths'
 import { quotaServiceKind, selectQuotaService } from './select-service'
 
 function memorySink(): { sink: LogSink; entries: LogEntry[] } {
@@ -38,9 +39,10 @@ describe('choosing a quota service', () => {
   it('serves canned meters under the fake flavor, and performs no IO doing it', async () => {
     const log = memorySink()
     // Pointed somewhere inspectable, because an agent-driven check must never
-    // go near the human's quota.
+    // go near the human's quota. Crucible's own state directory, never π's:
+    // nothing here knows what PI_CODING_AGENT_DIR is (ADR 0015).
     const home = mkdtempSync(join(tmpdir(), 'crucible-quota-flavor-'))
-    vi.stubEnv('PI_CODING_AGENT_DIR', home)
+    useQuotaCacheDir(home)
     const fetching = vi.spyOn(globalThis, 'fetch')
 
     const service = selectQuotaService('fake', log.sink)
@@ -51,7 +53,7 @@ describe('choosing a quota service', () => {
     // The same snapshot from both, because there is nothing behind it to change.
     expect(refreshed).toBe(read)
     expect(fetching).not.toHaveBeenCalled()
-    expect(existsSync(join(home, 'usage'))).toBe(false)
+    expect(existsSync(join(home, 'quota'))).toBe(false)
     expect(readdirSync(home)).toEqual([])
 
     rmSync(home, { recursive: true, force: true })

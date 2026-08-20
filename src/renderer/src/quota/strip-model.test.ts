@@ -228,7 +228,7 @@ describe('the rows', () => {
     expect(rows[1]).toMatchObject({ name: 'Grok', state: 'unknown', right: '', meters: [] })
   })
 
-  it('hides a scoped meter at zero the provider does not call binding', () => {
+  it('shows a scoped meter at zero like any other, per Q1', () => {
     const rows = quotaRows(
       snapshotOf({
         anthropic: {
@@ -242,9 +242,10 @@ describe('the rows', () => {
       NOW
     )
 
-    // A plan feature the account has never used is not a permanent empty bar;
-    // the moment it shows use or the provider calls it binding, it appears.
-    expect(rows[0].meters.map((shown) => shown.label)).toEqual(['7D', 'SPARK'])
+    // Every meter for every provider, visible at all times. An unused plan
+    // feature reads as an honest 0%, never as an absent row.
+    expect(rows[0].meters.map((shown) => shown.label)).toEqual(['7D', 'FABLE', 'SPARK'])
+    expect(rows[0].meters.map((shown) => shown.text)).toEqual(['29%', '0%', '0%'])
   })
 
   it('dims a stale row, shows its age instead of the countdown, and drops the emphasis', () => {

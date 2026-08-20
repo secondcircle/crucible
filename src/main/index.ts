@@ -12,6 +12,7 @@ import { forwardRendererOutput } from './log/renderer-output'
 import { createFileSink } from './log/sink'
 import { registerExhibitScheme, serveExhibitScheme } from './panel/exhibit-scheme'
 import { type QuotaChannel, serveQuotaChannel } from './quota/channel'
+import { useQuotaCacheDir } from './quota/paths'
 import { selectQuotaService } from './quota/select-service'
 import { panelFixtures } from './panel/fixtures'
 import { createPanelModel } from './panel/model'
@@ -102,7 +103,10 @@ const { adapter, flavor } = selectAdapter(
 const workspace = selectWorkspaceService(flavor, log)
 const commands = selectCommandService(flavor, log, app.getAppPath())
 // One store for the launch, whatever is on screen: two windows, two workspaces
-// or a dozen sessions never multiply the requests.
+// or a dozen sessions never multiply the requests. The cache is Crucible's own
+// and lives under Crucible's state, so it follows the dev/installed split and
+// touches nothing of π's (ADR 0015).
+useQuotaCacheDir(app.getPath('userData'))
 const quota = selectQuotaService(flavor, log)
 
 // Installed only: install-stable replaces the bundle in place, so watching
