@@ -109,9 +109,9 @@ export function Shell({
   // A summarizing jump pays for an LLM call, so the tree says it is working.
   const [jumping, setJumping] = useState<'jump' | 'summarize' | undefined>(undefined)
   const [toast, setToast] = useState<string | undefined>(undefined)
-  // The workspace the board was opened for. Holding the workspace rather than a
-  // flag is what makes the board follow the active one: it is open only while
-  // the two agree, so switching workspaces closes it with no effect to run.
+  // The workspace the board is open for, and the whole of the board's open
+  // state. Only the chip and ⌘B put a workspace here; everything that closes
+  // the board takes it back out, including a switch to another workspace.
   const [boardFor, setBoardFor] = useState<WorkspaceId | undefined>(undefined)
   // The file popover's token, and the answer the workspace service gave for it.
   const [fileToken, setFileToken] = useState<string | undefined>(undefined)
@@ -226,8 +226,13 @@ export function Shell({
   /** ⌘B does nothing where there is no board to open, and no chip exists. */
   const boardReachable = activeWorkspaceId !== undefined && boardAnswer?.kind !== 'noRepository'
   // A workspace that turns out not to be a repository has no board to show, so
-  // the overlay is gone the moment the answer says so.
+  // the overlay is gone in the frame the answer says so.
   const boardOpen = boardFor !== undefined && boardFor === activeWorkspaceId && boardReachable
+  // The board forgets that workspace in the same render, so a close is a close
+  // and not a predicate that can come back true: switching to another
+  // workspace and back leaves the board shut. The chip and ⌘B are the only two
+  // things that open it.
+  if (boardFor !== undefined && !boardOpen) setBoardFor(undefined)
 
   // What a completed login or logout changes above the port: the models the
   // credentials now reach.

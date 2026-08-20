@@ -228,6 +228,30 @@ describe('opening and closing the board', () => {
     expect(board()).toBeNull()
   })
 
+  it('stays closed when a folder that stopped being a repository becomes one again', async () => {
+    const workspace = await hosted()
+    await open()
+
+    // The same close, reached the other way: the answer says there is no
+    // repository here, so there is no board to show.
+    workspace.boards.set('/repos/crucible', { kind: 'noRepository' })
+    await act(async () => {
+      fireEvent.focus(window)
+    })
+    await settled()
+    expect(board()).toBeNull()
+
+    workspace.boards.set('/repos/crucible', { kind: 'board', board: hostedBoard() })
+    await act(async () => {
+      fireEvent.focus(window)
+    })
+    await settled()
+
+    expect(board()).toBeNull()
+    // And the chip is back, which is what the user opens it with.
+    expect(chip()).not.toBeNull()
+  })
+
   it('closes before the session tree, and never cancels a running turn', async () => {
     const port = createScriptedPort(oneSession())
     const workspace = createScriptedWorkspace()

@@ -77,6 +77,16 @@ export function isGitHubRemote(originUrl: string): boolean {
   return /(^|[@/.])github\.com[:/]/.test(originUrl.trim())
 }
 
+/** `owner/name`, which is both the board's label and what a query names. */
+export function parseNameWithOwner(
+  stdout: string
+): { readonly owner: string; readonly name: string } | undefined {
+  const [owner, name, ...rest] = stdout.trim().split('/')
+  if (owner === undefined || name === undefined || rest.length > 0) return undefined
+  if (owner === '' || name === '') return undefined
+  return { owner, name }
+}
+
 /**
  * One row per branch: the local head and the `origin/` ref of the same short
  * name are the same branch, and the copy with the later commit is the one the
@@ -204,6 +214,92 @@ export function parsePullRequests(stdout: string): readonly PullRequestFact[] {
     })
   }
   return facts
+}
+
+/**
+ * One merged pull request per branch name, asked for by head ref rather than
+ * taken off a list of the newest N: a branch squash-merged years ago is the
+ * case the board exists for, and no volume of newer pull requests may hide it.
+ * Aliases are what lets one request carry many branches; the answer is read by
+ * the head ref each node carries, so their order means nothing.
+ */
+export function mergedByHeadQuery(
+  owner: string,
+  name: string,
+  branches: readonly string[]
+): string {
+  const asked = branches
+    .map(
+      (branch, index) =>
+        `    b${index}: pullRequests(headRefName: ${JSON.stringify(branch)}, ` +
+        'states: [MERGED], first: 1, orderBy: {field: UPDATED_AT, direction: DESC}) ' +
+        '{ nodes { ...F } }'
+    )
+    .join('\n')
+  return (
+    `query {\n  repository(owner: ${JSON.stringify(owner)}, name: ${JSON.stringify(name)}) {\n` +
+    `${asked}\n  }\n}\n` +
+    'fragment F on PullRequest {\n' +
+    '  number\n  url\n  title\n  updatedAt\n  headRefName\n  headRefOid\n' +
+    '  author { login }\n  mergedBy { login }\n}'
+  )
+}
+
+interface RawMergedPullRequest {
+  number?: number
+  url?: string
+  title?: string
+  updatedAt?: string
+  headRefName?: string
+  headRefOid?: string
+  author?: { login?: string } | null
+  mergedBy?: { login?: string } | null
+}
+
+/** Throws on anything that is not gh's answer, which the collector treats as an unreachable host. */
+export function parseMergedByHead(stdout: string): readonly PullRequestFact[] {
+  const parsed: unknown = JSON.parse(stdout)
+  const repository = (parsed as { data?: { repository?: unknown } } | null)?.data?.repository
+  if (repository === null || typeof repository !== 'object') {
+    throw new Error('gh answered nothing about this repository.')
+  }
+
+  const facts: PullRequestFact[] = []
+  for (const asked of Object.values(repository as Record<string, unknown>)) {
+    const nodes = (asked as { nodes?: unknown } | null)?.nodes
+    if (!Array.isArray(nodes)) continue
+    for (const raw of nodes as readonly RawMergedPullRequest[]) {
+      const number = raw.number
+      const headRef = raw.headRefName
+      if (typeof number !== 'number' || typeof headRef !== 'string') continue
+      facts.push({
+        number,
+        state: 'merged',
+        url: raw.url ?? '',
+        headRef,
+        headTip: raw.headRefOid ?? '',
+        title: raw.title ?? '',
+        authorLogin: raw.author?.login ?? '',
+        updatedAt: raw.updatedAt ?? '',
+        ...(raw.mergedBy?.login === undefined ? {} : { mergedBy: raw.mergedBy.login }),
+        // Checks and reviews are the live pull requests' business; a merged one
+        // is judged on its head commit and who merged it.
+        changesRequested: false,
+        reviewers: [],
+        assignees: []
+      })
+    }
+  }
+  return facts
+}
+
+/** The same pull request can answer two questions; the board wants one of it. */
+export function dedupePullRequests(
+  facts: readonly PullRequestFact[]
+): readonly PullRequestFact[] {
+  const byNumber = new Map<number, PullRequestFact>()
+  for (const fact of facts) if (!byNumber.has(fact.number)) byNumber.set(fact.number, fact)
+  return [...byNumber.values()]
 }
 
 /** A requested reviewer is a person or a team, and a team has a slug. */

@@ -49,7 +49,10 @@ const GIT_REPO: ReadonlyArray<[RegExp, CommandOutcome]> = [
 const GH: ReadonlyArray<[RegExp, CommandOutcome]> = [
   [/^gh api user/, ok('secondcircle\n')],
   [/^gh repo view/, ok('secondcircle/pi-extensions\n')],
-  [/^gh pr list/, ok(fixture('gh-pr-list.json'))]
+  // Nothing of that repository's is open: the three open-pull-request
+  // questions really did answer an empty list when this was captured.
+  [/^gh pr list/, ok('[]')],
+  [/^gh api graphql/, ok(fixture('gh-graphql-merged.json'))]
 ]
 
 async function board(
@@ -111,6 +114,153 @@ describe('what the collector runs', () => {
     // No host at all: the board is git-only and says so by having no host.
     expect(answered.host).toBeUndefined()
     expect(answered.repoLabel).toBe('/repos/resume-site')
+  })
+})
+
+describe('how the host is asked', () => {
+  it('asks about landing branch by branch, never off a page of recent pull requests', async () => {
+    const { ran } = await board([...GIT_REPO, ...GH])
+    const ghRuns = ran.filter((run) => run.command === 'gh').map((run) => run.args.join(' '))
+
+    // Every list the collector asks for is a list of open pull requests, which
+    // is a human-sized thing. Whether a branch landed is never read off one:
+    // the newest hundred pull requests of a busy repository say nothing about a
+    // branch squash-merged a year ago.
+    const lists = ghRuns.filter((run) => run.startsWith('pr list'))
+    expect(lists).toHaveLength(3)
+    for (const list of lists) expect(list).toContain('--state open')
+    expect(ghRuns.some((run) => run.includes('--state all'))).toBe(false)
+    expect(ghRuns.some((run) => run.includes('--state merged'))).toBe(false)
+
+    // The three questions the board answers, each named to the authenticated
+    // login rather than to whatever the repository has been up to lately.
+    expect(lists[0]).toContain('--author secondcircle')
+    expect(lists[1]).toContain('--search review-requested:secondcircle')
+    expect(lists[2]).toContain('--assignee secondcircle')
+
+    // And the merged record is asked for by head ref, for every branch in
+    // front of the collector, with no limit anywhere in the question.
+    const asked = ghRuns.filter((run) => run.startsWith('api graphql')).join('\n')
+    for (const branch of [
+      'issue-7-roster-parking',
+      'issue-11-tier-aware-addendum',
+      'plan/plan-20260410-ueno',
+      'wip/pre-wipe-stash',
+      'backup-pre-surgery'
+    ]) {
+      expect(asked).toContain(`headRefName: "${branch}"`)
+    }
+    // The trunk is what everything is measured against, never a row and never
+    // a question.
+    expect(asked).not.toContain('headRefName: "main"')
+  })
+
+  it('names every branch once, however many there are, in batches', async () => {
+    const many = Array.from(
+      { length: 120 },
+      (_, index) =>
+        `refs/remotes/origin/team/branch-${index}\ttip${index}\t<them@example.com>\t` +
+        `2026-08-1${index % 10}T10:00:00Z\t3 1\twork ${index}\n`
+    ).join('')
+    const { ran } = await board([
+      ...GIT_REPO.filter(([pattern]) => !pattern.test('git for-each-ref')),
+      [/^git for-each-ref/, ok(many)],
+      ...GH
+    ])
+
+    const queries = ran
+      .filter((run) => run.command === 'gh' && run.args[1] === 'graphql')
+      .map((run) => run.args.join(' '))
+    // 120 branches, fifty to a request: three questions, not one per branch and
+    // not one enormous one.
+    expect(queries).toHaveLength(3)
+    for (const query of queries) {
+      expect([...query.matchAll(/headRefName:/g)].length).toBeLessThanOrEqual(50)
+    }
+    const asked = queries.join('\n')
+    for (let index = 0; index < 120; index += 1) {
+      expect([...asked.matchAll(new RegExp(`"team/branch-${index}"`, 'g'))]).toHaveLength(1)
+    }
+  })
+
+  it('spends no question on a branch whose pull request is open right now', async () => {
+    const openPr = JSON.stringify([
+      {
+        number: 61,
+        state: 'OPEN',
+        isDraft: false,
+        headRefName: 'role-delegation',
+        headRefOid: '962ee065786f931acd3075830d922c03dc1c4ba9',
+        title: 'A lead\u2019s switcher stops running blind',
+        url: 'https://github.com/secondcircle/pi-extensions/pull/61',
+        updatedAt: '2026-08-13T16:08:40Z',
+        author: { login: 'secondcircle' },
+        mergedBy: null,
+        statusCheckRollup: [{ __typename: 'CheckRun', status: 'COMPLETED', conclusion: 'FAILURE' }],
+        reviewDecision: '',
+        reviewRequests: [],
+        assignees: []
+      }
+    ])
+    const { board: answered, ran } = await board([
+      ...GIT_REPO,
+      [/^gh api user/, ok('secondcircle\n')],
+      [/^gh repo view/, ok('secondcircle/pi-extensions\n')],
+      [/^gh pr list --state open --author/, ok(openPr)],
+      [/^gh pr list/, ok('[]')],
+      [/^gh api graphql/, ok(fixture('gh-graphql-merged.json'))]
+    ])
+
+    const asked = ran
+      .filter((run) => run.command === 'gh' && run.args[1] === 'graphql')
+      .map((run) => run.args.join(' '))
+      .join('\n')
+    expect(asked).not.toContain('headRefName: "role-delegation"')
+    expect(answered.rows.find((row) => row.name === 'role-delegation')).toMatchObject({
+      group: 'inFlight',
+      signal: { kind: 'checksFailed', count: 1 },
+      pr: { number: 61, state: 'open' }
+    })
+  })
+
+  it('keeps one row for a pull request that answered two of the questions', async () => {
+    const naming = JSON.stringify([
+      {
+        number: 77,
+        state: 'OPEN',
+        isDraft: false,
+        headRefName: 'their-work',
+        headRefOid: 'aaa111',
+        title: 'Something of theirs that names you twice',
+        url: 'https://github.com/secondcircle/pi-extensions/pull/77',
+        updatedAt: '2026-08-19T09:00:00Z',
+        author: { login: 'someone-else' },
+        mergedBy: null,
+        statusCheckRollup: [],
+        reviewDecision: '',
+        reviewRequests: [{ login: 'secondcircle' }],
+        assignees: [{ login: 'secondcircle' }]
+      }
+    ])
+    const { board: answered } = await board([
+      ...GIT_REPO,
+      [/^gh api user/, ok('secondcircle\n')],
+      [/^gh repo view/, ok('secondcircle/pi-extensions\n')],
+      [/^gh pr list --state open --author/, ok('[]')],
+      // Requested reviewer and assignee are two questions, and this pull
+      // request is the answer to both.
+      [/^gh pr list/, ok(naming)],
+      [/^gh api graphql/, ok(fixture('gh-graphql-merged.json'))]
+    ])
+
+    const waiting = answered.rows.filter((row) => row.group === 'waitingOnYou')
+    expect(waiting).toHaveLength(1)
+    expect(waiting[0]).toMatchObject({
+      name: 'their-work',
+      signal: { kind: 'yourReview' },
+      drift: { kind: 'author', login: 'someone-else' },
+      pr: { number: 77, state: 'open' }
+    })
   })
 })
 
@@ -184,6 +334,33 @@ describe('a GitHub origin with no gh to answer for it', () => {
     )
   })
 
+  it('shows git only rather than half of what the host knows', async () => {
+    // The merged sweep is where a slow or rate-limited host gives out, and a
+    // board missing half its merged records would file landed work as stale.
+    const { board: answered } = await board([
+      ...GIT_REPO,
+      ...GH.filter(([pattern]) => !pattern.test('gh api graphql')),
+      [/^gh api graphql/, no('API rate limit exceeded')]
+    ])
+
+    expect(answered.host).toEqual({ kind: 'github', reachable: false })
+    expect(answered.rows.some((row) => row.pr !== undefined)).toBe(false)
+  })
+
+  it('shows git only when any one of the open questions goes unanswered', async () => {
+    const { board: answered } = await board([
+      ...GIT_REPO,
+      [/^gh api user/, ok('secondcircle\n')],
+      [/^gh repo view/, ok('secondcircle/pi-extensions\n')],
+      [/^gh pr list --state open --author/, ok('[]')],
+      [/^gh pr list --state open --search/, no('could not search')],
+      [/^gh pr list/, ok('[]')],
+      [/^gh api graphql/, ok(fixture('gh-graphql-merged.json'))]
+    ])
+
+    expect(answered.host).toEqual({ kind: 'github', reachable: false })
+  })
+
   it('treats an answer it cannot read as no answer at all', async () => {
     const { board: answered } = await board([
       ...GIT_REPO,
@@ -193,6 +370,17 @@ describe('a GitHub origin with no gh to answer for it', () => {
     ])
 
     expect(answered.host).toEqual({ kind: 'github', reachable: false })
+  })
+
+  it('treats a repository gh cannot see as no answer at all', async () => {
+    const { board: answered } = await board([
+      ...GIT_REPO,
+      [/^gh api user/, ok('secondcircle\n')],
+      [/^gh repo view/, ok('\n')]
+    ])
+
+    expect(answered.host).toEqual({ kind: 'github', reachable: false })
+    expect(answered.repoLabel).toBe('/repos/pi-extensions')
   })
 })
 

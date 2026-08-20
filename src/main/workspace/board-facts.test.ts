@@ -6,10 +6,14 @@
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import {
+  dedupePullRequests,
   isGitHubRemote,
   mergeBranches,
+  mergedByHeadQuery,
   parseAheadBehind,
   parseLeftRightCount,
+  parseMergedByHead,
+  parseNameWithOwner,
   parsePullRequests,
   parseRefs,
   parseTrunkRef
@@ -23,6 +27,7 @@ const REFS = fixture('for-each-ref.txt')
 const MERGED_REMOTES = fixture('branch-r-merged.txt')
 const PULL_REQUESTS = fixture('gh-pr-list.json')
 const REVIEWS = fixture('gh-pr-list-reviews.json')
+const MERGED_BY_HEAD = fixture('gh-graphql-merged.json')
 
 describe('what git says about refs', () => {
   it('reads every field of a captured for-each-ref line', () => {
@@ -199,5 +204,88 @@ describe('what gh says about pull requests', () => {
   it('refuses an answer that is not gh\u2019s', () => {
     expect(() => parsePullRequests('gh: command not found')).toThrow()
     expect(() => parsePullRequests('{"message":"Not Found"}')).toThrow()
+  })
+
+  it('keeps one copy of a pull request that answered two questions', () => {
+    const twice = [...parsePullRequests(REVIEWS), ...parsePullRequests(REVIEWS)]
+
+    expect(twice).toHaveLength(6)
+    expect(dedupePullRequests(twice).map((pr) => pr.number)).toEqual([14196, 13788, 331851])
+  })
+})
+
+describe('asking the host about branches by name', () => {
+  it('names the repository and one field per branch', () => {
+    const query = mergedByHeadQuery('secondcircle', 'pi-extensions', [
+      'issue-7-roster-parking',
+      'wip/pre-wipe'
+    ])
+
+    expect(query).toContain('repository(owner: "secondcircle", name: "pi-extensions")')
+    expect(query).toContain('b0: pullRequests(headRefName: "issue-7-roster-parking"')
+    expect(query).toContain('b1: pullRequests(headRefName: "wip/pre-wipe"')
+    // Merged only, and the newest merge of that head: the question is whether
+    // this branch landed, not what else the repository has been doing.
+    expect(query).toContain('states: [MERGED], first: 1')
+    // No limit and no page for an old pull request to fall out of.
+    expect(query).not.toMatch(/limit|first: [2-9]/)
+  })
+
+  it('quotes a branch name that would otherwise end the string', () => {
+    const query = mergedByHeadQuery('o', 'n', ['odd"name\\here'])
+
+    expect(query).toContain('headRefName: "odd\\"name\\\\here"')
+  })
+
+  it('reads the merged record back by the head ref each answer carries', () => {
+    // Captured from `gh api graphql` against secondcircle/pi-extensions, asked
+    // about the eighteen branches in the for-each-ref capture.
+    const merged = parseMergedByHead(MERGED_BY_HEAD)
+
+    expect(merged.map((pr) => pr.number).sort((left, right) => left - right)).toEqual([
+      14, 33, 45, 52
+    ])
+    expect(merged.find((pr) => pr.headRef === 'issue-7-roster-parking')).toEqual({
+      number: 45,
+      state: 'merged',
+      url: 'https://github.com/secondcircle/pi-extensions/pull/45',
+      headRef: 'issue-7-roster-parking',
+      headTip: '0e13b8dfe346f7368c8d4bf2aa4f5ba654b25a14',
+      title:
+        'The advertised roster survives /reload, so a login change can no longer re-bill a live ' +
+        "session's whole context",
+      authorLogin: 'secondcircle',
+      updatedAt: '2026-08-12T22:14:19Z',
+      mergedBy: 'secondcircle',
+      changesRequested: false,
+      reviewers: [],
+      assignees: []
+    })
+    // #54 was closed unmerged on issue-9-id-namespacing, and a closed pull
+    // request is never collected at all.
+    expect(merged.some((pr) => pr.headRef === 'issue-9-id-namespacing')).toBe(false)
+  })
+
+  it('says nothing for branches the host has never merged', () => {
+    expect(parseMergedByHead('{"data":{"repository":{"b0":{"nodes":[]}}}}')).toEqual([])
+  })
+
+  it('refuses an answer that is not a repository', () => {
+    expect(() => parseMergedByHead('gh: command not found')).toThrow()
+    expect(() =>
+      parseMergedByHead('{"data":{"repository":null},"errors":[{"type":"NOT_FOUND"}]}')
+    ).toThrow()
+  })
+})
+
+describe('what gh says the repository is called', () => {
+  it('splits owner from name, and refuses anything else', () => {
+    expect(parseNameWithOwner('secondcircle/pi-extensions\n')).toEqual({
+      owner: 'secondcircle',
+      name: 'pi-extensions'
+    })
+    expect(parseNameWithOwner('')).toBeUndefined()
+    expect(parseNameWithOwner('pi-extensions\n')).toBeUndefined()
+    expect(parseNameWithOwner('a/b/c\n')).toBeUndefined()
   })
 })

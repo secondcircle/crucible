@@ -6,10 +6,14 @@ import {
 } from '../../shared/workspace/classify-board'
 import type { BranchBoardAnswer } from '../../shared/workspace/service'
 import {
+  dedupePullRequests,
   FIELD,
   isGitHubRemote,
   mergeBranches,
+  mergedByHeadQuery,
   parseLeftRightCount,
+  parseMergedByHead,
+  parseNameWithOwner,
   parsePullRequests,
   parseRefs,
   parseTrunkRef,
@@ -26,8 +30,16 @@ export const COLLECTION_BUDGET_MS = 30_000
 /** How long any single command may take. */
 const COMMAND_MS = 15_000
 
-/** More pull requests than a person has any use for on one board. */
-const PR_LIMIT = 100
+/**
+ * Bounds the three lists of *open* pull requests one person is part of, which
+ * is a human-sized number. Nothing about landing is read off a list like this:
+ * merged records are asked for by branch (see `readMerged`), so no volume of
+ * newer pull requests can push an old squash merge out of sight.
+ */
+const OPEN_PR_LIMIT = 100
+
+/** How many branches one merged-record request asks about. */
+const MERGED_BATCH = 50
 
 export interface CommandOutcome {
   readonly ok: boolean
@@ -93,7 +105,9 @@ export async function collectBoard(
 
   const branches = await readBranches(git, trunk.ref, checkedOut)
 
-  const host = isGitHubRemote(originUrl) ? await readHost(runner, workspacePath, started, clock) : undefined
+  const host = isGitHubRemote(originUrl)
+    ? await readHost(runner, workspacePath, branches, trunk.name, started, clock)
+    : undefined
 
   const facts: BoardFacts = {
     trunk: trunk.name,
@@ -178,52 +192,125 @@ interface HostFacts {
   readonly pullRequests: readonly PullRequestFact[]
 }
 
+const UNREACHABLE: HostFacts = { reachable: false, pullRequests: [] }
+
+type Gh = (...args: readonly string[]) => Promise<CommandOutcome>
+
 /**
  * Everything gh knows, or nothing at all. A missing, unauthenticated or slow
  * gh leaves the board git-only and saying so, rather than half-populated.
+ *
+ * Three questions, exactly the three the board answers: which of your pull
+ * requests are open, which open ones name you, and which of the branches in
+ * front of you the host has already merged. The last is asked branch by
+ * branch, so a landing is found however old its pull request is; the sweep is
+ * bounded by this clone's branch count and batched, and if it cannot finish
+ * inside the collection's budget the board says the host is unreachable rather
+ * than filing a landed branch as stale.
  */
 async function readHost(
   runner: CommandRunner,
   workspacePath: string,
+  branches: readonly BranchFact[],
+  trunk: string,
   started: number,
   clock: CollectionClock
 ): Promise<HostFacts> {
-  async function gh(...args: readonly string[]): Promise<CommandOutcome> {
+  const gh: Gh = async (...args) => {
     const left = started + COLLECTION_BUDGET_MS - clock.now()
     if (left <= 0) return { ok: false, stdout: '', stderr: 'out of time' }
     return runner('gh', args, { cwd: workspacePath, timeoutMs: Math.min(COMMAND_MS, left) })
   }
 
-  const unreachable: HostFacts = { reachable: false, pullRequests: [] }
-
-  const login = await gh('api', 'user', '--jq', '.login')
-  if (!login.ok || login.stdout.trim() === '') return unreachable
-
-  const repo = await gh('repo', 'view', '--json', 'nameWithOwner', '--jq', '.nameWithOwner')
-  if (!repo.ok || repo.stdout.trim() === '') return unreachable
-
-  const list = await gh(
-    'pr',
-    'list',
-    '--state',
-    'all',
-    '--limit',
-    String(PR_LIMIT),
-    '--json',
-    PR_FIELDS
-  )
-  if (!list.ok) return unreachable
-
   try {
-    return {
-      reachable: true,
-      repoLabel: repo.stdout.trim(),
-      login: login.stdout.trim(),
-      pullRequests: parsePullRequests(list.stdout)
-    }
+    return (await askHost(gh, branches, trunk)) ?? UNREACHABLE
   } catch {
     // gh answered something this build cannot read: git-only, and the board
     // says the host is unreachable rather than inventing pull requests.
-    return unreachable
+    return UNREACHABLE
   }
+}
+
+/** Undefined where any one question went unanswered: it is all of it or none. */
+async function askHost(
+  gh: Gh,
+  branches: readonly BranchFact[],
+  trunk: string
+): Promise<HostFacts | undefined> {
+  const identity = await gh('api', 'user', '--jq', '.login')
+  const login = identity.ok ? identity.stdout.trim() : ''
+  if (login === '') return undefined
+
+  const named = await gh('repo', 'view', '--json', 'nameWithOwner', '--jq', '.nameWithOwner')
+  const repo = named.ok ? parseNameWithOwner(named.stdout) : undefined
+  if (repo === undefined) return undefined
+
+  const open = await readOpen(gh, login)
+  if (open === undefined) return undefined
+
+  // A branch whose pull request is open right now needs no merged record: it is
+  // in flight, and a merge that moved its tip is what keeps it out of Landed
+  // anyway.
+  const answered = new Set(open.map((pr) => pr.headRef))
+  const unanswered = branches
+    .map((branch) => branch.name)
+    .filter((name) => name !== trunk && !answered.has(name))
+
+  const merged = await readMerged(gh, repo, unanswered)
+  if (merged === undefined) return undefined
+
+  return {
+    reachable: true,
+    repoLabel: `${repo.owner}/${repo.name}`,
+    login,
+    pullRequests: [...open, ...merged]
+  }
+}
+
+/** Your open pull requests, and the open ones that name you. */
+async function readOpen(gh: Gh, login: string): Promise<readonly PullRequestFact[] | undefined> {
+  const lists: PullRequestFact[] = []
+  for (const question of [
+    ['--author', login],
+    // Requested reviewer and assignee are two questions to the host, and the
+    // same pull request may answer both.
+    ['--search', `review-requested:${login}`],
+    ['--assignee', login]
+  ]) {
+    const answer = await gh(
+      'pr',
+      'list',
+      '--state',
+      'open',
+      ...question,
+      '--limit',
+      String(OPEN_PR_LIMIT),
+      '--json',
+      PR_FIELDS
+    )
+    if (!answer.ok) return undefined
+    lists.push(...parsePullRequests(answer.stdout))
+  }
+  return dedupePullRequests(lists)
+}
+
+/** The host's merged record for named branches, however old the merge is. */
+async function readMerged(
+  gh: Gh,
+  repo: { readonly owner: string; readonly name: string },
+  branches: readonly string[]
+): Promise<readonly PullRequestFact[] | undefined> {
+  const merged: PullRequestFact[] = []
+  for (let from = 0; from < branches.length; from += MERGED_BATCH) {
+    const batch = branches.slice(from, from + MERGED_BATCH)
+    const answer = await gh(
+      'api',
+      'graphql',
+      '-f',
+      `query=${mergedByHeadQuery(repo.owner, repo.name, batch)}`
+    )
+    if (!answer.ok) return undefined
+    merged.push(...parseMergedByHead(answer.stdout))
+  }
+  return merged
 }
