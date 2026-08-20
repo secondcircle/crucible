@@ -270,6 +270,140 @@ describe('turns', () => {
   })
 })
 
+// π's queueing semantics as they cross the port: the shell folds the queue
+// into its snapshot, guards the turn events, and starts a turn for a message
+// that found none.
+describe('queued messages', () => {
+  /** Acts once, the first time a call in the live turn starts. */
+  function atFirstCall(act: () => void): void {
+    let done = false
+    shell.onEvent((event) => {
+      if (event.type !== 'tool_started' || done) return
+      done = true
+      act()
+    })
+  }
+
+  const queueOf = async (id: SessionId) => sessionOf(await shell.snapshot(), id)?.queue
+
+  it('starts a turn for a steering message with nothing to steer, and announces it', async () => {
+    const { sessionId } = await withSession()
+    events.length = 0
+
+    await shell.steer(sessionId, 'do this instead')
+    await settled()
+
+    // Nobody echoed it, so the port says it itself, right after the start.
+    const said = types().filter((type) => type !== 'state')
+    expect(said[0]).toBe('turn_started')
+    expect(said[1]).toBe('user_message')
+    expect(events.find((event) => event.type === 'user_message')).toMatchObject({
+      text: 'do this instead'
+    })
+    expect(await shell.transcript(sessionId)).toContainEqual({
+      kind: 'user',
+      text: 'do this instead'
+    })
+  })
+
+  it('does the same for a follow-up, so neither key is ever dead', async () => {
+    const { sessionId } = await withSession()
+    events.length = 0
+
+    await shell.followUp(sessionId, 'and this')
+    await settled()
+
+    expect(types()).toContain('user_message')
+    expect(types()).toContain('turn_ended')
+  })
+
+  it('carries the queue in the snapshot until the message is delivered', async () => {
+    const { sessionId } = await withSession()
+    const seen: (readonly string[] | undefined)[] = []
+    shell.onEvent((event) => {
+      if (event.type === 'state') seen.push(sessionOf(event.snapshot, sessionId)?.queue?.steering)
+    })
+    atFirstCall(() => {
+      void shell.steer(sessionId, 'read the adapter too')
+    })
+
+    await shell.prompt(sessionId, 'hello')
+    await settled()
+
+    expect(seen.some((steering) => steering?.includes('read the adapter too'))).toBe(true)
+    // Delivered, so the strip has nothing left to show and the transcript has
+    // it instead.
+    expect(await queueOf(sessionId)).toBeUndefined()
+    expect(types()).toContain('user_message')
+    expect(await shell.transcript(sessionId)).toContainEqual({
+      kind: 'user',
+      text: 'read the adapter too'
+    })
+  })
+
+  it('never lets a turn end with a message still queued behind it', async () => {
+    const { sessionId } = await withSession()
+    atFirstCall(() => {
+      void shell.steer(sessionId, 'redirect')
+      void shell.followUp(sessionId, 'afterwards')
+      void shell.cancel(sessionId)
+    })
+
+    await shell.prompt(sessionId, 'hello')
+    await settled()
+
+    // Both queues come back, steering first, and nothing fires at the plan the
+    // user just killed.
+    const flushed = events.find((event) => event.type === 'queue_flushed')
+    expect(flushed).toMatchObject({
+      messages: [
+        { kind: 'steering', text: 'redirect' },
+        { kind: 'followUp', text: 'afterwards' }
+      ]
+    })
+    expect(types()).not.toContain('user_message')
+    expect(types().indexOf('queue_flushed')).toBeLessThan(types().indexOf('turn_cancelled'))
+    expect(await queueOf(sessionId)).toBeUndefined()
+  })
+
+  it('hands the queue back on a reset, and keeps the sidebar identity', async () => {
+    const { sessionId } = await withSession()
+    let reset: Promise<void> | undefined
+    atFirstCall(() => {
+      reset = shell
+        .steer(sessionId, 'not this conversation')
+        .then(() => shell.resetSession(sessionId))
+    })
+
+    await shell.prompt(sessionId, 'hello')
+    await settled()
+    await reset
+
+    expect(types()).toContain('queue_flushed')
+    expect(await queueOf(sessionId)).toBeUndefined()
+    expect((await shell.snapshot()).sessions.map((session) => session.id)).toEqual([sessionId])
+  })
+
+  it('leaves nothing of a removed session’s queue behind', async () => {
+    const { sessionId } = await withSession()
+    atFirstCall(() => {
+      void shell.steer(sessionId, 'never delivered')
+    })
+
+    await shell.prompt(sessionId, 'hello')
+    await shell.removeSession(sessionId)
+    await settled()
+
+    expect((await shell.snapshot()).sessions).toEqual([])
+  })
+
+  it('answers false for a dequeue of something no longer queued', async () => {
+    const { sessionId } = await withSession()
+
+    expect(await shell.dequeue(sessionId, 'steering', 'never queued')).toBe(false)
+  })
+})
+
 describe('cancellation', () => {
   it('ends the live turn as cancelled and nothing else follows it', async () => {
     const { sessionId } = await withSession()
@@ -508,6 +642,9 @@ describe('a relaunch', () => {
   })
 })
 
+// The fake adapter is built with no pause, so its whole script runs on
+// microtasks: one macrotask turn is past all of it, however long the script
+// grows.
 async function settled(): Promise<void> {
-  for (let turn = 0; turn < 50; turn += 1) await Promise.resolve()
+  await new Promise((resolve) => setTimeout(resolve, 0))
 }

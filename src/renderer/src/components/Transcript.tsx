@@ -1,5 +1,12 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { ViewItem } from '../state/shell-state'
+import {
+  countsText,
+  groupIntoChains,
+  type LoneItem,
+  type ToolChain,
+  type ToolItem
+} from '../state/tool-chains'
 import { Markdown } from './Markdown'
 import './transcript.css'
 
@@ -67,11 +74,11 @@ export function Transcript({
   return (
     <div className="chat" ref={scroller} onScroll={onScroll} role="log" aria-label="Transcript">
       <ol className="items" ref={content}>
-        {items.map((item, index) => (
-          // The transcript is append-only and never reordered, so position is
-          // a stable key, and unlike an id it cannot be minted by a port.
-          <li key={index}>
-            <Item item={item} />
+        {groupIntoChains(items).map((row) => (
+          // The session is part of the key, so what a reader opened in one
+          // session can never be what another session shows opened.
+          <li key={`${sessionId}:${row.key}`}>
+            {row.kind === 'chain' ? <Chain chain={row.chain} /> : <Item item={row.item} />}
           </li>
         ))}
       </ol>
@@ -79,7 +86,7 @@ export function Transcript({
   )
 }
 
-function Item({ item }: { readonly item: ViewItem }): React.JSX.Element {
+function Item({ item }: { readonly item: LoneItem }): React.JSX.Element {
   switch (item.kind) {
     case 'user':
       return (
@@ -101,17 +108,6 @@ function Item({ item }: { readonly item: ViewItem }): React.JSX.Element {
 
     case 'thinking':
       return <Thinking text={item.text} running={item.running} />
-
-    case 'tool':
-      return (
-        <Tool
-          name={item.name}
-          summary={item.summary}
-          output={item.output}
-          ok={item.ok}
-          running={item.running}
-        />
-      )
 
     case 'stopped':
       return <div className="stopped">Stopped</div>
@@ -141,22 +137,66 @@ function Thinking({
   )
 }
 
+// Collapsed from the first call and never collapsing on its own afterwards, so
+// a chain that finishes does not move the transcript under the reader.
+function Chain({ chain }: { readonly chain: ToolChain }): React.JSX.Element {
+  const [open, setOpen] = useState(false)
+  const counts = countsText(chain.counts)
+
+  return (
+    <div className={`chain ${chain.state}${open ? ' open' : ''}`}>
+      <button
+        className="chainhead"
+        aria-expanded={open}
+        aria-label={['Tool chain', counts, chain.label].filter((part) => part !== '').join(' · ')}
+        onClick={() => setOpen(!open)}
+      >
+        {chain.live === undefined ? (
+          <span className="disc" aria-hidden="true">
+            {open ? '▾' : '▸'}
+          </span>
+        ) : (
+          // Still spinning while work continues, even once a call has failed.
+          <span className="spin" aria-hidden="true" />
+        )}
+        <span className="counts">
+          {chain.counts.map((count, index) => (
+            <span key={count.name}>
+              {index === 0 ? '' : ' · '}
+              {/* The number is keyed by its own value, so a count that goes up
+                  is a new element and its pulse plays again. */}
+              <span
+                key={count.count}
+                className={`n${chain.live === undefined ? '' : ' tick'}`}
+              >
+                {count.count}
+              </span>{' '}
+              {count.name}
+            </span>
+          ))}
+        </span>
+        {/* Whatever is running right now, and nothing once the chain settles. */}
+        <span className="live">
+          {chain.live === undefined ? '' : `${chain.live.name} ${chain.live.summary}`}
+        </span>
+        <span className="chainstate">{chain.label}</span>
+      </button>
+      {open ? (
+        <div className="calls">
+          {chain.calls.map((call, index) => (
+            <Call key={call.callId ?? `call-${index}`} call={call} />
+          ))}
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
 // Every tool renders the same way; per-tool renderings are later work.
-function Tool({
-  name,
-  summary,
-  output,
-  ok,
-  running
-}: {
-  readonly name: string
-  readonly summary: string
-  readonly output: string
-  readonly ok?: boolean
-  readonly running: boolean
-}): React.JSX.Element {
+function Call({ call }: { readonly call: ToolItem }): React.JSX.Element {
   const [open, setOpen] = useState(false)
   const tail = useRef<HTMLPreElement>(null)
+  const { name, summary, output, ok, running } = call
 
   useEffect(() => {
     // While a tool runs its output tails rather than grows, so a long-running

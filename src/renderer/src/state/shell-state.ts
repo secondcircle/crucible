@@ -137,6 +137,9 @@ function withView(state: ShellState, sessionId: SessionId, view: SessionView): S
 
 function heard(state: ShellState, event: PortEvent, at: number): ShellState {
   if (event.type === 'state') return { ...state, snapshot: event.snapshot }
+  // What a flush does is hand text back to the composer, which is the
+  // document's business and not the transcript's.
+  if (event.type === 'queue_flushed') return state
 
   const { sessionId } = event
   const view = state.views[sessionId] ?? EMPTY_VIEW
@@ -154,6 +157,14 @@ function heard(state: ShellState, event: PortEvent, at: number): ShellState {
   if (view.turn === undefined || view.turn.turnId !== event.turnId) return state
 
   switch (event.type) {
+    // A message the port delivered itself, which reads exactly as a sent one:
+    // it appears here at its delivery point, never before it.
+    case 'user_message':
+      return withView(state, sessionId, {
+        ...view,
+        items: [...settle(view.items, at), { kind: 'user', text: event.text }]
+      })
+
     case 'text_delta':
       return withView(state, sessionId, {
         ...view,

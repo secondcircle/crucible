@@ -2,6 +2,8 @@ import type {
   HistoryMatch,
   ModelId,
   ModelInfo,
+  QueuedKind,
+  QueuedMessage,
   SessionId,
   ThinkingLevel,
   TranscriptItem,
@@ -95,6 +97,25 @@ export type AdapterEvent =
       readonly usedTokens: number
       readonly contextWindow: number
     }
+  // The whole queue after any change, session-scoped like `usage`: main folds
+  // it into the snapshot rather than correlating it with a turn.
+  | {
+      readonly type: 'queue_changed'
+      readonly sessionId: SessionId
+      readonly steering: readonly string[]
+      readonly followUp: readonly string[]
+    }
+  | {
+      readonly type: 'user_message'
+      readonly sessionId: SessionId
+      readonly turnId: TurnId
+      readonly text: string
+    }
+  | {
+      readonly type: 'queue_flushed'
+      readonly sessionId: SessionId
+      readonly messages: readonly QueuedMessage[]
+    }
 
 export type AdapterEventListener = (event: AdapterEvent) => void
 
@@ -129,6 +150,16 @@ export interface ConversationAdapter {
   // A rejection means the turn never ran, and the caller then owes it a
   // terminal event.
   prompt(sessionId: SessionId, turnId: TurnId, text: string): Promise<void>
+
+  // The `'idle'` answer is what closes the race between the caller's view of
+  // `working` and the adapter's: rather than let a message sit unheard in an
+  // idle conversation, the adapter says it queued nothing and the caller sends
+  // the text as a prompt instead.
+  /** 'idle' means nothing was queued because no run is live; the caller sends it as a prompt. */
+  steer(sessionId: SessionId, text: string): Promise<'queued' | 'idle'>
+  followUp(sessionId: SessionId, text: string): Promise<'queued' | 'idle'>
+  /** Removes the first entry of that kind whose text matches. */
+  dequeue(sessionId: SessionId, kind: QueuedKind, text: string): Promise<boolean>
 
   /** Harmless when the session has no live turn. */
   cancel(sessionId: SessionId): Promise<void>

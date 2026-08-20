@@ -77,10 +77,13 @@
   cursor: default;
 }
 
-.send.working {
+/* While working, the send button stays and says what it will do; Stop sits
+   beside it rather than in its place. */
+.stop {
   background: var(--panel);
   color: var(--ink);
   border: 1px solid var(--accent);
+  border-radius: var(--radius);
   display: flex;
   align-items: center;
   gap: 8px;

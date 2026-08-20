@@ -30,6 +30,23 @@ export interface WorkspaceState {
   readonly path: string
 }
 
+// π's two kinds of queued message, adopted verbatim: a steering message
+// redirects the live turn at the next boundary between tool calls, a follow-up
+// waits until the agent has fully stopped.
+export type QueuedKind = 'steering' | 'followUp'
+
+export interface QueuedMessage {
+  readonly kind: QueuedKind
+  readonly text: string
+}
+
+export interface QueueState {
+  /** Undelivered steering messages, oldest first. */
+  readonly steering: readonly string[]
+  /** Undelivered follow-up messages, oldest first. */
+  readonly followUp: readonly string[]
+}
+
 export interface SessionState {
   readonly id: SessionId
   readonly workspaceId: WorkspaceId
@@ -41,6 +58,8 @@ export interface SessionState {
   readonly working: boolean
   // Absent until the adapter has reported real usage.
   readonly usage?: { readonly usedTokens: number; readonly contextWindow: number }
+  /** Absent when nothing is queued. */
+  readonly queue?: QueueState
 }
 
 export interface ShellSnapshot {
@@ -115,6 +134,23 @@ export type PortEvent =
       readonly ok: boolean
       readonly output: string
     }
+  // A user message the port itself delivered into the conversation: a queued
+  // message at its delivery point, or a steer that fell back to a prompt.
+  // Text sent through `prompt()` is never announced this way, because the
+  // caller of `prompt()` echoes its own.
+  | {
+      readonly type: 'user_message'
+      readonly sessionId: SessionId
+      readonly turnId: TurnId
+      readonly text: string
+    }
+  // Queued messages handed back rather than delivered: on cancel and on turn
+  // error. Queue order, steering first. Nothing flushed is delivered after.
+  | {
+      readonly type: 'queue_flushed'
+      readonly sessionId: SessionId
+      readonly messages: readonly QueuedMessage[]
+    }
   | { readonly type: 'turn_ended'; readonly sessionId: SessionId; readonly turnId: TurnId }
   | { readonly type: 'turn_cancelled'; readonly sessionId: SessionId; readonly turnId: TurnId }
   | {
@@ -158,6 +194,18 @@ export interface AgentPort {
 
   // Accepted, not finished: resolves once the turn is live.
   prompt(sessionId: SessionId, text: string): Promise<TurnId>
+
+  // Neither of these is ever lost and neither is ever refused: the message is
+  // queued and delivered within the live turn, or — when no turn is live, or
+  // the live turn ends before it can be queued — sent as the next prompt.
+  // Nothing enters the transcript at queue time.
+  steer(sessionId: SessionId, text: string): Promise<void>
+  followUp(sessionId: SessionId, text: string): Promise<void>
+  // Names the entry by content rather than by an index delivery may have
+  // shifted.
+  /** True when the entry was removed; false when it was no longer queued. */
+  dequeue(sessionId: SessionId, kind: QueuedKind, text: string): Promise<boolean>
+
   /** Harmless when there is nothing to stop. */
   cancel(sessionId: SessionId): Promise<void>
 }

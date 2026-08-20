@@ -59,23 +59,25 @@ describe('sending', () => {
 })
 
 describe('while a turn is live', () => {
-  it('offers Stop instead of Send, and leaves the box editable for a redirect', async () => {
+  it('offers Steer beside Stop, and leaves the box editable for a redirect', async () => {
     await shellWithSession()
 
     await send('write the adapter')
 
     expect(screen.getByRole('button', { name: /Stop/ })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Steer ⏎' })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Send' })).toBeNull()
     expect(screen.getByLabelText('Message')).toBeEnabled()
   })
 
-  it('does not send on Enter', async () => {
+  it('queues on Enter rather than starting a second turn', async () => {
     const port = await shellWithSession()
     await send('write the adapter')
 
     await send('and this too')
 
     expect(port.calls.filter((call) => call.op === 'prompt')).toHaveLength(1)
+    expect(port.calls).toContainEqual({ op: 'steer', args: ['s1', 'and this too'] })
   })
 
   it('shows genuine elapsed working time', async () => {

@@ -7,6 +7,8 @@ import type {
   ModelInfo,
   PortEvent,
   PortEventListener,
+  QueuedKind,
+  QueueState,
   SessionId,
   SessionState,
   ShellSnapshot,
@@ -47,6 +49,18 @@ interface LiveTurn {
   // undispatched one is ended here, and this mark keeps it from being
   // dispatched afterwards.
   cancelled: boolean
+  // Set when this turn carries a message nobody echoed — a steer or a
+  // follow-up that found no turn to queue into — which is then announced
+  // right after the turn starts.
+  readonly announce?: string
+  /** Resolves when the shell stops treating this turn as live. */
+  readonly over: Promise<void>
+  /** Resolves `over`; called wherever the turn leaves the live map. */
+  settled(): void
+}
+
+function queued(queue: QueueState | undefined): boolean {
+  return queue !== undefined && queue.steering.length + queue.followUp.length > 0
 }
 
 export function createShell({
@@ -58,6 +72,9 @@ export function createShell({
   const listeners = new Set<PortEventListener>()
   const live = new Map<SessionId, LiveTurn>()
   const usage = new Map<SessionId, { usedTokens: number; contextWindow: number }>()
+  // Folded from `queue_changed` exactly as usage is, so the strip renders from
+  // the snapshot and survives both a session switch and a renderer reload.
+  const queues = new Map<SessionId, QueueState>()
   const bindings = new Map<SessionId, Promise<Binding>>()
   let turns = 0
 
@@ -70,6 +87,7 @@ export function createShell({
   function snapshot(): ShellSnapshot {
     const sessions: SessionState[] = store.state.sessions.map((session) => {
       const reported = usage.get(session.id)
+      const queue = queues.get(session.id)
       return {
         id: session.id,
         workspaceId: session.workspaceId,
@@ -77,7 +95,8 @@ export function createShell({
         model: session.model,
         thinkingLevel: session.thinkingLevel,
         working: live.has(session.id),
-        ...(reported === undefined ? {} : { usage: reported })
+        ...(reported === undefined ? {} : { usage: reported }),
+        ...(queued(queue) ? { queue } : {})
       }
     })
 
@@ -146,16 +165,139 @@ export function createShell({
     return binding
   }
 
+  function mintTurn(announce?: string): LiveTurn {
+    turns += 1
+    let settled: () => void = () => {}
+    const over = new Promise<void>((resolve) => {
+      settled = resolve
+    })
+    return {
+      turnId: `t-${turns}`,
+      started: false,
+      dispatched: false,
+      cancelled: false,
+      announce,
+      over,
+      settled
+    }
+  }
+
+  // The one place a turn stops being live, so nothing waiting on `over` is
+  // left waiting.
+  function endTurn(sessionId: SessionId, turn: LiveTurn): void {
+    live.delete(sessionId)
+    turn.settled()
+  }
+
+  // A message this shell put into the conversation itself is announced right
+  // after the start, because no caller of `prompt()` echoed it.
+  function announceStart(sessionId: SessionId, turn: LiveTurn): void {
+    if (turn.started) return
+    turn.started = true
+    emit({ type: 'turn_started', sessionId, turnId: turn.turnId })
+    if (turn.announce !== undefined) {
+      emit({ type: 'user_message', sessionId, turnId: turn.turnId, text: turn.announce })
+    }
+  }
+
   // A turn the adapter never ran still owes its listeners a start before its
   // terminal event.
   function endAsCancelled(sessionId: SessionId, turn: LiveTurn): void {
-    live.delete(sessionId)
-    if (!turn.started) {
-      turn.started = true
-      emit({ type: 'turn_started', sessionId, turnId: turn.turnId })
-    }
+    endTurn(sessionId, turn)
+    announceStart(sessionId, turn)
     emit({ type: 'turn_cancelled', sessionId, turnId: turn.turnId })
     emitState()
+  }
+
+  // `announce` is the text of a message this shell delivered itself; a plain
+  // prompt has none, because its caller echoed it.
+  function beginTurn(sessionId: SessionId, text: string, announce?: string): TurnId {
+    requireSession(sessionId)
+    // Checked and claimed in the same tick, so nothing can slip between the
+    // two.
+    if (live.has(sessionId)) refuse('That session is already working.')
+
+    const turn = mintTurn(announce)
+    const { turnId } = turn
+    live.set(sessionId, turn)
+    emitState()
+
+    // Binding is part of running the turn rather than of accepting it, so a
+    // conversation that cannot be opened surfaces as this turn's error.
+    void ensureBound(sessionId)
+      .then(async () => {
+        // A stop, reset or removal during the bind already ended this turn,
+        // and the adapter must never be asked to run work the user stopped.
+        if (live.get(sessionId) !== turn) return
+        turn.dispatched = true
+        await adapter.prompt(sessionId, turnId, text)
+      })
+      .then(() => {
+        // A turn the adapter finished without saying so still ends exactly
+        // once, and it ends here.
+        if (live.get(sessionId) !== turn) return
+        // The adapter returned without saying how a stopped turn ended:
+        // cancelled is the honest outcome, not a normal end.
+        if (turn.cancelled) {
+          endAsCancelled(sessionId, turn)
+          return
+        }
+        endTurn(sessionId, turn)
+        announceStart(sessionId, turn)
+        emit({ type: 'turn_ended', sessionId, turnId })
+        emitState()
+      })
+      .catch((cause: unknown) => {
+        if (live.get(sessionId) !== turn) return
+        // A rejection after a stop is the stop landing, not a failure to
+        // show anyone.
+        if (turn.cancelled) {
+          endAsCancelled(sessionId, turn)
+          return
+        }
+        endTurn(sessionId, turn)
+        announceStart(sessionId, turn)
+        emit({
+          type: 'turn_error',
+          sessionId,
+          turnId,
+          message: displaySafeMessage(cause, 'The agent failed without saying why.')
+        })
+        emitState()
+      })
+
+    return turnId
+  }
+
+  // Never lost and never refused: the message is queued into the live turn,
+  // or, when there is no live turn to queue it into, it becomes the next
+  // prompt and is announced as a user message itself.
+  async function queueMessage(
+    sessionId: SessionId,
+    kind: QueuedKind,
+    text: string
+  ): Promise<void> {
+    requireSession(sessionId)
+
+    for (;;) {
+      const turn = live.get(sessionId)
+      if (turn === undefined) break
+      // A turn still binding has no adapter run behind it yet; waiting for the
+      // bind is what keeps a message queued during one from being lost.
+      await ensureBound(sessionId)
+      if (live.get(sessionId) === turn) {
+        const answer =
+          kind === 'steering'
+            ? await adapter.steer(sessionId, text)
+            : await adapter.followUp(sessionId, text)
+        if (answer === 'queued') return
+        // The adapter has no run to queue into after all, so this turn is over
+        // as far as the conversation is concerned: the message waits for it.
+        await turn.over
+      }
+    }
+
+    beginTurn(sessionId, text, text)
   }
 
   // A turn is live from the moment its prompt is accepted, which on the SDK
@@ -184,6 +326,20 @@ export function createShell({
       return
     }
 
+    // Queue events are session-scoped like usage: they belong to the session
+    // rather than to whichever turn happens to be live.
+    if (event.type === 'queue_changed') {
+      queues.set(event.sessionId, { steering: event.steering, followUp: event.followUp })
+      emitState()
+      return
+    }
+    if (event.type === 'queue_flushed') {
+      queues.delete(event.sessionId)
+      emit(event)
+      emitState()
+      return
+    }
+
     const turn = live.get(event.sessionId)
     // Dropping events for turns that are no longer live is what makes "nothing
     // after the terminal event" true whoever is behind the port.
@@ -191,26 +347,22 @@ export function createShell({
 
     if (event.type === 'turn_started') {
       if (turn.started) return
-      turn.started = true
-      emit(event)
+      announceStart(event.sessionId, turn)
       return
     }
 
-    if (!turn.started) {
-      // No adapter should stream before it starts a turn; if one does, the
-      // start is still said exactly once and first.
-      turn.started = true
-      emit({ type: 'turn_started', sessionId: event.sessionId, turnId: event.turnId })
-    }
+    // No adapter should stream before it starts a turn; if one does, the start
+    // is still said exactly once and first.
+    announceStart(event.sessionId, turn)
 
     if (event.type === 'turn_ended' || event.type === 'turn_cancelled') {
-      live.delete(event.sessionId)
+      endTurn(event.sessionId, turn)
       emit(event)
       emitState()
       return
     }
     if (event.type === 'turn_error') {
-      live.delete(event.sessionId)
+      endTurn(event.sessionId, turn)
       emit({
         type: 'turn_error',
         sessionId: event.sessionId,
@@ -263,6 +415,7 @@ export function createShell({
         adapter.release(session.id)
         bindings.delete(session.id)
         usage.delete(session.id)
+        queues.delete(session.id)
       }
       store.removeWorkspace(id)
       emitState()
@@ -313,6 +466,9 @@ export function createShell({
       adapter.release(id)
       bindings.delete(id)
       usage.delete(id)
+      // A queue has nowhere to be restored to once the entry holding it is
+      // gone.
+      queues.delete(id)
       store.removeSession(id)
       emitState()
     },
@@ -329,8 +485,10 @@ export function createShell({
         thinkingLevel: bound.thinkingLevel
       })
       // The fresh conversation has reported nothing yet, so the meter goes back
-      // to saying nothing rather than keeping the old session's numbers.
+      // to saying nothing rather than keeping the old session's numbers. The
+      // stop above already handed any queued message back to the composer.
       usage.delete(id)
+      queues.delete(id)
       emitState()
     },
 
@@ -415,63 +573,27 @@ export function createShell({
       emitState()
     },
 
+    // Async so that a refusal crosses the port as a rejection rather than as a
+    // synchronous throw.
     async prompt(sessionId: SessionId, text: string): Promise<TurnId> {
+      return beginTurn(sessionId, text)
+    },
+
+    async steer(sessionId: SessionId, text: string): Promise<void> {
+      await queueMessage(sessionId, 'steering', text)
+    },
+
+    async followUp(sessionId: SessionId, text: string): Promise<void> {
+      await queueMessage(sessionId, 'followUp', text)
+    },
+
+    async dequeue(sessionId: SessionId, kind: QueuedKind, text: string): Promise<boolean> {
       requireSession(sessionId)
-      // Checked and claimed in the same tick, so nothing can slip between the
-      // two.
-      if (live.has(sessionId)) refuse('That session is already working.')
-
-      turns += 1
-      const turnId = `t-${turns}`
-      const turn: LiveTurn = { turnId, started: false, dispatched: false, cancelled: false }
-      live.set(sessionId, turn)
-      emitState()
-
-      // Binding is part of running the turn rather than of accepting it, so a
-      // conversation that cannot be opened surfaces as this turn's error.
-      void ensureBound(sessionId)
-        .then(async () => {
-          // A stop, reset or removal during the bind already ended this turn,
-          // and the adapter must never be asked to run work the user stopped.
-          if (live.get(sessionId) !== turn) return
-          turn.dispatched = true
-          await adapter.prompt(sessionId, turnId, text)
-        })
-        .then(() => {
-          // A turn the adapter finished without saying so still ends exactly
-          // once, and it ends here.
-          if (live.get(sessionId) !== turn) return
-          // The adapter returned without saying how a stopped turn ended:
-          // cancelled is the honest outcome, not a normal end.
-          if (turn.cancelled) {
-            endAsCancelled(sessionId, turn)
-            return
-          }
-          live.delete(sessionId)
-          if (!turn.started) emit({ type: 'turn_started', sessionId, turnId })
-          emit({ type: 'turn_ended', sessionId, turnId })
-          emitState()
-        })
-        .catch((cause: unknown) => {
-          if (live.get(sessionId) !== turn) return
-          // A rejection after a stop is the stop landing, not a failure to
-          // show anyone.
-          if (turn.cancelled) {
-            endAsCancelled(sessionId, turn)
-            return
-          }
-          live.delete(sessionId)
-          if (!turn.started) emit({ type: 'turn_started', sessionId, turnId })
-          emit({
-            type: 'turn_error',
-            sessionId,
-            turnId,
-            message: displaySafeMessage(cause, 'The agent failed without saying why.')
-          })
-          emitState()
-        })
-
-      return turnId
+      // Nothing can be queued behind a session that was never bound, and
+      // binding one to say so would be work for no answer.
+      if (bindings.get(sessionId) === undefined) return false
+      await ensureBound(sessionId)
+      return adapter.dequeue(sessionId, kind, text)
     },
 
     async cancel(sessionId: SessionId): Promise<void> {
@@ -481,6 +603,7 @@ export function createShell({
     },
 
     dispose(): void {
+      for (const turn of live.values()) turn.settled()
       live.clear()
       adapter.dispose()
     }

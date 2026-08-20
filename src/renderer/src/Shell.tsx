@@ -2,12 +2,14 @@ import { useCallback, useEffect, useReducer, useRef, useState } from 'react'
 import type {
   AgentPort,
   HistoryMatch,
+  QueuedKind,
   SessionId,
   ThinkingLevel,
   WorkspaceId
 } from '../../shared/agent/port'
 import { Composer, useElapsedSeconds } from './components/Composer'
 import { ConfirmDialog } from './components/ConfirmDialog'
+import { entriesOf, QueuedStrip } from './components/QueuedStrip'
 import { ResumeOverlay } from './components/ResumeOverlay'
 import { Sidebar } from './components/Sidebar'
 import { TopBar } from './components/TopBar'
@@ -33,6 +35,8 @@ export function Shell({ port }: { port: AgentPort }): React.JSX.Element {
   const [failure, setFailure] = useState<string | undefined>(undefined)
   /** Sessions whose settled history this document has already asked for. */
   const fetched = useRef<Set<SessionId>>(new Set())
+  // Restoring a queued message puts the caret back where the words are.
+  const box = useRef<HTMLTextAreaElement>(null)
 
   const { snapshot, models, views } = state
   const activeWorkspaceId = snapshot.activeWorkspaceId
@@ -44,11 +48,22 @@ export function Shell({ port }: { port: AgentPort }): React.JSX.Element {
   // Known to hold nothing, which is what lets a guard skip its question.
   const emptyConversation = knownEmpty(view)
   const working = session?.working ?? false
+  const queue = session?.queue
   const model = models.find((candidate) => candidate.id === session?.model)
   const elapsedSeconds = useElapsedSeconds(working ? view?.turn?.startedAt : undefined)
 
   const report = useCallback((cause: unknown): void => {
     setFailure(cause instanceof Error ? cause.message : String(cause))
+  }, [])
+
+  // A draft being typed is never destroyed: restored text joins it rather than
+  // replacing it.
+  const restore = useCallback((sessionId: SessionId, ...texts: readonly string[]): void => {
+    setDrafts((current) => {
+      let draft = current[sessionId] ?? ''
+      for (const text of texts) draft = draft === '' ? text : `${draft}\n\n${text}`
+      return { ...current, [sessionId]: draft }
+    })
   }, [])
 
   // Subscribe before anything is asked for: events may arrive before the
@@ -59,6 +74,11 @@ export function Shell({ port }: { port: AgentPort }): React.JSX.Element {
       // The clock is read here rather than in the reducer, which stays pure so
       // React may replay it under StrictMode.
       dispatch({ type: 'event', event, at: Date.now() })
+      // Queued messages the port handed back rather than delivered go to the
+      // composer of the session they were queued in, active or not.
+      if (event.type === 'queue_flushed') {
+        restore(event.sessionId, ...event.messages.map((message) => message.text))
+      }
     })
     void port
       .snapshot()
@@ -69,7 +89,7 @@ export function Shell({ port }: { port: AgentPort }): React.JSX.Element {
       .then((listed) => dispatch({ type: 'models', models: listed }))
       .catch(report)
     return stop
-  }, [port, report])
+  }, [port, report, restore])
 
   // Settled history, once per session this document has not watched live.
   useEffect(() => {
@@ -122,17 +142,63 @@ export function Shell({ port }: { port: AgentPort }): React.JSX.Element {
     setDrafts((current) => ({ ...current, [activeSessionId]: text }))
   }
 
+  /** Enter: a prompt while idle, a steering message while the session works. */
   function send(): void {
     const id = activeSessionId
-    if (id === undefined || working) return
+    if (id === undefined) return
     const text = draft.trim()
     if (text === '') return
     setDrafts((current) => ({ ...current, [id]: '' }))
+    setFailure(undefined)
+    if (working) {
+      // Nothing is echoed into the transcript: a queued message appears only
+      // in the strip until the port says it was delivered.
+      void port.steer(id, text).catch(report)
+      return
+    }
     // What was sent stands in the transcript at once; the turn it starts
     // arrives as events.
     dispatch({ type: 'sent', sessionId: id, text })
-    setFailure(undefined)
     void port.prompt(id, text).catch(report)
+  }
+
+  /** Option+Enter: a follow-up while working, and exactly Enter while idle. */
+  function followUp(): void {
+    const id = activeSessionId
+    if (id === undefined) return
+    if (!working) {
+      send()
+      return
+    }
+    const text = draft.trim()
+    if (text === '') return
+    setDrafts((current) => ({ ...current, [id]: '' }))
+    setFailure(undefined)
+    void port.followUp(id, text).catch(report)
+  }
+
+  function dequeue(kind: QueuedKind, text: string): void {
+    const id = activeSessionId
+    if (id === undefined) return
+    void port
+      .dequeue(id, kind, text)
+      .then((removed) => {
+        // A false answer means the message was delivered or flushed while the
+        // click was in flight, and the state event that follows has already
+        // taken the entry off the strip.
+        if (!removed) return
+        restore(id, text)
+        box.current?.focus()
+      })
+      .catch(report)
+  }
+
+  // π's binding: the bottom-most entry, which is the last follow-up if there
+  // is one and the last steering message otherwise.
+  function restoreLast(): void {
+    const last = queue === undefined ? undefined : entriesOf(queue).at(-1)
+    if (last === undefined) return
+    dequeue(last.kind, last.text)
   }
 
   function newSession(): void {
@@ -287,10 +353,13 @@ export function Shell({ port }: { port: AgentPort }): React.JSX.Element {
           </p>
         )}
 
+        {queue === undefined ? null : <QueuedStrip queue={queue} onDequeue={dequeue} />}
+
         <Composer
           draft={draft}
           disabled={session === undefined}
           working={working}
+          boxRef={box}
           elapsedSeconds={elapsedSeconds}
           model={model}
           modelId={session?.model}
@@ -300,6 +369,8 @@ export function Shell({ port }: { port: AgentPort }): React.JSX.Element {
           thinkingMenuOpen={popover === 'thinking'}
           onDraft={setDraft}
           onSend={send}
+          onFollowUp={followUp}
+          onRestoreLast={restoreLast}
           onStop={cancel}
           onToggleModelPicker={() => setPopover(popover === 'model' ? 'none' : 'model')}
           onSelectModel={selectModel}

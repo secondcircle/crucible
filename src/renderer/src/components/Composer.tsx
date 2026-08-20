@@ -18,8 +18,11 @@ export function Composer({
   modelPickerOpen,
   thinkingLevel,
   thinkingMenuOpen,
+  boxRef,
   onDraft,
   onSend,
+  onFollowUp,
+  onRestoreLast,
   onStop,
   onToggleModelPicker,
   onSelectModel,
@@ -37,15 +40,24 @@ export function Composer({
   readonly modelPickerOpen: boolean
   readonly thinkingLevel?: ThinkingLevel
   readonly thinkingMenuOpen: boolean
+  /** Held above, because what restores a queued message also focuses it. */
+  readonly boxRef?: React.RefObject<HTMLTextAreaElement | null>
   readonly onDraft: (draft: string) => void
+  /** Enter: a prompt while idle, a steering message while working. */
   readonly onSend: () => void
+  /** Option+Enter: a follow-up while working, and a plain send while idle. */
+  readonly onFollowUp: () => void
+  /** Option+Up: π's binding for pulling the last queued message back. */
+  readonly onRestoreLast: () => void
   readonly onStop: () => void
   readonly onToggleModelPicker: () => void
   readonly onSelectModel: (id: string) => void
   readonly onToggleThinkingMenu: () => void
   readonly onSelectThinkingLevel: (level: ThinkingLevel) => void
 }): React.JSX.Element {
-  const sendable = !disabled && !working && draft.trim() !== ''
+  // While working the same draft queues instead of sending, so what makes a
+  // draft usable is the same question in both states.
+  const sendable = !disabled && draft.trim() !== ''
 
   return (
     <div className="composer">
@@ -56,10 +68,19 @@ export function Composer({
           value={draft}
           disabled={disabled}
           onChange={(changed) => onDraft(changed.target.value)}
+          ref={boxRef}
           onKeyDown={(pressed) => {
+            if (pressed.key === 'ArrowUp' && pressed.altKey) {
+              pressed.preventDefault()
+              onRestoreLast()
+              return
+            }
             if (pressed.key !== 'Enter' || pressed.shiftKey) return
             pressed.preventDefault()
-            if (sendable) onSend()
+            if (!sendable) return
+            // Never a dead key: idle, Option+Enter is a plain send.
+            if (pressed.altKey) onFollowUp()
+            else onSend()
           }}
         />
         <div className="crow">
@@ -107,11 +128,18 @@ export function Composer({
           </div>
 
           {working ? (
-            <button className="send working" onClick={onStop}>
-              <span className="spin" aria-hidden="true" />
-              <span className="stopsq" aria-hidden="true" />
-              Stop
-            </button>
+            <>
+              {/* Labelled for what it will do, because a hotkey is never the
+                  only way to reach a capability. */}
+              <button className="send steer" disabled={!sendable} onClick={onSend}>
+                Steer ⏎
+              </button>
+              <button className="stop" onClick={onStop}>
+                <span className="spin" aria-hidden="true" />
+                <span className="stopsq" aria-hidden="true" />
+                Stop
+              </button>
+            </>
           ) : (
             <button className="send" disabled={!sendable} onClick={onSend}>
               Send
@@ -126,7 +154,7 @@ export function Composer({
             <span className="workingnote">
               agent working{elapsedSeconds === undefined ? '' : ` · ${elapsedSeconds}s`}
             </span>{' '}
-            — <kbd>esc</kbd> or Stop to cancel ·{' '}
+            — <kbd>⏎</kbd> steer · <kbd>⌥⏎</kbd> follow-up · <kbd>esc</kbd> stop ·{' '}
           </>
         ) : null}
         <kbd>⇧⏎</kbd> newline

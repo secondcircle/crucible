@@ -131,6 +131,72 @@ describe('tool calls', () => {
   })
 })
 
+// π takes a message out of its queue and says so immediately before that
+// message starts, which is the signal a delivery is told apart by.
+describe('queued messages', () => {
+  it('reports the whole queue after any change', () => {
+    expect(map({ type: 'queue_update', steering: ['redirect'], followUp: [] })).toEqual({
+      type: 'queue_changed',
+      sessionId: 's1',
+      steering: ['redirect'],
+      followUp: []
+    })
+  })
+
+  it('announces a queued message that has just been delivered', () => {
+    const mapper = createEventMapper()
+    mapper.map(sdk({ type: 'queue_update', steering: ['redirect'], followUp: [] }), TARGET)
+    mapper.map(sdk({ type: 'queue_update', steering: [], followUp: [] }), TARGET)
+
+    expect(
+      mapper.map(
+        sdk({
+          type: 'message_start',
+          message: { role: 'user', content: [{ type: 'text', text: 'redirect' }] }
+        }),
+        TARGET
+      )
+    ).toEqual({ type: 'user_message', sessionId: 's1', turnId: 't-1', text: 'redirect' })
+  })
+
+  it('says nothing about the prompt’s own message, which its caller echoed', () => {
+    expect(
+      map({
+        type: 'message_start',
+        message: { role: 'user', content: [{ type: 'text', text: 'write the adapter' }] }
+      })
+    ).toBeUndefined()
+  })
+
+  it('announces a delivered message exactly once', () => {
+    const mapper = createEventMapper()
+    mapper.map(sdk({ type: 'queue_update', steering: ['again'], followUp: [] }), TARGET)
+    mapper.map(sdk({ type: 'queue_update', steering: [], followUp: [] }), TARGET)
+    const start = sdk({
+      type: 'message_start',
+      message: { role: 'user', content: [{ type: 'text', text: 'again' }] }
+    })
+
+    expect(mapper.map(start, TARGET)).toMatchObject({ type: 'user_message' })
+    expect(mapper.map(start, TARGET)).toBeUndefined()
+  })
+
+  it('says nothing about a message merely being queued', () => {
+    const mapper = createEventMapper()
+    mapper.map(sdk({ type: 'queue_update', steering: ['later'], followUp: [] }), TARGET)
+
+    expect(
+      mapper.map(
+        sdk({
+          type: 'message_start',
+          message: { role: 'user', content: [{ type: 'text', text: 'later' }] }
+        }),
+        TARGET
+      )
+    ).toBeUndefined()
+  })
+})
+
 describe('failures', () => {
   it('becomes a turn error carrying a sentence, not a payload', () => {
     expect(

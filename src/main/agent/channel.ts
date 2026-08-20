@@ -1,6 +1,6 @@
 import { ipcMain, type BrowserWindow } from 'electron'
 import { EVENT_CHANNEL, REQUEST_CHANNEL, type PortResult } from '../../shared/agent/channels'
-import type { PortEvent } from '../../shared/agent/port'
+import type { PortEvent, QueuedKind } from '../../shared/agent/port'
 import type { Shell } from '../shell/shell'
 import { displaySafeMessage } from './adapter-error'
 
@@ -68,6 +68,15 @@ async function invoke(shell: Shell, request: unknown): Promise<unknown> {
     return value
   }
 
+  /** One of π's two queues, named, or a refusal: there is no third kind. */
+  function kind(position: number): QueuedKind {
+    const value = given[position]
+    if (value !== 'steering' && value !== 'followUp') {
+      throw new Error(`${op} needs a queue to name, and that is not one.`)
+    }
+    return value
+  }
+
   switch (op) {
     case 'snapshot':
       return shell.snapshot()
@@ -99,6 +108,12 @@ async function invoke(shell: Shell, request: unknown): Promise<unknown> {
       return shell.setThinkingLevel(text(0), text(1))
     case 'prompt':
       return shell.prompt(text(0), text(1))
+    case 'steer':
+      return shell.steer(text(0), text(1))
+    case 'followUp':
+      return shell.followUp(text(0), text(1))
+    case 'dequeue':
+      return shell.dequeue(text(0), kind(1), text(2))
     case 'cancel':
       return shell.cancel(text(0))
     default:

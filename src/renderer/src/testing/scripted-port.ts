@@ -5,6 +5,9 @@ import type {
   ModelInfo,
   PortEvent,
   PortEventListener,
+  QueuedKind,
+  QueuedMessage,
+  QueueState,
   SessionId,
   SessionState,
   ShellSnapshot,
@@ -26,11 +29,18 @@ export interface ScriptedPort extends AgentPort {
   readonly transcripts: Map<SessionId, readonly TranscriptItem[]>
   /** What the folder picker will answer with; `null` is a cancelled picker. */
   folder: string | null
+  // Set only where a test needs the race: otherwise `dequeue` answers by
+  // whether the entry was really there, the way main does.
+  dequeueAnswer?: boolean
 
   update(change: (snapshot: ShellSnapshot) => ShellSnapshot): void
   emit(event: PortEvent): void
 
   turnOf(sessionId: SessionId): TurnId | undefined
+  userMessage(sessionId: SessionId, text: string): void
+  /** Hands queued messages back the way a stop or a failed turn does. */
+  flushQueue(sessionId: SessionId, messages: readonly QueuedMessage[]): void
+  queueOf(sessionId: SessionId): QueueState | undefined
   text(sessionId: SessionId, delta: string): void
   thinking(sessionId: SessionId, delta: string): void
   toolStarted(sessionId: SessionId, callId: string, name: string, summary: string): void
@@ -84,6 +94,44 @@ export function createScriptedPort(initial: Partial<ShellSnapshot> = {}): Script
     changeSession(sessionId, (session) => ({ ...session, working: false }))
     emit(event)
     emitState()
+  }
+
+  function queueOf(sessionId: SessionId): QueueState {
+    const session = snapshot.sessions.find((candidate) => candidate.id === sessionId)
+    return session?.queue ?? { steering: [], followUp: [] }
+  }
+
+  function setQueue(sessionId: SessionId, state: QueueState): void {
+    // Absent rather than empty, exactly as main reports it.
+    const empty = state.steering.length + state.followUp.length === 0
+    changeSession(sessionId, (session) => {
+      const rest: SessionState = { ...session }
+      delete (rest as { queue?: QueueState }).queue
+      return empty ? rest : { ...rest, queue: state }
+    })
+  }
+
+  function queue(sessionId: SessionId, kind: QueuedKind, text: string): Promise<void> {
+    if (!turns.has(sessionId)) {
+      // Nothing to queue into: main sends the text as the next prompt and
+      // announces it, because no caller echoed it.
+      const turnId = `t-${(minted += 1)}`
+      turns.set(sessionId, turnId)
+      changeSession(sessionId, (session) => ({ ...session, working: true }))
+      emit({ type: 'turn_started', sessionId, turnId })
+      emit({ type: 'user_message', sessionId, turnId, text })
+      emitState()
+      return Promise.resolve()
+    }
+    const current = queueOf(sessionId)
+    setQueue(
+      sessionId,
+      kind === 'steering'
+        ? { ...current, steering: [...current.steering, text] }
+        : { ...current, followUp: [...current.followUp, text] }
+    )
+    emitState()
+    return Promise.resolve()
   }
 
   const port: ScriptedPort = {
@@ -250,6 +298,31 @@ export function createScriptedPort(initial: Partial<ShellSnapshot> = {}): Script
       return Promise.resolve(turnId)
     },
 
+    // Queued while the session works, exactly as main answers; with no live
+    // turn the text starts one, which is main's fallback.
+    steer(sessionId: SessionId, text: string): Promise<void> {
+      calls.push({ op: 'steer', args: [sessionId, text] })
+      return queue(sessionId, 'steering', text)
+    },
+
+    followUp(sessionId: SessionId, text: string): Promise<void> {
+      calls.push({ op: 'followUp', args: [sessionId, text] })
+      return queue(sessionId, 'followUp', text)
+    },
+
+    dequeue(sessionId: SessionId, kind: QueuedKind, text: string): Promise<boolean> {
+      calls.push({ op: 'dequeue', args: [sessionId, kind, text] })
+      if (port.dequeueAnswer !== undefined) return Promise.resolve(port.dequeueAnswer)
+      const current = queueOf(sessionId)
+      const entries = [...(kind === 'steering' ? current.steering : current.followUp)]
+      const at = entries.indexOf(text)
+      if (at === -1) return Promise.resolve(false)
+      entries.splice(at, 1)
+      setQueue(sessionId, kind === 'steering' ? { ...current, steering: entries } : { ...current, followUp: entries })
+      emitState()
+      return Promise.resolve(true)
+    },
+
     cancel(sessionId: SessionId): Promise<void> {
       calls.push({ op: 'cancel', args: [sessionId] })
       if (turns.has(sessionId)) {
@@ -266,6 +339,19 @@ export function createScriptedPort(initial: Partial<ShellSnapshot> = {}): Script
     emit,
 
     turnOf: (sessionId) => turns.get(sessionId),
+
+    userMessage(sessionId, text) {
+      emit({ type: 'user_message', sessionId, turnId: turn(sessionId), text })
+    },
+
+    flushQueue(sessionId, messages) {
+      setQueue(sessionId, { steering: [], followUp: [] })
+      emit({ type: 'queue_flushed', sessionId, messages })
+      emitState()
+    },
+
+    queueOf: (sessionId) =>
+      snapshot.sessions.find((session) => session.id === sessionId)?.queue,
 
     text(sessionId, delta) {
       emit({ type: 'text_delta', sessionId, turnId: turn(sessionId), delta })

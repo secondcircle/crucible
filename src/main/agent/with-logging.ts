@@ -71,6 +71,9 @@ export function withLogging(shell: Shell, log: LogSink, adapter: string): Shell 
     ),
 
     prompt: op('prompt', (sessionId, text) => shell.prompt(sessionId, text)),
+    steer: op('steer', (sessionId, text) => shell.steer(sessionId, text)),
+    followUp: op('followUp', (sessionId, text) => shell.followUp(sessionId, text)),
+    dequeue: op('dequeue', (sessionId, kind, text) => shell.dequeue(sessionId, kind, text)),
     cancel: op('cancel', (sessionId) => shell.cancel(sessionId)),
 
     dispose: () => {

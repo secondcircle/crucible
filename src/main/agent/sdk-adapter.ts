@@ -18,6 +18,8 @@ import type {
   HistoryMatch,
   ModelId,
   ModelInfo,
+  QueuedKind,
+  QueuedMessage,
   SessionId,
   ThinkingLevel,
   TranscriptItem,
@@ -94,7 +96,16 @@ export function createSdkAdapter(): ConversationAdapter {
       const pi = await sdk()
       const agentDir = pi.getAgentDir()
       const settingsManager = pi.SettingsManager.create(workspacePath, agentDir)
-      settingsManager.applyOverrides({ packages: [], extensions: [] })
+      // In memory only, and never written back to the user's settings files:
+      // the emptied resources keep their globally configured extensions out of
+      // a Crucible session, and the two queue modes are Crucible's fixed
+      // pacing — every queued message of a kind is delivered as a group.
+      settingsManager.applyOverrides({
+        packages: [],
+        extensions: [],
+        steeringMode: 'all',
+        followUpMode: 'all'
+      })
       const resourceLoader = new pi.DefaultResourceLoader({
         cwd: workspacePath,
         agentDir,
@@ -177,6 +188,18 @@ export function createSdkAdapter(): ConversationAdapter {
     const bound = sessions.get(sessionId)
     if (bound === undefined) throw new Error('That session is not bound to a conversation.')
     return bound
+  }
+
+  // `clearQueue()` removes and returns in one step, so nothing can be
+  // delivered between reading the queue and emptying it.
+  function flushQueue(bound: Bound, sessionId: SessionId): void {
+    const { steering, followUp } = bound.session.clearQueue()
+    const messages: QueuedMessage[] = [
+      ...steering.map((text): QueuedMessage => ({ kind: 'steering', text })),
+      ...followUp.map((text): QueuedMessage => ({ kind: 'followUp', text }))
+    ]
+    if (messages.length === 0) return
+    emit({ type: 'queue_flushed', sessionId, messages })
   }
 
   // Stop the work before letting go of the session, or an in-flight request
@@ -408,6 +431,11 @@ export function createSdkAdapter(): ConversationAdapter {
 
       if (abandoned) return
 
+      // Flushed before the terminal event, whatever the outcome: a message
+      // still queued when a run is over was never delivered, and it goes back
+      // to the composer rather than into the next run.
+      flushQueue(bound, sessionId)
+
       // Decided here because only the adapter that called `abort()` knows an
       // abort happened.
       emit(cancelled ? { type: 'turn_cancelled', sessionId, turnId } : outcome)
@@ -425,8 +453,46 @@ export function createSdkAdapter(): ConversationAdapter {
       }
     },
 
+    // Streaming in this adapter's own terms: `running` is set for the whole of
+    // the prompt call, while `isStreaming` lags it by a microtask and would
+    // answer 'idle' for a run genuinely under way.
+    async steer(sessionId: SessionId, text: string): Promise<'queued' | 'idle'> {
+      const bound = requireBound(sessionId)
+      if (bound.running === undefined) return 'idle'
+      await bound.session.steer(text)
+      return 'queued'
+    },
+
+    async followUp(sessionId: SessionId, text: string): Promise<'queued' | 'idle'> {
+      const bound = requireBound(sessionId)
+      if (bound.running === undefined) return 'idle'
+      await bound.session.followUp(text)
+      return 'queued'
+    },
+
+    // π removes queued messages only as a whole, so one entry leaves by
+    // clearing the queue and putting the rest back in order. Re-queued text is
+    // already expanded, which expanding again does nothing to.
+    async dequeue(sessionId: SessionId, kind: QueuedKind, text: string): Promise<boolean> {
+      const bound = sessions.get(sessionId)
+      if (bound === undefined) return false
+      const { session } = bound
+      const { steering, followUp } = session.clearQueue()
+      const wanted = kind === 'steering' ? steering : followUp
+      const at = wanted.indexOf(text)
+      if (at !== -1) wanted.splice(at, 1)
+      for (const queued of steering) await session.steer(queued)
+      for (const queued of followUp) await session.followUp(queued)
+      return at !== -1
+    },
+
     async cancel(sessionId: SessionId): Promise<void> {
-      sessions.get(sessionId)?.running?.cancel()
+      const bound = sessions.get(sessionId)
+      if (bound?.running === undefined) return
+      // Cleared before the abort, so nothing queued can fire at a plan the
+      // user just killed.
+      flushQueue(bound, sessionId)
+      bound.running.cancel()
     },
 
     onEvent(listener: AdapterEventListener): Unsubscribe {

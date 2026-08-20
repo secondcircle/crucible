@@ -90,11 +90,104 @@
   white-space: pre-wrap;
 }
 
-/* tool calls — chip collapsed, bounded output when open or running */
-.tool {
+/* tool chains — one collapsed row per run of consecutive calls */
+.chain {
   max-width: var(--column);
   margin: 0 auto 10px;
   padding: 0 24px;
+}
+
+.chainhead {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  width: 100%;
+  font: 12px var(--mono);
+  color: var(--dim);
+  background: var(--code);
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--ok);
+  border-radius: 6px;
+  padding: 7px 12px;
+  text-align: left;
+}
+
+.chain.running > .chainhead {
+  border-left-color: var(--accent);
+}
+
+.chain.failed > .chainhead {
+  border-left-color: var(--error);
+}
+
+/* A chain holding a call that was cut off with its turn claims no outcome. */
+.chain.stopped > .chainhead {
+  border-left-color: var(--faint);
+}
+
+.chainhead .disc {
+  color: var(--faint);
+  flex: none;
+  width: 10px;
+}
+
+.counts {
+  color: var(--ink);
+  white-space: nowrap;
+  flex: none;
+}
+
+.counts .n {
+  color: var(--accent2);
+}
+
+/* A count that just went up pulses once, so a landing call is visible from the
+   collapsed row. Only a chain with work left in it ticks: a settled one has
+   nothing to announce. */
+.counts .n.tick {
+  display: inline-block;
+  animation: tick 0.45s ease-out;
+}
+
+@keyframes tick {
+  0% {
+    color: var(--ink);
+    transform: scale(1.35);
+  }
+
+  100% {
+    color: var(--accent2);
+    transform: scale(1);
+  }
+}
+
+/* The call running right now, said in one ellipsized line. */
+.live {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--dim);
+  font-style: italic;
+}
+
+.chainstate {
+  margin-left: auto;
+  color: var(--faint);
+  flex: none;
+}
+
+/* A failure is unmissable from the collapsed row, running or not. */
+.chain.failed .chainstate {
+  color: var(--error);
+}
+
+.calls {
+  margin: 2px 0 0 14px;
+}
+
+/* tool calls — a chain's own rows, with bounded output when open or running */
+.tool {
+  margin-bottom: 2px;
 }
 
 .toolhead {
@@ -108,7 +201,7 @@
   border: 1px solid var(--line);
   border-left: 3px solid var(--ok);
   border-radius: 6px;
-  padding: 7px 12px;
+  padding: 6px 12px;
   text-align: left;
 }
 
@@ -128,6 +221,7 @@
 
 .toolname {
   color: var(--ink);
+  flex: none;
 }
 
 .toolsummary {
@@ -139,6 +233,7 @@
 .toolstate {
   margin-left: auto;
   color: var(--faint);
+  flex: none;
 }
 
 .tool.failed .toolstate {

@@ -26,10 +26,45 @@ export function createEventMapper(): EventMapper {
   // Tool output arrives as a growing snapshot rather than as chunks, so only
   // the part past this count is forwarded.
   const forwarded = new Map<string, number>()
+  /** The queue as the last `queue_update` reported it, oldest first. */
+  let queued: readonly string[] = []
+  // π takes a message out of its queue and says so immediately before that
+  // message starts, so what left the queue is exactly what is being delivered.
+  // The prompt's own user message leaves no such trace, which is what keeps it
+  // from being shown a second time.
+  const delivering: string[] = []
 
   return {
     map(event: AgentSessionEvent, { sessionId, turnId }: TurnTarget): AdapterEvent | undefined {
       switch (event.type) {
+        case 'queue_update': {
+          const now = [...event.steering, ...event.followUp]
+          const left = [...queued]
+          for (const text of now) {
+            const at = left.indexOf(text)
+            if (at !== -1) left.splice(at, 1)
+          }
+          delivering.push(...left)
+          queued = now
+          return {
+            type: 'queue_changed',
+            sessionId,
+            steering: [...event.steering],
+            followUp: [...event.followUp]
+          }
+        }
+
+        case 'message_start': {
+          if (event.message.role !== 'user') return undefined
+          const text = userText(event.message.content)
+          const at = delivering.indexOf(text)
+          // A user message nobody queued is the prompt's own, and its caller
+          // already echoed it.
+          if (text === '' || at === -1) return undefined
+          delivering.splice(at, 1)
+          return { type: 'user_message', sessionId, turnId, text }
+        }
+
         case 'message_update':
           switch (event.assistantMessageEvent.type) {
             case 'text_delta':
@@ -135,6 +170,22 @@ export function summarizeToolArgs(args: unknown): string {
   }
   const first = Object.values(fields).find((value) => typeof value === 'string' && value !== '')
   return typeof first === 'string' ? clip(first, SUMMARY_LIMIT) : ''
+}
+
+/** A user message's text, whichever of the two shapes its content came in. */
+function userText(content: unknown): string {
+  if (typeof content === 'string') return content
+  if (!Array.isArray(content)) return ''
+  return content
+    .map((block) =>
+      typeof block === 'object' &&
+      block !== null &&
+      (block as { type?: unknown }).type === 'text' &&
+      typeof (block as { text?: unknown }).text === 'string'
+        ? (block as { text: string }).text
+        : ''
+    )
+    .join('')
 }
 
 // Only text blocks cross: an image or a structured payload is the SDK's own

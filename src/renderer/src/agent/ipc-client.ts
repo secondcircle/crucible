@@ -6,6 +6,7 @@ import type {
   ModelInfo,
   PortEvent,
   PortEventListener,
+  QueuedKind,
   SessionId,
   ShellSnapshot,
   ThinkingLevel,
@@ -91,6 +92,10 @@ export function createIpcClient(): AgentPort {
       call<void>('setThinkingLevel', sessionId, level),
 
     prompt: (sessionId: SessionId, text: string) => call<TurnId>('prompt', sessionId, text),
+    steer: (sessionId: SessionId, text: string) => call<void>('steer', sessionId, text),
+    followUp: (sessionId: SessionId, text: string) => call<void>('followUp', sessionId, text),
+    dequeue: (sessionId: SessionId, kind: QueuedKind, text: string) =>
+      call<boolean>('dequeue', sessionId, kind, text),
     cancel: (sessionId: SessionId) => call<void>('cancel', sessionId)
   }
 }

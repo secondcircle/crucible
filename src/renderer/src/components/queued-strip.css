@@ -1,0 +1,61 @@
+/* Between the transcript and the composer: dashed, because none of it has
+   happened yet. */
+.queue {
+  max-width: var(--column);
+  width: 100%;
+  margin: 0 auto;
+  padding: 0 24px;
+  flex: none;
+}
+
+.qitem {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+  width: 100%;
+  background: none;
+  border: 1px dashed var(--line);
+  border-radius: 8px;
+  padding: 6px 12px;
+  margin-bottom: 6px;
+  text-align: left;
+  color: var(--dim);
+  font-size: 12.5px;
+}
+
+.qitem:hover {
+  border-color: var(--dim);
+}
+
+.qkind {
+  flex: none;
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  padding: 1px 7px;
+  border-radius: 9px;
+  border: 1px solid var(--line);
+}
+
+.qkind.steer {
+  color: var(--accent2);
+  border-color: var(--accent);
+}
+
+.qkind.follow {
+  color: var(--thinking);
+  border-color: var(--thinking);
+}
+
+.qtext {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.qhint {
+  margin-left: auto;
+  flex: none;
+  color: var(--faint);
+  font-size: 11px;
+}

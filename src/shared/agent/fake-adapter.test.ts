@@ -22,8 +22,15 @@ async function withSession(sessionId = 's1'): Promise<{
 
 const types = (events: readonly AdapterEvent[]): string[] => events.map((event) => event.type)
 
+/** One call: its start, a chunk of output for each chunk it streams, its end. */
+const call = (chunks: number): string[] => [
+  'tool_started',
+  ...Array.from({ length: chunks }, () => 'tool_output'),
+  'tool_ended'
+]
+
 describe('the scripted turn', () => {
-  it('runs thinking, one tool call, a markdown reply, usage, then the end', async () => {
+  it('runs thinking, a chain of calls, a lone call, a reply, usage, then the end', async () => {
     const { adapter, events } = await withSession()
 
     await adapter.prompt('s1', 't-1', 'hello')
@@ -33,11 +40,13 @@ describe('the scripted turn', () => {
       'thinking_delta',
       'thinking_delta',
       'thinking_delta',
-      'tool_started',
-      'tool_output',
-      'tool_output',
-      'tool_output',
-      'tool_ended',
+      // Three consecutive calls, which is one tool chain.
+      ...call(3),
+      ...call(1),
+      ...call(1),
+      // Text ends that chain, so what follows is a chain of one.
+      'text_delta',
+      ...call(1),
       ...Array.from({ length: 13 }, () => 'text_delta'),
       'turn_ended',
       'usage'
@@ -58,16 +67,30 @@ describe('the scripted turn', () => {
     expect(reply).toContain('```ts')
   })
 
-  it('keeps one tool call, opened and closed, with its output', async () => {
+  it('opens and closes every call it starts, with its output', async () => {
     const { adapter, events } = await withSession()
 
     await adapter.prompt('s1', 't-1', 'hello')
-    const started = events.find((event) => event.type === 'tool_started')
-    const ended = events.find((event) => event.type === 'tool_ended')
+    const started = events.filter((event) => event.type === 'tool_started')
+    const ended = events.filter((event) => event.type === 'tool_ended')
 
-    expect(started).toMatchObject({ name: 'bash', summary: 'npm test' })
-    expect(ended).toMatchObject({ ok: true, callId: started?.callId })
-    expect(ended?.type === 'tool_ended' ? ended.output : '').toContain('42 passed')
+    expect(started[0]).toMatchObject({ name: 'bash', summary: 'npm test' })
+    expect(ended.map((event) => event.callId)).toEqual(started.map((event) => event.callId))
+    expect(ended[0].type === 'tool_ended' ? ended[0].output : '').toContain('42 passed')
+  })
+
+  it('spans two tool names in one chain and fails exactly one of the calls', async () => {
+    const { adapter, events } = await withSession()
+
+    await adapter.prompt('s1', 't-1', 'hello')
+    const started = events.filter((event) => event.type === 'tool_started')
+    const ended = events.filter((event) => event.type === 'tool_ended')
+
+    // Three in the chain and one on its own, under two names, so a single
+    // scripted turn shows the counts, the failure marker and a chain of one.
+    expect(started).toHaveLength(4)
+    expect(new Set(started.map((event) => event.name))).toEqual(new Set(['bash', 'read']))
+    expect(ended.filter((event) => !event.ok)).toHaveLength(1)
   })
 
   it('reports usage that is inside the window and grows with the conversation', async () => {
@@ -81,6 +104,153 @@ describe('the scripted turn', () => {
     expect(usage[0].usedTokens).toBeGreaterThan(0)
     expect(usage[1].usedTokens).toBeGreaterThan(usage[0].usedTokens)
     expect(usage[1].usedTokens).toBeLessThan(usage[1].contextWindow)
+  })
+})
+
+// π's own queueing semantics, implemented here so both features are
+// exercisable without a paid call.
+describe('queued messages', () => {
+  /** Queues through `at`, once, the first time that event type arrives. */
+  function once(
+    adapter: ReturnType<typeof createFakeAdapter>,
+    type: AdapterEvent['type'],
+    act: () => void
+  ): void {
+    let done = false
+    adapter.onEvent((event) => {
+      if (event.type !== type || done) return
+      done = true
+      act()
+    })
+  }
+
+  it('delivers every queued steering message at the next boundary between calls', async () => {
+    const { adapter, events } = await withSession()
+    once(adapter, 'tool_started', () => {
+      void adapter.steer('s1', 'check the adapter too')
+      void adapter.steer('s1', 'and the tests')
+    })
+
+    await adapter.prompt('s1', 't-1', 'hello')
+
+    const at = types(events).indexOf('user_message')
+    // The whole queue lands as a group, between the call that was running and
+    // the next one.
+    expect(types(events).slice(at - 1, at + 5)).toEqual([
+      'tool_ended',
+      'user_message',
+      'queue_changed',
+      'user_message',
+      'queue_changed',
+      'tool_started'
+    ])
+    expect(events.slice(at).filter((event) => event.type === 'user_message')).toMatchObject([
+      { text: 'check the adapter too' },
+      { text: 'and the tests' }
+    ])
+    expect(events[at + 1]).toMatchObject({ steering: ['and the tests'] })
+    expect(events[at + 3]).toMatchObject({ steering: [], followUp: [] })
+  })
+
+  it('holds a follow-up until the reply is done, answers it, and only then ends', async () => {
+    const { adapter, events } = await withSession()
+    once(adapter, 'tool_started', () => {
+      void adapter.followUp('s1', 'summarize what you would refactor first')
+    })
+
+    await adapter.prompt('s1', 't-1', 'hello')
+
+    const at = types(events).indexOf('user_message')
+    // Nothing of it before the reply was streamed in full.
+    expect(types(events).slice(0, at).filter((type) => type === 'text_delta').length).toBe(14)
+    expect(types(events).slice(at)).toEqual([
+      'user_message',
+      'queue_changed',
+      'text_delta',
+      'turn_ended',
+      'usage'
+    ])
+  })
+
+  it('hands both queues back before it says the turn was cancelled', async () => {
+    const { adapter, events } = await withSession()
+    once(adapter, 'tool_started', () => {
+      void adapter.steer('s1', 'stop reading and write it')
+      void adapter.followUp('s1', 'then summarize')
+      void adapter.cancel('s1')
+    })
+
+    await adapter.prompt('s1', 't-1', 'hello')
+
+    const flushed = events.find((event) => event.type === 'queue_flushed')
+    expect(flushed).toMatchObject({
+      messages: [
+        { kind: 'steering', text: 'stop reading and write it' },
+        { kind: 'followUp', text: 'then summarize' }
+      ]
+    })
+    expect(types(events).indexOf('queue_flushed')).toBeLessThan(
+      types(events).indexOf('turn_cancelled')
+    )
+    // Nothing the user got back is delivered after they killed the turn.
+    expect(types(events)).not.toContain('user_message')
+  })
+
+  it('queues nothing into a session with no live run, and says so', async () => {
+    const { adapter, events } = await withSession()
+
+    expect(await adapter.steer('s1', 'hello')).toBe('idle')
+    expect(await adapter.followUp('s1', 'hello')).toBe('idle')
+
+    expect(events).toEqual([])
+  })
+
+  it('dequeues exactly the named entry, and answers false for a delivered one', async () => {
+    const { adapter, events } = await withSession()
+    const removed: boolean[] = []
+    once(adapter, 'tool_started', () => {
+      void adapter.steer('s1', 'one')
+      void adapter.steer('s1', 'two')
+      void adapter.dequeue('s1', 'steering', 'one').then((answer) => removed.push(answer))
+    })
+
+    await adapter.prompt('s1', 't-1', 'hello')
+
+    expect(removed).toEqual([true])
+    expect(events.filter((event) => event.type === 'user_message')).toMatchObject([{ text: 'two' }])
+    // Already delivered: there is nothing left to take back.
+    expect(await adapter.dequeue('s1', 'steering', 'two')).toBe(false)
+  })
+
+  it('settles a delivered message into the conversation where it was delivered', async () => {
+    const { adapter } = await withSession()
+    once(adapter, 'tool_started', () => {
+      void adapter.steer('s1', 'check the tests too')
+    })
+
+    await adapter.prompt('s1', 't-1', 'hello')
+    const transcript = await adapter.transcript('s1')
+
+    const at = transcript.findIndex(
+      (item) => item.kind === 'user' && item.text === 'check the tests too'
+    )
+    // A restored transcript reads as the live one did: between the call that
+    // was running and the one that followed it.
+    expect(transcript[at - 1].kind).toBe('tool')
+    expect(transcript[at + 1].kind).toBe('tool')
+  })
+
+  it('discards a released session’s queue rather than restoring it to nowhere', async () => {
+    const { adapter, events } = await withSession()
+    once(adapter, 'tool_started', () => {
+      void adapter.steer('s1', 'never delivered')
+      adapter.release('s1')
+    })
+
+    await adapter.prompt('s1', 't-1', 'hello')
+
+    expect(types(events)).not.toContain('queue_flushed')
+    expect(types(events)).not.toContain('user_message')
   })
 })
 

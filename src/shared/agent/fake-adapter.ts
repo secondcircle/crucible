@@ -10,6 +10,8 @@ import type {
   HistoryMatch,
   ModelId,
   ModelInfo,
+  QueuedKind,
+  QueuedMessage,
   SessionId,
   ThinkingLevel,
   TranscriptItem,
@@ -40,22 +42,61 @@ const THINKING_DELTAS: readonly string[] = [
   'and markdown with a list and a fenced block.'
 ]
 
-const TOOL = {
+interface ScriptedCall {
+  readonly name: string
+  readonly summary: string
+  readonly ok: boolean
+  readonly chunks: readonly string[]
+}
+
+// Three consecutive calls under two names, one of them a failure, so a single
+// scripted turn exercises the multi-name counts and the failure marker of a
+// tool chain without a paid call.
+const CHAIN: readonly ScriptedCall[] = [
+  {
+    name: 'bash',
+    summary: 'npm test',
+    ok: true,
+    chunks: [
+      ' Test Files  8 passed (8)\n',
+      '      Tests  42 passed (42)\n',
+      '   Duration  1.18s\n'
+    ]
+  },
+  {
+    name: 'read',
+    summary: 'src/shared/agent/port.ts',
+    ok: true,
+    chunks: ['// This module imports nothing on purpose\n']
+  },
+  {
+    name: 'read',
+    summary: 'docs/design/feature-inventory.md',
+    ok: false,
+    chunks: ['ENOENT: no such file or directory\n']
+  }
+]
+
+// Assistant text rather than a thought, so the chain ends here at every
+// thinking level.
+const BETWEEN_DELTAS: readonly string[] = [
+  'One of those files is not there. Listing the folder instead.\n'
+]
+
+// A chain of one, which renders in the same grammar as the run of three.
+const LONE_CALL: ScriptedCall = {
   name: 'bash',
-  summary: 'npm test',
-  chunks: [
-    ' Test Files  8 passed (8)\n',
-    '      Tests  42 passed (42)\n',
-    '   Duration  1.18s\n'
-  ]
-} as const
+  summary: 'ls docs/design',
+  ok: true,
+  chunks: ['m1-parity-core.md\nmock-a-ember.html\n']
+}
 
 const REPLY_DELTAS: readonly string[] = [
   'The fake adapter answers every prompt with this same scripted turn.',
   ' Nothing was sent anywhere and nothing was paid for it.\n\n',
   'What the script covers:\n\n',
   '- a thinking block, dim and collapsed\n',
-  '- a tool call that runs, streams output and finishes\n',
+  '- a chain of three calls, one of which fails, and a lone call after it\n',
   '- markdown with `inline code`, a table and a fenced block\n\n',
   '| flavor | cost | default |\n| --- | --- | --- |\n',
   '| fake | none | yes |\n| sdk | metered | no |\n\n',
@@ -64,6 +105,16 @@ const REPLY_DELTAS: readonly string[] = [
   "await adapter.prompt(sessionId, turnId, 'hello')\n",
   '```\n\n',
   'Stop or Escape ends this turn wherever it stands.'
+]
+
+// Delivered queued messages are answered, briefly and honestly: the script has
+// one answer and no model was asked for another.
+const STEERING_ANSWER_DELTAS: readonly string[] = [
+  'Steering taken. The script has only this one answer, and nothing was sent anywhere.'
+]
+
+const FOLLOW_UP_ANSWER_DELTAS: readonly string[] = [
+  'Follow-up taken, once the rest was done. Still the same scripted answer.'
 ]
 
 // Every workspace starts with these, so resume has something to find.
@@ -111,6 +162,9 @@ interface Bound {
   thinkingLevel: ThinkingLevel
   /** One per session, many per adapter. */
   running?: RunningTurn
+  /** π's two queues, oldest first, undelivered only. */
+  readonly steering: string[]
+  readonly followUp: string[]
 }
 
 interface RunningTurn {
@@ -193,6 +247,33 @@ export function createFakeAdapter({
     return bound
   }
 
+  function emitQueue(bound: Bound, sessionId: SessionId): void {
+    emit({
+      type: 'queue_changed',
+      sessionId,
+      steering: [...bound.steering],
+      followUp: [...bound.followUp]
+    })
+  }
+
+  /** Hands every undelivered message back, steering first, and empties both queues. */
+  function flushQueue(bound: Bound, sessionId: SessionId): void {
+    const messages: QueuedMessage[] = [
+      ...bound.steering.map((text): QueuedMessage => ({ kind: 'steering', text })),
+      ...bound.followUp.map((text): QueuedMessage => ({ kind: 'followUp', text }))
+    ]
+    bound.steering.length = 0
+    bound.followUp.length = 0
+    if (messages.length === 0) return
+    emit({ type: 'queue_flushed', sessionId, messages })
+  }
+
+  /** Silent: releasing or disposing leaves nowhere to restore a queue to. */
+  function discardQueue(bound: Bound): void {
+    bound.steering.length = 0
+    bound.followUp.length = 0
+  }
+
   function previewOf(conversation: Conversation): string {
     for (const item of [...conversation.items].reverse()) {
       if (item.kind === 'user') return clip(`you: ${item.text}`)
@@ -244,18 +325,28 @@ export function createFakeAdapter({
 
     const conversation = bound.conversation
     const pending: TranscriptItem[] = [{ kind: 'user', text }]
-    let thinking = ''
-    let reply = ''
-    let toolOutput = ''
+    /** The assistant block being streamed, settled at every block boundary. */
+    let spoken = ''
+    /** Everything this turn produced, which is what the usage estimate reads. */
+    let counted = text
+
+    function settleSpoken(): void {
+      if (spoken === '') return
+      pending.push({ kind: 'assistant', markdown: spoken })
+      counted += spoken
+      spoken = ''
+    }
 
     function settle(terminal: AdapterEvent): void {
-      if (reply !== '') pending.push({ kind: 'assistant', markdown: reply })
+      settleSpoken()
       if (terminal.type === 'turn_cancelled') pending.push({ kind: 'stopped' })
+      // Delivered messages are settled at their delivery point, so a restored
+      // transcript reads as the live one did.
       conversation.items.push(...pending)
       conversation.at = new Date().toISOString()
       conversation.usedTokens = Math.min(
         CONTEXT_WINDOW,
-        conversation.usedTokens + estimateTokens(text + thinking + toolOutput + reply)
+        conversation.usedTokens + estimateTokens(counted)
       )
       bound.running = undefined
       emit(terminal)
@@ -268,53 +359,126 @@ export function createFakeAdapter({
       })
     }
 
-    async function script(): Promise<void> {
-      emit({ type: 'turn_started', sessionId, turnId })
-
-      if (bound.thinkingLevel !== 'off') {
-        const startedAt = Date.now()
-        for (const delta of THINKING_DELTAS) {
-          await beat()
-          if (stopped !== undefined) return finish()
-          thinking += delta
-          emit({ type: 'thinking_delta', sessionId, turnId, delta })
-        }
-        pending.push({
-          kind: 'thinking',
-          text: thinking,
-          seconds: Math.max(1, Math.round((Date.now() - startedAt) / 1000))
-        })
-      }
-
-      const callId = `${turnId}-call-1`
-      await beat()
-      if (stopped !== undefined) return finish()
-      emit({ type: 'tool_started', sessionId, turnId, callId, name: TOOL.name, summary: TOOL.summary })
-
-      for (const chunk of TOOL.chunks) {
+    /** False once the script has been abandoned, which ends every loop. */
+    async function say(deltas: readonly string[]): Promise<boolean> {
+      for (const delta of deltas) {
         await beat()
-        if (stopped !== undefined) return finish()
-        toolOutput += chunk
+        if (stopped !== undefined) return false
+        spoken += delta
+        emit({ type: 'text_delta', sessionId, turnId, delta })
+      }
+      settleSpoken()
+      return true
+    }
+
+    async function think(): Promise<boolean> {
+      if (bound.thinkingLevel === 'off') return true
+      const startedAt = Date.now()
+      let thinking = ''
+      for (const delta of THINKING_DELTAS) {
+        await beat()
+        if (stopped !== undefined) return false
+        thinking += delta
+        emit({ type: 'thinking_delta', sessionId, turnId, delta })
+      }
+      counted += thinking
+      pending.push({
+        kind: 'thinking',
+        text: thinking,
+        seconds: Math.max(1, Math.round((Date.now() - startedAt) / 1000))
+      })
+      return true
+    }
+
+    async function call(scripted: ScriptedCall, number: number): Promise<boolean> {
+      settleSpoken()
+      const callId = `${turnId}-call-${number}`
+      await beat()
+      if (stopped !== undefined) return false
+      emit({
+        type: 'tool_started',
+        sessionId,
+        turnId,
+        callId,
+        name: scripted.name,
+        summary: scripted.summary
+      })
+
+      let output = ''
+      for (const chunk of scripted.chunks) {
+        await beat()
+        if (stopped !== undefined) return false
+        output += chunk
         emit({ type: 'tool_output', sessionId, turnId, callId, chunk })
       }
 
       await beat()
-      if (stopped !== undefined) return finish()
-      emit({ type: 'tool_ended', sessionId, turnId, callId, ok: true, output: toolOutput })
+      if (stopped !== undefined) return false
+      emit({ type: 'tool_ended', sessionId, turnId, callId, ok: scripted.ok, output })
+      counted += output
       pending.push({
         kind: 'tool',
-        name: TOOL.name,
-        summary: TOOL.summary,
-        ok: true,
-        output: toolOutput
+        name: scripted.name,
+        summary: scripted.summary,
+        ok: scripted.ok,
+        output
       })
+      return true
+    }
 
-      for (const delta of REPLY_DELTAS) {
+    // A delivery point: everything queued of that kind goes in one group,
+    // oldest first, and each message is announced as it lands.
+    async function deliver(kind: QueuedKind): Promise<boolean> {
+      const queue = kind === 'steering' ? bound.steering : bound.followUp
+      while (queue.length > 0) {
         await beat()
-        if (stopped !== undefined) return finish()
-        reply += delta
-        emit({ type: 'text_delta', sessionId, turnId, delta })
+        if (stopped !== undefined) return false
+        const message = queue.shift() ?? ''
+        settleSpoken()
+        counted += message
+        pending.push({ kind: 'user', text: message })
+        emit({ type: 'user_message', sessionId, turnId, text: message })
+        emitQueue(bound, sessionId)
       }
+      return true
+    }
+
+    // The turn ends only when both queues are empty: steering first, because a
+    // follow-up waits for the agent to have fully stopped.
+    async function drain(): Promise<boolean> {
+      for (;;) {
+        if (bound.steering.length > 0) {
+          if (!(await deliver('steering'))) return false
+          if (!(await say(STEERING_ANSWER_DELTAS))) return false
+          continue
+        }
+        if (bound.followUp.length > 0) {
+          if (!(await deliver('followUp'))) return false
+          if (!(await say(FOLLOW_UP_ANSWER_DELTAS))) return false
+          continue
+        }
+        return true
+      }
+    }
+
+    async function script(): Promise<void> {
+      emit({ type: 'turn_started', sessionId, turnId })
+
+      if (!(await think())) return finish()
+
+      let number = 0
+      for (const scripted of CHAIN) {
+        number += 1
+        if (!(await call(scripted, number))) return finish()
+        // The boundary between two tool calls is where steering lands.
+        if (!(await deliver('steering'))) return finish()
+      }
+
+      if (!(await say(BETWEEN_DELTAS))) return finish()
+      if (!(await call(LONE_CALL, number + 1))) return finish()
+      if (!(await deliver('steering'))) return finish()
+      if (!(await say(REPLY_DELTAS))) return finish()
+      if (!(await drain())) return finish()
 
       await beat()
       if (stopped !== undefined) return finish()
@@ -324,10 +488,15 @@ export function createFakeAdapter({
     function finish(): void {
       if (stopped === 'disposed') {
         // The document that asked is gone, so the turn says nothing more at
-        // all, not even a terminal event.
+        // all, not even a terminal event, and there is nowhere left to restore
+        // a queue to.
+        discardQueue(bound)
         bound.running = undefined
         return
       }
+      // Flushed before the terminal event, so no turn ever ends with a message
+      // still queued behind it.
+      if (stopped === 'cancelled') flushQueue(bound, sessionId)
       settle(
         stopped === 'cancelled'
           ? { type: 'turn_cancelled', sessionId, turnId }
@@ -364,7 +533,9 @@ export function createFakeAdapter({
         // falls back to it and the fallback is what gets reported.
         conversation,
         model: FAKE_MODEL.id,
-        thinkingLevel: preferredLevel(request.preferredThinkingLevel)
+        thinkingLevel: preferredLevel(request.preferredThinkingLevel),
+        steering: [],
+        followUp: []
       }
       sessions.set(request.sessionId, bound)
       return {
@@ -397,7 +568,9 @@ export function createFakeAdapter({
       const bound: Bound = {
         conversation,
         model: FAKE_MODEL.id,
-        thinkingLevel: 'low'
+        thinkingLevel: 'low',
+        steering: [],
+        followUp: []
       }
       sessions.set(request.sessionId, bound)
       return {
@@ -415,6 +588,7 @@ export function createFakeAdapter({
     release(sessionId: SessionId): void {
       const bound = sessions.get(sessionId)
       bound?.running?.abandon('disposed')
+      if (bound !== undefined) discardQueue(bound)
       // The conversation itself stays in `conversations`: removal forgets the
       // sidebar entry, never the history behind it.
       sessions.delete(sessionId)
@@ -463,6 +637,38 @@ export function createFakeAdapter({
       return run(bound, sessionId, turnId, text)
     },
 
+    // Nothing is queued into a session with no live run: the caller is told so
+    // and sends the text as a prompt instead, which is what keeps a message
+    // from sitting unheard in an idle conversation.
+    async steer(sessionId: SessionId, text: string): Promise<'queued' | 'idle'> {
+      const bound = requireBound(sessionId)
+      if (bound.running === undefined) return 'idle'
+      bound.steering.push(text)
+      emitQueue(bound, sessionId)
+      return 'queued'
+    },
+
+    async followUp(sessionId: SessionId, text: string): Promise<'queued' | 'idle'> {
+      const bound = requireBound(sessionId)
+      if (bound.running === undefined) return 'idle'
+      bound.followUp.push(text)
+      emitQueue(bound, sessionId)
+      return 'queued'
+    },
+
+    async dequeue(sessionId: SessionId, kind: QueuedKind, text: string): Promise<boolean> {
+      const bound = sessions.get(sessionId)
+      if (bound === undefined) return false
+      const queue = kind === 'steering' ? bound.steering : bound.followUp
+      // The first match, because that is the one the strip shows first and the
+      // one delivery would take next.
+      const index = queue.indexOf(text)
+      if (index === -1) return false
+      queue.splice(index, 1)
+      emitQueue(bound, sessionId)
+      return true
+    },
+
     async cancel(sessionId: SessionId): Promise<void> {
       sessions.get(sessionId)?.running?.abandon('cancelled')
     },
@@ -477,7 +683,10 @@ export function createFakeAdapter({
     // Subscriptions are left alone: whoever is listening keeps listening, and
     // hears the next turn in full. Only the work is dropped.
     dispose(): void {
-      for (const bound of sessions.values()) bound.running?.abandon('disposed')
+      for (const bound of sessions.values()) {
+        bound.running?.abandon('disposed')
+        discardQueue(bound)
+      }
     }
   }
 }

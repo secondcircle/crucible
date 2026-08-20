@@ -118,6 +118,9 @@ function stubShell(answers: Partial<Record<string, unknown>> = {}): {
     setModel: op('setModel'),
     setThinkingLevel: op('setThinkingLevel'),
     prompt: op('prompt'),
+    steer: op('steer'),
+    followUp: op('followUp'),
+    dequeue: op('dequeue'),
     cancel: op('cancel'),
     dispose: () => {
       record.disposals += 1
@@ -180,6 +183,20 @@ describe('what crosses the request channel', () => {
     })
     expect(await request('activateSession', 42)).toMatchObject({ ok: false })
     expect(stub.asked).toEqual([])
+  })
+
+  it('serves the queue operations, and refuses a queue it cannot name', async () => {
+    const stub = stubShell({ dequeue: true })
+    serveAgentChannel(stub.shell, stubWindow().window)
+
+    expect(await request('steer', 's', 'redirect')).toEqual({ ok: true, value: undefined })
+    expect(await request('dequeue', 's', 'followUp', 'later')).toEqual({ ok: true, value: true })
+    expect(await request('dequeue', 's', 'both', 'later')).toMatchObject({ ok: false })
+
+    expect(stub.asked).toEqual([
+      { op: 'steer', args: ['s', 'redirect'] },
+      { op: 'dequeue', args: ['s', 'followUp', 'later'] }
+    ])
   })
 
   it('serves the operations that take no argument at all', async () => {
