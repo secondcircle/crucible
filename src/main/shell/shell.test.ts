@@ -565,6 +565,58 @@ describe('a turn accepted while its session is still binding', () => {
     expect((await shell.snapshot()).sessions).toEqual([])
   })
 
+  // Reproduction for review finding 2: when the bind behind a live turn
+  // fails, `steer` rejects with the bind's error and the message is gone —
+  // not queued, not flushed, not sent as the next prompt — though the port
+  // contract says a message sent through steer is never lost and never
+  // refused.
+  it('does not lose a message steered while the turn’s bind is failing', async () => {
+    const created = await withSession()
+    sessionId = created.sessionId
+    shell.dispose()
+
+    const inner = createFakeAdapter({ pauseMs: 0 })
+    const gate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const failing: ConversationAdapter = {
+      ...inner,
+      async bind() {
+        await gate
+        throw new Error('That conversation could not be opened.')
+      }
+    }
+    shell = createShell({
+      store: createShellStore(file),
+      adapter: failing,
+      pickFolder: async () => picked
+    })
+    events = []
+    shell.onEvent((event) => events.push(event))
+
+    await shell.prompt(sessionId, 'hello')
+    const steered = shell.steer(sessionId, 'redirect')
+    release()
+
+    // Never refused: the steer resolves rather than rejecting with the
+    // bind's failure…
+    await expect(steered).resolves.toBeUndefined()
+    await settled()
+
+    // …and never lost: the text either fell back to a prompt of its own
+    // (announced by `user_message`, even one whose turn then errors) or was
+    // handed back through `queue_flushed`.
+    const announced = events.some(
+      (event) => event.type === 'user_message' && event.text === 'redirect'
+    )
+    const flushed = events.some(
+      (event) =>
+        event.type === 'queue_flushed' &&
+        event.messages.some((message) => message.text === 'redirect')
+    )
+    expect(announced || flushed).toBe(true)
+  })
+
   it('is cancelled by a reset rather than run under the fresh conversation', async () => {
     await gatedRelaunch()
     await shell.prompt(sessionId, 'hello')

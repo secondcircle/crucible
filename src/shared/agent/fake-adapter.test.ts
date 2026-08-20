@@ -3,7 +3,7 @@
 // Every zero-cost check in this repository runs against this adapter, so what
 // those checks rely on is pinned here. Nothing waits on a clock: the adapter is
 // built with no pause, so a turn is over in microtasks.
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { AdapterEvent } from './adapter'
 import { createFakeAdapter, FAKE_MODEL } from './fake-adapter'
 
@@ -21,6 +21,12 @@ async function withSession(sessionId = 's1'): Promise<{
 }
 
 const types = (events: readonly AdapterEvent[]): string[] => events.map((event) => event.type)
+
+// One reproduction below drives the paced script under fake timers; every
+// other test builds the adapter with no pause and waits on no clock.
+afterEach(() => {
+  vi.useRealTimers()
+})
 
 /** One call: its start, a chunk of output for each chunk it streams, its end. */
 const call = (chunks: number): string[] => [
@@ -238,6 +244,43 @@ describe('queued messages', () => {
     // was running and the one that followed it.
     expect(transcript[at - 1].kind).toBe('tool')
     expect(transcript[at + 1].kind).toBe('tool')
+  })
+
+  // Reproduction for review finding 1: the script's final pause sits after
+  // the last queue check, so a message queued during it ends the turn still
+  // queued — neither delivered (`user_message`) nor handed back
+  // (`queue_flushed`) — breaking the invariant that a turn never ends with a
+  // non-empty queue.
+  it('delivers or flushes a message queued during the turn’s final pause', async () => {
+    vi.useFakeTimers()
+    const adapter = createFakeAdapter({ pauseMs: 10 })
+    await adapter.bind({ sessionId: 's1', workspacePath: WORKSPACE })
+    const events: AdapterEvent[] = []
+    adapter.onEvent((event) => events.push(event))
+    const lastDelta = 'Stop or Escape ends this turn wherever it stands.'
+
+    const turn = adapter.prompt('s1', 't-1', 'hello')
+    // Advance beat by beat until the reply has fully streamed; the script now
+    // stands in the pause between its last queue check and its end.
+    for (let beats = 0; beats < 200; beats += 1) {
+      if (events.some((event) => event.type === 'text_delta' && event.delta === lastDelta)) break
+      await vi.advanceTimersByTimeAsync(10)
+    }
+    expect(await adapter.steer('s1', 'one more thing')).toBe('queued')
+
+    await vi.advanceTimersByTimeAsync(1_000)
+    await turn
+
+    expect(types(events)).toContain('turn_ended')
+    const delivered = events.some(
+      (event) => event.type === 'user_message' && event.text === 'one more thing'
+    )
+    const flushed = events.some(
+      (event) =>
+        event.type === 'queue_flushed' &&
+        event.messages.some((message) => message.text === 'one more thing')
+    )
+    expect(delivered || flushed).toBe(true)
   })
 
   it('discards a released session’s queue rather than restoring it to nowhere', async () => {
