@@ -231,18 +231,30 @@ export function Composer({
           }}
           ref={boxRef}
           onKeyDown={(pressed) => {
-            if (filesOpen && shown.length > 0) {
-              if (pressed.key === 'ArrowDown' || pressed.key === 'ArrowUp') {
-                pressed.preventDefault()
-                const by = pressed.key === 'ArrowDown' ? 1 : shown.length - 1
-                select((selected + by) % shown.length)
-                return
-              }
-              if (pressed.key === 'Enter' || pressed.key === 'Tab') {
-                pressed.preventDefault()
-                const path = shown[selected]
-                if (path !== undefined) insertPath(path)
-                return
+            // While the popover is open Enter belongs to it and never sends
+            // (§25), the empty state included: §24 keeps the popover open on
+            // `No files match`. With nothing to insert, Enter closes the
+            // popover rather than sending a draft nobody can unsend.
+            if (filesOpen) {
+              if (shown.length === 0) {
+                if (pressed.key === 'Enter' && !pressed.shiftKey) {
+                  pressed.preventDefault()
+                  onFileToken(undefined)
+                  return
+                }
+              } else {
+                if (pressed.key === 'ArrowDown' || pressed.key === 'ArrowUp') {
+                  pressed.preventDefault()
+                  const by = pressed.key === 'ArrowDown' ? 1 : shown.length - 1
+                  select((selected + by) % shown.length)
+                  return
+                }
+                if (pressed.key === 'Enter' || pressed.key === 'Tab') {
+                  pressed.preventDefault()
+                  const path = shown[selected]
+                  if (path !== undefined) insertPath(path)
+                  return
+                }
               }
             }
             if (pressed.key === 'ArrowUp' && pressed.altKey) {

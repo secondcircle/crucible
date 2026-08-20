@@ -97,6 +97,28 @@ describe('the @ popover', () => {
     expect(port.calls.map((call) => call.op)).not.toContain('prompt')
   })
 
+  it('closes the empty popover on Enter, leaving the draft to be sent by the next one', async () => {
+    const { port } = await shell()
+    await type('ask about @zzzz')
+
+    await act(async () => {
+      fireEvent.keyDown(box(), { key: 'Enter' })
+    })
+
+    // Nothing to insert, so that Enter spends itself on the popover: the draft
+    // is untouched and the empty state is gone.
+    expect(screen.queryByText('No files match')).toBeNull()
+    expect(popover()).toBeNull()
+    expect(box()).toHaveValue('ask about @zzzz')
+
+    await act(async () => {
+      fireEvent.keyDown(box(), { key: 'Enter' })
+    })
+    await settled()
+
+    expect(port.calls).toContainEqual({ op: 'prompt', args: ['s1', 'ask about @zzzz'] })
+  })
+
   it('inserts the workspace-relative path as plain text on Enter', async () => {
     const { port } = await shell()
     await type('look at @comp')
