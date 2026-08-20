@@ -276,6 +276,23 @@ describe('sending a command', () => {
     expect(sent(port, 'prompt')).toEqual(['s1', '/nothing like a command'])
   })
 
+  // Reviewer reproduction (review-1): the plain-text path clears the draft
+  // synchronously in the keydown handler, but a command clears it only when
+  // the expansion resolves. Enter repeating inside that window — keyboard
+  // auto-repeat over the real IPC round trip — sends the same command twice.
+  it('delivers the command once when Enter repeats before the expansion resolves', async () => {
+    const { port } = await shell()
+
+    await type('/align the queue')
+    await act(async () => {
+      fireEvent.keyDown(box(), { key: 'Enter' })
+      fireEvent.keyDown(box(), { key: 'Enter' })
+    })
+    await settled()
+
+    expect(port.calls.filter((call) => call.op === 'prompt')).toHaveLength(1)
+  })
+
   it('keeps the draft and says why when the file has gone', async () => {
     const { port } = await shell(
       createScriptedCommands([
