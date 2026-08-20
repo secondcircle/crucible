@@ -14,13 +14,17 @@ import type {
 import type { AppUpdateService } from '../../shared/app-update/service'
 import type { CommandInfo, CommandService } from '../../shared/commands/service'
 import { commandFragment } from '../../shared/commands/template'
+import { boardCounts } from '../../shared/workspace/classify-board'
 import type { QuotaService } from '../../shared/quota/service'
 import type {
+  BoardRow,
   RunId,
   WorkspaceEvent,
   WorkspaceService
 } from '../../shared/workspace/service'
+import { useBranchBoards } from './board/use-boards'
 import { BashDrawer, type RunView } from './components/BashDrawer'
+import { BranchBoard } from './components/BranchBoard'
 import { type Attachment, Composer, useElapsedSeconds } from './components/Composer'
 import { ConfirmDialog } from './components/ConfirmDialog'
 import { ContextPanel, PanelEdge } from './components/ContextPanel'
@@ -121,6 +125,9 @@ export function Shell({
   // A summarizing jump pays for an LLM call, so the tree says it is working.
   const [jumping, setJumping] = useState<'jump' | 'summarize' | undefined>(undefined)
   const [toast, setToast] = useState<string | undefined>(undefined)
+  // The whole of the board's open state: only the chip and ⌘B put a workspace
+  // here, and everything that closes the board takes it back out.
+  const [boardFor, setBoardFor] = useState<WorkspaceId | undefined>(undefined)
   // The file popover's token, and the answer the workspace service gave for it.
   const [fileToken, setFileToken] = useState<string | undefined>(undefined)
   const [files, setFiles] = useState<
@@ -170,6 +177,8 @@ export function Shell({
   const box = useRef<HTMLTextAreaElement>(null)
   // Output can arrive before the id of the run it belongs to does.
   const owners = useRef<Record<RunId, WorkspaceId>>({})
+  /** Where the caret goes once seeded composer text has rendered. */
+  const seedCaret = useRef<number | undefined>(undefined)
   const orphans = useRef<Map<RunId, WorkspaceEvent[]>>(new Map())
   const escapes = useRef<number>(0)
 
@@ -217,6 +226,50 @@ export function Shell({
   const report = useCallback((cause: unknown): void => {
     setFailure(cause instanceof Error ? cause.message : String(cause))
   }, [])
+
+  // A workspace whose session is working is left alone: no collection runs
+  // against a repository an agent may be mid-turn in.
+  const workingWorkspaces = useMemo(
+    () =>
+      new Set(
+        snapshot.sessions
+          .filter((candidate) => candidate.working)
+          .map((candidate) => candidate.workspaceId)
+      ),
+    [snapshot.sessions]
+  )
+
+  const { boards, refresh: refreshBoard } = useBranchBoards({
+    service,
+    workspaces: snapshot.workspaces,
+    activeWorkspaceId,
+    working: workingWorkspaces,
+    onFailure: report
+  })
+
+  const boardEntry = activeWorkspaceId === undefined ? undefined : boards[activeWorkspaceId]
+  const closeBoard = useCallback((): void => setBoardFor(undefined), [])
+  const boardAnswer = boardEntry?.answer
+  const board = boardAnswer?.kind === 'board' ? boardAnswer.board : undefined
+  // Nothing renders that is not backed by real state: no chip before the first
+  // answer, and none at all for a folder that is not a repository.
+  const counts = board === undefined ? undefined : boardCounts(board)
+  const needYou = useMemo(() => {
+    const perWorkspace: Record<WorkspaceId, number> = {}
+    for (const [id, entry] of Object.entries(boards)) {
+      if (entry.answer?.kind !== 'board') continue
+      perWorkspace[id] = boardCounts(entry.answer.board).needYou
+    }
+    return perWorkspace
+  }, [boards])
+  /** ⌘B does nothing where there is no board to open, and no chip exists. */
+  const boardReachable = activeWorkspaceId !== undefined && boardAnswer?.kind !== 'noRepository'
+  // A workspace that turns out not to be a repository has no board to show, so
+  // the overlay is gone in the frame the answer says so.
+  const boardOpen = boardFor !== undefined && boardFor === activeWorkspaceId && boardReachable
+  // Cleared in the same render, so a close cannot come back true when the
+  // workspace is switched away from and back to.
+  if (boardFor !== undefined && !boardOpen) setBoardFor(undefined)
 
   // What a completed login or logout changes above the port: the models the
   // credentials now reach.
@@ -351,6 +404,16 @@ export function Shell({
     return () => clearTimeout(clear)
   }, [toast])
 
+  // The caret can only be placed once the draft it belongs to has rendered,
+  // which is why this waits a frame rather than happening at the seeding.
+  useEffect(() => {
+    const caret = seedCaret.current
+    if (caret === undefined) return
+    seedCaret.current = undefined
+    box.current?.focus()
+    box.current?.setSelectionRange(caret, caret)
+  })
+
   // Read again every time the popover opens, so a command an agent wrote a
   // moment ago is in this very list.
   useEffect(() => {
@@ -431,6 +494,13 @@ export function Shell({
         setFileToken(undefined)
         return
       }
+      // The board closes after the dialogs, sheets and popovers, and before
+      // the session tree. While it is open Escape never cancels a turn.
+      if (boardOpen) {
+        pressed.preventDefault()
+        closeBoard()
+        return
+      }
       if (treeOpen) {
         pressed.preventDefault()
         setTreeOpen(false)
@@ -457,6 +527,7 @@ export function Shell({
     question,
     popover,
     fileToken,
+    boardOpen,
     treeOpen,
     activeSessionId,
     working,
@@ -465,9 +536,40 @@ export function Shell({
     liveLogin,
     closeLogin,
     settings.open,
-    browsingCommands
+    browsingCommands,
+    closeBoard
   ])
 
+  const openBoard = useCallback((): void => {
+    if (activeWorkspaceId === undefined) return
+    // The overlay is there in the same frame; the collection catches up under
+    // it, and says "Reading branches…" until it does.
+    setBoardFor(activeWorkspaceId)
+    refreshBoard(activeWorkspaceId)
+  }, [activeWorkspaceId, refreshBoard])
+
+  // ⌘B is the board's own key, and the affordance is absent rather than
+  // silently broken where there is nothing to open.
+  useEffect(() => {
+    function onKeyDown(pressed: KeyboardEvent): void {
+      if (pressed.key !== 'b' && pressed.key !== 'B') return
+      if (!pressed.metaKey && !pressed.ctrlKey) return
+      if (boardOpen) {
+        pressed.preventDefault()
+        closeBoard()
+        return
+      }
+      // Only claim the key where there is a board to open. The shortcut is
+      // global, so someone who learned it in a repository will press it in a
+      // plain folder too, and swallowing it there leaves the app looking
+      // broken rather than looking like it has no board (ADR 0010).
+      if (!boardReachable) return
+      pressed.preventDefault()
+      openBoard()
+    }
+    document.addEventListener('keydown', onKeyDown)
+    return () => document.removeEventListener('keydown', onKeyDown)
+  }, [boardOpen, boardReachable, openBoard, closeBoard])
   // The model ring. Nothing on screen names the key, and it works mid-turn
   // because the switch only reaches the next turn.
   useEffect(() => {
@@ -1000,6 +1102,35 @@ export function Shell({
       })
   }
 
+  // Nothing the board can do touches the repository.
+
+  function openPullRequest(row: BoardRow): void {
+    const pr = row.pr
+    if (pr === undefined) return
+    setToast(`Opening #${pr.number} in your browser`)
+    void service.openUrl(pr.url).catch(report)
+  }
+
+  function copyBranchName(name: string): void {
+    setToast(`Copied ${name}`)
+    void navigator.clipboard?.writeText(name).catch(report)
+  }
+
+  /** Seeds the composer with what was selected. Nothing is sent. */
+  function askAboutBranches(names: readonly string[]): void {
+    const id = activeSessionId
+    if (id === undefined) return
+    closeBoard()
+    const seeded = `${names.join('\n')}\n`
+    setDrafts((current) => {
+      const drafted = current[id] ?? ''
+      // A draft being typed is never destroyed: it stays below the names, the
+      // way a restored queued message does.
+      return { ...current, [id]: drafted === '' ? seeded : `${seeded}\n${drafted}` }
+    })
+    seedCaret.current = seeded.length
+  }
+
   function answer(): void {
     if (question === undefined) return
     const asked = question
@@ -1021,6 +1152,7 @@ export function Shell({
     >
       <Sidebar
         snapshot={snapshot}
+        needYou={needYou}
         onNewSession={newSession}
         onAddWorkspace={addWorkspace}
         onActivateWorkspace={activateWorkspace}
@@ -1048,6 +1180,11 @@ export function Shell({
           onResetSession={resetSession}
           onOpenSettings={() => setSettings({ open: true, tab: 'providers' })}
           onOpenUsage={() => setSettings({ open: true, tab: 'usage' })}
+          board={
+            counts === undefined
+              ? undefined
+              : { landed: counts.landed, needYou: counts.needYou, onOpen: openBoard }
+          }
           update={
             updateCommit === undefined || appUpdate === undefined
               ? undefined
@@ -1161,6 +1298,24 @@ export function Shell({
           onRunBash={runBash}
           onToggleWorktree={toggleWorktree}
         />
+
+        {/* Over the whole main column, top bar and composer included, and
+            never over the sidebar. */}
+        {boardOpen ? (
+          <BranchBoard
+            board={board}
+            refreshing={boardEntry?.refreshing ?? false}
+            failure={boardEntry?.failure}
+            hasSession={session !== undefined}
+            onRefresh={() => {
+              if (activeWorkspaceId !== undefined) refreshBoard(activeWorkspaceId)
+            }}
+            onOpenPr={openPullRequest}
+            onCopy={copyBranchName}
+            onAsk={askAboutBranches}
+            onClose={closeBoard}
+          />
+        ) : null}
       </main>
 
       {/* Nothing at all when the session has no tabs: the chat is full-width,

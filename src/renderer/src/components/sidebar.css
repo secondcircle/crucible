@@ -81,6 +81,16 @@
   background: var(--panel);
 }
 
+/* The count of what is asking for you in that workspace, absent at zero. */
+.ws .n {
+  font: 10px var(--mono);
+  color: var(--accent2);
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  padding: 0 5px;
+  flex: none;
+}
+
 .ws.active .wsname {
   color: var(--ink);
 }

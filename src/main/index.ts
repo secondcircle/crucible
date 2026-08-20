@@ -100,7 +100,9 @@ const { adapter, flavor } = selectAdapter(
 
 // One flavor decision governs every seam, so a fake-flavor launch reads no
 // folder, starts no process and serves canned commands.
-const workspace = selectWorkspaceService(flavor, log)
+const workspace = selectWorkspaceService(flavor, log, (url: string) => {
+  void electronShell.openExternal(url)
+})
 const commands = selectCommandService(flavor, log, app.getAppPath())
 // One store for the launch, whatever is on screen: two windows, two workspaces
 // or a dozen sessions never multiply the requests. The cache is Crucible's own

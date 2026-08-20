@@ -54,6 +54,21 @@ describe('the workspace client', () => {
     ])
   })
 
+  it('carries the board and the link across under their own names', async () => {
+    const surface = install(() => ({ ok: true, value: { kind: 'noRepository' } }))
+    const service = createWorkspaceClient()
+
+    await expect(service.branchBoard('/repos/crucible')).resolves.toEqual({
+      kind: 'noRepository'
+    })
+    await service.openUrl('https://github.com/secondcircle/crucible/pull/4')
+
+    expect(surface.requests).toEqual([
+      { op: 'branchBoard', args: ['/repos/crucible'] },
+      { op: 'openUrl', args: ['https://github.com/secondcircle/crucible/pull/4'] }
+    ])
+  })
+
   it('turns a refused result back into a rejection a person can read', async () => {
     install(() => ({ ok: false, message: 'That folder could not be read.' }))
     const service = createWorkspaceClient()
