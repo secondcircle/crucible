@@ -68,9 +68,16 @@ Its state lives in `~/Library/Application Support/Crucible`; every dev launch
 uses `Crucible-Dev` instead, so no worktree or branch under test can ever
 touch the installed app's sessions.
 
+Updates flow on their own: a `post-merge` hook (`scripts/git-hooks/`, wired
+by `git config core.hooksPath scripts/git-hooks`, once per clone) reinstalls
+the app in the background when a merge lands on `main`, logging to
+`logs/install-stable.log`. The running app polls its own build stamp, and
+when the bundle on disk is newer it shows an "Update ready · Restart" pill in
+the top bar. Restarting is always the human's click, never automatic — a
+restart mid-turn drops that turn.
+
 Agents never touch the installed app or its state: don't launch it, don't
-reinstall it, don't read or write its userData. Testing happens through
-`npm run dev` (agent-driven) or `npm run dev:sdk` (for the human) in whatever
-checkout holds the code under test. After a merge to `main`, running
-`npm run install:stable` is how the human's app picks the merge up — do it
-when the human asks, and tell them to relaunch.
+reinstall it, don't read or write its userData, and never click its restart
+pill for the human. Testing happens through `npm run dev` (agent-driven) or
+`npm run dev:sdk` (for the human) in whatever checkout holds the code under
+test.

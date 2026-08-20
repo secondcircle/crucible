@@ -7,6 +7,13 @@ import {
 } from '../shared/agent/channels'
 import type { PortEvent } from '../shared/agent/port'
 import {
+  APP_UPDATE_EVENT_CHANNEL,
+  APP_UPDATE_REQUEST_CHANNEL,
+  type AppUpdateRequest,
+  type AppUpdateResult
+} from '../shared/app-update/channels'
+import type { UpdateReady } from '../shared/app-update/service'
+import {
   COMMAND_REQUEST_CHANNEL,
   type CommandRequest,
   type CommandResult
@@ -57,6 +64,15 @@ contextBridge.exposeInMainWorld('crucible', {
   commands: {
     request: (request: CommandRequest): Promise<CommandResult> =>
       ipcRenderer.invoke(COMMAND_REQUEST_CHANNEL, request)
+  },
+
+  // The installed app's update seam: one question, one event, one restart.
+  appUpdate: {
+    request: (request: AppUpdateRequest): Promise<AppUpdateResult> =>
+      ipcRenderer.invoke(APP_UPDATE_REQUEST_CHANNEL, request),
+
+    onEvent: (listener: (event: UpdateReady) => void): (() => void) =>
+      forwarder(APP_UPDATE_EVENT_CHANNEL, listener)
   }
 })
 

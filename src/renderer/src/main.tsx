@@ -1,6 +1,7 @@
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { createIpcClient } from './agent/ipc-client'
+import { createAppUpdateClient } from './app-update/ipc-client'
 import { createCommandClient } from './commands/ipc-client'
 import { Shell } from './Shell'
 import { createWorkspaceClient } from './workspace/ipc-client'
@@ -18,6 +19,7 @@ function mountApp(): void {
         port={createIpcClient()}
         workspace={createWorkspaceClient()}
         commands={createCommandClient()}
+        appUpdate={createAppUpdateClient()}
       />
     </StrictMode>
   )

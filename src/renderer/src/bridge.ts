@@ -1,3 +1,5 @@
+import type { AppUpdateRequest, AppUpdateResult } from '../../shared/app-update/channels'
+import type { UpdateReady } from '../../shared/app-update/service'
 import type { PortRequest, PortResult } from '../../shared/agent/channels'
 import type { PortEvent } from '../../shared/agent/port'
 import type { CommandRequest, CommandResult } from '../../shared/commands/channels'
@@ -24,12 +26,19 @@ export interface CrucibleCommands {
   request(request: CommandRequest): Promise<CommandResult>
 }
 
+/** The update half, same pattern: main announces a waiting build, we ask to restart. */
+export interface CrucibleAppUpdate {
+  request(request: AppUpdateRequest): Promise<AppUpdateResult>
+  onEvent(listener: (event: UpdateReady) => void): () => void
+}
+
 declare global {
   interface Window {
     crucible?: {
       agent?: CrucibleAgent
       workspace?: CrucibleWorkspace
       commands?: CrucibleCommands
+      appUpdate?: CrucibleAppUpdate
     }
   }
 }
@@ -58,4 +67,12 @@ export function commandsBridge(): CrucibleCommands {
     throw new Error('renderer: window.crucible.commands is missing — the preload did not load')
   }
   return commands
+}
+
+export function appUpdateBridge(): CrucibleAppUpdate {
+  const appUpdate = window.crucible?.appUpdate
+  if (appUpdate === undefined) {
+    throw new Error('renderer: window.crucible.appUpdate is missing — the preload did not load')
+  }
+  return appUpdate
 }

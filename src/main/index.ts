@@ -1,6 +1,8 @@
 import { join } from 'node:path'
 import { app, BrowserWindow, dialog, shell as electronShell } from 'electron'
 import { type AgentChannel, serveAgentChannel } from './agent/channel'
+import { type AppUpdateChannel, serveAppUpdateChannel } from './app-update/channel'
+import { createAppUpdateService, stillAppUpdateService } from './app-update/service'
 import { selectAdapter } from './agent/select-adapter'
 import { withLogging } from './agent/with-logging'
 import { type CommandChannel, serveCommandChannel } from './commands/channel'
@@ -88,6 +90,20 @@ const { adapter, flavor } = selectAdapter(
 const workspace = selectWorkspaceService(flavor, log)
 const commands = selectCommandService(flavor, log, app.getAppPath())
 
+// Installed only: install-stable replaces the bundle in place, so watching
+// our own stamp file is how the running app learns a newer build is waiting.
+// A dev launch serves the still service and the pill can never appear.
+const appUpdate = app.isPackaged
+  ? createAppUpdateService({
+      stampPath: join(app.getAppPath(), 'out', 'build-stamp.json'),
+      relaunch: () => {
+        log.append({ source: 'main', event: 'update_restart' })
+        app.relaunch()
+        app.quit()
+      }
+    })
+  : stillAppUpdateService()
+
 // The dialog is the main process's to open, which is why adding a workspace is
 // an operation on the port rather than an argument to one.
 async function pickFolder(): Promise<string | null> {
@@ -122,6 +138,7 @@ const shell = withLogging(
 let channel: AgentChannel | undefined
 let workspaceChannel: WorkspaceChannel | undefined
 let commandChannel: CommandChannel | undefined
+let appUpdateChannel: AppUpdateChannel | undefined
 
 function openWindow(reason?: 'activate'): void {
   const window = createMainWindow()
@@ -131,6 +148,7 @@ function openWindow(reason?: 'activate'): void {
   channel = serveAgentChannel(shell, window)
   workspaceChannel = serveWorkspaceChannel(workspace.service, window)
   commandChannel = serveCommandChannel(commands, window)
+  appUpdateChannel = serveAppUpdateChannel(appUpdate, window)
   log.append(
     reason === undefined
       ? { source: 'main', event: 'window_created' }
@@ -164,6 +182,8 @@ app.on('will-quit', () => {
   channel?.dispose()
   workspaceChannel?.dispose()
   commandChannel?.dispose()
+  appUpdateChannel?.dispose()
+  appUpdate.dispose()
   workspace.dispose()
   log.append({ source: 'main', event: 'app_quitting' })
 })

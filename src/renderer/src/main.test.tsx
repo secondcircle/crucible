@@ -76,6 +76,11 @@ function pageWithPreload(
       },
       commands: {
         request: (request: CommandRequest): Promise<CommandResult> => answer(commands, request)
+      },
+      // A dev launch's answer: never an update, so the pill stays absent.
+      appUpdate: {
+        request: async (): Promise<{ ok: true; value: null }> => ({ ok: true, value: null }),
+        onEvent: (): (() => void) => () => {}
       }
     },
     configurable: true

@@ -8,6 +8,7 @@ import type {
   ThinkingLevel,
   WorkspaceId
 } from '../../shared/agent/port'
+import type { AppUpdateService } from '../../shared/app-update/service'
 import type { CommandInfo, CommandService } from '../../shared/commands/service'
 import { commandFragment } from '../../shared/commands/template'
 import type {
@@ -57,15 +58,39 @@ const JUMPED_WITH_SUMMARY =
 export function Shell({
   port,
   workspace: service,
-  commands
+  commands,
+  appUpdate
 }: {
   readonly port: AgentPort
   readonly workspace: WorkspaceService
   // Beside the port, never behind it: a command is expanded here, and the
   // port never learns commands exist.
   readonly commands: CommandService
+  // Absent everywhere but the installed app's window; without it no update
+  // pill can ever render.
+  readonly appUpdate?: AppUpdateService
 }): React.JSX.Element {
   const [state, dispatch] = useReducer(reduce, NOTHING_YET)
+  // The waiting build's commit, once main has announced one.
+  const [updateCommit, setUpdateCommit] = useState<string | undefined>(undefined)
+
+  useEffect(() => {
+    if (appUpdate === undefined) return
+    let alive = true
+    // Asked once, so a pill main announced before this window subscribed is
+    // not lost; refusals mean only that there is nothing to show.
+    void appUpdate
+      .pending()
+      .then((commit) => {
+        if (alive && commit !== null) setUpdateCommit(commit)
+      })
+      .catch(() => {})
+    const unsubscribe = appUpdate.onEvent((event) => setUpdateCommit(event.commit))
+    return () => {
+      alive = false
+      unsubscribe()
+    }
+  }, [appUpdate])
   const [popover, setPopover] = useState<Popover>('none')
   const [question, setQuestion] = useState<Question | undefined>(undefined)
   const [drafts, setDrafts] = useState<Readonly<Record<SessionId, string>>>({})
@@ -849,6 +874,16 @@ export function Shell({
           onResetSession={resetSession}
           onOpenSettings={() => setSettings({ open: true, tab: 'providers' })}
           onOpenUsage={() => setSettings({ open: true, tab: 'usage' })}
+          update={
+            updateCommit === undefined || appUpdate === undefined
+              ? undefined
+              : {
+                  commit: updateCommit,
+                  onRestart: () => {
+                    void appUpdate.restart().catch(() => {})
+                  }
+                }
+          }
         />
 
         {/* The tree overlays this region and nothing else: the composer below

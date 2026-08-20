@@ -29,6 +29,21 @@
   flex: 1;
 }
 
+/* The pill is quiet accent, not alarm: an update waits, nothing is wrong. */
+.top .update {
+  background: none;
+  border: 1px solid var(--accent);
+  color: var(--accent2);
+  border-radius: 6px;
+  padding: 2px 9px;
+  font-size: 12px;
+}
+
+.top .update:hover {
+  color: var(--ink);
+  border-color: var(--accent2);
+}
+
 /* Cost only: the context meter beside it keeps the percentage. */
 .top .cost {
   font: 12px var(--mono);

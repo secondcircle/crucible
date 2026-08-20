@@ -14,7 +14,8 @@ export function TopBar({
   onToggleTree,
   onResetSession,
   onOpenSettings,
-  onOpenUsage
+  onOpenUsage,
+  update
 }: {
   readonly session?: SessionState
   readonly workspace?: WorkspaceState
@@ -28,6 +29,8 @@ export function TopBar({
   readonly onOpenSettings: () => void
   /** The cost chip, which lands on the same sheet's Usage tab. */
   readonly onOpenUsage: () => void
+  /** A newer installed build, waiting. One click restarts into it. */
+  readonly update?: { readonly commit: string; readonly onRestart: () => void }
 }): React.JSX.Element {
   const usage = session?.usage
   const percent = contextPercent(usage)
@@ -64,6 +67,18 @@ export function TopBar({
 
       {/* Everything from here is right-aligned, as mocked. */}
       <span className="spacer" />
+
+      {/* Restarting mid-turn drops that turn, so the person decides when. */}
+      {update === undefined ? null : (
+        <button
+          className="update"
+          aria-label="Restart into the updated app"
+          title={`A newer build (${update.commit}) is installed. Restart to pick it up.`}
+          onClick={update.onRestart}
+        >
+          ↻ Update ready · Restart
+        </button>
+      )}
 
       {/* A dash until the adapter has reported real cost, exactly the meter's
           honesty rule. */}
