@@ -124,9 +124,8 @@ describe('what survives a relaunch', () => {
     })
   })
 
-  // A flavor is what says whose token this is, so one this build cannot vouch
-  // for is dropped: absent reads as “not restorable”, which is the honest
-  // answer.
+  // Absent reads as not restorable, which is the safe way to load a stamp this
+  // build cannot vouch for.
   it('loads a flavor that is not a launch flavor, or has no token, as absent', () => {
     const written = join(directory, 'shell-state.json')
     writeFileSync(

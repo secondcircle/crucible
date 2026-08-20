@@ -1,9 +1,7 @@
 // @vitest-environment node
 //
-// A conversation token belongs to the flavor that minted it. Driven against
-// the real fake adapter and a real store file, with the running flavor always
-// 'fake': `'sdk'` appears here only as a word written into the store, never as
-// an adapter anyone constructs.
+// The running flavor is always 'fake'; 'sdk' is only a word written into the
+// store, so no SDK adapter is ever constructed here.
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -20,9 +18,8 @@ import { storePanelPersistence } from '../panel/store-persistence'
 import { createShell, type Shell } from './shell'
 import { createShellStore, type StoredSession } from './store'
 
-// "The token never reached the adapter" is not observable from outside the
-// port, so this test wraps the real fake adapter and keeps what went through
-// it. A test-local wrapper at an existing seam, not a production one.
+// What never reached the adapter is not observable through the port, so this
+// wrapper keeps what did.
 interface Recorder {
   readonly binds: BindRequest[]
   readonly usages: UsageRequest[]
@@ -67,9 +64,7 @@ function build(): void {
   })
 }
 
-// A relaunch: the sidebar comes back off the file and the conversations are
-// still where their adapter keeps them, but nothing is bound any more. The
-// edit is the store file as some earlier launch left it.
+// The edit stands in for a store file as some earlier launch left it.
 function relaunch(edit: (session: Record<string, unknown>) => void = () => {}): void {
   shell.dispose()
   for (const session of createShellStore(file).state.sessions) inner.release(session.id)
@@ -96,7 +91,7 @@ async function withSession(): Promise<{ workspaceId: string; sessionId: SessionI
   return { workspaceId, sessionId }
 }
 
-/** The store as a relaunch would read it, which is the only honest reading. */
+/** Read from the file, since the live store's state can differ from what it wrote. */
 const stored = (id: SessionId): StoredSession | undefined => createShellStore(file).session(id)
 
 const bindsFor = (id: SessionId): BindRequest[] =>
