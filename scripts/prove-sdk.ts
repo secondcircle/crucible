@@ -18,7 +18,6 @@ function print(line: string): void {
 // The repository is the app's own directory here, the same value
 // `app.getAppPath()` hands the composition root in dev.
 const APP = join(import.meta.dirname, '..')
-// Composed from the files the app ships, exactly as a launch composes it.
 const systemPrompt = shippedSystemPrompt(APP)
 
 // A panel of its own, kept in memory: this proof asks for one short turn and

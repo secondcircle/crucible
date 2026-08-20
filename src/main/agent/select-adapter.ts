@@ -12,12 +12,8 @@ export interface SelectedAdapter {
 }
 
 export interface SdkOptions {
-  /**
-   * The composed system prompt, asked for only when the sdk flavor is the one
-   * chosen. It throws rather than answering with less: a fake-flavor launch
-   * needs no prompt and must start without one, and an sdk-flavor launch that
-   * cannot read what it ships must not fall back to π's own prompt.
-   */
+  // Called only for the sdk flavor, so a launch on the fake still starts when
+  // no prompt can be read.
   readonly systemPrompt: () => string
   /** Opening the OS browser during a login; only main can do it. */
   readonly openExternal?: (url: string) => void

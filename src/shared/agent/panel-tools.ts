@@ -16,11 +16,8 @@ export interface PanelToolDefinition {
   readonly name: PanelToolName
   /** Human-readable, for a tool row. */
   readonly label: string
-  /**
-   * Everything the model is told about the tool, curation included: a
-   * description travels in the request's tools parameter, which is the one
-   * channel Crucible's own system prompt does not replace.
-   */
+  // Carries the curation too: a description rides the request's tools
+  // parameter, the one channel Crucible's system prompt does not replace.
   readonly description: string
   readonly parameters: readonly PanelToolParameter[]
 }

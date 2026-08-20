@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
-// Spelled with its extension so plain Node can load this module too, which is
-// how `prove:sdk` composes the same prompt the app composes.
+// Extension spelled out so plain Node loads this module too, not only the
+// bundler.
 import { composeSystemPrompt } from './agent/system-prompt.ts'
 
 // The one module that knows where the app keeps the files it ships; everything
@@ -14,7 +14,6 @@ export function shippedCommandsPath(root: string): string {
   return join(root, SHIPPED_DIRECTORY, 'commands')
 }
 
-/** The index the role prompt points at; the agent reads docs when asked. */
 export function shippedDocsIndexPath(root: string): string {
   return join(root, SHIPPED_DIRECTORY, 'agent-docs', 'index.md')
 }
@@ -35,11 +34,7 @@ export function readShippedStandingPrompt(root: string): string {
   return read(shippedStandingPromptPath(root))
 }
 
-/**
- * The whole system prompt of every agent this launch starts, read from the
- * files that ship with the app. A missing file throws: falling back would hand
- * the agent π's own prompt, which is the thing this prompt replaces.
- */
+/** A missing file throws: a fallback would hand the agent π's own prompt. */
 export function shippedSystemPrompt(root: string): string {
   return composeSystemPrompt({
     role: readShippedRolePrompt(root),

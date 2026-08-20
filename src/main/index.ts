@@ -55,9 +55,8 @@ const { adapter, flavor } = selectAdapter(
   log,
   { tools: panel, exhibits: panelFixtures(app.getAppPath()) },
   {
-    // Read and composed once per launch, and only when the sdk flavor is the
-    // one chosen. A file it ships and cannot read throws here, naming the file:
-    // no session starts on π's own prompt.
+    // A thunk, so a fake-flavor launch starts even when a shipped prompt file
+    // cannot be read; for the sdk flavor an unreadable file throws the launch.
     systemPrompt: () => shippedSystemPrompt(app.getAppPath()),
     // A login's browser is opened here; the renderer gets no such capability.
     openExternal: (url: string) => {

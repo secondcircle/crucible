@@ -100,15 +100,13 @@ export function createSdkAdapter({
   // The same model the fake's scripts call and the same model the shell reads:
   // the tools registered below are its three behaviors and nothing more.
   readonly panel: PanelTools
-  // Composed above this seam and passed as a full override: every session this
-  // adapter opens is told this and nothing π wrote.
+  // Passed as a full override: every session this adapter opens is told this
+  // and nothing π wrote.
   readonly systemPrompt: string
   // Opening the OS browser is main's to do, and it is injected rather than
   // imported so this module still loads under plain Node for `prove:sdk`.
   readonly openExternal?: (url: string) => void
 }): ConversationAdapter {
-  // Crucible's own folder, so no session reads π's resources or writes its
-  // conversations where π's own sessions live.
   const agentDir = crucibleAgentDir(homedir())
   const listeners = new Set<AdapterEventListener>()
   const sessions = new Map<SessionId, Bound>()
@@ -138,7 +136,6 @@ export function createSdkAdapter({
     return modelRuntime
   }
 
-  /** Where this workspace's conversations are written and looked for. */
   function sessionDir(workspacePath: string): string {
     return workspaceSessionDir(agentDir, workspacePath)
   }
@@ -169,16 +166,14 @@ export function createSdkAdapter({
         // π's own prompt folders are not read at all: commands are Crucible's,
         // and two command systems in one composer would be two grammars.
         noPromptTemplates: true,
-        // Belt and braces: π's folders are not Crucible's any more, and a skill
-        // is one of the few things that would still reach a session past a
-        // full prompt override.
+        // A skill is one of the few things that would still reach a session
+        // past a full prompt override.
         noSkills: true,
-        // The base is ignored, so a system-prompt file discovered in any folder
-        // is dead structurally and π's own prompt never reaches a session.
+        // The base is ignored, so π's own prompt never reaches a session and a
+        // system-prompt file discovered in any folder is dead.
         systemPromptOverride: () => systemPrompt,
-        // Nothing rides the prompt: no doc text, and no file dropped into the
-        // agent dir, since a Crucible-owned custom-instructions mechanism is
-        // deferred rather than arrived at by accident.
+        // A Crucible-owned custom-instructions mechanism is deferred, so a file
+        // dropped into the agent dir must not become one by accident.
         appendSystemPromptOverride: () => []
       })
       await resourceLoader.reload()
@@ -221,8 +216,8 @@ export function createSdkAdapter({
       return {
         name: tool.name,
         label: tool.label,
-        // Whatever the tool must always say travels here: a description rides
-        // the request's tools parameter and survives the prompt override.
+        // A description survives the prompt override: it rides the request's
+        // tools parameter.
         description: tool.description,
         parameters,
         // A model error propagates: π then reports a failed call carrying the

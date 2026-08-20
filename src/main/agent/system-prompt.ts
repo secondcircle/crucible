@@ -1,25 +1,16 @@
-// Pure, no I/O and no SDK import, so the whole of what a Crucible agent is
-// told can be checked without constructing an adapter or paying for a call.
-// A future node agent picks a different role prompt; the standing prompt is
-// appended whatever it picks.
+// No I/O and no SDK import, so what an agent is told can be checked without
+// constructing an adapter or paying for a call.
 
 /** The one substitution a role prompt may ask for. */
 export const DOCS_INDEX_PLACEHOLDER = '{{CRUCIBLE_DOCS_INDEX}}'
 
 export interface SystemPromptLayers {
-  /** Role prompt text; may contain the {{CRUCIBLE_DOCS_INDEX}} placeholder. */
   readonly role: string
-  /** Standing prompt text; appended whatever the role says. */
   readonly standing: string
-  /** Absolute path substituted for every occurrence of the placeholder. */
   readonly docsIndexPath?: string
 }
 
-/**
- * The whole system prompt of an agent Crucible starts: role first, standing
- * last, one blank line between them. π appends the project context files and
- * the cwd line after this text; nothing else is added here.
- */
+/** π appends the project context files and the cwd line after this text. */
 export function composeSystemPrompt({
   role,
   standing,
@@ -31,9 +22,8 @@ export function composeSystemPrompt({
       : role.split(DOCS_INDEX_PLACEHOLDER).join(docsIndexPath).trim()
   const appended = standing.trim()
 
-  // A blank layer would leave π's own prompt standing: an empty override makes
-  // the SDK fall back to it, which is the one outcome this module exists to
-  // prevent.
+  // An empty override makes the SDK fall back to π's own prompt, the one
+  // outcome this module exists to prevent.
   if (substituted === '') throw new Error('A Crucible agent needs a role prompt; this one is blank.')
   if (appended === '') {
     throw new Error('A Crucible agent needs a standing prompt; this one is blank.')

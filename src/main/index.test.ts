@@ -146,8 +146,6 @@ describe('what a launch does', () => {
 
   it('starts though it can read no shipped prompt file, because the fake needs none', () => {
     // Nothing is shipped under this launch's app directory, prompts included.
-    // The system prompt is composed only for an sdk-flavor launch, and a
-    // missing file there fails that launch rather than this one.
     expect(existsSync(join(harness.appPath, 'resources'))).toBe(false)
     expect(records()[1]).toMatchObject({ event: 'adapter_selected', adapter: 'fake' })
   })

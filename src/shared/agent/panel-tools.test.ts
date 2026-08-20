@@ -5,10 +5,8 @@
 import { describe, expect, it } from 'vitest'
 import { PANEL_TOOLS, panelTool } from './panel-tools'
 
-// The curation the panel lives by, word for word. It rides panel_show's
-// description because a description travels in the request's tools parameter,
-// and Crucible's own system prompt replaces every section π would have
-// generated for it.
+// Pinned word for word, because a drift here changes what every session is
+// told about the panel.
 const CURATION = [
   "The context panel is the user's primary display; they may not notice messages in the chat. Content shown there is what the user relies on to follow the work.",
   "The panel's value comes from curation, not accumulation: it should reflect only what is relevant to the current conversation. Stale tabs actively obscure what matters now \u2014 close them once they have served their purpose (e.g. a plan that has been accepted).",
