@@ -6,10 +6,12 @@ import type {
   Unsubscribe,
   WorkspaceEvent,
   WorkspaceEventListener,
-  WorkspaceService
+  WorkspaceService,
+  WorktreeCreation
 } from '../../shared/workspace/service'
 import { collectBoard, type CommandOutcome, type CommandRunner } from './collect-board'
 import { listFiles } from './files'
+import { createWorktree, isGitWorkspace } from './worktree'
 
 // The workspace service's real flavor: the one module that reads the user's
 // folders and starts their processes, reachable only through its own channel.
@@ -74,18 +76,26 @@ export function createWorkspaceService({
   }
 
   return {
-    async searchFiles(workspacePath: string, query: string): Promise<readonly string[]> {
-      return rankFiles(await listFiles(workspacePath), query)
+    async searchFiles(directory: string, query: string): Promise<readonly string[]> {
+      return rankFiles(await listFiles(directory), query)
     },
 
-    async startRun(workspacePath: string, command: string): Promise<RunId> {
+    isGitWorkspace(workspacePath: string): Promise<boolean> {
+      return isGitWorkspace(workspacePath)
+    },
+
+    createWorktree(workspacePath: string): Promise<WorktreeCreation> {
+      return createWorktree(workspacePath)
+    },
+
+    async startRun(directory: string, command: string): Promise<RunId> {
       minted += 1
       const runId = `run-${minted}`
 
       // Its own process group, so stopping the run stops what it started
       // rather than orphaning a tree of children.
       const child = spawn('bash', ['-c', command], {
-        cwd: workspacePath,
+        cwd: directory,
         detached: true,
         stdio: ['ignore', 'pipe', 'pipe']
       })

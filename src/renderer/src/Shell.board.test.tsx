@@ -21,7 +21,7 @@ const TWO_WORKSPACES: Partial<ShellSnapshot> = {
     { id: 'w2', name: 'resume-site', path: '/repos/resume-site' }
   ],
   activeWorkspaceId: 'w1',
-  sessions: [{ id: 's1', workspaceId: 'w1', createdAt: NOW, working: false }],
+  sessions: [{ id: 's1', workspaceId: 'w1', createdAt: NOW, working: false, fresh: false }],
   activeSessionId: 's1'
 }
 

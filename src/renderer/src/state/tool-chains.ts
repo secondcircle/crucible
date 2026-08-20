@@ -1,3 +1,4 @@
+import { tokens } from '../labels'
 import type { ViewItem } from './shell-state'
 
 // A derivation over the flat item list rather than a second shape the reducer
@@ -101,6 +102,13 @@ function describe(calls: readonly ToolItem[], startedAt: number): ToolChain {
     state,
     label
   }
+}
+
+// Half-parsed JSON is never shown, so a call that has not run yet says only
+// how much of its arguments has arrived.
+export function callSummary(call: ToolItem): string {
+  if (call.argChars === undefined) return call.summary
+  return `arguments · ${tokens(call.argChars)}`
 }
 
 /** `3 bash · 2 read`, or nothing at all until the first call has landed. */

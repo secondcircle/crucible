@@ -69,6 +69,10 @@ export async function invoke(service: WorkspaceService, request: unknown): Promi
   switch (op) {
     case 'searchFiles':
       return service.searchFiles(text(0), text(1))
+    case 'isGitWorkspace':
+      return service.isGitWorkspace(text(0))
+    case 'createWorktree':
+      return service.createWorktree(text(0))
     case 'startRun':
       return service.startRun(text(0), text(1))
     case 'stopRun':

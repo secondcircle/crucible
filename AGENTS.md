@@ -85,10 +85,13 @@ Its state lives in `~/Library/Application Support/Crucible`; every dev launch
 uses `Crucible-Dev` instead, so no worktree or branch under test can ever
 touch the installed app's sessions.
 
-Updates flow on their own: a `post-merge` hook (`scripts/git-hooks/`, wired
-by `git config core.hooksPath scripts/git-hooks`, once per clone) reinstalls
-the app in the background when a merge lands on `main`, logging to
-`logs/install-stable.log`. The running app polls its own build stamp, and
+Updates flow on their own: whenever `main` moves in this clone, the app is
+rebuilt in the background, logging to `logs/install-stable.log`. Three hooks
+(`scripts/git-hooks/`, wired by `git config core.hooksPath scripts/git-hooks`,
+once per clone) cover every way that happens — `post-merge`, `post-commit`
+and `post-rewrite` — and all three call `install-if-main.sh`, which holds the
+branch, dirty-tree and already-installed guards. The running app polls its
+own build stamp, and
 when the bundle on disk is newer it shows an "Update ready · Restart" pill in
 the top bar. Restarting is always the human's click, never automatic — a
 restart mid-turn drops that turn.

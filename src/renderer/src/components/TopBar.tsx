@@ -1,13 +1,14 @@
-import type { ModelInfo, SessionState, WorkspaceState } from '../../../shared/agent/port'
-import { contextPercent, sessionLabel, tokens } from '../labels'
+import type { SessionState } from '../../../shared/agent/port'
+import { contextPercent, tokens } from '../labels'
 import './topbar.css'
 
+// Nothing here repeats a fact the sidebar rows or the composer chip already
+// state, which is why the session, workspace and model are absent.
+//
 // The meter shows a dash until the adapter reports real usage: a context meter
 // that guesses is worse than one that admits it does not know yet.
 export function TopBar({
   session,
-  workspace,
-  model,
   menuOpen,
   treeOpen,
   onToggleMenu,
@@ -19,8 +20,6 @@ export function TopBar({
   update
 }: {
   readonly session?: SessionState
-  readonly workspace?: WorkspaceState
-  readonly model?: ModelInfo
   readonly menuOpen: boolean
   readonly treeOpen: boolean
   readonly onToggleMenu: () => void
@@ -49,17 +48,6 @@ export function TopBar({
 
   return (
     <header className="top">
-      <span className="title">{session === undefined ? 'No session' : sessionLabel(session)}</span>
-      <span className="where">{workspace?.name ?? 'No workspace'}</span>
-      {session?.model === undefined ? null : (
-        <span className="model">{model?.label ?? session.model}</span>
-      )}
-      {session?.working ? (
-        <span className="working" aria-label="Agent working">
-          ● working
-        </span>
-      ) : null}
-
       {/* The mouse and dictation path into the tree; double-Esc is only an
           accelerator for it. */}
       {session === undefined ? null : (

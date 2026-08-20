@@ -274,7 +274,11 @@ describe('asking about what is selected', () => {
 describe('when the board collects', () => {
   it('collects when the workspace becomes active, and again when the board opens', async () => {
     const { workspace } = await shell()
-    expect(workspace.calls).toEqual([{ op: 'branchBoard', args: ['/repos/crucible'] }])
+    // Only this board's own calls: activating a workspace also asks whether it
+    // is a git one, which is the worktree chip's question, not the board's.
+    expect(workspace.calls.filter((call) => call.op === 'branchBoard')).toEqual([
+      { op: 'branchBoard', args: ['/repos/crucible'] }
+    ])
 
     await open()
 

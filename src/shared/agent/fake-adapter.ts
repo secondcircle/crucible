@@ -107,6 +107,9 @@ interface ScriptedCall {
   readonly summary: string
   readonly ok: boolean
   readonly chunks: readonly string[]
+  // Absent means the call starts running the moment it appears, so the other
+  // entry path stays covered too.
+  readonly argBeats?: readonly number[]
 }
 
 // Two names and one failure, so a single scripted turn exercises a tool
@@ -116,6 +119,8 @@ const CHAIN: readonly ScriptedCall[] = [
     name: 'bash',
     summary: 'npm test',
     ok: true,
+    // The pending phase, visible under `npm run dev` and assertable in a test.
+    argBeats: [24, 310, 1_480],
     chunks: [
       ' Test Files  8 passed (8)\n',
       '      Tests  42 passed (42)\n',
@@ -317,6 +322,10 @@ export function scaleUsage(messages: number): SessionUsage {
   }
 }
 
+export function fakeTitle(text: string): string {
+  return text.replace(/\s+/g, ' ').trim().split(' ').filter(Boolean).slice(0, 8).join(' ')
+}
+
 // Deliberately approximate: the number only has to be coherent and monotonic.
 function estimateTokens(text: string): number {
   return Math.max(1, Math.ceil(text.length / 4))
@@ -365,6 +374,27 @@ export function createFakeAdapter({
     // A copy, so a listener that unsubscribes while being called does not
     // disturb the delivery of that same event to the others.
     for (const listener of [...listeners]) listener(event)
+  }
+
+  // The rule the SDK adapter follows too: the count goes out whenever the
+  // conversation grew, which is on the bind and at every step of a turn, not
+  // only once a turn is over. `growth` is what the live turn has added so far.
+  function reportUsage(sessionId: SessionId, conversation: Conversation, growth = 0): void {
+    const usedTokens = Math.min(CONTEXT_WINDOW, conversation.usedTokens + growth)
+    // An empty conversation has reported nothing, and a dash is what nothing
+    // looks like.
+    if (usedTokens === 0) return
+    emit({
+      type: 'usage',
+      sessionId,
+      usedTokens,
+      contextWindow: CONTEXT_WINDOW,
+      // Money is only known per finished turn, so a conversation that has paid
+      // for none keeps its dash while its tokens are already on the meter.
+      ...(conversation.usageMessages === 0
+        ? {}
+        : { cost: dollars(conversation.usageMessages * TURN_COST * 100) })
+    })
   }
 
   // The kind is in the token because canned conversations come back identical
@@ -630,10 +660,17 @@ export function createFakeAdapter({
           ? `${opening.command}\n${opening.output}`
           : ''
 
+    // Every place the turn adds to what the conversation holds goes through
+    // here, so the meter moves with the work rather than jumping at the end.
+    function add(text: string): void {
+      counted += text
+      reportUsage(sessionId, conversation, estimateTokens(counted))
+    }
+
     function settleSpoken(): void {
       if (spoken === '') return
       pending.push({ kind: 'assistant', markdown: spoken })
-      counted += spoken
+      add(spoken)
       spoken = ''
     }
 
@@ -654,14 +691,9 @@ export function createFakeAdapter({
       // stopped turn was still paid for.
       conversation.usageMessages += 1
       emit(terminal)
-      // Reported after the turn, which is when it is genuinely known.
-      emit({
-        type: 'usage',
-        sessionId,
-        usedTokens: conversation.usedTokens,
-        contextWindow: CONTEXT_WINDOW,
-        cost: dollars(conversation.usageMessages * TURN_COST * 100)
-      })
+      // The last word: the tokens are settled and the turn's money is now
+      // known, which the counts crossing mid-turn could not say.
+      reportUsage(sessionId, conversation)
     }
 
     /** False once the script has been abandoned, which ends every loop. */
@@ -686,7 +718,7 @@ export function createFakeAdapter({
         thinking += delta
         emit({ type: 'thinking_delta', sessionId, turnId, delta })
       }
-      counted += thinking
+      add(thinking)
       pending.push({
         kind: 'thinking',
         text: thinking,
@@ -724,7 +756,7 @@ export function createFakeAdapter({
         output = cause instanceof Error ? cause.message : String(cause)
       }
       emit({ type: 'tool_ended', sessionId, turnId, callId, ok, output })
-      counted += output
+      add(output)
       pending.push({ kind: 'tool', name: scripted.name, summary: scripted.summary, ok, output })
       return true
     }
@@ -732,6 +764,18 @@ export function createFakeAdapter({
     async function call(scripted: ScriptedCall, number: number): Promise<boolean> {
       settleSpoken()
       const callId = `${turnId}-call-${number}`
+      // The model committing to the call, before any of it runs: the element
+      // is in the transcript from here, with a growing argument count.
+      if (scripted.argBeats !== undefined) {
+        await beat()
+        if (stopped !== undefined) return false
+        emit({ type: 'tool_call_started', sessionId, turnId, callId, name: scripted.name })
+        for (const chars of scripted.argBeats) {
+          await beat()
+          if (stopped !== undefined) return false
+          emit({ type: 'tool_call_args', sessionId, turnId, callId, chars })
+        }
+      }
       await beat()
       if (stopped !== undefined) return false
       emit({
@@ -754,7 +798,7 @@ export function createFakeAdapter({
       await beat()
       if (stopped !== undefined) return false
       emit({ type: 'tool_ended', sessionId, turnId, callId, ok: scripted.ok, output })
-      counted += output
+      add(output)
       pending.push({
         kind: 'tool',
         name: scripted.name,
@@ -774,7 +818,7 @@ export function createFakeAdapter({
         if (stopped !== undefined) return false
         const message = queue.shift() ?? ''
         settleSpoken()
-        counted += message
+        add(message)
         pending.push({ kind: 'user', text: message })
         emit({ type: 'user_message', sessionId, turnId, text: message })
         emitQueue(bound, sessionId)
@@ -791,7 +835,7 @@ export function createFakeAdapter({
         const share = bound.shares.shift()
         if (share === undefined) break
         settleSpoken()
-        counted += `${share.run.command}\n${share.run.output}`
+        add(`${share.run.command}\n${share.run.output}`)
         pending.push({
           kind: 'bashRun',
           command: share.run.command,
@@ -944,6 +988,9 @@ export function createFakeAdapter({
         shares: []
       }
       sessions.set(request.sessionId, bound)
+      // A conversation that came back is already holding context: without this
+      // the meter reads as a dash from launch until a turn ends.
+      if (existing !== undefined) reportUsage(request.sessionId, conversation)
       return {
         token: conversation.token,
         model: bound.model,
@@ -980,6 +1027,7 @@ export function createFakeAdapter({
         shares: []
       }
       sessions.set(request.sessionId, bound)
+      reportUsage(request.sessionId, conversation)
       return {
         token: conversation.token,
         model: bound.model,
@@ -1062,9 +1110,31 @@ export function createFakeAdapter({
       return [FAKE_MODEL]
     },
 
-    async setModel(sessionId: SessionId, model: ModelId): Promise<void> {
+    async setModel(
+      sessionId: SessionId,
+      model: ModelId
+    ): Promise<{ thinkingLevel?: ThinkingLevel }> {
       if (model !== FAKE_MODEL.id) throw new Error('The fake adapter has only one model.')
-      requireBound(sessionId).model = model
+      const bound = requireBound(sessionId)
+      bound.model = model
+      // The level in effect after the switch, which this adapter keeps as it
+      // was because its one model supports every level it reports.
+      return { thinkingLevel: bound.thinkingLevel }
+    },
+
+    // Deterministic from the conversation, so the title visibly changes as
+    // turns land: no network, no cost, nothing canned that ignores content.
+    async titleConversation(
+      sessionId: SessionId
+    ): Promise<{ title: string } | undefined> {
+      const bound = sessions.get(sessionId)
+      if (bound === undefined) return undefined
+      const said = [...pathEntries(bound.conversation)]
+        .reverse()
+        .find((entry) => entry.item.kind === 'user')
+      if (said === undefined || said.item.kind !== 'user') return undefined
+      const title = fakeTitle(said.item.text)
+      return title === '' ? undefined : { title }
     },
 
     async setThinkingLevel(sessionId: SessionId, level: ThinkingLevel): Promise<void> {

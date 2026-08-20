@@ -1,11 +1,14 @@
-import type { SessionState } from '../../shared/agent/port'
+import type { SessionWorktree } from '../../shared/agent/port'
 
-// One format in one place, so the sidebar and the top bar cannot drift into
-// two names for one session.
-export function sessionLabel(session: Pick<SessionState, 'createdAt'>): string {
-  const at = new Date(session.createdAt)
-  if (Number.isNaN(at.getTime())) return 'Session'
-  return `Session · ${at.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}`
+// The small display formats, in one place so two components cannot drift into
+// two spellings of one fact. `sessionLabel` is gone: the model writes the
+// title now.
+
+// The branch when it is known, and the directory's own name when a script made
+// a worktree whose branch could not be read.
+export function worktreeLabel(worktree: SessionWorktree): string {
+  if (worktree.branch !== undefined && worktree.branch !== '') return worktree.branch
+  return worktree.path.split('/').filter(Boolean).at(-1) ?? worktree.path
 }
 
 /** The clock time a tree node carries: `2:04 PM`, and nothing when unknown. */
@@ -67,6 +70,21 @@ export function branchAge(touchedAt: string, now = Date.now()): string {
   if (days < 7) return `${days}d`
   const date = `${when.getDate()} ${MONTHS[when.getMonth()]}`
   return days > 365 ? `${date} ${when.getFullYear()}` : date
+}
+
+// How long the running turn has been running: seconds while it is short, then
+// m:ss, then hours and minutes, because nobody watches the seconds on an hour
+// old turn. Monospaced and tabular where it renders, so it never shifts width
+// as it ticks.
+export function elapsedTime(iso: string, now = Date.now()): string {
+  const from = new Date(iso).getTime()
+  if (Number.isNaN(from)) return ''
+  const seconds = Math.max(0, Math.floor((now - from) / 1000))
+  if (seconds < 60) return `${seconds}s`
+  if (seconds < 3600) {
+    return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`
+  }
+  return `${Math.floor(seconds / 3600)}h ${Math.floor((seconds % 3600) / 60)}m`
 }
 
 // The meter's percentage, and nothing at all until the adapter has reported

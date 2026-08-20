@@ -8,6 +8,7 @@ import { Shell } from './Shell'
 import { createScriptedPort, oneSession } from './testing/scripted-port'
 import { createScriptedWorkspace } from './testing/scripted-workspace'
 import { createScriptedCommands } from './testing/scripted-commands'
+import { sessionsShown } from './testing/sidebar'
 import { settled } from './testing/settled'
 
 const REPLY = [
@@ -27,7 +28,7 @@ async function replyWith(deltas: readonly string[]): Promise<void> {
       workspace={createScriptedWorkspace()}
       commands={createScriptedCommands()}
     />)
-  await screen.findByRole('button', { name: /^Session · / })
+  await sessionsShown()
   await settled()
 
   await act(async () => {
@@ -105,7 +106,7 @@ describe('a person\u2019s own message', () => {
       workspace={createScriptedWorkspace()}
       commands={createScriptedCommands()}
     />)
-    await screen.findByRole('button', { name: /^Session · / })
+    await sessionsShown()
 
     act(() => {
       port.emit({ type: 'state', snapshot: port.snapshotNow })

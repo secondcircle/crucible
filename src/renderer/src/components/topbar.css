@@ -11,20 +11,6 @@
   flex: none;
 }
 
-.top .title {
-  color: var(--ink);
-  font-weight: 600;
-  font-size: 13.5px;
-}
-
-.top .model {
-  color: var(--dim);
-}
-
-.top .working {
-  color: var(--ok);
-}
-
 .top .spacer {
   flex: 1;
 }

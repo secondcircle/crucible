@@ -3,7 +3,8 @@ import type {
   RunId,
   Unsubscribe,
   WorkspaceEventListener,
-  WorkspaceService
+  WorkspaceService,
+  WorktreeCreation
 } from '../../../shared/workspace/service'
 import { workspaceBridge } from '../bridge'
 
@@ -25,10 +26,13 @@ export function createWorkspaceClient(): WorkspaceService {
   }
 
   return {
-    searchFiles: (workspacePath: string, query: string) =>
-      call<readonly string[]>('searchFiles', workspacePath, query),
-    startRun: (workspacePath: string, command: string) =>
-      call<RunId>('startRun', workspacePath, command),
+    searchFiles: (directory: string, query: string) =>
+      call<readonly string[]>('searchFiles', directory, query),
+    isGitWorkspace: (workspacePath: string) =>
+      call<boolean>('isGitWorkspace', workspacePath),
+    createWorktree: (workspacePath: string) =>
+      call<WorktreeCreation>('createWorktree', workspacePath),
+    startRun: (directory: string, command: string) => call<RunId>('startRun', directory, command),
     stopRun: (runId: RunId) => call<void>('stopRun', runId),
     branchBoard: (workspacePath: string) =>
       call<BranchBoardAnswer>('branchBoard', workspacePath),

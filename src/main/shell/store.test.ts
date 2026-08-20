@@ -124,6 +124,51 @@ describe('what survives a relaunch', () => {
     })
   })
 
+  it('carries a session’s title, last activity and titling spend through', () => {
+    const first = createShellStore(file)
+    const workspace = first.addWorkspace('/repos/crucible')
+    const session = first.addSession({
+      workspaceId: workspace.id,
+      createdAt: 'now',
+      title: 'Removing the composer hint bar',
+      lastActivityAt: 'later',
+      titlingSpend: 0.02
+    })
+
+    expect(createShellStore(file).session(session.id)).toEqual({
+      id: session.id,
+      workspaceId: workspace.id,
+      createdAt: 'now',
+      title: 'Removing the composer hint bar',
+      lastActivityAt: 'later',
+      titlingSpend: 0.02
+    })
+  })
+
+  // A store written before sessions had titles loads exactly as it did, and
+  // the session simply has none.
+  it('loads a session with no title, activity or spend of its own', () => {
+    const written = join(directory, 'shell-state.json')
+    writeFileSync(
+      written,
+      JSON.stringify({
+        version: 1,
+        workspaces: [{ id: 'w', path: '/repos/crucible' }],
+        sessions: [
+          { id: 'older', workspaceId: 'w', createdAt: 'now' },
+          { id: 'nonsense', workspaceId: 'w', createdAt: 'now', title: 7, titlingSpend: 'lots' }
+        ],
+        activeSessionByWorkspace: {}
+      })
+    )
+
+    const store = createShellStore(written)
+
+    expect(store.session('older')).toEqual({ id: 'older', workspaceId: 'w', createdAt: 'now' })
+    expect(store.session('nonsense')?.title).toBeUndefined()
+    expect(store.session('nonsense')?.titlingSpend).toBeUndefined()
+  })
+
   // Absent reads as not restorable, which is the safe way to load a stamp this
   // build cannot vouch for.
   it('loads a flavor that is not a launch flavor, or has no token, as absent', () => {
@@ -148,6 +193,103 @@ describe('what survives a relaunch', () => {
     expect(store.session('misspelled')?.token).toBe('t')
     expect(store.session('stamp-only')?.tokenFlavor).toBeUndefined()
     expect(store.session('intact')?.tokenFlavor).toBe('fake')
+  })
+
+  it('carries a session’s worktree and its fresh mark through', () => {
+    const first = createShellStore(file)
+    const workspace = first.addWorkspace('/repos/crucible')
+    const session = first.addSession({
+      workspaceId: workspace.id,
+      createdAt: 'now',
+      fresh: true
+    })
+    first.updateSession(session.id, {
+      worktree: { path: '/repos/crucible/.crucible/worktrees/9f3a2c', branch: 'crucible/9f3a2c' }
+    })
+
+    expect(createShellStore(file).session(session.id)).toEqual({
+      id: session.id,
+      workspaceId: workspace.id,
+      createdAt: 'now',
+      fresh: true,
+      worktree: { path: '/repos/crucible/.crucible/worktrees/9f3a2c', branch: 'crucible/9f3a2c' }
+    })
+  })
+
+  it('takes the worktree off again when a session goes back to its checkout', () => {
+    const first = createShellStore(file)
+    const workspace = first.addWorkspace('/repos/crucible')
+    const session = first.addSession({
+      workspaceId: workspace.id,
+      createdAt: 'now',
+      fresh: true,
+      worktree: { path: '/repos/crucible/.crucible/worktrees/9f3a2c' }
+    })
+
+    first.updateSession(session.id, { worktree: undefined })
+
+    expect(first.session(session.id)?.worktree).toBeUndefined()
+    expect(createShellStore(file).session(session.id)?.worktree).toBeUndefined()
+    expect(readFileSync(file, 'utf8')).not.toContain('worktrees/9f3a2c')
+  })
+
+  // A record written before the mark existed is a session with a conversation,
+  // and unlocking it would let a flip abandon one.
+  it('loads a session with no fresh mark as one that has already started', () => {
+    const written = join(directory, 'shell-state.json')
+    writeFileSync(
+      written,
+      JSON.stringify({
+        version: 1,
+        workspaces: [{ id: 'w', path: '/repos/crucible' }],
+        sessions: [
+          { id: 'older', workspaceId: 'w', createdAt: 'now', token: 'opaque-1' },
+          { id: 'marked', workspaceId: 'w', createdAt: 'now', fresh: true },
+          { id: 'unmarked', workspaceId: 'w', createdAt: 'now', fresh: false },
+          { id: 'nonsense', workspaceId: 'w', createdAt: 'now', fresh: 'yes' }
+        ],
+        activeSessionByWorkspace: {}
+      })
+    )
+
+    const store = createShellStore(written)
+
+    expect(store.session('older')?.fresh).toBeUndefined()
+    expect(store.session('older')?.token).toBe('opaque-1')
+    expect(store.session('marked')?.fresh).toBe(true)
+    expect(store.session('unmarked')?.fresh).toBeUndefined()
+    expect(store.session('nonsense')?.fresh).toBeUndefined()
+  })
+
+  it('loads a worktree that does not read as one as absent, session intact', () => {
+    const written = join(directory, 'shell-state.json')
+    writeFileSync(
+      written,
+      JSON.stringify({
+        version: 1,
+        workspaces: [{ id: 'w', path: '/repos/crucible' }],
+        sessions: [
+          { id: 'listy', workspaceId: 'w', createdAt: 'now', worktree: ['/somewhere'] },
+          { id: 'pathless', workspaceId: 'w', createdAt: 'now', worktree: { branch: 'crucible/x' } },
+          {
+            id: 'branchless',
+            workspaceId: 'w',
+            createdAt: 'now',
+            worktree: { path: '/w/9f3a2c', branch: 7 }
+          }
+        ],
+        activeSessionByWorkspace: {}
+      })
+    )
+
+    const store = createShellStore(written)
+
+    // The directory on disk is untouched either way: what is lost here is a
+    // field, and the session still opens.
+    expect(store.session('listy')?.worktree).toBeUndefined()
+    expect(store.session('listy')?.createdAt).toBe('now')
+    expect(store.session('pathless')?.worktree).toBeUndefined()
+    expect(store.session('branchless')?.worktree).toEqual({ path: '/w/9f3a2c' })
   })
 
   it('loads panel data that does not read as panel data as absent', () => {

@@ -1,14 +1,4 @@
 #!/bin/bash
-# Fires after any merge in this clone (worktrees share hooksPath, so the
-# branch guard is what scopes it): a merge landing on main reinstalls the
-# stable app in the background. The running app's update watcher notices the
-# new bundle and offers the restart — nothing here interrupts anyone.
-#
-# Wired by: git config core.hooksPath scripts/git-hooks
-branch="$(git rev-parse --abbrev-ref HEAD 2>/dev/null)"
-[ "$branch" = "main" ] || exit 0
-
-root="$(git rev-parse --show-toplevel)"
-mkdir -p "$root/logs"
-echo "post-merge: installing the stable app in the background → logs/install-stable.log"
-(cd "$root" && nohup npm run install:stable > logs/install-stable.log 2>&1 &)
+# A merge or a fast-forward pull landing on main. Worktrees share hooksPath,
+# so the branch guard inside is what scopes this to the main checkout.
+exec "$(dirname "$0")/install-if-main.sh"

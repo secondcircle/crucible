@@ -9,14 +9,15 @@ import { Shell } from './Shell'
 import { createScriptedPort, oneSession, type ScriptedPort } from './testing/scripted-port'
 import { createScriptedWorkspace } from './testing/scripted-workspace'
 import { createScriptedCommands } from './testing/scripted-commands'
+import { sessionsShown } from './testing/sidebar'
 import { settled } from './testing/settled'
 
 const TWO_SESSIONS: ShellSnapshot = {
   workspaces: [{ id: 'w1', name: 'crucible', path: '/repos/crucible' }],
   activeWorkspaceId: 'w1',
   sessions: [
-    { id: 's1', workspaceId: 'w1', createdAt: '2026-08-19T14:14:00.000Z', working: false },
-    { id: 's2', workspaceId: 'w1', createdAt: '2026-08-19T15:20:00.000Z', working: false }
+    { id: 's1', workspaceId: 'w1', createdAt: '2026-08-19T14:14:00.000Z', working: false, fresh: false },
+    { id: 's2', workspaceId: 'w1', createdAt: '2026-08-19T15:20:00.000Z', working: false, fresh: false }
   ],
   activeSessionId: 's1'
 }
@@ -35,7 +36,7 @@ async function shell(snapshot: Partial<ShellSnapshot> = oneSession()): Promise<S
       commands={createScriptedCommands()}
     />)
   if ((snapshot.sessions ?? []).length > 0) {
-    await screen.findAllByRole('button', { name: /^Session · / })
+    await sessionsShown()
   } else {
     await screen.findByText('No workspace yet.')
   }

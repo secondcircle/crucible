@@ -25,6 +25,9 @@ export function createEventMapper(): EventMapper {
   // Tool output arrives as a growing snapshot rather than as chunks, so only
   // the part past this count is forwarded.
   const forwarded = new Map<string, number>()
+  // Argument characters streamed per call, so the count that crosses is
+  // cumulative and monotonic rather than per-frame.
+  const argChars = new Map<string, number>()
   /** The queue as the last `queue_update` reported it, oldest first. */
   let queued: readonly string[] = []
   // π says a message left its queue immediately before that message starts, so
@@ -78,6 +81,39 @@ export function createEventMapper(): EventMapper {
                 turnId,
                 delta: event.assistantMessageEvent.delta
               }
+            // Nothing runs yet, and this window is the whole of a long call's
+            // first seconds.
+            case 'toolcall_start': {
+              const call = toolCallAt(
+                event.assistantMessageEvent.partial,
+                event.assistantMessageEvent.contentIndex
+              )
+              if (call === undefined) return undefined
+              argChars.set(call.id, 0)
+              return {
+                type: 'tool_call_started',
+                sessionId,
+                turnId,
+                callId: call.id,
+                name: call.name
+              }
+            }
+
+            case 'toolcall_delta': {
+              const call = toolCallAt(
+                event.assistantMessageEvent.partial,
+                event.assistantMessageEvent.contentIndex
+              )
+              if (call === undefined) return undefined
+              const chars =
+                (argChars.get(call.id) ?? 0) + event.assistantMessageEvent.delta.length
+              argChars.set(call.id, chars)
+              return { type: 'tool_call_args', sessionId, turnId, callId: call.id, chars }
+            }
+
+            // `toolcall_end` says nothing new: execution start, or the call's
+            // own end, settles the element the two events above opened.
+
             case 'error':
               // An abort is not a failure: the adapter that asked for it says
               // so itself, and says it once.
@@ -109,6 +145,7 @@ export function createEventMapper(): EventMapper {
 
         case 'tool_execution_start':
           forwarded.set(event.toolCallId, 0)
+          argChars.delete(event.toolCallId)
           return {
             type: 'tool_started',
             sessionId,
@@ -134,6 +171,7 @@ export function createEventMapper(): EventMapper {
 
         case 'tool_execution_end':
           forwarded.delete(event.toolCallId)
+          argChars.delete(event.toolCallId)
           return {
             type: 'tool_ended',
             sessionId,
@@ -150,6 +188,20 @@ export function createEventMapper(): EventMapper {
       }
     }
   }
+}
+
+// The call being streamed at that position, when the partial message genuinely
+// carries one there: nothing is guessed from a half-parsed block.
+function toolCallAt(
+  partial: unknown,
+  contentIndex: number
+): { readonly id: string; readonly name: string } | undefined {
+  const content = (partial as { content?: unknown })?.content
+  if (!Array.isArray(content)) return undefined
+  const block = content[contentIndex] as { type?: unknown; id?: unknown; name?: unknown }
+  if (block?.type !== 'toolCall') return undefined
+  if (typeof block.id !== 'string' || typeof block.name !== 'string') return undefined
+  return { id: block.id, name: block.name }
 }
 
 // The argument a person recognizes the call by, never the whole object: this

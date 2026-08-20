@@ -54,9 +54,10 @@ const TWO_SESSIONS: ShellSnapshot = {
       workspaceId: 'w1',
       createdAt: '2026-08-19T14:14:00.000Z',
       working: false,
+      fresh: false,
       usage: { usedTokens: 62_000, contextWindow: 200_000, cost: 0.84 }
     },
-    { id: 's2', workspaceId: 'w1', createdAt: '2026-08-19T15:20:00.000Z', working: false }
+    { id: 's2', workspaceId: 'w1', createdAt: '2026-08-19T15:20:00.000Z', working: false, fresh: false }
   ],
   activeSessionId: 's1'
 }
@@ -369,8 +370,9 @@ describe('the usage tab', () => {
     expect(cell('This session', 'Cache read')).toEqual(['Cache read', '36,900', '$0.11'])
     expect(cell('This session', 'Total')).toEqual(['Total', '61,982', '$0.84'])
 
-    // Every curated session of the workspace, and the workspace's own total.
-    expect(cell('Sessions in this workspace', 'Session · ')).toHaveLength(4)
+    // Every curated session of the workspace, named by its title, and the
+    // workspace's own total.
+    expect(cell('Sessions in this workspace', 'New session')).toHaveLength(4)
     expect(cell('Sessions in this workspace', 'Workspace total')).toEqual([
       'Workspace total',
       '36',

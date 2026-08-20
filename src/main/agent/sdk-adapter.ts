@@ -1,5 +1,11 @@
 import { homedir } from 'node:os'
-import type { AuthEvent, AuthInteraction, AuthPrompt, Provider } from '@earendil-works/pi-ai'
+import type {
+  AuthEvent,
+  AuthInteraction,
+  AuthPrompt,
+  Provider,
+  ThinkingLevel as SdkThinkingLevel
+} from '@earendil-works/pi-ai'
 import type {
   AgentSession,
   CreateAgentSessionOptions,
@@ -43,11 +49,13 @@ import type {
 // Spelled with their extensions so plain Node can load this module too: its
 // ESM resolver does no extension guessing.
 import { summarizeActivity } from '../../shared/agent/activity.ts'
+import { TITLE_MODEL } from '../../shared/agent/known-models.ts'
 import { PANEL_TOOLS, type PanelTools } from '../../shared/agent/panel-tools.ts'
 import { displaySafeMessage } from './adapter-error.ts'
 import { toProviderState, type AuthFacts, type ProviderFacts } from './providers.ts'
 import { crucibleAgentDir, workspaceSessionDir } from './paths.ts'
 import { createEventMapper } from './sdk-events.ts'
+import { sanitizeTitle, TITLE_INSTRUCTION, titleInput } from './sdk-titler.ts'
 import {
   BASH_RUN_TYPE,
   deliveredBashRunId,
@@ -68,6 +76,19 @@ interface Bound {
   running?: RunningTurn
   /** Bash runs waiting for the boundary that delivers them, oldest first. */
   readonly shares: PendingShare[]
+  /** The last numbers reported for this conversation, so a still count is not re-sent. */
+  reported?: ReportedUsage
+  /**
+   * A prompt sent to π but not yet in `session.messages`, which is the whole
+   * first minutes of a session as far as the titler can see.
+   */
+  asked?: string
+}
+
+interface ReportedUsage {
+  readonly usedTokens: number
+  readonly contextWindow: number
+  readonly cost?: number
 }
 
 interface PendingShare {
@@ -392,18 +413,34 @@ export function createSdkAdapter({
 
     const unsubscribe = session.subscribe((event) => {
       if (abandoned) return
+      // π's own list has the prompt now, so the copy kept for the titler is
+      // no longer the only record of it.
+      if (event.type === 'message_start' && event.message.role === 'user') {
+        bound.asked = undefined
+      }
       const mapped = mapper.map(event, { sessionId, turnId })
-      if (mapped === undefined) return
-      if (mapped.type === 'turn_error') {
+      if (mapped?.type === 'turn_error') {
         outcome = mapped
-        return
+      } else if (mapped !== undefined) {
+        if (mapped.type === 'text_delta') {
+          // Text arriving after a failed message is the SDK's own retry
+          // succeeding: the turn is no longer failing.
+          outcome = { type: 'turn_ended', sessionId, turnId }
+        }
+        emit(mapped)
       }
-      if (mapped.type === 'text_delta') {
-        // Text arriving after a failed message is the SDK's own retry
-        // succeeding: the turn is no longer failing.
-        outcome = { type: 'turn_ended', sessionId, turnId }
+
+      // The three moments the context genuinely moved: an answer landed with
+      // its own token count, a tool result was appended after it, or a
+      // compaction threw most of the conversation away. Deltas are skipped
+      // because a per-character re-estimate would say nothing new.
+      if (
+        event.type === 'message_end' ||
+        event.type === 'tool_execution_end' ||
+        event.type === 'compaction_end'
+      ) {
+        reportUsage(sessionId, bound)
       }
-      emit(mapped)
     })
 
     bound.running = {
@@ -444,21 +481,9 @@ export function createSdkAdapter({
     // abort happened.
     emit(cancelled ? { type: 'turn_cancelled', sessionId, turnId } : outcome)
 
-    const usage = session.getContextUsage()
-    // No usage event at all, rather than a guess, when the SDK reports
-    // nothing.
-    if (usage?.tokens != null) {
-      // The percentage is path-based, as π reports it; the cost beside it is
-      // the whole conversation's, because money does not vanish on a jump.
-      const spent = usageOf(session.sessionManager)
-      emit({
-        type: 'usage',
-        sessionId,
-        usedTokens: usage.tokens,
-        contextWindow: usage.contextWindow,
-        ...(spent === undefined ? {} : { cost: spent.totalCost })
-      })
-    }
+    // The last word on the turn: the cost is only whole once the final message
+    // has been written with its usage.
+    reportUsage(sessionId, bound)
   }
 
   // π's `AuthInteraction` is an SDK type and cannot cross the port, so it is
@@ -526,6 +551,38 @@ export function createSdkAdapter({
       emit({ type: 'auth_prompt_closed', promptId })
       settle({ closed: why })
     }
+  }
+
+  // π keeps no context counter: it recomputes the estimate from the branch on
+  // every read, so this is worth asking for whenever the conversation grows —
+  // on the bind, after each answer and tool result, and once the turn is over.
+  function reportUsage(sessionId: SessionId, bound: Bound): void {
+    const usage = bound.session.getContextUsage()
+    // Nothing at all rather than a guess when π reports nothing: right after a
+    // compaction it genuinely does not know yet.
+    if (usage?.tokens == null) return
+
+    // The tokens are the current path's, as π counts them; the cost beside
+    // them is the whole conversation's, because money does not vanish on a
+    // jump.
+    const spent = usageOf(bound.session.sessionManager)
+    const next: ReportedUsage = {
+      usedTokens: usage.tokens,
+      contextWindow: usage.contextWindow,
+      ...(spent === undefined ? {} : { cost: spent.totalCost })
+    }
+    const last = bound.reported
+    if (
+      last !== undefined &&
+      last.usedTokens === next.usedTokens &&
+      last.contextWindow === next.contextWindow &&
+      last.cost === next.cost
+    ) {
+      return
+    }
+
+    bound.reported = next
+    emit({ type: 'usage', sessionId, ...next })
   }
 
   /** π's per-message usage over a whole conversation, every branch of it. */
@@ -603,6 +660,11 @@ export function createSdkAdapter({
         shares: []
       }
       sessions.set(request.sessionId, bound)
+      // A conversation that came back is already holding context, and it is
+      // holding it before anyone prompts it again: without this the meter
+      // reads as a dash from launch until the next turn ends. A fresh
+      // conversation says nothing, so nothing is reported for one.
+      if (restored) reportUsage(request.sessionId, bound)
       return describe(bound, restored)
     },
 
@@ -627,6 +689,9 @@ export function createSdkAdapter({
       )
       bound.session = session
       bound.token = tokenOf(session)
+      // The old conversation's numbers described a conversation this session
+      // no longer has.
+      bound.reported = undefined
       return describe(bound, false)
     },
 
@@ -650,6 +715,7 @@ export function createSdkAdapter({
         shares: []
       }
       sessions.set(request.sessionId, bound)
+      reportUsage(request.sessionId, bound)
       return describe(bound, true)
     },
 
@@ -712,9 +778,12 @@ export function createSdkAdapter({
       ref: string,
       summarize: boolean
     ): Promise<{ editorText?: string }> {
-      const { session } = requireBound(sessionId)
-      const navigated = await session.navigateTree(ref, { summarize })
+      const bound = requireBound(sessionId)
+      const navigated = await bound.session.navigateTree(ref, { summarize })
       if (navigated.cancelled) throw new Error('That jump did not happen.')
+      // The branch under the session changed, so whatever was last reported
+      // counted messages that are no longer on the path.
+      bound.reported = undefined
       return navigated.editorText === undefined ? {} : { editorText: navigated.editorText }
     },
 
@@ -741,8 +810,60 @@ export function createSdkAdapter({
         .sort((left, right) => left.label.localeCompare(right.label))
     },
 
-    async setModel(sessionId: SessionId, model: ModelId): Promise<void> {
-      await requireBound(sessionId).session.setModel(await resolveModel(model))
+    // The level the session is on afterwards is π's answer, not Crucible's:
+    // the new model may not support the level the old one was on.
+    async setModel(
+      sessionId: SessionId,
+      model: ModelId
+    ): Promise<{ thinkingLevel?: ThinkingLevel }> {
+      const { session } = requireBound(sessionId)
+      await session.setModel(await resolveModel(model))
+      return { thinkingLevel: session.thinkingLevel }
+    },
+
+    // One non-streaming completion, and a model call rather than an agent
+    // Crucible starts: no role prompt, no standing prompt, no tools.
+    async titleConversation(sessionId: SessionId): Promise<
+      | { title: string; spend?: { tokens: number; cost: number } }
+      | undefined
+    > {
+      const bound = requireBound(sessionId)
+      const { session } = bound
+      const input = titleInput(toTranscript(session.messages), bound.asked)
+      if (input === undefined) return undefined
+
+      const [pi, models, model] = await Promise.all([
+        import('@earendil-works/pi-ai'),
+        runtime(),
+        resolveModel(TITLE_MODEL)
+      ])
+      // π's own name for "no thinking" is read back from π, so no level name
+      // is written here.
+      const levels = pi.getSupportedThinkingLevels(model)
+      const noThinking = pi.getSupportedThinkingLevels({ ...model, reasoning: false })[0]
+      const lowest = levels[0]
+      // π asks for no thinking by carrying no level at all, which is exactly
+      // what the first position means when it is that marker.
+      const reasoning =
+        lowest === undefined || lowest === noThinking
+          ? undefined
+          : (lowest as SdkThinkingLevel)
+
+      const answer = await models.completeSimple(
+        model,
+        {
+          systemPrompt: TITLE_INSTRUCTION,
+          messages: [{ role: 'user', content: input, timestamp: Date.now() }]
+        },
+        reasoning === undefined ? undefined : { reasoning }
+      )
+      const title = sanitizeTitle(pi.contentText(answer.content))
+      // An empty answer is a failed pass: the last good title stays.
+      if (title === undefined) throw new Error('The titler answered with nothing.')
+      const usage = answer.usage
+      return usage === undefined
+        ? { title }
+        : { title, spend: { tokens: usage.totalTokens, cost: usage.cost.total } }
     },
 
     async setThinkingLevel(sessionId: SessionId, level: ThinkingLevel): Promise<void> {
@@ -844,12 +965,19 @@ export function createSdkAdapter({
       text: string,
       images?: readonly ImageAttachment[]
     ): Promise<void> {
-      const { session } = requireBound(sessionId)
+      const bound = requireBound(sessionId)
+      const { session } = bound
       const options =
         images === undefined || images.length === 0
           ? undefined
           : { images: images.map(toImageContent) }
-      return runTurn(sessionId, turnId, () => session.prompt(text, options))
+      // Held from before the turn is announced, because the shell asks for a
+      // title the moment it hears the start and π appends the prompt to its
+      // own list some way into the call below.
+      bound.asked = text
+      return runTurn(sessionId, turnId, () => session.prompt(text, options)).finally(() => {
+        bound.asked = undefined
+      })
     },
 
     // The idle path: a turn whose content is the run itself, written in the

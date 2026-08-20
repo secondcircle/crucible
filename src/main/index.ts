@@ -11,6 +11,9 @@ import { shippedSystemPrompt } from './shipped'
 import { forwardRendererOutput } from './log/renderer-output'
 import { createFileSink } from './log/sink'
 import { registerExhibitScheme, serveExhibitScheme } from './panel/exhibit-scheme'
+import { type QuotaChannel, serveQuotaChannel } from './quota/channel'
+import { useQuotaCacheDir } from './quota/paths'
+import { selectQuotaService } from './quota/select-service'
 import { panelFixtures } from './panel/fixtures'
 import { createPanelModel } from './panel/model'
 import { storePanelPersistence } from './panel/store-persistence'
@@ -101,6 +104,12 @@ const workspace = selectWorkspaceService(flavor, log, (url: string) => {
   void electronShell.openExternal(url)
 })
 const commands = selectCommandService(flavor, log, app.getAppPath())
+// One store for the launch, whatever is on screen: two windows, two workspaces
+// or a dozen sessions never multiply the requests. The cache is Crucible's own
+// and lives under Crucible's state, so it follows the dev/installed split and
+// touches nothing of π's (ADR 0015).
+useQuotaCacheDir(app.getPath('userData'))
+const quota = selectQuotaService(flavor, log)
 
 // Installed only: install-stable replaces the bundle in place, so watching
 // our own stamp file is how the running app learns a newer build is waiting.
@@ -141,7 +150,17 @@ const shell = withLogging(
     flavor,
     panel,
     pickFolder,
-    seedWorkspacePath: seedWorkspacePath()
+    seedWorkspacePath: seedWorkspacePath(),
+    // Nobody asked for a title, so nobody is told it failed: the run log is
+    // the whole of the report.
+    onTitlingFailure: (cause) => {
+      log.append({
+        source: 'main',
+        event: 'titling_failed',
+        adapter: flavor,
+        message: cause instanceof Error ? cause.message : String(cause)
+      })
+    }
   }),
   log,
   flavor
@@ -151,6 +170,7 @@ let channel: AgentChannel | undefined
 let workspaceChannel: WorkspaceChannel | undefined
 let commandChannel: CommandChannel | undefined
 let appUpdateChannel: AppUpdateChannel | undefined
+let quotaChannel: QuotaChannel | undefined
 
 function openWindow(reason?: 'activate'): void {
   const window = createMainWindow()
@@ -161,6 +181,7 @@ function openWindow(reason?: 'activate'): void {
   workspaceChannel = serveWorkspaceChannel(workspace.service, window)
   commandChannel = serveCommandChannel(commands, window)
   appUpdateChannel = serveAppUpdateChannel(appUpdate, window)
+  quotaChannel = serveQuotaChannel(quota, window)
   log.append(
     reason === undefined
       ? { source: 'main', event: 'window_created' }
@@ -195,6 +216,7 @@ app.on('will-quit', () => {
   workspaceChannel?.dispose()
   commandChannel?.dispose()
   appUpdateChannel?.dispose()
+  quotaChannel?.dispose()
   appUpdate.dispose()
   workspace.dispose()
   log.append({ source: 'main', event: 'app_quitting' })

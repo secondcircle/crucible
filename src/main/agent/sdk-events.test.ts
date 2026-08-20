@@ -43,6 +43,91 @@ describe('streaming content', () => {
   })
 })
 
+// The window before a call runs, which π reports and Crucible used to drop on
+// the floor: on a long Write it is tens of seconds of nothing.
+describe('a call whose arguments are still streaming', () => {
+  function partial(id: string, name: string): unknown {
+    return { content: [{ type: 'toolCall', id, name, arguments: {} }] }
+  }
+
+  it('opens the call the moment the model commits to it', () => {
+    expect(
+      map({
+        type: 'message_update',
+        assistantMessageEvent: {
+          type: 'toolcall_start',
+          contentIndex: 0,
+          partial: partial('call-1', 'write')
+        }
+      })
+    ).toEqual({
+      type: 'tool_call_started',
+      sessionId: 's1',
+      turnId: 't-1',
+      callId: 'call-1',
+      name: 'write'
+    })
+  })
+
+  it('counts argument characters cumulatively, never per frame', () => {
+    const mapper = createEventMapper()
+    const started = {
+      type: 'message_update',
+      assistantMessageEvent: {
+        type: 'toolcall_start',
+        contentIndex: 0,
+        partial: partial('call-1', 'write')
+      }
+    }
+    const delta = (text: string): unknown => ({
+      type: 'message_update',
+      assistantMessageEvent: {
+        type: 'toolcall_delta',
+        contentIndex: 0,
+        delta: text,
+        partial: partial('call-1', 'write')
+      }
+    })
+    mapper.map(sdk(started), TARGET)
+
+    expect(mapper.map(sdk(delta('12345')), TARGET)).toEqual({
+      type: 'tool_call_args',
+      sessionId: 's1',
+      turnId: 't-1',
+      callId: 'call-1',
+      chars: 5
+    })
+    expect(mapper.map(sdk(delta('678')), TARGET)).toMatchObject({ chars: 8 })
+  })
+
+  it('says nothing about a block that is not a call it can name', () => {
+    expect(
+      map({
+        type: 'message_update',
+        assistantMessageEvent: {
+          type: 'toolcall_start',
+          contentIndex: 0,
+          partial: { content: [{ type: 'text', text: 'not a call' }] }
+        }
+      })
+    ).toBeUndefined()
+  })
+
+  it('drops toolcall_end: execution start or the call’s own end settles it', () => {
+    expect(
+      map({
+        type: 'message_update',
+        assistantMessageEvent: {
+          type: 'toolcall_end',
+          contentIndex: 0,
+          toolCall: { type: 'toolCall', id: 'call-1', name: 'write', arguments: {} },
+          partial: partial('call-1', 'write')
+        }
+      })
+    ).toBeUndefined()
+  })
+})
+
 describe('tool calls', () => {
   it('opens with the tool name and the argument a person recognizes it by', () => {
     expect(

@@ -1,0 +1,8 @@
+#!/bin/bash
+# An amend or a rebase moved main. A rebase fires no post-commit for the
+# commits it replays, so without this hook main could move with nothing
+# rebuilt. An amend fires both; the second one finds the lock held and the
+# first build re-reads HEAD, so the amended commit is what gets installed.
+#
+# git feeds this hook the rewritten shas on stdin. It has no use for them.
+exec "$(dirname "$0")/install-if-main.sh"

@@ -21,6 +21,7 @@ import type {
   SessionState,
   SessionTree,
   SessionUsage,
+  SessionWorktree,
   ShellSnapshot,
   TabId,
   ThinkingLevel,
@@ -47,6 +48,12 @@ export interface ScriptedPort extends AgentPort {
   jumpText?: string
   /** Set where a test wants the refusal main gives a working session. */
   jumpRefusal?: string
+  /** Set where a test wants the refusal main gives a failed rebind. */
+  worktreeRefusal?: string
+  // Held open where a test wants the rebind still in flight: the change lands
+  // when the test says so, the way it lands when main's bind comes back.
+  holdWorktree?: boolean
+  settleWorktreeChange(): void
   /** How the next `shareBashRun` settles; delivered unless a test says else. */
   shareOutcome: 'delivered' | 'dropped'
   // Held open where a test wants the waiting state: the promise settles when
@@ -98,6 +105,9 @@ export interface ScriptedPort extends AgentPort {
   queueOf(sessionId: SessionId): QueueState | undefined
   text(sessionId: SessionId, delta: string): void
   thinking(sessionId: SessionId, delta: string): void
+  toolCallStarted(sessionId: SessionId, callId: string, name: string): void
+  /** Argument characters streamed so far, cumulative. */
+  toolCallArgs(sessionId: SessionId, callId: string, chars: number): void
   toolStarted(sessionId: SessionId, callId: string, name: string, summary: string): void
   toolOutput(sessionId: SessionId, callId: string, chunk: string): void
   toolEnded(sessionId: SessionId, callId: string, ok: boolean, output: string): void
@@ -106,6 +116,10 @@ export interface ScriptedPort extends AgentPort {
 }
 
 const NOW = '2026-08-19T14:14:00.000Z'
+
+// A session in the sidebar is named by the titler, so the one a test drives
+// carries a title too. A test about the untitled state passes `undefined`.
+export const SESSION_TITLE = 'Wiring the composer to the agent port'
 
 export function createScriptedPort(initial: Partial<ShellSnapshot> = {}): ScriptedPort {
   const listeners = new Set<PortEventListener>()
@@ -186,7 +200,7 @@ export function createScriptedPort(initial: Partial<ShellSnapshot> = {}): Script
       // announces it, because no caller echoed it.
       const turnId = `t-${(minted += 1)}`
       turns.set(sessionId, turnId)
-      changeSession(sessionId, (session) => ({ ...session, working: true }))
+      changeSession(sessionId, (session) => ({ ...session, working: true, fresh: false }))
       emit({ type: 'turn_started', sessionId, turnId })
       emit({ type: 'user_message', sessionId, turnId, text })
       emitState()
@@ -204,6 +218,7 @@ export function createScriptedPort(initial: Partial<ShellSnapshot> = {}): Script
   }
 
   let held: ((outcome: 'delivered' | 'dropped') => void) | undefined
+  let heldWorktree: (() => void) | undefined
   let login: { resolve: () => void; reject: (cause: Error) => void } | undefined
 
   const port: ScriptedPort = {
@@ -278,6 +293,9 @@ export function createScriptedPort(initial: Partial<ShellSnapshot> = {}): Script
             workspaceId,
             createdAt: NOW,
             working: false,
+            // One click of New session lands on the checkout, with the choice
+            // still open.
+            fresh: true,
             model: port.models[0]?.id,
             thinkingLevel: port.models[0]?.thinkingLevels[0]
           }
@@ -310,9 +328,58 @@ export function createScriptedPort(initial: Partial<ShellSnapshot> = {}): Script
     resetSession(id: SessionId): Promise<void> {
       calls.push({ op: 'resetSession', args: [id] })
       port.transcripts.set(id, [])
-      changeSession(id, (session) => ({ ...session, usage: undefined }))
+      // The identity keeps its worktree and gets its choice back, exactly as
+      // main resets one.
+      changeSession(id, (session) => ({ ...session, usage: undefined, fresh: true }))
       emitState()
       return Promise.resolve()
+    },
+
+    // Refused for a session that is not fresh, because the shell's guard is
+    // the contract and the chip is only its presentation.
+    setWorktree(sessionId: SessionId, worktree?: SessionWorktree): Promise<void> {
+      calls.push({
+        op: 'setWorktree',
+        args: worktree === undefined ? [sessionId] : [sessionId, worktree]
+      })
+      if (port.worktreeRefusal !== undefined) {
+        return Promise.reject(new Error(port.worktreeRefusal))
+      }
+      const found = snapshot.sessions.find((candidate) => candidate.id === sessionId)
+      if (found === undefined) {
+        return Promise.reject(new Error('That session is no longer open.'))
+      }
+      if (!found.fresh) {
+        return Promise.reject(
+          new Error('That session has already started. Reset it to change where it works.')
+        )
+      }
+      // Nothing is said until the change has landed, which is what makes the
+      // held case and the instant one behave the same way.
+      const land = (): void => {
+        changeSession(sessionId, (session) => {
+          const rest: SessionState = { ...session }
+          delete (rest as { worktree?: SessionWorktree }).worktree
+          return worktree === undefined ? rest : { ...rest, worktree }
+        })
+        emitState()
+      }
+      if (port.holdWorktree !== true) {
+        land()
+        return Promise.resolve()
+      }
+      return new Promise<void>((resolve) => {
+        heldWorktree = () => {
+          land()
+          resolve()
+        }
+      })
+    },
+
+    settleWorktreeChange(): void {
+      const settle = heldWorktree
+      heldWorktree = undefined
+      settle?.()
     },
 
     transcript(id: SessionId): Promise<readonly TranscriptItem[]> {
@@ -335,9 +402,17 @@ export function createScriptedPort(initial: Partial<ShellSnapshot> = {}): Script
       const id = `s-${(minted += 1)}`
       snapshot = {
         ...snapshot,
+        // A resumed conversation is not fresh and starts on the checkout.
         sessions: [
           ...snapshot.sessions,
-          { id, workspaceId, createdAt: NOW, working: false, model: port.models[0]?.id }
+          {
+            id,
+            workspaceId,
+            createdAt: NOW,
+            working: false,
+            fresh: false,
+            model: port.models[0]?.id
+          }
         ],
         activeSessionId: id
       }
@@ -468,7 +543,9 @@ export function createScriptedPort(initial: Partial<ShellSnapshot> = {}): Script
       })
       const turnId = `t-${(minted += 1)}`
       turns.set(sessionId, turnId)
-      changeSession(sessionId, (session) => ({ ...session, working: true }))
+      // The first accepted message is what ends freshness, exactly as the
+      // shell ends it.
+      changeSession(sessionId, (session) => ({ ...session, working: true, fresh: false }))
       emit({ type: 'turn_started', sessionId, turnId })
       emitState()
       return Promise.resolve(turnId)
@@ -602,6 +679,14 @@ export function createScriptedPort(initial: Partial<ShellSnapshot> = {}): Script
       emit({ type: 'thinking_delta', sessionId, turnId: turn(sessionId), delta })
     },
 
+    toolCallStarted(sessionId, callId, name) {
+      emit({ type: 'tool_call_started', sessionId, turnId: turn(sessionId), callId, name })
+    },
+
+    toolCallArgs(sessionId, callId, chars) {
+      emit({ type: 'tool_call_args', sessionId, turnId: turn(sessionId), callId, chars })
+    },
+
     toolStarted(sessionId, callId, name, summary) {
       emit({ type: 'tool_started', sessionId, turnId: turn(sessionId), callId, name, summary })
     },
@@ -632,7 +717,17 @@ export function oneSession(
   return {
     workspaces: [{ id: 'w1', name: 'crucible', path: '/repos/crucible' }],
     activeWorkspaceId: 'w1',
-    sessions: [{ id: 's1', workspaceId: 'w1', createdAt: NOW, working: false, ...overrides }],
+    sessions: [
+      {
+        id: 's1',
+        workspaceId: 'w1',
+        createdAt: NOW,
+        title: SESSION_TITLE,
+        working: false,
+        fresh: false,
+        ...overrides
+      }
+    ],
     activeSessionId: 's1'
   }
 }

@@ -5,19 +5,19 @@
 import { act, fireEvent, render, screen } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 import type { ShellSnapshot } from '../../shared/agent/port'
-import { sessionLabel } from './labels'
 import { Shell } from './Shell'
 import { createScriptedPort, oneSession, type ScriptedPort } from './testing/scripted-port'
 import { createScriptedWorkspace } from './testing/scripted-workspace'
 import { createScriptedCommands } from './testing/scripted-commands'
+import { sessionsShown } from './testing/sidebar'
 import { settled } from './testing/settled'
 
 const TWO_SESSIONS: ShellSnapshot = {
   workspaces: [{ id: 'w1', name: 'crucible', path: '/repos/crucible' }],
   activeWorkspaceId: 'w1',
   sessions: [
-    { id: 's1', workspaceId: 'w1', createdAt: '2026-08-19T14:14:00.000Z', working: false },
-    { id: 's2', workspaceId: 'w1', createdAt: '2026-08-19T15:20:00.000Z', working: false }
+    { id: 's1', workspaceId: 'w1', createdAt: '2026-08-19T14:14:00.000Z', working: false, fresh: false },
+    { id: 's2', workspaceId: 'w1', createdAt: '2026-08-19T15:20:00.000Z', working: false, fresh: false }
   ],
   activeSessionId: 's1'
 }
@@ -32,7 +32,7 @@ async function shellWithSession(
       workspace={createScriptedWorkspace()}
       commands={createScriptedCommands()}
     />)
-  await screen.findAllByRole('button', { name: /^Session · / })
+  await sessionsShown()
   await settled()
   return port
 }
@@ -71,7 +71,9 @@ describe('the composer while a session works', () => {
     expect(screen.getByRole('button', { name: /Stop/ })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Send' })).toBeNull()
     const hint = screen.getByText(/agent working/).parentElement
-    expect(hint).toHaveTextContent('⏎ steer · ⌥⏎ follow-up · esc stop · ⇧⏎ newline')
+    expect(hint).toHaveTextContent('⏎ steer · ⌥⏎ follow-up · esc stop')
+    // The always-on hints are gone for good: the row speaks only live state.
+    expect(hint?.textContent).not.toContain('newline')
   })
 })
 
@@ -283,6 +285,5 @@ describe('the strip and the sessions', () => {
     })
 
     expect(box()).toHaveValue('meant for the first session')
-    expect(sessionLabel({ createdAt: '2026-08-19T14:14:00.000Z' })).toContain('Session')
   })
 })

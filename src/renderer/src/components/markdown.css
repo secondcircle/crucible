@@ -1,9 +1,12 @@
-.markdown > * + * {
-  margin-top: 8px;
-}
+/* Every block after the first gets the same gap. It has to beat the 21.7px
+   line box of the body text, or a paragraph break reads as another line.
 
-.markdown p {
-  margin: 0;
+   Nothing below may set its own margin-top. A rule like `.markdown p` names
+   a class and a tag, so it outranks this one and wins: that is how
+   paragraphs came to sit flush against each other with a margin of zero.
+   Indent with padding, and leave the vertical rhythm to this rule. */
+.markdown > * + * {
+  margin-top: 15px;
 }
 
 .markdown h1,
@@ -15,17 +18,16 @@
   font-size: 13.5px;
   font-weight: 650;
   color: var(--ink);
-  margin-top: 14px;
+  margin-top: 20px;
 }
 
 .markdown ul,
 .markdown ol {
-  margin: 4px 0 4px 20px;
-  padding: 0;
+  padding-left: 20px;
 }
 
 .markdown li {
-  margin: 2px 0;
+  margin: 3px 0;
 }
 
 .markdown pre {
@@ -34,7 +36,6 @@
   border-radius: var(--radius);
   padding: 12px 14px;
   overflow-x: auto;
-  margin: 10px 0;
 }
 
 .markdown pre code {
@@ -55,7 +56,6 @@
 .markdown table {
   border-collapse: collapse;
   font-size: 12.5px;
-  margin: 10px 0;
 }
 
 .markdown th,

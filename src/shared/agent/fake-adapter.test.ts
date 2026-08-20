@@ -4,9 +4,16 @@
 // on is pinned here.
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { AdapterEvent } from './adapter'
-import { createFakeAdapter, FAKE_MODEL } from './fake-adapter'
+import { createFakeAdapter, FAKE_MODEL, FAKE_TURN_USAGE } from './fake-adapter'
 
 const WORKSPACE = '/workspaces/crucible'
+
+/** What one scripted turn costs, which is the whole of a first turn's money. */
+const TURN_COST =
+  FAKE_TURN_USAGE.input.cost +
+  FAKE_TURN_USAGE.output.cost +
+  FAKE_TURN_USAGE.cacheRead.cost +
+  FAKE_TURN_USAGE.cacheWrite.cost
 
 async function withSession(sessionId = 's1'): Promise<{
   adapter: ReturnType<typeof createFakeAdapter>
@@ -19,7 +26,13 @@ async function withSession(sessionId = 's1'): Promise<{
   return { adapter, events }
 }
 
-const types = (events: readonly AdapterEvent[]): string[] => events.map((event) => event.type)
+// Usage rides along with the work now, so a sequence that is about the work
+// leaves it out; where it lands is pinned by the two usage tests below.
+const types = (events: readonly AdapterEvent[]): string[] =>
+  events.map((event) => event.type).filter((type) => type !== 'usage')
+
+const usageOf = (events: readonly AdapterEvent[]): AdapterEvent[] =>
+  events.filter((event) => event.type === 'usage')
 
 // One test below drives the paced script under fake timers; every other builds
 // the adapter with no pause and waits on no clock.
@@ -34,8 +47,16 @@ const call = (chunks: number): string[] => [
   'tool_ended'
 ]
 
+// The other entry path, and the window a long call would otherwise spend
+// looking frozen.
+const pendingCall = (beats: number, chunks: number): string[] => [
+  'tool_call_started',
+  ...Array.from({ length: beats }, () => 'tool_call_args'),
+  ...call(chunks)
+]
+
 describe('the scripted turn', () => {
-  it('runs thinking, a chain of calls, a lone call, a reply, usage, then the end', async () => {
+  it('runs thinking, a chain of calls, a lone call, a reply, then the end', async () => {
     const { adapter, events } = await withSession()
 
     await adapter.prompt('s1', 't-1', 'hello')
@@ -45,16 +66,16 @@ describe('the scripted turn', () => {
       'thinking_delta',
       'thinking_delta',
       'thinking_delta',
-      // Three consecutive calls, which is one tool chain.
-      ...call(3),
+      // Three consecutive calls, which is one tool chain. The first announces
+      // itself while its arguments stream.
+      ...pendingCall(3, 3),
       ...call(1),
       ...call(1),
       // Text ends that chain, so what follows is a chain of one.
       'text_delta',
       ...call(1),
       ...Array.from({ length: 13 }, () => 'text_delta'),
-      'turn_ended',
-      'usage'
+      'turn_ended'
     ])
   })
 
@@ -103,12 +124,50 @@ describe('the scripted turn', () => {
 
     await adapter.prompt('s1', 't-1', 'hello')
     await adapter.prompt('s1', 't-2', 'again')
-    const usage = events.filter((event) => event.type === 'usage')
+    const usage = usageOf(events)
 
-    expect(usage).toHaveLength(2)
-    expect(usage[0].usedTokens).toBeGreaterThan(0)
-    expect(usage[1].usedTokens).toBeGreaterThan(usage[0].usedTokens)
-    expect(usage[1].usedTokens).toBeLessThan(usage[1].contextWindow)
+    const counts = usage.map((event) => (event.type === 'usage' ? event.usedTokens : 0))
+    expect(counts[0]).toBeGreaterThan(0)
+    expect([...counts].sort((a, b) => a - b)).toEqual(counts)
+    const last = usage.at(-1)
+    expect(last?.type === 'usage' ? last.usedTokens : 0).toBeLessThan(
+      last?.type === 'usage' ? last.contextWindow : 0
+    )
+  })
+
+  // A meter that only moves once a turn is over is a meter that says nothing
+  // during the minutes it matters, which is what a long turn is.
+  it('moves the meter during the turn, and settles the money at the end', async () => {
+    const { adapter, events } = await withSession()
+
+    await adapter.prompt('s1', 't-1', 'hello')
+    const ended = events.findIndex((event) => event.type === 'turn_ended')
+    const during = usageOf(events.slice(0, ended))
+    const after = usageOf(events.slice(ended))
+
+    expect(during.length).toBeGreaterThan(1)
+    // Money is a finished turn's, so the chip keeps its dash while the tokens
+    // are already climbing.
+    expect(during.every((event) => event.type === 'usage' && event.cost === undefined)).toBe(true)
+    expect(after).toHaveLength(1)
+    expect(after[0].type === 'usage' ? after[0].cost : 0).toBeCloseTo(TURN_COST, 5)
+  })
+
+  // Nothing prompts a resumed conversation before it is looked at, so a meter
+  // that waits for a turn is a dash for as long as the reading lasts.
+  it('reports what a restored conversation already holds, before any turn', async () => {
+    const adapter = createFakeAdapter({ pauseMs: 0 })
+    await adapter.bind({ sessionId: 's1', workspacePath: WORKSPACE })
+    await adapter.prompt('s1', 't-1', 'hello')
+    const token = (await adapter.bind({ sessionId: 's1', workspacePath: WORKSPACE })).token
+
+    const events: AdapterEvent[] = []
+    adapter.onEvent((event) => events.push(event))
+    adapter.release('s1')
+    await adapter.bind({ sessionId: 's1', workspacePath: WORKSPACE, token })
+
+    expect(usageOf(events)).toHaveLength(1)
+    expect(usageOf(events)[0]).toMatchObject({ sessionId: 's1' })
   })
 })
 
@@ -138,10 +197,13 @@ describe('queued messages', () => {
 
     await adapter.prompt('s1', 't-1', 'hello')
 
-    const at = types(events).indexOf('user_message')
+    // The turn's own events, without the meter's, because this is about where
+    // a queued message lands.
+    const flow = events.filter((event) => event.type !== 'usage')
+    const at = flow.findIndex((event) => event.type === 'user_message')
     // The whole queue lands as a group, between the call that was running and
     // the next one.
-    expect(types(events).slice(at - 1, at + 5)).toEqual([
+    expect(types(flow).slice(at - 1, at + 5)).toEqual([
       'tool_ended',
       'user_message',
       'queue_changed',
@@ -149,12 +211,12 @@ describe('queued messages', () => {
       'queue_changed',
       'tool_started'
     ])
-    expect(events.slice(at).filter((event) => event.type === 'user_message')).toMatchObject([
+    expect(flow.slice(at).filter((event) => event.type === 'user_message')).toMatchObject([
       { text: 'check the adapter too' },
       { text: 'and the tests' }
     ])
-    expect(events[at + 1]).toMatchObject({ steering: ['and the tests'] })
-    expect(events[at + 3]).toMatchObject({ steering: [], followUp: [] })
+    expect(flow[at + 1]).toMatchObject({ steering: ['and the tests'] })
+    expect(flow[at + 3]).toMatchObject({ steering: [], followUp: [] })
   })
 
   it('holds a follow-up until the reply is done, answers it, and only then ends', async () => {
@@ -172,8 +234,7 @@ describe('queued messages', () => {
       'user_message',
       'queue_changed',
       'text_delta',
-      'turn_ended',
-      'usage'
+      'turn_ended'
     ])
   })
 
@@ -308,8 +369,10 @@ describe('cancellation', () => {
     expect(types(events)).not.toContain('turn_ended')
     const terminal = events.findIndex((event) => event.type === 'turn_cancelled')
     expect(terminal).toBeGreaterThan(0)
-    // Only usage follows a terminal event, and nothing of the turn does.
-    expect(types(events).slice(terminal + 1)).toEqual(['usage'])
+    // Nothing of the turn follows a terminal event: the last word after it is
+    // the meter's, which a stopped turn still owes.
+    expect(types(events).slice(terminal + 1)).toEqual([])
+    expect(usageOf(events.slice(terminal + 1))).toHaveLength(1)
   })
 
   it('leaves the partial reply and a stopped marker in the conversation', async () => {
@@ -455,6 +518,51 @@ describe('history, reset and resume', () => {
   })
 })
 
+// Deterministic from the conversation rather than canned, so a title visibly
+// changes as turns land and the refresh loop is drivable for free.
+describe('the fake titler', () => {
+  it('names a session from its most recent user message', async () => {
+    const { adapter } = await withSession()
+    await adapter.prompt('s1', 't-1', 'rebuild the composer footer from the mock')
+
+    expect(await adapter.titleConversation('s1')).toEqual({
+      title: 'rebuild the composer footer from the mock'
+    })
+  })
+
+  it('keeps a title to eight words, on one line, and charges nothing', async () => {
+    const { adapter } = await withSession()
+    await adapter.prompt(
+      's1',
+      't-1',
+      'one two three four five six seven eight nine\nten eleven'
+    )
+
+    const titled = await adapter.titleConversation('s1')
+
+    expect(titled?.title).toBe('one two three four five six seven eight')
+    expect(titled?.spend).toBeUndefined()
+  })
+
+  it('follows the conversation as later turns land', async () => {
+    const { adapter } = await withSession()
+    await adapter.prompt('s1', 't-1', 'first thing said')
+    const first = await adapter.titleConversation('s1')
+
+    await adapter.prompt('s1', 't-2', 'second thing said')
+
+    expect(first?.title).toBe('first thing said')
+    expect((await adapter.titleConversation('s1'))?.title).toBe('second thing said')
+  })
+
+  it('has nothing to say about a conversation nobody has spoken in', async () => {
+    const { adapter } = await withSession()
+
+    expect(await adapter.titleConversation('s1')).toBeUndefined()
+    expect(await adapter.titleConversation('never-bound')).toBeUndefined()
+  })
+})
+
 describe('what it says about itself', () => {
   it('exposes one model that says it is fake, with more than one level', async () => {
     const adapter = createFakeAdapter({ pauseMs: 0 })
@@ -470,7 +578,7 @@ describe('what it says about itself', () => {
   it('refuses a model or a level it cannot honestly serve', async () => {
     const { adapter } = await withSession()
 
-    await expect(adapter.setModel('s1', 'anthropic/claude-opus-4-5')).rejects.toThrow()
+    await expect(adapter.setModel('s1', 'anthropic/claude-opus-5')).rejects.toThrow()
     await expect(adapter.setThinkingLevel('s1', 'xhigh')).rejects.toThrow()
     await expect(adapter.setThinkingLevel('s1', 'high')).resolves.toBeUndefined()
   })

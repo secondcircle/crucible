@@ -77,6 +77,23 @@ export type AdapterEvent =
       readonly turnId: TurnId
       readonly delta: string
     }
+  // The argument-streaming window, which is the whole of a long call's first
+  // seconds: the model has committed to the call, and nothing runs yet.
+  | {
+      readonly type: 'tool_call_started'
+      readonly sessionId: SessionId
+      readonly turnId: TurnId
+      readonly callId: string
+      readonly name: string
+    }
+  | {
+      readonly type: 'tool_call_args'
+      readonly sessionId: SessionId
+      readonly turnId: TurnId
+      readonly callId: string
+      /** Cumulative and monotonic, so a dropped frame self-heals. */
+      readonly chars: number
+    }
   | {
       readonly type: 'tool_started'
       readonly sessionId: SessionId
@@ -186,8 +203,23 @@ export interface ConversationAdapter {
 
   /** The models the user can genuinely reach, with their native levels. */
   listModels(): Promise<readonly ModelInfo[]>
-  setModel(sessionId: SessionId, model: ModelId): Promise<void>
+  // Answers with the level in effect after the switch, because the new model
+  // may not support the level the old one was on.
+  setModel(
+    sessionId: SessionId,
+    model: ModelId
+  ): Promise<{ readonly thinkingLevel?: ThinkingLevel }>
   setThinkingLevel(sessionId: SessionId, level: ThinkingLevel): Promise<void>
+
+  // Undefined when there is nothing to title, which is not a failure; a
+  // failure rejects.
+  titleConversation(sessionId: SessionId): Promise<
+    | {
+        readonly title: string
+        readonly spend?: { readonly tokens: number; readonly cost: number }
+      }
+    | undefined
+  >
 
   // Credentials are the agent side's, so they live behind this seam with the
   // models they unlock.

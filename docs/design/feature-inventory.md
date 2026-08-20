@@ -26,7 +26,7 @@ names the milestone from `m1-parity-core.md`. **never** means ruled out.
 
 | π feature | π behavior | Crucible status |
 |---|---|---|
-| /model | model selector (Ctrl+L) | **built** — searchable popover on the composer chip, populated from real credentials/config, never hard-coded (A14, A21) |
+| /model | model selector (Ctrl+L) | **built** — searchable popover on the composer chip, populated from real credentials/config, never hard-coded (A14, A21); model aliases rename ids Crucible knows by heart for display on the chip and never change what the picker lists |
 | Scoped models + cycling | /scoped-models, Ctrl+P cycles | later (M1 block 4) — favorites + ⌘P cycling explicitly deferred by A21 |
 | Thinking level | Shift+Tab cycles; editor border shows level | **built** — composer chip lists the *native* levels the selected model supports (A22), per-session, changes between turns only |
 | Cache guard | (none in TUI) | **built** — "Invalidate this session's cache?" dialog before a mid-conversation thinking change (A22; ruled first-class in m1-parity-core) |

@@ -63,15 +63,38 @@ export interface PanelState {
   readonly activeTabId: TabId
 }
 
+// Where a session works when it is not in its workspace's checkout. Crucible
+// creates worktrees and never deletes them.
+export interface SessionWorktree {
+  /** Absolute, and the directory this session's work happens in. */
+  readonly path: string
+  /** Absent when the branch could not be read. */
+  readonly branch?: string
+}
+
 export interface SessionState {
   readonly id: SessionId
   readonly workspaceId: WorkspaceId
-  /** ISO; the neutral placeholder label derives from it. */
+  /** ISO; what the sidebar's relative time falls back to. */
   readonly createdAt: string
+  // Absent until the first title lands, which is what the sidebar's untitled
+  // state means.
+  readonly title?: string
+  /** ISO of the session's last activity; absent means `createdAt` stands in. */
+  readonly lastActivityAt?: string
+  /** Present only for a worktree session; absent means the checkout. */
+  readonly worktree?: SessionWorktree
+  // True until the conversation's first message, and restored by a session
+  // reset. The one condition under which the worktree may still be changed.
+  readonly fresh: boolean
   // Absent until genuinely known, so nothing downstream shows a guess.
   readonly model?: ModelId
   readonly thinkingLevel?: ThinkingLevel
   readonly working: boolean
+  // ISO of the moment the live turn began, and absent whenever `working` is
+  // false. The sidebar counts up from it: while a turn runs, how long it has
+  // been running is the only time worth showing.
+  readonly workingSince?: string
   // Absent until the adapter has reported real usage. `cost` is the whole
   // conversation's dollars so far and is absent until that too is known.
   readonly usage?: {
@@ -244,6 +267,24 @@ export type PortEvent =
       readonly turnId: TurnId
       readonly delta: string
     }
+  // The model committed to a call and is streaming its arguments: the element
+  // exists from this moment, seconds before the call begins running.
+  | {
+      readonly type: 'tool_call_started'
+      readonly sessionId: SessionId
+      readonly turnId: TurnId
+      readonly callId: string
+      readonly name: string
+    }
+  // How many argument characters have streamed so far, cumulative and
+  // monotonic, so a dropped frame self-heals on the next one.
+  | {
+      readonly type: 'tool_call_args'
+      readonly sessionId: SessionId
+      readonly turnId: TurnId
+      readonly callId: string
+      readonly chars: number
+    }
   | {
       readonly type: 'tool_started'
       readonly sessionId: SessionId
@@ -358,6 +399,11 @@ export interface AgentPort {
   ): Promise<{ readonly editorText?: string }>
   /** Free-text label on a node; absent or empty clears it. Allowed anytime. */
   setLabel(id: SessionId, ref: string, label?: string): Promise<void>
+
+  // Attaches a worktree to a session, or with none puts it back on the
+  // checkout. Refused unless the session is fresh; nothing on disk is deleted
+  // either way.
+  setWorktree(sessionId: SessionId, worktree?: SessionWorktree): Promise<void>
 
   listModels(): Promise<readonly ModelInfo[]>
   setModel(sessionId: SessionId, model: ModelId): Promise<void>
