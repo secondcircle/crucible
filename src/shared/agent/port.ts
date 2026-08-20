@@ -91,6 +91,10 @@ export interface SessionState {
   readonly model?: ModelId
   readonly thinkingLevel?: ThinkingLevel
   readonly working: boolean
+  // ISO of the moment the live turn began, and absent whenever `working` is
+  // false. The sidebar counts up from it: while a turn runs, how long it has
+  // been running is the only time worth showing.
+  readonly workingSince?: string
   // Absent until the adapter has reported real usage. `cost` is the whole
   // conversation's dollars so far and is absent until that too is known.
   readonly usage?: {

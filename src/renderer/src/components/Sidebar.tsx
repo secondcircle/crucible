@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import type { SessionId, ShellSnapshot, WorkspaceId } from '../../../shared/agent/port'
 // Titles are the model's now, so the row shows a title and a relative time;
 // sessionLabel is gone.
-import { relativeTime } from '../labels'
+import { elapsedTime, relativeTime } from '../labels'
 import type { QuotaView } from '../quota/use-quota'
 import { QuotaStrip } from './QuotaStrip'
 import './sidebar.css'
@@ -13,8 +13,19 @@ const UNTITLED = 'New session'
 // tick and "just now" cannot fossilize.
 const TICK_MS = 30_000
 
-// A row's working state is in its accessible name and not the colored dot
-// alone: the dot is the eye's version, the name is everybody else's. A
+// A counter that only moved every 30s would look stopped, so the whole rail
+// ticks per second for as long as anything is working, and drops back after.
+const WORKING_TICK_MS = 1_000
+
+// Two states, two channels, so a rail full of running agents still says which
+// session you are in. Viewing is the slab: a filled row with an accent edge,
+// which holds still. Working is the right-hand block: a counter of how long
+// the turn has run, with three blinking dots under it, and it is the only
+// thing in the row that moves. Nothing in the title column carries state, so
+// every title starts on the same left edge.
+//
+// A row's working state is in its accessible name and not the moving dots
+// alone: the dots are the eye's version, the name is everybody else's. A
 // worktree session says so the same way, glyph and name together.
 //
 // Every workspace lists its sessions, active or not, because work in one
@@ -44,7 +55,7 @@ export function Sidebar({
   readonly quota?: QuotaView
 }): React.JSX.Element {
   const { workspaces, activeWorkspaceId, sessions, activeSessionId } = snapshot
-  const now = useClock()
+  const now = useClock(sessions.some((session) => session.working))
 
   return (
     <nav className="side" aria-label="Workspaces and sessions">
@@ -93,6 +104,7 @@ export function Sidebar({
                 <ul className="sessions">
                   {own.map((session) => {
                     const title = session.title ?? UNTITLED
+                    const viewing = session.id === activeSessionId
                     // Knowing *that* a session is in a worktree is the whole
                     // signal here; which worktree lives in the composer chip.
                     const marks = [
@@ -100,10 +112,10 @@ export function Sidebar({
                       session.working ? 'working' : undefined
                     ].filter((mark): mark is string => mark !== undefined)
                     return (
-                      <li key={session.id} className="sessrow">
+                      <li key={session.id} className={`sessrow${viewing ? ' viewing' : ''}`}>
                         <button
-                          className={rowClass(session.id === activeSessionId, session.title)}
-                          aria-current={session.id === activeSessionId ? 'true' : undefined}
+                          className={rowClass(viewing, session.title)}
+                          aria-current={viewing ? 'true' : undefined}
                           aria-label={marks.length === 0 ? title : `${title} (${marks.join(', ')})`}
                           // Always set, so a title the two-line clamp cut off
                           // is readable in full without leaving the sidebar.
@@ -114,10 +126,6 @@ export function Sidebar({
                               overflow clips at the padding edge, so a padded
                               clamp box leaks the top of the cut-off line. */}
                           <span className="sesstext">
-                            <span
-                              className={`dot${session.working ? ' working' : ''}`}
-                              aria-hidden="true"
-                            />
                             {session.worktree === undefined ? null : (
                               <span className="wt" aria-hidden="true">
                                 ⑂
@@ -126,14 +134,29 @@ export function Sidebar({
                             {title}
                           </span>
                         </button>
-                        {/* The time and the remove button share one slot on
-                            the right: the time is the resting state, the ×
-                            takes its place on hover, and neither moves the
-                            title. A two-line title keeps its time. */}
+                        {/* One slot on the right, centered against the whole
+                            title block: how long ago at rest, how long so far
+                            plus the dots while working, and the × over both on
+                            hover. Nothing here ever moves the title. */}
                         <span className="rowend">
-                          <small aria-hidden="true">
-                            {relativeTime(session.lastActivityAt ?? session.createdAt, now)}
-                          </small>
+                          {session.working && session.workingSince !== undefined ? (
+                            <>
+                              <span className="elapsed" aria-hidden="true">
+                                {elapsedTime(session.workingSince, now)}
+                              </span>
+                              {/* Three dots, blinking in sequence: the only
+                                  animation a row is allowed. */}
+                              <span className="typing" aria-hidden="true">
+                                <i />
+                                <i />
+                                <i />
+                              </span>
+                            </>
+                          ) : (
+                            <small aria-hidden="true">
+                              {relativeTime(session.lastActivityAt ?? session.createdAt, now)}
+                            </small>
+                          )}
                           <button
                             className="rowaction"
                             aria-label={`Remove ${title}`}
@@ -175,13 +198,16 @@ function rowClass(active: boolean, title?: string): string {
   return `sess${active ? ' active' : ''}${title === undefined ? ' untitled' : ''}`
 }
 
-// The clock the relative times are read against, so they age on their own
-// rather than only when something else re-renders the sidebar.
-function useClock(): number {
+// The clock the times are read against, so they age on their own rather than
+// only when something else re-renders the sidebar. One clock for both kinds:
+// a running counter needs a second, a "4m ago" does not, and paying for the
+// fast one only while something works keeps an idle rail still.
+function useClock(working: boolean): number {
   const [now, setNow] = useState(() => Date.now())
   useEffect(() => {
-    const tick = setInterval(() => setNow(Date.now()), TICK_MS)
+    const every = working ? WORKING_TICK_MS : TICK_MS
+    const tick = setInterval(() => setNow(Date.now()), every)
     return () => clearInterval(tick)
-  }, [])
+  }, [working])
   return now
 }

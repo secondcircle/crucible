@@ -1,0 +1,276 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Sidebar — slab, dots, elapsed</title>
+<style>
+  :root{
+    --bg:#191419; --bg2:#211a20; --panel:#241c23; --panel2:#2e242d; --line:#3a2e38;
+    --ink:#e8dfe2; --dim:#9b8a94; --faint:#6b5d66;
+    --accent:#e07a4f; --accent2:#f0a37c; --ok:#7fb069; --error:#d96a5a;
+    --font:-apple-system,'Segoe UI',system-ui,sans-serif;
+    --mono:ui-monospace,'SF Mono',Menlo,monospace;
+    --radius:8px;
+  }
+  *{box-sizing:border-box;margin:0}
+  body{background:#100d10;color:var(--ink);font:13.5px/1.5 var(--font);padding:28px 30px 60px}
+  h1{font-size:16px;font-weight:600}
+  h2{font-size:12.5px;font-weight:600;color:var(--ink);margin:34px 0 10px;
+     padding-top:14px;border-top:1px solid var(--line)}
+  .intro{max-width:790px;color:var(--dim);font-size:12.5px;margin:10px 0 4px}
+  .intro b{color:var(--ink);font-weight:600}
+  .rowset{display:flex;gap:22px;flex-wrap:wrap;align-items:flex-start;margin-top:14px}
+  .col{width:248px}
+  .col.wide{width:300px}
+  .label{font-size:11px;text-transform:uppercase;letter-spacing:.12em;color:var(--faint);margin-bottom:9px}
+  .label b{color:var(--ok);font-weight:400}
+  .note{font-size:11.5px;color:var(--dim);margin-top:11px;line-height:1.55}
+  .note b{color:var(--ink);font-weight:600}
+  .note .bad{color:var(--error)}
+  .note .good{color:var(--ok)}
+
+  /* ---------- the rail, at its real 248px ---------- */
+  .side{width:100%;background:var(--bg2);border:1px solid var(--line);border-radius:10px;
+        padding:8px 0 10px;box-shadow:0 10px 28px rgba(0,0,0,.45);overflow:hidden}
+  .brand{padding:8px 16px;font-weight:700;letter-spacing:.06em;font-size:13.5px}
+  .brand em{color:var(--accent);font-style:normal}
+  .newsession{margin:2px 12px 10px;padding:6px;border:1px solid var(--line);border-radius:var(--radius);
+              background:var(--panel);text-align:center;font-size:12.5px;color:var(--ink)}
+  .wslabel{padding:3px 16px;font-size:10.5px;text-transform:uppercase;letter-spacing:.12em;color:var(--faint)}
+  ul{list-style:none;margin:0;padding:0}
+
+  .ws{position:relative;display:flex;align-items:center;gap:8px;padding:6px 10px 6px 16px;
+      font-size:13px;color:var(--dim)}
+  .wsdot{width:7px;height:7px;border-radius:50%;background:var(--faint);flex:none}
+  .wsname{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .wscount{font:10px var(--mono);color:var(--faint)}
+  li.wsactive > .ws{background:var(--panel);color:var(--ink)}
+  li.wsactive > .ws .wsdot{background:var(--accent);box-shadow:0 0 6px var(--accent)}
+
+  .sessions{position:relative;margin:2px 0 8px 22px;border-left:1px solid var(--line);padding:0}
+
+  /* One left edge for every title: no leading dot, so nothing indents the text. */
+  .sessrow{position:relative;display:flex;align-items:center;padding-left:3px}
+  .sess{flex:1;min-width:0;padding:6px 6px 6px 12px;font-size:12.5px;line-height:1.35;
+        color:var(--dim);background:none;border:none;text-align:left}
+  .sesstext{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+  .untitled .sess{color:var(--faint);font-style:italic}
+
+  /* the slab: viewing */
+  .bar{position:absolute;left:-1px;top:0;bottom:0;width:3px;background:transparent}
+  .active{background:var(--panel2)}
+  .active .bar{background:var(--accent);box-shadow:0 0 8px rgba(224,122,79,.55)}
+  .active .sess{color:var(--ink);font-weight:600}
+
+  /* the right slot, centered against the whole title block */
+  .rowend{flex:none;align-self:center;padding:0 10px 0 6px;display:flex;flex-direction:column;
+          align-items:flex-end;justify-content:center;gap:4px;min-width:34px}
+  .when{color:var(--faint);font-size:10.5px;white-space:nowrap;font-variant-numeric:tabular-nums}
+  .elapsed{display:none;font:10.5px/1 var(--mono);color:var(--ok);opacity:.85;white-space:nowrap;
+           font-variant-numeric:tabular-nums;letter-spacing:-.02em}
+  .typing{display:none;gap:3.5px;align-items:center;height:4px}
+  .typing i{width:3.5px;height:3.5px;border-radius:50%;background:var(--ok);animation:blink 1.3s infinite}
+  @keyframes blink{0%,80%,100%{opacity:.22}40%{opacity:1}}
+  .working .typing{display:inline-flex}
+  .working .when{display:none}
+  .working .elapsed{display:block}
+
+  /* variant B — the workspace dot goes too; active is the slab's language, one level up */
+  .nowsdot .wsdot{display:none}
+  .nowsdot li.wsactive > .ws{box-shadow:inset 3px 0 0 var(--accent)}
+  .nowsdot li.wsactive > .ws .wsname{color:var(--ink);font-weight:600}
+
+  /* ---------- alignment close-up ---------- */
+  .zoom{background:var(--bg2);border:1px solid var(--line);border-radius:10px;padding:10px 0}
+  .zoom .sessions{margin-left:20px}
+  .zoomcap{font:10.5px var(--mono);color:var(--faint);padding:2px 14px 6px}
+  .guide{position:absolute;top:0;bottom:0;width:1px;background:repeating-linear-gradient(
+     to bottom,rgba(224,122,79,.65) 0 3px,transparent 3px 6px);z-index:2}
+  .olddot{display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--faint);
+       margin-right:7px;vertical-align:1px}
+  .old .sess{padding-left:12px}
+
+  /* ---------- state matrix ---------- */
+  .grid{display:grid;grid-template-columns:repeat(4,248px);gap:14px 22px;margin-top:12px}
+  .cell{background:var(--bg2);border:1px solid var(--line);border-radius:10px;padding:6px 0}
+  .cellcap{font:10.5px var(--mono);color:var(--faint);padding:4px 14px 6px}
+  .cellcap b{color:var(--accent2);font-weight:400}
+  .bare{border:none;box-shadow:none;background:none;padding:0}
+
+  .rec{max-width:660px;font-size:12.5px;color:var(--dim);line-height:1.65;margin-top:12px}
+  .rec ul{list-style:disc;margin:8px 0 0 18px}
+  .rec li{margin:5px 0}
+  .rec code{font:11.5px var(--mono);color:var(--accent2)}
+  .rec b{color:var(--ink);font-weight:600}
+</style>
+</head>
+<body>
+
+<h1>One left edge, one right block</h1>
+<p class="intro">
+  The leading dot is gone. It was carrying selection, the slab carries that now, and all it bought
+  in exchange was 13px of indent that made every title start in a slightly different place than the
+  rail. The right slot is now <b>centered against the whole title block</b>, so a one-line and a
+  two-line row both read as one object. Counters are live.
+</p>
+
+<div class="rowset" id="row"></div>
+
+<h2>The alignment, up close</h2>
+<div class="rowset">
+  <div class="col wide">
+    <div class="label">before · dot indents every title</div>
+    <div class="zoom">
+      <div class="zoomcap">titles start at 25px, right slot top-aligned</div>
+      <ul class="sessions old" style="border-left:1px solid var(--line)">
+        <span class="guide" style="left:25px"></span>
+        <li class="sessrow" style="align-items:flex-start">
+          <button class="sess"><span class="sesstext"><span class="olddot"></span>Context window not updating consistently across sessions</span></button>
+          <span class="rowend" style="align-self:flex-start;padding-top:6px"><span class="elapsed" style="display:block">2:16</span><span class="typing" style="display:inline-flex"><i></i><i></i><i></i></span></span>
+        </li>
+        <li class="sessrow" style="align-items:flex-start">
+          <button class="sess"><span class="sesstext"><span class="olddot"></span>Copy pass on the landing page</span></button>
+          <span class="rowend" style="align-self:flex-start;padding-top:6px"><small class="when">yst</small></span>
+        </li>
+      </ul>
+    </div>
+    <div class="note">The dot pushes the text off the rail's own margin, and the stacked right block hangs from the top, so a two-line row has its clock level with line one and nothing else.</div>
+  </div>
+  <div class="col wide">
+    <div class="label">after · <b>flush</b></div>
+    <div class="zoom">
+      <div class="zoomcap">titles start at 12px, right slot centered</div>
+      <ul class="sessions" style="border-left:1px solid var(--line)">
+        <span class="guide" style="left:12px"></span>
+        <li class="sessrow">
+          <button class="sess"><span class="sesstext">Context window not updating consistently across sessions</span></button>
+          <span class="rowend"><span class="elapsed" style="display:block">2:16</span><span class="typing" style="display:inline-flex"><i></i><i></i><i></i></span></span>
+        </li>
+        <li class="sessrow">
+          <button class="sess"><span class="sesstext">Copy pass on the landing page</span></button>
+          <span class="rowend"><small class="when">yst</small></span>
+        </li>
+      </ul>
+    </div>
+    <div class="note">One column for titles, 13px more of every title visible before the clamp, and the clock sits on the row's centerline whether the title runs to one line or two.</div>
+  </div>
+</div>
+
+<h2>Every state</h2>
+<div class="grid" id="grid"></div>
+
+<h2>What I'd build</h2>
+<div class="rec">
+  <p>
+    Rail A. Session rows lose the dot; workspace rows keep theirs, because that dot is the only mark
+    a collapsed workspace has and it sits on its own indent level where nothing has to line up with it.
+    Rail B shows the alternative if you want the purge to go all the way up: the workspace slab gets
+    the same accent edge as a session, one level out.
+  </p>
+  <ul>
+    <li>Titles gain 13px before the two-line clamp. On these titles that is most of a word per line.</li>
+    <li>Working state is now carried entirely by the right block: green counter, green dots, both
+      centered. Nothing in the title column moves, ever.</li>
+    <li>The removed dot also removed the last color-only status cue in a session row, which is a
+      quiet accessibility win. Working is motion plus a number, viewing is a slab plus weight.</li>
+    <li>Centering means a one-line working row grows a couple of px taller than a one-line idle row.
+      Cheap, and it keeps the block from riding high on the two-line rows, which is the case that
+      actually looked broken.</li>
+  </ul>
+</div>
+
+<script>
+const DATA = [
+  {ws:'crucible', wsActive:true, sessions:[
+    {t:'Fixing text dots and markdown paragraph spacing in the transcript', w:8,    at:'now'},
+    {t:'Context window not updating consistently across sessions',          w:134,  at:'1m'},
+    {t:'Sidebar working-state visual language',                             w:0,    at:'4m', active:true},
+    {t:'Fixing auto-summarization trigger timing in workspace switches',    w:47,   at:'6m'},
+    {t:'Quota strip rounds the wrong way past $10',                         w:2840, at:'22m'},
+    {t:'New session',                                                       w:0,    at:'just now', untitled:true},
+  ]},
+  {ws:'splash-down-platform', sessions:[
+    {t:'Cleaning up git repository and organizing project structure', w:196,  at:'3m'},
+    {t:'Deploy pipeline flakes on cold start',                        w:531,  at:'9m'},
+    {t:'Copy pass on the landing page',                               w:0,    at:'yst'},
+  ]},
+  {ws:'resume-site', sessions:[
+    {t:'Print stylesheet for the PDF export', w:4327, at:'4m'},
+    {t:'Netlify redirects for the old URLs',  w:0,    at:'2d'},
+  ]},
+]
+
+const RAILS = [
+  {cls:'', name:'A · no session dots <b>◂ pick</b>',
+   note:'Every title on one left edge, right block centered. The workspace dot stays: it is the only mark on that row and nothing aligns to it.'},
+  {cls:'nowsdot', name:'B · no dots anywhere',
+   note:'The workspace dot goes too and the active workspace takes the slab treatment one level out. <span class="good">Calmest rail of the set</span>; the only orange left is the edge of the row you are in.'},
+]
+
+function fmt(s){
+  if(s < 60) return s+'s'
+  if(s < 3600) return Math.floor(s/60)+':'+String(s%60).padStart(2,'0')
+  return Math.floor(s/3600)+'h '+Math.floor((s%3600)/60)+'m'
+}
+
+function rows(sessions, i0){
+  return sessions.map((s,i)=>{
+    const cls = ['sessrow', s.w?'working':'', s.active?'active':'', s.untitled?'untitled':''].filter(Boolean).join(' ')
+    const d = ((i0+i)*0.41 % 2.2)
+    const dots = [0,1,2].map(k=>`<i style="animation-delay:${(d+k*0.18).toFixed(2)}s"></i>`).join('')
+    return `<li class="${cls}">
+      <span class="bar"></span>
+      <button class="sess"><span class="sesstext">${s.t}</span></button>
+      <span class="rowend">
+        <small class="when">${s.at}</small>
+        <span class="elapsed" data-from="${s.w}">${fmt(s.w)}</span>
+        <span class="typing">${dots}</span>
+      </span>
+    </li>`
+  }).join('')
+}
+
+function sidebar(cls){
+  let n = 0
+  const body = DATA.map(w=>{
+    const working = w.sessions.filter(s=>s.w).length
+    const html = `<li class="${w.wsActive?'wsactive':''}">
+      <div class="ws"><span class="wsdot"></span><span class="wsname">${w.ws}</span>
+        <span class="wscount">${working?working+' ⟳':''}</span></div>
+      <ul class="sessions">${rows(w.sessions, n)}</ul></li>`
+    n += w.sessions.length
+    return html
+  }).join('')
+  return `<div class="side ${cls}">
+    <div class="brand"><em>◆</em> CRUCIBLE</div>
+    <div class="newsession">New session</div>
+    <div class="wslabel">Workspaces</div>
+    <ul>${body}</ul>
+  </div>`
+}
+
+document.getElementById('row').innerHTML = RAILS.map(r=>
+  `<div class="col"><div class="label">${r.name}</div>${sidebar(r.cls)}<div class="note">${r.note}</div></div>`
+).join('')
+
+const CASES = [
+  ['idle · not viewing',       {w:0,   active:false}],
+  ['working · not viewing',    {w:134, active:false}],
+  ['idle · <b>viewing</b>',    {w:0,   active:true}],
+  ['working · <b>viewing</b>', {w:8,   active:true}],
+]
+document.getElementById('grid').innerHTML = CASES.map(([cap,s])=>`
+  <div class="cell">
+    <div class="cellcap">${cap}</div>
+    <div class="side bare">
+      <ul><li><ul class="sessions">
+        ${rows([{t:'Sidebar working-state visual language', w:s.w, active:s.active, at:'4m'}],1)}
+      </ul></li></ul>
+    </div>
+  </div>`).join('')
+
+const clocks = [...document.querySelectorAll('.elapsed[data-from]')].map(el=>({el, t:Number(el.dataset.from)}))
+setInterval(()=>{ for(const c of clocks){ c.t++; c.el.textContent = fmt(c.t) } }, 1000)
+</script>
+</body>
+</html>

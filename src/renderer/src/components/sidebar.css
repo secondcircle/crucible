@@ -98,16 +98,10 @@
   box-shadow: 0 0 6px var(--accent);
 }
 
-.ws.working .dot,
-.dot.working {
+/* The workspace dot is the only mark a collapsed workspace has, so it stays;
+   it does not pulse, because a workspace is not the thing that works. */
+.ws.working .dot {
   background: var(--ok);
-  animation: breathe 2.4s infinite;
-}
-
-@keyframes breathe {
-  50% {
-    opacity: 0.35;
-  }
 }
 
 .rowaction {
@@ -136,18 +130,43 @@
 }
 
 .sessrow {
+  position: relative;
   display: flex;
-  align-items: flex-start;
+  /* Centered, so a two-line title and its clock read as one object rather
+     than as a clock nailed to the first line. */
+  align-items: center;
+  padding-left: 3px;
+}
+
+/* The slab: the row being looked at is a filled block with a lit edge. It is
+   the one cue that survives a rail full of working sessions, because it is
+   made of matter and position rather than of a color to find. */
+.sessrow.viewing {
+  background: var(--panel2);
+}
+
+.sessrow.viewing::before {
+  content: '';
+  position: absolute;
+  left: -1px;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  background: var(--accent);
+  box-shadow: 0 0 8px rgba(224, 122, 79, 0.55);
 }
 
 /* Two lines of title, then it clips. Never three: the row is scanned, not
    read. The clamp is on .sesstext and the padding is here, because overflow
    clips at the padding edge: a padded clamp box shows the tops of the third
-   line's glyphs through the padding as a row of stray dots. */
+   line's glyphs through the padding as a row of stray dots.
+
+   No status glyph precedes the title, so every title in the rail starts on one
+   left edge and the two-line clamp gets those 13px of text instead. */
 .sess {
   flex: 1;
   min-width: 0;
-  padding: 5px 8px 5px 12px;
+  padding: 6px 8px 6px 12px;
   font-size: 12.5px;
   line-height: 1.35;
   color: var(--dim);
@@ -163,21 +182,20 @@
   overflow: hidden;
 }
 
-.sess .dot {
-  display: inline-block;
-  width: 6px;
-  height: 6px;
-  margin-right: 7px;
-  vertical-align: 1px;
-}
-
-/* One slot, two occupants. The × sits on top of the time and both are the
-   same size, so hovering swaps them without reflowing the row. */
+/* One slot, stacked: the time or the counter on top, the dots under it, and
+   the × over both on hover. Right-aligned and centered, so the block never
+   moves the title and never rides high on a two-line row. */
 .rowend {
   position: relative;
   flex: none;
-  align-self: flex-start;
-  padding: 6px 10px 0 4px;
+  align-self: center;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  justify-content: center;
+  gap: 4px;
+  min-width: 34px;
+  padding: 0 10px 0 6px;
 }
 
 .rowend small {
@@ -186,27 +204,87 @@
   white-space: nowrap;
 }
 
+/* Mono and tabular: a counter that ticks must not change width as it does.
+   It replaces the relative time rather than joining it — during a turn, "4m
+   ago" and "0:43" are two answers to one question and one of them is wrong. */
+.elapsed {
+  font-family: var(--mono);
+  font-size: 10.5px;
+  line-height: 1;
+  color: var(--ok);
+  opacity: 0.85;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+}
+
+.typing {
+  display: flex;
+  align-items: center;
+  gap: 3.5px;
+  height: 4px;
+}
+
+.typing i {
+  width: 3.5px;
+  height: 3.5px;
+  border-radius: 50%;
+  background: var(--ok);
+  animation: blink 1.3s infinite;
+}
+
+.typing i:nth-child(2) {
+  animation-delay: 0.18s;
+}
+
+.typing i:nth-child(3) {
+  animation-delay: 0.36s;
+}
+
+@keyframes blink {
+  0%,
+  80%,
+  100% {
+    opacity: 0.22;
+  }
+  40% {
+    opacity: 1;
+  }
+}
+
+/* Held still rather than hidden: the dots are still a badge when they do not
+   blink, and the counter still says the turn is running. */
+@media (prefers-reduced-motion: reduce) {
+  .typing i {
+    animation: none;
+    opacity: 1;
+  }
+}
+
 .sessrow .rowaction {
   position: absolute;
   inset: 0;
   padding: 0;
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: flex-end;
   line-height: 1;
 }
 
 .sessrow:hover .rowend small,
-.sessrow:focus-within .rowend small {
+.sessrow:focus-within .rowend small,
+.sessrow:hover .elapsed,
+.sessrow:focus-within .elapsed,
+.sessrow:hover .typing,
+.sessrow:focus-within .typing {
   visibility: hidden;
 }
 
+/* The slab carries being-looked-at; the title only gains weight and full ink,
+   which is what makes it legible against the filled row. */
 .sess.active {
-  color: var(--accent2);
-}
-
-.sess.active .dot {
-  background: var(--accent2);
+  color: var(--ink);
+  font-weight: 600;
 }
 
 /* the whole of the at-a-glance worktree signal: between the working dot and

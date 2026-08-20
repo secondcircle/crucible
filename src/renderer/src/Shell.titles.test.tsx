@@ -74,13 +74,15 @@ describe('the sidebar row', () => {
 
   // Where the clamp itself lives: jsdom loads no stylesheet, so how many lines
   // it renders is checked on the running app, not here.
-  it('puts the title and the dot in the clamped block, the time out of it', async () => {
+  it('puts the title in the clamped block, alone, with the time out of it', async () => {
     await shell()
 
     const [titled] = sessionRows()
     expect(titled).toHaveClass('sess')
     expect(titled.querySelector('.sesstext')).toHaveTextContent(LONG)
-    expect(titled.querySelector('.sesstext .dot')).toBeInTheDocument()
+    // No status glyph precedes the title: every row starts on one left edge,
+    // and state is carried by the slab and the right-hand slot instead.
+    expect(titled.querySelector('.sesstext .dot')).toBeNull()
   })
 
   it('shares that slot with the remove button, which covers the time', async () => {
@@ -129,6 +131,52 @@ describe('the sidebar row', () => {
     })
 
     expect(screen.getByRole('button', { name: `${LONG} (working)` })).toBeInTheDocument()
+  })
+
+  // Viewing and working are told apart by kind, not by shade: one is a slab
+  // that holds still, the other is the only thing in the row that moves.
+  it('marks the row being looked at as a slab, and only that one', async () => {
+    const port = await shell()
+
+    const rows = (): HTMLElement[] => [...document.querySelectorAll<HTMLElement>('.side .sessrow')]
+    expect(rows().map((row) => row.classList.contains('viewing'))).toEqual([true, false])
+
+    act(() => port.update((snapshot) => ({ ...snapshot, activeSessionId: 's2' })))
+
+    expect(rows().map((row) => row.classList.contains('viewing'))).toEqual([false, true])
+  })
+
+  it('counts up from the turn it is running, in place of how long ago', async () => {
+    const port = await shell()
+
+    expect(rowEnd(sessionRows()[0]).querySelector('.elapsed')).toBeNull()
+
+    act(() =>
+      port.update((snapshot) => ({
+        ...snapshot,
+        sessions: snapshot.sessions.map((session) =>
+          session.id === 's1'
+            ? {
+                ...session,
+                working: true,
+                // Half a second clear of the boundary: the rail's clock was
+                // read at render and is a few ms behind this line.
+                workingSince: new Date(Date.now() - 134_500).toISOString()
+              }
+            : session
+        )
+      }))
+    )
+
+    const end = rowEnd(sessionRows()[0])
+    expect(end.querySelector('.elapsed')?.textContent).toBe('2:14')
+    // One question, one answer: the relative time is gone for the length of
+    // the turn, and the dots say what the counter is counting.
+    expect(end.querySelector('small')).toBeNull()
+    expect(end.querySelectorAll('.typing i')).toHaveLength(3)
+    // The idle row keeps its relative time and grows nothing that moves.
+    expect(rowEnd(sessionRows()[1]).querySelector('small')?.textContent).toBe('30m ago')
+    expect(rowEnd(sessionRows()[1]).querySelector('.typing')).toBeNull()
   })
 
   it('offers no way to rename a session, anywhere', async () => {

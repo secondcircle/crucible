@@ -252,6 +252,26 @@ describe('turns', () => {
     expect(sessionOf(await shell.snapshot(), sessionId)?.working).toBe(false)
   })
 
+  it('dates the live turn, so the sidebar can count up from it', async () => {
+    const { sessionId } = await withSession()
+
+    const stamps: (string | undefined)[] = []
+    shell.onEvent((event) => {
+      if (event.type === 'state') stamps.push(sessionOf(event.snapshot, sessionId)?.workingSince)
+    })
+    const before = Date.now()
+    await shell.prompt(sessionId, 'hello')
+    const started = stamps[0]
+    await settled()
+
+    expect(started).toBeDefined()
+    expect(new Date(started ?? '').getTime()).toBeGreaterThanOrEqual(before)
+    expect(new Date(started ?? '').getTime()).toBeLessThanOrEqual(Date.now())
+    // It goes with the turn: no stopped session carries an elapsed time.
+    expect(stamps.at(-1)).toBeUndefined()
+    expect(sessionOf(await shell.snapshot(), sessionId)?.workingSince).toBeUndefined()
+  })
+
   it('folds the adapter\u2019s usage into the snapshot', async () => {
     const { sessionId } = await withSession()
 

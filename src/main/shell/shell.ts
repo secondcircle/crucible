@@ -68,6 +68,8 @@ type TurnOutcome = 'ended' | 'stopped'
 
 interface LiveTurn {
   readonly turnId: TurnId
+  /** ISO of the moment the turn was accepted, which is what the sidebar counts from. */
+  readonly startedAt: string
   started: boolean
   // False for the whole of the bind: the session is working above the port
   // while the adapter has never heard of the turn.
@@ -129,6 +131,7 @@ export function createShell({
   function snapshot(): ShellSnapshot {
     const sessions: SessionState[] = store.state.sessions.map((session) => {
       const reported = usage.get(session.id)
+      const turn = live.get(session.id)
       const queue = queues.get(session.id)
       // Folded exactly as the queue is, and absent when the session has no
       // tabs, which is what makes the region vanish rather than stand empty.
@@ -143,7 +146,10 @@ export function createShell({
           : { lastActivityAt: session.lastActivityAt }),
         model: session.model,
         thinkingLevel: session.thinkingLevel,
-        working: live.has(session.id),
+        working: turn !== undefined,
+        // Present exactly while the session works, so nothing downstream can
+        // show an elapsed time for a session that has stopped.
+        ...(turn === undefined ? {} : { workingSince: turn.startedAt }),
         ...(session.worktree === undefined ? {} : { worktree: session.worktree }),
         // Absent in the record means a session past its first message, which
         // is what a record written before the mark existed has to read as.
@@ -377,6 +383,7 @@ export function createShell({
     })
     return {
       turnId: `t-${turns}`,
+      startedAt: new Date().toISOString(),
       started: false,
       dispatched: false,
       cancelled: false,
