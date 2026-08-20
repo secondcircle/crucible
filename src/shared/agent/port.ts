@@ -1,6 +1,5 @@
 // This module imports nothing on purpose: it is the one module the renderer
-// shares with main, so any import added here could smuggle a π SDK type across
-// the seam.
+// shares with main, so any import here could smuggle a π SDK type across.
 
 export type WorkspaceId = string
 
@@ -30,9 +29,8 @@ export interface WorkspaceState {
   readonly path: string
 }
 
-// π's two kinds of queued message, adopted verbatim: a steering message
-// redirects the live turn at the next boundary between tool calls, a follow-up
-// waits until the agent has fully stopped.
+// π's two kinds, adopted verbatim: steering redirects the live turn at the
+// next boundary between tool calls, a follow-up waits until the agent stops.
 export type QueuedKind = 'steering' | 'followUp'
 
 export interface QueuedMessage {
@@ -134,18 +132,16 @@ export type PortEvent =
       readonly ok: boolean
       readonly output: string
     }
-  // A user message the port itself delivered into the conversation: a queued
-  // message at its delivery point, or a steer that fell back to a prompt.
-  // Text sent through `prompt()` is never announced this way, because the
-  // caller of `prompt()` echoes its own.
+  // Only for a message the port delivered itself. Text sent through `prompt()`
+  // is never announced this way, because its caller echoes its own.
   | {
       readonly type: 'user_message'
       readonly sessionId: SessionId
       readonly turnId: TurnId
       readonly text: string
     }
-  // Queued messages handed back rather than delivered: on cancel and on turn
-  // error. Queue order, steering first. Nothing flushed is delivered after.
+  // Queued messages handed back rather than delivered, steering first. Nothing
+  // flushed is delivered afterwards.
   | {
       readonly type: 'queue_flushed'
       readonly sessionId: SessionId
@@ -195,15 +191,11 @@ export interface AgentPort {
   // Accepted, not finished: resolves once the turn is live.
   prompt(sessionId: SessionId, text: string): Promise<TurnId>
 
-  // Neither of these is ever lost and neither is ever refused: the message is
-  // queued and delivered within the live turn, or — when no turn is live, or
-  // the live turn ends before it can be queued — sent as the next prompt.
-  // Nothing enters the transcript at queue time.
+  // Never lost and never refused: with no live turn to take it, the message is
+  // sent as the next prompt. Nothing enters the transcript at queue time.
   steer(sessionId: SessionId, text: string): Promise<void>
   followUp(sessionId: SessionId, text: string): Promise<void>
-  // Names the entry by content rather than by an index delivery may have
-  // shifted.
-  /** True when the entry was removed; false when it was no longer queued. */
+  /** By content, because delivery may have shifted any index. */
   dequeue(sessionId: SessionId, kind: QueuedKind, text: string): Promise<boolean>
 
   /** Harmless when there is nothing to stop. */

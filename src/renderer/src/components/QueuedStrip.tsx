@@ -1,10 +1,8 @@
 import type { QueuedKind, QueueState } from '../../../shared/agent/port'
 import './queued-strip.css'
 
-// What is queued and not yet delivered, and nothing else: an undelivered
-// message is never shown in the transcript as if it were part of the
-// conversation. The strip renders from the snapshot, so it follows the active
-// session and is still there after switching away and back.
+// Undelivered messages live here and never in the transcript, which would read
+// as if they were already part of the conversation.
 export function QueuedStrip({
   queue,
   onDequeue

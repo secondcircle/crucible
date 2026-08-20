@@ -1,8 +1,7 @@
 // @vitest-environment jsdom
 //
-// The sidebar is the curated state, so it is what these assert on: nothing may
-// appear in it by discovery, and nothing may vanish from it because a
-// conversation was deleted.
+// Nothing may appear in the sidebar by discovery, and nothing may vanish from
+// it because a conversation was deleted.
 import { act, fireEvent, render, screen, within } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 import { Shell } from './Shell'

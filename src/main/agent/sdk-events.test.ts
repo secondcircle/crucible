@@ -1,7 +1,7 @@
 // @vitest-environment node
 //
-// Fakes of the SDK's event stream, never a real session, so this suite makes no
-// paid call and constructs no SDK adapter.
+// Fakes of the SDK's event stream, never a real session, so nothing here makes
+// a paid call.
 import { describe, expect, it } from 'vitest'
 import type { AgentSessionEvent } from '@earendil-works/pi-coding-agent'
 import { createEventMapper, renderToolOutput, summarizeToolArgs } from './sdk-events'

@@ -1,8 +1,7 @@
 import type { SessionState } from '../../shared/agent/port'
 
-// Session naming is deferred, so a session is labelled by when it was created
-// and nothing else. The format lives here so the sidebar and the top bar cannot
-// drift into two names for one session.
+// One format in one place, so the sidebar and the top bar cannot drift into
+// two names for one session.
 export function sessionLabel(session: Pick<SessionState, 'createdAt'>): string {
   const at = new Date(session.createdAt)
   if (Number.isNaN(at.getTime())) return 'Session'

@@ -5,13 +5,11 @@ import { displaySafeMessage } from './adapter-error.ts'
 import { renderToolOutput, summarizeToolArgs } from './sdk-events.ts'
 
 // Stored messages produce the same item kinds a live turn does, so history
-// renders through the code a stream renders through. Anything the SDK stores
-// that is not text is dropped rather than guessed at.
+// renders through the code a stream renders through.
 export type StoredMessage = AgentSession['messages'][number]
 
 export function toTranscript(messages: readonly StoredMessage[]): TranscriptItem[] {
   const items: TranscriptItem[] = []
-  /** Tool calls seen in assistant messages, waiting for their results. */
   const calls = new Map<string, { name: string; summary: string }>()
 
   for (const message of messages) {
@@ -73,7 +71,6 @@ export function toTranscript(messages: readonly StoredMessage[]): TranscriptItem
   return items
 }
 
-/** A message's text, whichever of the two shapes its content came in. */
 function textOf(content: unknown): string {
   if (typeof content === 'string') return content.trim()
   if (!Array.isArray(content)) return ''

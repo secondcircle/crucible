@@ -1,8 +1,7 @@
 // @vitest-environment node
 //
-// Driven against the real fake adapter and a real store over a temp file, with
-// no Electron and no IPC, which is the point of having put the rules here
-// rather than in the channel.
+// Driven against the real fake adapter and a real store, with no Electron and
+// no IPC, which is the point of having put the rules here.
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -270,9 +269,8 @@ describe('turns', () => {
   })
 })
 
-// π's queueing semantics as they cross the port: the shell folds the queue
-// into its snapshot, guards the turn events, and starts a turn for a message
-// that found none.
+// π's queueing semantics as they cross the port, including the turn started
+// for a message that found none.
 describe('queued messages', () => {
   /** Acts once, the first time a call in the live turn starts. */
   function atFirstCall(act: () => void): void {
@@ -397,10 +395,8 @@ describe('queued messages', () => {
     expect((await shell.snapshot()).sessions).toEqual([])
   })
 
-  // Removal stops the turn, and a stop is a cancel: both adapters hand the
-  // queue back on one. A removed session has no composer to hand it to, so the
-  // flush must not cross the port — the renderer would file the text under a
-  // session nothing can ever show again.
+  // A removed session has no composer to hand a flushed queue back to, so the
+  // renderer would file the text under a session it can never show.
   it('discards a removed session’s queue rather than handing it back to nothing', async () => {
     const { sessionId } = await withSession()
     const listeners = new Set<AdapterEventListener>()
@@ -448,10 +444,8 @@ describe('queued messages', () => {
     expect((await shell.snapshot()).sessions).toEqual([])
   })
 
-  // The other way the queueing path can fail: the bind is fine but the
-  // adapter itself refuses the message. The contract is the same — never lost,
-  // never refused — so the text waits out the turn and becomes the next
-  // prompt instead of coming back as a rejection.
+  // The bind is fine here and the adapter itself refuses the message, where
+  // the contract is still never lost and never refused.
   it('does not lose a message the adapter refused to queue', async () => {
     const { sessionId } = await withSession()
     const refusing: ConversationAdapter = {
@@ -576,9 +570,8 @@ describe('cancellation', () => {
   })
 })
 
-// A prompt sent while its session is still binding is accepted and shown as
-// working while the adapter has never heard of the turn, so everything that
-// stops a turn has to land there too, before the adapter is asked to run it.
+// A prompt accepted while its session is still binding shows as working before
+// the adapter has heard of it, so everything that stops a turn has to land.
 describe('a turn accepted while its session is still binding', () => {
   let sessionId: SessionId
   let release: () => void = () => {}
@@ -650,11 +643,8 @@ describe('a turn accepted while its session is still binding', () => {
     expect((await shell.snapshot()).sessions).toEqual([])
   })
 
-  // Reproduction for review finding 2: when the bind behind a live turn
-  // fails, `steer` rejects with the bind's error and the message is gone —
-  // not queued, not flushed, not sent as the next prompt — though the port
-  // contract says a message sent through steer is never lost and never
-  // refused.
+  // A failing bind behind a live turn is the one path where a steered message
+  // has no queue to land in and no turn to fall back to.
   it('does not lose a message steered while the turn’s bind is failing', async () => {
     const created = await withSession()
     sessionId = created.sessionId
@@ -683,14 +673,13 @@ describe('a turn accepted while its session is still binding', () => {
     const steered = shell.steer(sessionId, 'redirect')
     release()
 
-    // Never refused: the steer resolves rather than rejecting with the
-    // bind's failure…
+    // Never refused: the steer resolves rather than rejecting with the bind's
+    // failure…
     await expect(steered).resolves.toBeUndefined()
     await settled()
 
-    // …and never lost: the text either fell back to a prompt of its own
-    // (announced by `user_message`, even one whose turn then errors) or was
-    // handed back through `queue_flushed`.
+    // …and never lost: the text either fell back to a prompt of its own or was
+    // handed back to the composer.
     const announced = events.some(
       (event) => event.type === 'user_message' && event.text === 'redirect'
     )
@@ -765,8 +754,8 @@ describe('a relaunch', () => {
     await settled()
     shell.dispose()
 
-    // A second shell over the same file, with a fresh adapter: the sidebar is
-    // the store's, and what the conversation holds is the adapter's.
+    // A second shell over the same file: the sidebar is the store's, and what
+    // the conversation holds is the adapter's.
     build()
     const snapshot = await shell.snapshot()
 
@@ -779,9 +768,8 @@ describe('a relaunch', () => {
   })
 })
 
-// The fake adapter is built with no pause, so its whole script runs on
-// microtasks: one macrotask turn is past all of it, however long the script
-// grows.
+// The fake adapter is built with no pause, so one macrotask turn is past its
+// whole script however long that grows.
 async function settled(): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, 0))
 }

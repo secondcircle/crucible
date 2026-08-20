@@ -5,9 +5,8 @@ import type { SessionId, TurnId } from '../../shared/agent/port'
 // resolver does no extension guessing.
 import { displaySafeMessage } from './adapter-error.ts'
 
-// Where no π SDK type is allowed past. The SDK is imported for its types only,
-// so nothing here holds a session, a credential or a socket. Anything not
-// named below is dropped rather than guessed at.
+// Where no π SDK type is allowed past: the SDK is imported for its types only,
+// and anything not named below is dropped rather than guessed at.
 
 export interface TurnTarget {
   readonly sessionId: SessionId
@@ -28,10 +27,8 @@ export function createEventMapper(): EventMapper {
   const forwarded = new Map<string, number>()
   /** The queue as the last `queue_update` reported it, oldest first. */
   let queued: readonly string[] = []
-  // π takes a message out of its queue and says so immediately before that
-  // message starts, so what left the queue is exactly what is being delivered.
-  // The prompt's own user message leaves no such trace, which is what keeps it
-  // from being shown a second time.
+  // π says a message left its queue immediately before that message starts, so
+  // what left is exactly what is being delivered. A prompt leaves no trace.
   const delivering: string[] = []
 
   return {
@@ -98,9 +95,8 @@ export function createEventMapper(): EventMapper {
               return undefined
           }
 
-        // A failed request is folded into the final message instead of
-        // arriving as an error event, and `prompt()` still resolves normally,
-        // so without this a paid failure would read as a clean, empty turn.
+        // A failed request is folded into the final message rather than raised
+        // as an error, so without this a paid failure reads as an empty turn.
         case 'message_end':
           return event.message.role === 'assistant' && event.message.stopReason === 'error'
             ? {
@@ -147,9 +143,8 @@ export function createEventMapper(): EventMapper {
             output: renderToolOutput(event.result)
           }
 
-        // The SDK's own turn boundaries are dropped: one `prompt()` call can
-        // span several of them when the SDK retries or compacts, and the
-        // adapter's turn is bounded by the call.
+        // The SDK's own turn boundaries are dropped: one `prompt()` call spans
+        // several of them when the SDK retries or compacts.
         default:
           return undefined
       }
@@ -157,8 +152,8 @@ export function createEventMapper(): EventMapper {
   }
 }
 
-// The argument a person recognizes the call by, never the whole argument
-// object: this becomes a one-line label.
+// The argument a person recognizes the call by, never the whole object: this
+// becomes a one-line label.
 export function summarizeToolArgs(args: unknown): string {
   if (typeof args === 'string') return clip(args, SUMMARY_LIMIT)
   if (typeof args !== 'object' || args === null) return ''
@@ -172,7 +167,6 @@ export function summarizeToolArgs(args: unknown): string {
   return typeof first === 'string' ? clip(first, SUMMARY_LIMIT) : ''
 }
 
-/** A user message's text, whichever of the two shapes its content came in. */
 function userText(content: unknown): string {
   if (typeof content === 'string') return content
   if (!Array.isArray(content)) return ''

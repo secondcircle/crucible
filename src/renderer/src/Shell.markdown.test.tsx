@@ -1,8 +1,7 @@
 // @vitest-environment jsdom
 //
-// Markdown is where an agent's own text becomes what the window shows, so both
-// halves are asserted: the formatting a reply is entitled to, and the markup it
-// must never get.
+// Markdown is where an agent's own text becomes what the window shows: the
+// formatting a reply is entitled to, and the markup it must never get.
 import { act, render, screen, within } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 import { Shell } from './Shell'
@@ -36,21 +35,17 @@ describe('an assistant reply', () => {
   it('renders the markdown a reply is entitled to', async () => {
     await replyWith(REPLY)
 
-    // a list
     expect(screen.getByText('the fake one is free').tagName).toBe('LI')
     expect(screen.getByText('the SDK one is metered').tagName).toBe('LI')
 
-    // a table
     const table = screen.getByRole('table')
     expect(within(table).getByRole('columnheader', { name: 'flavor' })).toBeInTheDocument()
     expect(within(table).getByRole('cell', { name: 'none' })).toBeInTheDocument()
 
-    // inline code
     const inline = screen.getByText('CRUCIBLE_AGENT=sdk')
     expect(inline.tagName).toBe('CODE')
     expect(inline.closest('pre')).toBeNull()
 
-    // a fenced block
     const fenced = screen.getByText('const port = createIpcClient()')
     expect(fenced.tagName).toBe('CODE')
     expect(fenced.closest('pre')).not.toBeNull()
@@ -110,9 +105,8 @@ describe('a person\u2019s own message', () => {
       port.endTurn('s1')
     })
 
-    // The prompt reaches the transcript through the shell's own send path in
-    // other tests; here the settled transcript is what a restored one looks
-    // like, and it is text either way.
+    // A settled transcript is what a restored one looks like, and a prompt is
+    // text either way.
     expect(screen.queryByRole('heading', { name: 'not a heading, and `not code`' })).toBeNull()
   })
 })

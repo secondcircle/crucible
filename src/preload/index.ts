@@ -7,11 +7,8 @@ import {
 } from '../shared/agent/channels'
 import type { PortEvent } from '../shared/agent/port'
 
-// The whole of what the sandboxed renderer can reach of Electron. Two members,
-// no general `ipcRenderer` passthrough, and payloads only: nothing carrying a
-// `sender` may cross into the renderer's world.
-//
-// Bundled to a single file so it loads under `sandbox: true`.
+// The whole of what the sandboxed renderer can reach of Electron: two members,
+// no general passthrough, and nothing carrying a `sender` may cross.
 contextBridge.exposeInMainWorld('crucible', {
   agent: {
     request: (request: PortRequest): Promise<PortResult> =>

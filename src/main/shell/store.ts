@@ -3,9 +3,8 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname } from 'node:path'
 import type { ModelId, SessionId, ThinkingLevel, WorkspaceId } from '../../shared/agent/port'
 
-// One store above both adapters, so the launch flavors can never disagree about
-// what the sidebar holds. Its file location is an argument so a test can hand it
-// a temp file.
+// One store above both adapters, so the launch flavors can never disagree
+// about what the sidebar holds. Its file location is an argument for tests.
 
 /** What lets a later shape be migrated. */
 const VERSION = 1
@@ -77,8 +76,7 @@ export function createShellStore(
       writeFileSync(path, `${JSON.stringify({ version: VERSION, ...next }, null, 2)}\n`, 'utf8')
     } catch (cause) {
       // A store that cannot write is still a store: the launch keeps working
-      // from memory rather than throwing at whoever happened to click
-      // something.
+      // from memory rather than throwing at whoever clicked.
       onWriteFailure(cause)
     }
   }
@@ -166,7 +164,6 @@ export function createShellStore(
       const sessions = state.sessions.filter((session) => session.id !== id)
       const activeSessionByWorkspace = { ...state.activeSessionByWorkspace }
       if (removed !== undefined && activeSessionByWorkspace[removed.workspaceId] === id) {
-        // The workspace falls back to another of its sessions, or to none.
         const next = sessions.find((session) => session.workspaceId === removed.workspaceId)
         if (next === undefined) delete activeSessionByWorkspace[removed.workspaceId]
         else activeSessionByWorkspace[removed.workspaceId] = next.id
@@ -193,9 +190,8 @@ export function createShellStore(
   }
 }
 
-// An unreadable, unparsable or unknown-version file is treated as absent, so
-// the window still opens: losing a sidebar is recoverable, a window that will
-// not open is not.
+// An unreadable or unknown-version file is treated as absent: losing a sidebar
+// is recoverable, a window that will not open is not.
 function load(path: string): ShellStoreState {
   let parsed: unknown
   try {

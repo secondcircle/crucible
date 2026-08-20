@@ -27,25 +27,19 @@ import type {
   Unsubscribe
 } from '../../shared/agent/port'
 // Spelled with their extensions so plain Node can load this module too: its
-// ESM resolver does no extension guessing. Every other import here is
-// type-only and erased.
+// ESM resolver does no extension guessing.
 import { displaySafeMessage } from './adapter-error.ts'
 import { createEventMapper } from './sdk-events.ts'
 import { toTranscript } from './sdk-transcript.ts'
 
-// The only module in Crucible that opens a paid session. It takes no options
-// because nothing about a π session is a caller's to choose, and it is where
-// π storage stops: above it a conversation is only an opaque token.
-//
-// The SDK is imported dynamically because it is ESM-only, so the CommonJS main
-// bundle cannot `require` it, and a fake-flavor launch then never loads it.
+// Imported dynamically because the SDK is ESM-only, so the CommonJS main
+// bundle cannot `require` it and a fake-flavor launch never loads it.
 type Sdk = typeof import('@earendil-works/pi-coding-agent')
 
 interface Bound {
   session: AgentSession
   readonly workspacePath: string
   token: string
-  /** One per session, many per adapter. */
   running?: RunningTurn
 }
 
@@ -85,9 +79,8 @@ export function createSdkAdapter(): ConversationAdapter {
     return modelRuntime
   }
 
-  // Stock π except for the emptied `packages` and `extensions` and
-  // `noExtensions` below, which is what keeps the user's globally configured
-  // extensions, the legacy system among them, out of a Crucible session.
+  // Stock π except for the emptied resources below, which keep the user's
+  // globally configured extensions out of a Crucible session.
   function workspaceResources(workspacePath: string): Promise<WorkspaceResources> {
     const existing = resources.get(workspacePath)
     if (existing !== undefined) return existing
@@ -96,10 +89,8 @@ export function createSdkAdapter(): ConversationAdapter {
       const pi = await sdk()
       const agentDir = pi.getAgentDir()
       const settingsManager = pi.SettingsManager.create(workspacePath, agentDir)
-      // In memory only, and never written back to the user's settings files:
-      // the emptied resources keep their globally configured extensions out of
-      // a Crucible session, and the two queue modes are Crucible's fixed
-      // pacing — every queued message of a kind is delivered as a group.
+      // In memory only, never written back to the user's settings files. The
+      // queue modes are fixed here: a kind is delivered as one group.
       settingsManager.applyOverrides({
         packages: [],
         extensions: [],
@@ -152,8 +143,7 @@ export function createSdkAdapter(): ConversationAdapter {
 
     if (preferred?.model !== undefined) {
       // A preference the credentials cannot reach is not an error: the SDK's
-      // own fallback answers, and what gets reported back is what is in
-      // effect.
+      // own fallback answers, and that fallback is what gets reported back.
       try {
         options.model = await resolveModel(preferred.model)
       } catch {
@@ -239,8 +229,7 @@ export function createSdkAdapter(): ConversationAdapter {
           )
           restored = true
         } catch {
-          // The conversation is gone: deleted, moved, or written by a build
-          // that is no longer here. A fresh one is bound instead and the
+          // The conversation is gone, so a fresh one is bound instead and the
           // caller is told nothing was restored.
           session = undefined
         }
@@ -431,9 +420,8 @@ export function createSdkAdapter(): ConversationAdapter {
 
       if (abandoned) return
 
-      // Flushed before the terminal event, whatever the outcome: a message
-      // still queued when a run is over was never delivered, and it goes back
-      // to the composer rather than into the next run.
+      // A message still queued when a run is over was never delivered, so it
+      // goes back to the composer rather than into the next run.
       flushQueue(bound, sessionId)
 
       // Decided here because only the adapter that called `abort()` knows an
@@ -453,9 +441,8 @@ export function createSdkAdapter(): ConversationAdapter {
       }
     },
 
-    // Streaming in this adapter's own terms: `running` is set for the whole of
-    // the prompt call, while `isStreaming` lags it by a microtask and would
-    // answer 'idle' for a run genuinely under way.
+    // `running` rather than the SDK's `isStreaming`, which lags by a microtask
+    // and would answer 'idle' for a run genuinely under way.
     async steer(sessionId: SessionId, text: string): Promise<'queued' | 'idle'> {
       const bound = requireBound(sessionId)
       if (bound.running === undefined) return 'idle'
@@ -471,8 +458,7 @@ export function createSdkAdapter(): ConversationAdapter {
     },
 
     // π removes queued messages only as a whole, so one entry leaves by
-    // clearing the queue and putting the rest back in order. Re-queued text is
-    // already expanded, which expanding again does nothing to.
+    // clearing the queue and putting the rest back in order.
     async dequeue(sessionId: SessionId, kind: QueuedKind, text: string): Promise<boolean> {
       const bound = sessions.get(sessionId)
       if (bound === undefined) return false

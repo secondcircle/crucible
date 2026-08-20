@@ -1,8 +1,7 @@
 // @vitest-environment node
 //
-// The composition root's interface is what it does when Electron loads it, so
-// the test drives it the way Electron does, with `electron` and the window
-// factory replaced by stand-ins.
+// A composition root's interface is what it does when Electron loads it, so
+// Electron is what stands in here.
 import { mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'

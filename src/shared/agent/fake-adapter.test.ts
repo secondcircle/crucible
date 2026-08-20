@@ -1,8 +1,7 @@
 // @vitest-environment node
 //
-// Every zero-cost check in this repository runs against this adapter, so what
-// those checks rely on is pinned here. Nothing waits on a clock: the adapter is
-// built with no pause, so a turn is over in microtasks.
+// Every zero-cost check runs against this adapter, so what those checks rely
+// on is pinned here.
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { AdapterEvent } from './adapter'
 import { createFakeAdapter, FAKE_MODEL } from './fake-adapter'
@@ -22,8 +21,8 @@ async function withSession(sessionId = 's1'): Promise<{
 
 const types = (events: readonly AdapterEvent[]): string[] => events.map((event) => event.type)
 
-// One reproduction below drives the paced script under fake timers; every
-// other test builds the adapter with no pause and waits on no clock.
+// One test below drives the paced script under fake timers; every other builds
+// the adapter with no pause and waits on no clock.
 afterEach(() => {
   vi.useRealTimers()
 })
@@ -240,17 +239,14 @@ describe('queued messages', () => {
     const at = transcript.findIndex(
       (item) => item.kind === 'user' && item.text === 'check the tests too'
     )
-    // A restored transcript reads as the live one did: between the call that
+    // A restored transcript reads as the live one did, between the call that
     // was running and the one that followed it.
     expect(transcript[at - 1].kind).toBe('tool')
     expect(transcript[at + 1].kind).toBe('tool')
   })
 
-  // Reproduction for review finding 1: the script's final pause sits after
-  // the last queue check, so a message queued during it ends the turn still
-  // queued — neither delivered (`user_message`) nor handed back
-  // (`queue_flushed`) — breaking the invariant that a turn never ends with a
-  // non-empty queue.
+  // The script's final pause sits after its last queue check, which is the
+  // window a message can be stranded in.
   it('delivers or flushes a message queued during the turn’s final pause', async () => {
     vi.useFakeTimers()
     const adapter = createFakeAdapter({ pauseMs: 10 })
@@ -431,9 +427,8 @@ describe('history, reset and resume', () => {
     await adapter.prompt('s1', 't-1', 'said this launch')
     const live = await adapter.bind({ sessionId: 's1', workspacePath: WORKSPACE })
 
-    // A second adapter is a second launch: its history holds the canned
-    // entries and nothing else, so the old token binds a fresh conversation
-    // and says so rather than landing on some other conversation.
+    // A second adapter is a second launch, so a token from the first has to
+    // bind a fresh conversation rather than land on some other one.
     const relaunched = createFakeAdapter({ pauseMs: 0 })
     const rebound = await relaunched.bind({
       sessionId: 's1',

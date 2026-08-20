@@ -17,9 +17,8 @@ import type {
   WorkspaceId
 } from '../../../shared/agent/port'
 
-// Answers operations the way main does, but streams nothing by itself: a test
-// says exactly what arrives and when, which keeps component tests about
-// rendering rather than about timing.
+// Answers operations the way main does but streams nothing by itself, so a
+// component test is about rendering rather than about timing.
 export interface ScriptedPort extends AgentPort {
   readonly calls: ReadonlyArray<{ readonly op: string; readonly args: readonly unknown[] }>
   /** The snapshot as it stands, which every `state` event carries whole. */

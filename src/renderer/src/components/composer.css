@@ -117,7 +117,6 @@ kbd {
   color: var(--dim);
 }
 
-/* popovers: the model picker and the thinking menu */
 .pop {
   position: absolute;
   bottom: 34px;
