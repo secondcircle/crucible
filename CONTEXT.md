@@ -42,8 +42,16 @@ supporting mocks. The name of the look, not of any feature.
 _Avoid_: the theme, the skin, the dark mode.
 
 **Workspace**:
-An OS folder opened in Crucible as an agent working directory and as the home of that folder's sessions.
+An OS folder opened in Crucible: the home of that folder's sessions and the default place their agents work.
 _Avoid_: project, repository.
+
+**Checkout**:
+The workspace folder's own git working directory, where a session works unless it has a worktree.
+_Avoid_: local, live checkout.
+
+**Worktree**:
+A git worktree of the workspace's repository, created for exactly one session to work in place of the checkout. Crucible creates worktrees and never deletes them.
+_Avoid_: venue, sandbox, branch (a worktree holds a branch; it is not one).
 
 **Session**:
 A user-curated workspace sidebar item holding one agent conversation. It appears only when the user creates or adds it in Crucible; adapter-managed history never populates the sidebar by discovery.
