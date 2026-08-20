@@ -63,11 +63,25 @@ export interface PanelState {
   readonly activeTabId: TabId
 }
 
+// Where a session works when it is not in its workspace's checkout. Crucible
+// creates worktrees and never deletes them.
+export interface SessionWorktree {
+  /** Absolute, and the directory this session's work happens in. */
+  readonly path: string
+  /** Absent when the branch could not be read. */
+  readonly branch?: string
+}
+
 export interface SessionState {
   readonly id: SessionId
   readonly workspaceId: WorkspaceId
   /** ISO; the neutral placeholder label derives from it. */
   readonly createdAt: string
+  /** Present only for a worktree session; absent means the checkout. */
+  readonly worktree?: SessionWorktree
+  // True until the conversation's first message, and restored by a session
+  // reset. The one condition under which the worktree may still be changed.
+  readonly fresh: boolean
   // Absent until genuinely known, so nothing downstream shows a guess.
   readonly model?: ModelId
   readonly thinkingLevel?: ThinkingLevel
@@ -358,6 +372,11 @@ export interface AgentPort {
   ): Promise<{ readonly editorText?: string }>
   /** Free-text label on a node; absent or empty clears it. Allowed anytime. */
   setLabel(id: SessionId, ref: string, label?: string): Promise<void>
+
+  // Attaches a worktree to a session, or with none puts it back on the
+  // checkout. Refused unless the session is fresh; nothing on disk is deleted
+  // either way.
+  setWorktree(sessionId: SessionId, worktree?: SessionWorktree): Promise<void>
 
   listModels(): Promise<readonly ModelInfo[]>
   setModel(sessionId: SessionId, model: ModelId): Promise<void>

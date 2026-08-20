@@ -75,6 +75,10 @@ export function withLogging(shell: Shell, log: LogSink, adapter: string): Shell 
     ),
     resumeSession: op('resumeSession', (workspaceId, ref) => shell.resumeSession(workspaceId, ref)),
 
+    setWorktree: op('setWorktree', (sessionId, worktree) =>
+      shell.setWorktree(sessionId, worktree)
+    ),
+
     listModels: op('listModels', () => shell.listModels()),
     setModel: op('setModel', (sessionId, model) => shell.setModel(sessionId, model)),
     setThinkingLevel: op('setThinkingLevel', (sessionId, level) =>

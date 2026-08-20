@@ -61,6 +61,72 @@
   cursor: default;
 }
 
+/* the worktree chip: where this session works, in one element for all of its
+   states — checkout, creating, and a branch it is already in */
+.chip .g {
+  color: var(--faint);
+}
+
+.chip.on {
+  border-color: var(--accent);
+  color: var(--accent2);
+}
+
+.chip.on .g {
+  color: var(--accent2);
+}
+
+.chip.on b {
+  color: var(--accent2);
+}
+
+.chip.busy {
+  color: var(--accent2);
+}
+
+.chip.busy .g {
+  color: var(--accent2);
+  animation: pulse 1.1s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%,
+  100% {
+    opacity: 0.35;
+  }
+
+  50% {
+    opacity: 1;
+  }
+}
+
+/* a script may mint a long name: the tail is the distinctive part, so what is
+   cut is the head */
+.chip.branch b {
+  font: 500 11px var(--mono);
+  max-width: 170px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  direction: rtl;
+  text-align: left;
+}
+
+/* a failed creation, in the transcript's own code styling rather than an error
+   surface of its own */
+.wtout {
+  background: var(--code);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 8px 10px;
+  margin: 8px 0 0;
+  font: 11px/1.5 var(--mono);
+  color: var(--error);
+  white-space: pre-wrap;
+  max-height: 180px;
+  overflow: auto;
+}
+
 /* Send and Stop trade the same slot, so both get the same box: swapping one
    for the other moves nothing around them. */
 .send,

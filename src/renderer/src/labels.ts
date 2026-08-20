@@ -1,4 +1,4 @@
-import type { SessionState } from '../../shared/agent/port'
+import type { SessionState, SessionWorktree } from '../../shared/agent/port'
 
 // One format in one place, so the sidebar and the top bar cannot drift into
 // two names for one session.
@@ -6,6 +6,13 @@ export function sessionLabel(session: Pick<SessionState, 'createdAt'>): string {
   const at = new Date(session.createdAt)
   if (Number.isNaN(at.getTime())) return 'Session'
   return `Session · ${at.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}`
+}
+
+// The branch when it is known, and the directory's own name when a script made
+// a worktree whose branch could not be read.
+export function worktreeLabel(worktree: SessionWorktree): string {
+  if (worktree.branch !== undefined && worktree.branch !== '') return worktree.branch
+  return worktree.path.split('/').filter(Boolean).at(-1) ?? worktree.path
 }
 
 /** The clock time a tree node carries: `2:04 PM`, and nothing when unknown. */

@@ -3,7 +3,8 @@ import { sessionLabel } from '../labels'
 import './sidebar.css'
 
 // A row's working state is in its accessible name and not the colored dot
-// alone: the dot is the eye's version, the name is everybody else's.
+// alone: the dot is the eye's version, the name is everybody else's. A
+// worktree session says so the same way, glyph and name together.
 //
 // Every workspace lists its sessions, active or not, because work in one
 // workspace keeps running while another is in front. Only the human removes a
@@ -76,18 +77,29 @@ export function Sidebar({
                 <ul className="sessions">
                   {own.map((session) => {
                     const label = sessionLabel(session)
+                    // Knowing *that* a session is in a worktree is the whole
+                    // signal here; which worktree lives in the composer chip.
+                    const marks = [
+                      session.worktree === undefined ? undefined : 'worktree',
+                      session.working ? 'working' : undefined
+                    ].filter((mark): mark is string => mark !== undefined)
                     return (
                       <li key={session.id} className="sessrow">
                         <button
                           className={`sess${session.id === activeSessionId ? ' active' : ''}`}
                           aria-current={session.id === activeSessionId ? 'true' : undefined}
-                          aria-label={session.working ? `${label} (working)` : label}
+                          aria-label={marks.length === 0 ? label : `${label} (${marks.join(', ')})`}
                           onClick={() => onActivateSession(session.id)}
                         >
                           <span
                             className={`dot${session.working ? ' working' : ''}`}
                             aria-hidden="true"
                           />
+                          {session.worktree === undefined ? null : (
+                            <span className="wt" aria-hidden="true">
+                              ⑂
+                            </span>
+                          )}
                           {label}
                         </button>
                         <button

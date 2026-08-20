@@ -4,6 +4,7 @@ import type {
   HistoryMatch,
   QueuedKind,
   SessionId,
+  SessionState,
   SessionTree as Tree,
   ThinkingLevel,
   WorkspaceId
@@ -116,6 +117,17 @@ export function Shell({
   // the window. Both are this document's memory and neither outlives it.
   const [collapsed, setCollapsed] = useState<Readonly<Record<SessionId, boolean>>>({})
   const [panelWidth, setPanelWidth] = useState<number | undefined>(undefined)
+  // Whether each workspace is a git working tree, as the workspace service
+  // answered. Absent until the answer arrives, which is why nothing flashes.
+  const [gitWorkspaces, setGitWorkspaces] = useState<Readonly<Record<WorkspaceId, boolean>>>({})
+  // Sessions with a worktree flip under way, keyed by session: switching away
+  // during a creation disturbs nothing.
+  const [flipping, setFlipping] = useState<readonly SessionId[]>([])
+  // The last failed creation, and the session it happened in. Transient: it
+  // clears on the next attempt and does not survive a reload.
+  const [worktreeOutput, setWorktreeOutput] = useState<
+    { readonly sessionId: SessionId; readonly output: string } | undefined
+  >(undefined)
   // The commands this workspace can reach, read fresh every time the popover
   // opens, and the Escape that closed it.
   const [commandList, setCommandList] = useState<readonly CommandInfo[] | undefined>(undefined)
@@ -132,6 +144,11 @@ export function Shell({
   }>({ open: false, tab: 'providers' })
   /** Sessions whose settled history this document has already asked for. */
   const fetched = useRef<Set<SessionId>>(new Set())
+  /** Workspaces already asked about, so the question is asked once each. */
+  const askedGit = useRef<Set<string>>(new Set())
+  // Read by a creation that outlived the click: what the sidebar holds now,
+  // rather than what it held when the flip started.
+  const sessionsNow = useRef<readonly SessionState[]>([])
   /** Sessions with a send under way, still waiting on its expansion. */
   const sending = useRef<Set<SessionId>>(new Set())
   // Restoring a queued message puts the caret back where the words are.
@@ -150,6 +167,7 @@ export function Shell({
   const items = view?.items ?? []
   // Known to hold nothing, which is what lets a guard skip its question.
   const emptyConversation = knownEmpty(view)
+  const flipInFlight = activeSessionId !== undefined && flipping.includes(activeSessionId)
   const working = session?.working ?? false
   const queue = session?.queue
   const model = models.find((candidate) => candidate.id === session?.model)
@@ -158,6 +176,9 @@ export function Shell({
   const draft = activeSessionId === undefined ? '' : (drafts[activeSessionId] ?? '')
   /** The folder a command list belongs to, which is what a fetch depends on. */
   const workspacePath = active?.path
+  // Where this session's work happens: its worktree, or its workspace's
+  // checkout. Bash runs and file search follow it.
+  const sessionDirectory = session?.worktree?.path ?? active?.path
   // The popover belongs to the name being typed, and Escape closes it until
   // the next edit reopens it.
   const browsingCommands =
@@ -232,6 +253,24 @@ export function Shell({
     return stop
   }, [port, report, restore])
 
+  useEffect(() => {
+    sessionsNow.current = snapshot.sessions
+  }, [snapshot.sessions])
+
+  // Asked once per workspace folder. A question that could not be answered
+  // leaves the chip absent, which is what a non-git workspace looks like too.
+  useEffect(() => {
+    for (const workspace of snapshot.workspaces) {
+      const asked = `${workspace.id}:${workspace.path}`
+      if (askedGit.current.has(asked)) continue
+      askedGit.current.add(asked)
+      void service
+        .isGitWorkspace(workspace.path)
+        .then((git) => setGitWorkspaces((current) => ({ ...current, [workspace.id]: git })))
+        .catch(() => {})
+    }
+  }, [snapshot.workspaces, service])
+
   // Settled history, once per session this document has not watched live.
   useEffect(() => {
     if (activeSessionId === undefined || fetched.current.has(activeSessionId)) return
@@ -263,10 +302,10 @@ export function Shell({
   // What is shown belongs to the token it was asked for, so a slow answer can
   // never be taken for the current one.
   useEffect(() => {
-    if (fileToken === undefined || active === undefined) return
+    if (fileToken === undefined || sessionDirectory === undefined) return
     let current = true
     void service
-      .searchFiles(active.path, fileToken)
+      .searchFiles(sessionDirectory, fileToken)
       .then((found) => {
         if (current) setFiles({ of: fileToken, paths: found })
       })
@@ -276,7 +315,7 @@ export function Shell({
     return () => {
       current = false
     }
-  }, [fileToken, active, service, report])
+  }, [fileToken, sessionDirectory, service, report])
 
   useEffect(() => {
     if (toast === undefined) return
@@ -615,7 +654,60 @@ export function Shell({
   function activateSession(id: SessionId): void {
     setPopover('none')
     setTreeOpen(false)
+    // A failed creation belongs to the moment it was read in: switching
+    // sessions is the user done with it.
+    setWorktreeOutput(undefined)
     void port.activateSession(id).catch(report)
+  }
+
+  // The two choices and nothing between them: the checkout, or a worktree made
+  // on the spot. Only a fresh session gets here, and no worktree is ever
+  // deleted — flipping back detaches and leaves the directory on disk.
+  function toggleWorktree(): void {
+    const id = activeSessionId
+    if (id === undefined || session === undefined || active === undefined) return
+    if (!session.fresh || flipping.includes(id)) return
+
+    // Same frame as the click: the chip is busy before anything is asked for.
+    setWorktreeOutput(undefined)
+    setFlipping((current) => [...current, id])
+    const done = (): void =>
+      setFlipping((current) => current.filter((waiting) => waiting !== id))
+
+    if (session.worktree !== undefined) {
+      void port
+        .setWorktree(id)
+        .catch((cause: unknown) => showWorktreeOutput(id, cause))
+        .finally(done)
+      return
+    }
+
+    void service
+      .createWorktree(active.path)
+      .then(async (created) => {
+        if (!created.ok) {
+          setWorktreeOutput({ sessionId: id, output: created.output })
+          return
+        }
+        // The session may have been removed while the script ran: the result
+        // is discarded and the worktree left exactly where it is.
+        if (!sessionsNow.current.some((candidate) => candidate.id === id)) return
+        await port.setWorktree(
+          id,
+          created.branch === undefined
+            ? { path: created.path }
+            : { path: created.path, branch: created.branch }
+        )
+      })
+      .catch((cause: unknown) => showWorktreeOutput(id, cause))
+      .finally(done)
+  }
+
+  function showWorktreeOutput(sessionId: SessionId, cause: unknown): void {
+    setWorktreeOutput({
+      sessionId,
+      output: cause instanceof Error ? cause.message : String(cause)
+    })
   }
 
   function removeSession(id: SessionId): void {
@@ -719,7 +811,7 @@ export function Shell({
 
   function runBash(command: string): void {
     const workspaceId = activeWorkspaceId
-    if (workspaceId === undefined || active === undefined) return
+    if (workspaceId === undefined || sessionDirectory === undefined) return
     const live = runs[workspaceId]
     if (live?.state === 'running') {
       // No hidden processes and no implicit kill: the drawer says what to do.
@@ -736,7 +828,7 @@ export function Shell({
       [workspaceId]: { command, output: '', state: 'running', sharing: false }
     }))
     void service
-      .startRun(active.path, command)
+      .startRun(sessionDirectory, command)
       .then((runId) => {
         owners.current[runId] = workspaceId
         const waiting = orphans.current.get(runId) ?? []
@@ -963,7 +1055,16 @@ export function Shell({
           files={shownFiles}
           commands={browsingCommands ? commandList : undefined}
           workspaceName={active?.name}
-          workspacePath={active?.path}
+          sessionDirectory={sessionDirectory}
+          worktree={session?.worktree}
+          worktreeShown={active !== undefined && gitWorkspaces[active.id] === true}
+          worktreeBusy={flipInFlight}
+          worktreeLocked={session !== undefined && !session.fresh}
+          worktreeOutput={
+            worktreeOutput !== undefined && worktreeOutput.sessionId === activeSessionId
+              ? worktreeOutput.output
+              : undefined
+          }
           onDraft={setDraft}
           onSend={send}
           onFollowUp={followUp}
@@ -976,6 +1077,7 @@ export function Shell({
           onRemoveAttachment={removeAttachment}
           onFileToken={setFileToken}
           onRunBash={runBash}
+          onToggleWorktree={toggleWorktree}
         />
       </main>
 

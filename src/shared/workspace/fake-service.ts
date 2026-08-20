@@ -4,7 +4,8 @@ import type {
   Unsubscribe,
   WorkspaceEvent,
   WorkspaceEventListener,
-  WorkspaceService
+  WorkspaceService,
+  WorktreeCreation
 } from './service'
 
 // No folder is read and no process is started, so an agent-driven check costs
@@ -33,6 +34,10 @@ export const CANNED_FILES: readonly string[] = [
   'src/shared/agent/port.ts',
   'src/shared/workspace/service.ts'
 ]
+
+// Hex-looking and fixed, so a flip to a worktree lands on a branch name an
+// agent-driven check can read back. Cycled, so two flips differ.
+export const CANNED_WORKTREE_IDS: readonly string[] = ['9f3a2c', '4b81de', 'c07a15']
 
 /** Anything with this word in it fails, so a red exit badge is drivable. */
 const FAILING = 'fail'
@@ -108,12 +113,33 @@ export function createFakeWorkspaceService({
     timer = setTimeout(next, pauseMs)
   }
 
+  let worktrees = 0
+
   return {
-    async searchFiles(_workspacePath: string, query: string): Promise<readonly string[]> {
+    async searchFiles(_directory: string, query: string): Promise<readonly string[]> {
       return rankFiles(CANNED_FILES, query)
     },
 
-    async startRun(_workspacePath: string, command: string): Promise<RunId> {
+    // Every canned workspace is a git one, so the chip is there to drive.
+    async isGitWorkspace(): Promise<boolean> {
+      return true
+    },
+
+    // No process and no folder: a pause long enough to see the working state,
+    // then a canned branch.
+    async createWorktree(workspacePath: string): Promise<WorktreeCreation> {
+      await new Promise((resolve) => setTimeout(resolve, pauseMs))
+      const id =
+        CANNED_WORKTREE_IDS[worktrees % CANNED_WORKTREE_IDS.length] ?? CANNED_WORKTREE_IDS[0] ?? ''
+      worktrees += 1
+      return {
+        ok: true,
+        path: `${workspacePath}/.crucible/worktrees/${id}`,
+        branch: `crucible/${id}`
+      }
+    },
+
+    async startRun(_directory: string, command: string): Promise<RunId> {
       minted += 1
       const runId = `fake-run-${minted}`
       const endless = command.includes(ENDLESS)

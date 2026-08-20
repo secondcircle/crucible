@@ -245,6 +245,7 @@ describe('switching sessions', () => {
         workspaceId: 'w1',
         createdAt: SHOWN,
         working: false,
+        fresh: false,
         panel: { tabs: [PLAN], activeTabId: 'plan' }
       },
       {
@@ -252,6 +253,7 @@ describe('switching sessions', () => {
         workspaceId: 'w1',
         createdAt: SHOWN,
         working: false,
+        fresh: false,
         panel: { tabs: [BENCHMARK], activeTabId: 'benchmark' }
       }
     ],

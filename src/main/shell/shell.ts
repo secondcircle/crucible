@@ -17,6 +17,7 @@ import type {
   SessionState,
   SessionTree,
   SessionUsage,
+  SessionWorktree,
   ShellSnapshot,
   TabId,
   ThinkingLevel,
@@ -105,6 +106,9 @@ export function createShell({
   // Removing a session stops its turn, and a stop hands the queue back, which
   // a session on its way out has no composer left to receive.
   const removing = new Set<SessionId>()
+  // Sessions whose directory is being changed. Nothing may start a turn in one
+  // meanwhile: which directory the work would happen in is not settled yet.
+  const rebinding = new Set<SessionId>()
   const bindings = new Map<SessionId, Promise<Binding>>()
   let turns = 0
 
@@ -128,6 +132,10 @@ export function createShell({
         model: session.model,
         thinkingLevel: session.thinkingLevel,
         working: live.has(session.id),
+        ...(session.worktree === undefined ? {} : { worktree: session.worktree }),
+        // Absent in the record means a session past its first message, which
+        // is what a record written before the mark existed has to read as.
+        fresh: session.fresh === true,
         ...(reported === undefined ? {} : { usage: reported }),
         ...(queued(queue) ? { queue } : {}),
         ...(tabs === undefined ? {} : { panel: tabs })
@@ -154,12 +162,14 @@ export function createShell({
     throw new Error(message)
   }
 
-  function requireSession(id: SessionId): { workspacePath: string } {
+  // The directory a session's work happens in: its worktree when it has one,
+  // and its workspace's checkout when it does not.
+  function requireSession(id: SessionId): { directory: string } {
     const session = store.session(id)
     if (session === undefined) refuse('That session is no longer open.')
     const workspace = store.workspace(session.workspaceId)
     if (workspace === undefined) refuse('That session has no workspace.')
-    return { workspacePath: workspace.path }
+    return { directory: session.worktree?.path ?? workspace.path }
   }
 
   // A token is the minting adapter's own string, so it is offered back only to
@@ -175,7 +185,7 @@ export function createShell({
     const already = bindings.get(id)
     if (already !== undefined) return already
 
-    const { workspacePath } = requireSession(id)
+    const { directory } = requireSession(id)
     const session = store.session(id)
     const token = restorableToken(session)
     // Dropped once, here: the bind below overwrites it, so the mismatch does
@@ -184,7 +194,7 @@ export function createShell({
     const binding = adapter
       .bind({
         sessionId: id,
-        workspacePath,
+        workspacePath: directory,
         token,
         preferredModel: session?.model ?? store.state.lastModel,
         preferredThinkingLevel: session?.thinkingLevel
@@ -286,10 +296,19 @@ export function createShell({
     // Checked and claimed in the same tick, so nothing can slip between the
     // two.
     if (live.has(sessionId)) refuse('That session is already working.')
+    if (rebinding.has(sessionId)) {
+      refuse('That session is still settling where it works. Try again in a moment.')
+    }
 
     const turn = mintTurn(announce)
     const { turnId } = turn
     live.set(sessionId, turn)
+    // Every first message goes through here — a prompt, a shared run, or a
+    // queued message that became the next prompt — so this is where a session
+    // stops being fresh, and it is written down before the state goes out.
+    if (store.session(sessionId)?.fresh === true) {
+      store.updateSession(sessionId, { fresh: undefined })
+    }
     emitState()
 
     // Binding is part of running the turn rather than of accepting it, so a
@@ -590,7 +609,10 @@ export function createShell({
 
       const stored = store.addSession({
         workspaceId,
-        createdAt: new Date().toISOString()
+        createdAt: new Date().toISOString(),
+        // One click of New session lands on the checkout, and the choice is
+        // open until the first message.
+        fresh: true
       })
       try {
         const bound = await adapter.bind({
@@ -650,6 +672,8 @@ export function createShell({
     async resetSession(id: SessionId): Promise<void> {
       requireSession(id)
       await stop(id)
+      // Bound at the session's own directory, so a reset session goes on
+      // working in its worktree.
       await ensureBound(id)
       const bound = await adapter.reset(id)
       bindings.set(id, Promise.resolve(bound))
@@ -657,7 +681,10 @@ export function createShell({
         token: bound.token,
         tokenFlavor: flavor,
         model: bound.model,
-        thinkingLevel: bound.thinkingLevel
+        thinkingLevel: bound.thinkingLevel,
+        // The identity keeps its worktree and gets its choice back: this is
+        // the one way a locked control unlocks.
+        fresh: true
       })
       // The fresh conversation has reported nothing yet, so the meter goes back
       // to saying nothing rather than keeping the old session's numbers.
@@ -703,6 +730,8 @@ export function createShell({
         return existing.id
       }
 
+      // No fresh mark: a resumed conversation is not fresh, and it starts on
+      // the checkout because nothing re-attaches a worktree.
       const stored = store.addSession({ workspaceId, createdAt: new Date().toISOString() })
       try {
         const bound = await adapter.resume({
@@ -792,9 +821,71 @@ export function createShell({
       const token = restorableToken(session)
       return adapter.sessionUsage({
         sessionId: id,
-        workspacePath: workspace.path,
+        workspacePath: session.worktree?.path ?? workspace.path,
         ...(token === undefined ? {} : { token })
       })
+    },
+
+    // The guard lives here rather than in the chip: whoever is behind the port
+    // is refused a change to a session that has already started.
+    async setWorktree(sessionId: SessionId, worktree?: SessionWorktree): Promise<void> {
+      const session = store.session(sessionId)
+      if (session === undefined) refuse('That session is no longer open.')
+      const workspace = store.workspace(session.workspaceId)
+      if (workspace === undefined) refuse('That session has no workspace.')
+      if (session.fresh !== true) {
+        refuse('That session has already started. Reset it to change where it works.')
+      }
+
+      const directory = worktree?.path ?? workspace.path
+      // Let go of the conversation before rebinding, so the bind mints a fresh
+      // one rooted in the chosen directory. Only a fresh session can get here,
+      // so there is no conversation content to lose.
+      bindings.delete(sessionId)
+      adapter.release(sessionId)
+      let bound: Binding
+      rebinding.add(sessionId)
+      try {
+        bound = await adapter.bind({
+          sessionId,
+          workspacePath: directory,
+          preferredModel: session.model ?? store.state.lastModel,
+          ...(session.thinkingLevel === undefined
+            ? {}
+            : { preferredThinkingLevel: session.thinkingLevel })
+        })
+      } catch (cause) {
+        // Nothing was written, so the session is exactly where it was; the next
+        // use binds it again from the token it still holds.
+        refuse(displaySafeMessage(cause, 'That conversation could not be opened.'))
+      } finally {
+        rebinding.delete(sessionId)
+      }
+
+      // Removed while the rebind was in flight: nothing is written, and the
+      // conversation it just opened is let go of again. The worktree itself is
+      // left exactly where it is.
+      if (store.session(sessionId) === undefined) {
+        adapter.release(sessionId)
+        return
+      }
+
+      bindings.set(sessionId, Promise.resolve(bound))
+      // Written only now, after the rebind: a failed one leaves no half-moved
+      // session behind.
+      store.updateSession(sessionId, {
+        worktree,
+        token: bound.token,
+        tokenFlavor: flavor,
+        model: bound.model,
+        thinkingLevel: bound.thinkingLevel
+      })
+      // The conversation behind the identity is a new one, so nothing of the
+      // old one survives as a ghost.
+      usage.delete(sessionId)
+      queues.delete(sessionId)
+      panel.reset(sessionId)
+      emitState()
     },
 
     async setModel(sessionId: SessionId, model: ModelId): Promise<void> {
