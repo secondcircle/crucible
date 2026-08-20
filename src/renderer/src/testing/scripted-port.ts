@@ -98,7 +98,6 @@ export interface ScriptedPort extends AgentPort {
   queueOf(sessionId: SessionId): QueueState | undefined
   text(sessionId: SessionId, delta: string): void
   thinking(sessionId: SessionId, delta: string): void
-  /** The model committing to a call, before any of it runs. */
   toolCallStarted(sessionId: SessionId, callId: string, name: string): void
   /** Argument characters streamed so far, cumulative. */
   toolCallArgs(sessionId: SessionId, callId: string, chars: number): void

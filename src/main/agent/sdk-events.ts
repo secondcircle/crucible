@@ -81,9 +81,8 @@ export function createEventMapper(): EventMapper {
                 turnId,
                 delta: event.assistantMessageEvent.delta
               }
-            // The model has committed to a call and is streaming its
-            // arguments. Nothing runs yet, and this window is the whole of a
-            // long call's first seconds.
+            // Nothing runs yet, and this window is the whole of a long call's
+            // first seconds.
             case 'toolcall_start': {
               const call = toolCallAt(
                 event.assistantMessageEvent.partial,

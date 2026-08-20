@@ -165,9 +165,8 @@ describe('collapsing', () => {
   })
 })
 
-// Issue #4: the clamp forgot the sidebar, so past a point the panel claimed
-// width the layout could not give it and the divider pinned while the surplus
-// was clipped off screen.
+// A clamp that forgets the sidebar lets the panel claim width the layout
+// cannot give it, pinning the divider with the surplus clipped off screen.
 describe('dragging the divider', () => {
   /** A 1600px window whose row holds a 248px sidebar and a 5px divider. */
   function layOut(): void {

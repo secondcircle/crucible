@@ -3,7 +3,6 @@ import type { SessionId, ShellSnapshot, WorkspaceId } from '../../../shared/agen
 import { relativeTime } from '../labels'
 import './sidebar.css'
 
-/** What a session with no title yet reads as, until the first one lands. */
 const UNTITLED = 'New session'
 
 // Relative times go stale on their own, so the rows are re-rendered on a slow

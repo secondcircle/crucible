@@ -109,9 +109,8 @@ export function createShell({
   // Removing a session stops its turn, and a stop hands the queue back, which
   // a session on its way out has no composer left to receive.
   const removing = new Set<SessionId>()
-  // At most one titling pass per session at a time. `again` is every trigger
-  // that arrived during one, coalesced into a single follow-up pass; `stale`
-  // is a pass whose conversation was replaced while it ran.
+  // At most one pass per session at a time, so triggers arriving during one
+  // coalesce into a single follow-up rather than a queue of passes.
   const titling = new Map<SessionId, { again: boolean; stale: boolean }>()
   const bindings = new Map<SessionId, Promise<Binding>>()
   let turns = 0
@@ -162,9 +161,8 @@ export function createShell({
     emit({ type: 'state', snapshot: snapshot() })
   }
 
-  // What the session's `$` chip reads: the conversation's dollars plus what
-  // naming it cost. A dash stays a dash, because ignorance is not
-  // under-reporting.
+  // Naming a session is part of what it cost. A dash stays a dash, because
+  // ignorance is not under-reporting.
   function withTitlingSpend(
     id: SessionId,
     reported: { usedTokens: number; contextWindow: number; cost?: number }
@@ -174,15 +172,13 @@ export function createShell({
     return { ...reported, cost: reported.cost + spend }
   }
 
-  /** Stamped on every moment the sidebar's relative time should count from. */
   function touch(id: SessionId): void {
     if (store.session(id) === undefined) return
     store.updateSession(id, { lastActivityAt: new Date().toISOString() })
   }
 
-  // The conversation a live pass is reading is about to be replaced, so
-  // whatever it comes back with belongs to nothing, and the triggers it
-  // gathered belong to nothing either.
+  // A live pass is reading a conversation about to be replaced, so whatever it
+  // comes back with belongs to nothing.
   function forgetTitle(id: SessionId): void {
     const running = titling.get(id)
     if (running !== undefined) {
@@ -192,9 +188,8 @@ export function createShell({
     store.updateSession(id, { title: undefined, titlingSpend: undefined })
   }
 
-  // Titling is agent-side work behind the port; when to do it is the shell's.
-  // A pass that fails is logged and otherwise ignored: the last good title
-  // stays, and nothing flashes back to the untitled state.
+  // A failed pass is logged and otherwise ignored, so the last good title
+  // stays rather than flashing back to the untitled state.
   function requestTitle(id: SessionId): void {
     const running = titling.get(id)
     if (running !== undefined) {
@@ -901,9 +896,8 @@ export function createShell({
       return { ...summed, totalCost: summed.totalCost + spend }
     },
 
-    // Allowed while the session works: the model applies to the next turn, and
-    // nothing about the live one changes. Only the thinking level, whose change
-    // invalidates the prompt cache, waits for the turn to be over.
+    // Allowed mid-turn, because the model only reaches the next turn. The
+    // thinking level still waits: changing it invalidates the prompt cache.
     async setModel(sessionId: SessionId, model: ModelId): Promise<void> {
       requireSession(sessionId)
       await ensureBound(sessionId)

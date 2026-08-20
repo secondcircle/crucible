@@ -283,8 +283,7 @@ function Call({ call }: { readonly call: ToolItem }): React.JSX.Element {
   const [open, setOpen] = useState(false)
   const tail = useRef<HTMLPreElement>(null)
   const { name, output, ok, running } = call
-  // Before the call runs this is its argument count; afterwards it is the
-  // one-line summary, in the same slot and on the same element.
+  // One slot for both phases, so a call does not jump as it starts running.
   const summary = callSummary(call)
 
   useEffect(() => {

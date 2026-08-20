@@ -106,9 +106,8 @@
   border-radius: 2px;
 }
 
-/* Live state only: no keyboard hint lives here, and the row reserves its
-   height in every state, so an idle composer is quiet without anything above
-   or below it moving when the working, bash or held-back state lands. */
+/* Height is reserved in every state, so nothing above or below moves when
+   the working, bash or held-back state lands. */
 .esc {
   text-align: center;
   font-size: 11.5px;

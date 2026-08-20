@@ -34,9 +34,8 @@ const call = (chunks: number): string[] => [
   'tool_ended'
 ]
 
-// The other entry path: the model commits to the call and streams its
-// arguments before anything runs, which is the window a long call spends
-// looking frozen without it.
+// The other entry path, and the window a long call would otherwise spend
+// looking frozen.
 const pendingCall = (beats: number, chunks: number): string[] => [
   'tool_call_started',
   ...Array.from({ length: beats }, () => 'tool_call_args'),

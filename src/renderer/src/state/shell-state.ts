@@ -35,9 +35,8 @@ export type ViewItem =
       readonly output: string
       readonly ok?: boolean
       readonly running: boolean
-      // Argument characters streamed so far. Present only before the call
-      // begins running, which is what the pending readout counts; the real
-      // summary replaces it the moment execution starts.
+      // Argument characters streamed so far, present only until the call
+      // begins running and the real summary takes the slot.
       readonly argChars?: number
     }
   | {

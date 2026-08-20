@@ -175,7 +175,6 @@
   background: var(--accent2);
 }
 
-/* A session the titler has not named yet, in the mock's untitled style. */
 .sess.untitled {
   color: var(--faint);
   font-style: italic;

@@ -1,9 +1,7 @@
 // @vitest-environment jsdom
 //
 // The row under the composer speaks only when there is live state to speak
-// about. It said the same two keyboard hints on every screen the user ever
-// looked at, and those are gone; what is left is the working timer, the bash
-// warning and the held-back warning, in a row that never changes height.
+// about, and keeps its height so nothing around it moves.
 import { act, fireEvent, render, screen } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 import { Shell } from './Shell'

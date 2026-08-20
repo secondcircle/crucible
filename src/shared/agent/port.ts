@@ -68,9 +68,8 @@ export interface SessionState {
   readonly workspaceId: WorkspaceId
   /** ISO; what the sidebar's relative time falls back to. */
   readonly createdAt: string
-  // Written by a small model from this session's own user and assistant
-  // messages. Absent until the first title lands, which is what the sidebar's
-  // untitled state means.
+  // Absent until the first title lands, which is what the sidebar's untitled
+  // state means.
   readonly title?: string
   /** ISO of the session's last activity; absent means `createdAt` stands in. */
   readonly lastActivityAt?: string

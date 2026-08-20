@@ -2,10 +2,8 @@ import type { SessionState } from '../../../shared/agent/port'
 import { contextPercent, tokens } from '../labels'
 import './topbar.css'
 
-// Nothing here states a fact the screen already states: the session title and
-// its working dot are the sidebar's, the workspace is the highlighted sidebar
-// row, and the model is the composer chip. What is left is the Tree button and
-// the right-hand cluster.
+// Nothing here repeats a fact the sidebar rows or the composer chip already
+// state, which is why the session, workspace and model are absent.
 //
 // The meter shows a dash until the adapter reports real usage: a context meter
 // that guesses is worse than one that admits it does not know yet.

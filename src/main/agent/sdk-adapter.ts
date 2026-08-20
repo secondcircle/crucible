@@ -775,9 +775,8 @@ export function createSdkAdapter({
         runtime(),
         resolveModel(TITLE_MODEL)
       ])
-      // The lowest level this model reports, taken by position. π's own name
-      // for "no thinking" is read back from π — what it reports for a model
-      // that cannot think at all — so no level name is written here either.
+      // π's own name for "no thinking" is read back from π, so no level name
+      // is written here.
       const levels = pi.getSupportedThinkingLevels(model)
       const noThinking = pi.getSupportedThinkingLevels({ ...model, reasoning: false })[0]
       const lowest = levels[0]

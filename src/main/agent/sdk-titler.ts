@@ -1,10 +1,9 @@
 import type { TranscriptItem } from '../../shared/agent/port'
 
-// The titler's shaping and sanitizing, with no SDK type in sight, so `npm test`
-// covers both without constructing an SDK adapter. The completion itself lives
-// in the adapter; everything decidable without a network lives here.
+// No SDK type reaches this module, so the shaping and sanitizing stay testable
+// without constructing an SDK adapter.
 
-/** What the titler is asked for. A model call, so no role prompt composes it. */
+/** A model call, so no role prompt composes this. */
 export const TITLE_INSTRUCTION =
   'You name conversations. Given a conversation between a user and a coding ' +
   'agent, answer with a 5-8 word description of what the conversation is ' +
@@ -16,11 +15,8 @@ const MESSAGE_LIMIT = 500
 /** About this much input is plenty to name a conversation by. */
 const INPUT_LIMIT = 4_000
 
-/**
- * The conversation as the titler sees it: user and assistant messages only,
- * oldest first. Never tool output, thinking, summaries or bash runs. Absent
- * when there is nothing to title.
- */
+// Never tool output, thinking, summaries or bash runs: what the two speakers
+// said is what a session is about.
 export function titleInput(items: readonly TranscriptItem[]): string | undefined {
   const lines: string[] = []
   for (const item of items) {
@@ -35,11 +31,8 @@ export function titleInput(items: readonly TranscriptItem[]): string | undefined
   return input.trim() === '' ? undefined : input
 }
 
-/**
- * A title out of whatever the model answered: its first line, trimmed, with
- * surrounding quotes stripped and inner whitespace collapsed. Absent when
- * nothing is left, which the caller treats as a failed pass.
- */
+// Absent when nothing survives the trimming, which the caller treats as a
+// failed pass.
 export function sanitizeTitle(reply: string): string | undefined {
   const first = reply.split('\n')[0] ?? ''
   const title = first

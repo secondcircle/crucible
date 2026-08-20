@@ -367,10 +367,8 @@ export function Composer({
               className="chip"
               aria-label={`Model: ${chipName ?? 'none'}`}
               aria-expanded={modelPickerOpen}
-              // This button changes the model between turns, never during one.
-              // The model ring is the exception and bypasses it: a keystroke
-              // may switch mid-turn, and the new model applies to the next
-              // turn.
+              // Between turns only. The model ring bypasses this button, so a
+              // keystroke may still switch mid-turn.
               disabled={disabled || working}
               onClick={onToggleModelPicker}
             >
@@ -427,9 +425,8 @@ export function Composer({
         </div>
       </div>
 
-      {/* Live state only, and never a keyboard hint that would follow the
-          reader around the screen. The row keeps its height in every state,
-          idle included, so nothing above or below it moves. */}
+      {/* Height is reserved in every state, idle included, so nothing above
+          or below moves when live state lands here. */}
       <div className="esc">
         {bash ? (
           <span className="bashnote">
@@ -452,11 +449,8 @@ export function Composer({
   )
 }
 
-// Lists what the port reported and nothing else, under the port's own labels
-// and in its order: an alias never appears here, so an unfamiliar model stays
-// identifiable. The one place Crucible names models is
-// `src/shared/agent/known-models.ts`, and it renames ids for display only.
-// Its query state is its own, so reopening starts clean.
+// The port's own labels and order, never an alias, so an unfamiliar model
+// stays identifiable. Its query state is its own, so reopening starts clean.
 function ModelPicker({
   models,
   current,

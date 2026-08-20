@@ -1,8 +1,7 @@
 // @vitest-environment jsdom
 //
-// A column of running sessions is scanned, not read: each row says what its
-// session is about, in the title a small model wrote for it, with how long ago
-// it was active trailing the words.
+// A column of running sessions is scanned, not read, so a row says what its
+// session is about and how long ago it was active.
 import { act, fireEvent, render, screen, within } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 import type { ShellSnapshot } from '../../shared/agent/port'

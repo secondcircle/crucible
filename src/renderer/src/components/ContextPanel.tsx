@@ -55,11 +55,8 @@ export function ContextPanel({
     if (panel !== null && panel !== undefined) panel.style.pointerEvents = 'none'
 
     function onMove(moved: MouseEvent): void {
-      // Measured from the row the panel is really in, which also holds the
-      // sidebar and this divider. Treating the window as chat plus panel lets
-      // the panel claim width the layout cannot give it: the divider then pins
-      // while the surplus is clipped off the right edge, and dragging back
-      // does nothing until that hidden width is spent.
+      // Measured from the row rather than the window, which would let the
+      // panel claim the sidebar's width and clip the surplus off screen.
       const line = divider.current?.getBoundingClientRect().width ?? 0
       const right = divider.current?.parentElement?.getBoundingClientRect().right ?? 0
       const chat = divider.current?.previousElementSibling ?? null

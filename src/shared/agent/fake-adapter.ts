@@ -107,9 +107,8 @@ interface ScriptedCall {
   readonly summary: string
   readonly ok: boolean
   readonly chunks: readonly string[]
-  // The argument-streaming window before the call runs, as a growing count of
-  // characters. Absent means the call starts running the moment it appears,
-  // which is the other entry path and stays covered too.
+  // Absent means the call starts running the moment it appears, so the other
+  // entry path stays covered too.
   readonly argBeats?: readonly number[]
 }
 
@@ -323,7 +322,6 @@ export function scaleUsage(messages: number): SessionUsage {
   }
 }
 
-/** What the fake titler answers with: the first eight words, one line. */
 export function fakeTitle(text: string): string {
   return text.replace(/\s+/g, ' ').trim().split(' ').filter(Boolean).slice(0, 8).join(' ')
 }

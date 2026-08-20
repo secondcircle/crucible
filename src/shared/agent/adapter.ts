@@ -203,19 +203,16 @@ export interface ConversationAdapter {
 
   /** The models the user can genuinely reach, with their native levels. */
   listModels(): Promise<readonly ModelInfo[]>
-  // Answers with the thinking level in effect after the switch, because the
-  // new model may not support the level the old one was on. Crucible names no
-  // level of its own: it folds back whatever this reports.
+  // Answers with the level in effect after the switch, because the new model
+  // may not support the level the old one was on.
   setModel(
     sessionId: SessionId,
     model: ModelId
   ): Promise<{ readonly thinkingLevel?: ThinkingLevel }>
   setThinkingLevel(sessionId: SessionId, level: ThinkingLevel): Promise<void>
 
-  /**
-   * A fresh session title from the conversation's user and assistant messages,
-   * or undefined when there is nothing to title. Rejects on failure.
-   */
+  // Undefined when there is nothing to title, which is not a failure; a
+  // failure rejects.
   titleConversation(sessionId: SessionId): Promise<
     | {
         readonly title: string

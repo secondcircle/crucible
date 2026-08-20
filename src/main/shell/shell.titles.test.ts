@@ -1,9 +1,7 @@
 // @vitest-environment node
 //
 // When a session is titled is the shell's business; writing the title is the
-// adapter's. Driven against the fake adapter, which titles deterministically
-// from the conversation and costs nothing, plus a small double where a test
-// needs a pass to fail, to hang, or to cost money.
+// adapter's, so these run against the fake adapter and cost nothing.
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -250,8 +248,7 @@ describe('what titling costs', () => {
     const sessionId = await withSession()
 
     // A rebind with no stored title is a titling trigger of its own, so this
-    // session has been paid for without the adapter having reported a single
-    // conversation number.
+    // session has been paid for without a single conversation number.
     shell.dispose()
     withSpend(0.01)
     await shell.transcript(sessionId)

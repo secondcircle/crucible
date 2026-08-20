@@ -412,10 +412,8 @@ export function Shell({
     browsingCommands
   ])
 
-  // The model ring: Shift-Tab moves the active session to the next model of
-  // the ring the port actually listed, without opening the picker and without
-  // naming the key anywhere on screen. It works mid-turn — the chip changes
-  // now, the model applies to the next turn.
+  // The model ring. Nothing on screen names the key, and it works mid-turn
+  // because the switch only reaches the next turn.
   useEffect(() => {
     function onKeyDown(pressed: KeyboardEvent): void {
       if (pressed.key !== 'Tab' || !pressed.shiftKey) return

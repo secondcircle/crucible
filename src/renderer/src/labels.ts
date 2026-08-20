@@ -1,7 +1,5 @@
 // The small display formats, in one place so two components cannot drift into
-// two spellings of one fact. A session's name is not among them: a small model
-// writes the session title, and the sidebar shows it with `relativeTime`
-// trailing the words.
+// two spellings of one fact.
 
 /** The clock time a tree node carries: `2:04 PM`, and nothing when unknown. */
 export function clockTime(iso: string): string {
