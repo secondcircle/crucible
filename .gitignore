@@ -7,3 +7,6 @@ logs/
 *.tsbuildinfo
 .crucible/worktrees/
 .crucible/align/
+.crucible/runs/
+.crucible/staged/
+.crucible/inspector.html
