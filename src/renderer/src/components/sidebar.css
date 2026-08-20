@@ -141,14 +141,12 @@
 }
 
 /* Two lines of title, then it clips. Never three: the row is scanned, not
-   read. The dot and the relative time ride inside the same clamped block. */
+   read. The clamp is on .sesstext and the padding is here, because overflow
+   clips at the padding edge: a padded clamp box shows the tops of the third
+   line's glyphs through the padding as a row of stray dots. */
 .sess {
   flex: 1;
   min-width: 0;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
   padding: 5px 8px 5px 12px;
   font-size: 12.5px;
   line-height: 1.35;
@@ -156,6 +154,13 @@
   background: none;
   border: none;
   text-align: left;
+}
+
+.sesstext {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 
 .sess .dot {
@@ -166,11 +171,34 @@
   vertical-align: 1px;
 }
 
-.sess small {
+/* One slot, two occupants. The × sits on top of the time and both are the
+   same size, so hovering swaps them without reflowing the row. */
+.rowend {
+  position: relative;
+  flex: none;
+  align-self: flex-start;
+  padding: 6px 10px 0 4px;
+}
+
+.rowend small {
   color: var(--faint);
   font-size: 10.5px;
-  margin-left: 6px;
   white-space: nowrap;
+}
+
+.sessrow .rowaction {
+  position: absolute;
+  inset: 0;
+  padding: 0;
+  display: flex;
+  align-items: flex-start;
+  justify-content: flex-end;
+  line-height: 1;
+}
+
+.sessrow:hover .rowend small,
+.sessrow:focus-within .rowend small {
+  visibility: hidden;
 }
 
 .sess.active {

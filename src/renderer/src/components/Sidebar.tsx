@@ -103,25 +103,34 @@ export function Sidebar({
                           title={title}
                           onClick={() => onActivateSession(session.id)}
                         >
-                          <span
-                            className={`dot${session.working ? ' working' : ''}`}
-                            aria-hidden="true"
-                          />
-                          {title}
-                          {/* Inside the clamped block, trailing the text: it
-                              never gets a row of its own. */}
-                          <small>
+                          {/* The clamp lives on this span, not the button:
+                              overflow clips at the padding edge, so a padded
+                              clamp box leaks the top of the cut-off line. */}
+                          <span className="sesstext">
+                            <span
+                              className={`dot${session.working ? ' working' : ''}`}
+                              aria-hidden="true"
+                            />
+                            {title}
+                          </span>
+                        </button>
+                        {/* The time and the remove button share one slot on
+                            the right: the time is the resting state, the ×
+                            takes its place on hover, and neither moves the
+                            title. A two-line title keeps its time. */}
+                        <span className="rowend">
+                          <small aria-hidden="true">
                             {relativeTime(session.lastActivityAt ?? session.createdAt, now)}
                           </small>
-                        </button>
-                        <button
-                          className="rowaction"
-                          aria-label={`Remove ${title}`}
-                          title="Forget this session — the conversation can be resumed later"
-                          onClick={() => onRemoveSession(session.id)}
-                        >
-                          ×
-                        </button>
+                          <button
+                            className="rowaction"
+                            aria-label={`Remove ${title}`}
+                            title="Forget this session — the conversation can be resumed later"
+                            onClick={() => onRemoveSession(session.id)}
+                          >
+                            ×
+                          </button>
+                        </span>
                       </li>
                     )
                   })}

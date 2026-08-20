@@ -51,26 +51,41 @@ async function shell(snapshot: ShellSnapshot = SESSIONS): Promise<ScriptedPort> 
   return port
 }
 
+// The right-hand slot of a row: the relative time, and the remove button
+// stacked over it.
+function rowEnd(row: HTMLElement): HTMLElement {
+  const end = row.closest('.sessrow')?.querySelector<HTMLElement>('.rowend')
+  if (!end) throw new Error('the row has no .rowend slot')
+  return end
+}
+
 describe('the sidebar row', () => {
-  it('is the session title, with the relative time trailing it inline', async () => {
+  it('is the session title, with the relative time in a slot beside it', async () => {
     await shell()
 
     const [titled] = sessionRows()
     expect(titled).toHaveTextContent(LONG)
-    // Inside the clamped block, after the words: never a row of its own.
-    expect(titled.querySelector('small')?.textContent).toBe('4m ago')
-    expect(titled.lastElementChild?.tagName).toBe('SMALL')
+    // Outside the clamp, so a title long enough to fill it keeps its time.
+    expect(titled.querySelector('small')).toBeNull()
+    expect(rowEnd(titled).querySelector('small')?.textContent).toBe('4m ago')
   })
 
   // Where the clamp itself lives: jsdom loads no stylesheet, so how many lines
   // it renders is checked on the running app, not here.
-  it('puts the title, the dot and the time in the one clamped block', async () => {
+  it('puts the title and the dot in the clamped block, the time out of it', async () => {
     await shell()
 
     const [titled] = sessionRows()
     expect(titled).toHaveClass('sess')
-    expect(titled?.querySelector('.dot')).toBeInTheDocument()
-    expect(titled?.querySelector('small')).toBeInTheDocument()
+    expect(titled.querySelector('.sesstext')).toHaveTextContent(LONG)
+    expect(titled.querySelector('.sesstext .dot')).toBeInTheDocument()
+  })
+
+  it('shares that slot with the remove button, which covers the time', async () => {
+    await shell()
+
+    const end = rowEnd(sessionRows()[0])
+    expect(within(end).getByRole('button', { name: `Remove ${LONG}` })).toHaveClass('rowaction')
   })
 
   it('carries the whole title as a tooltip, clipped or not', async () => {
@@ -86,7 +101,7 @@ describe('the sidebar row', () => {
 
     expect(untitled).toHaveTextContent('New session')
     expect(untitled).toHaveClass('untitled')
-    expect(untitled.querySelector('small')?.textContent).toBe('30m ago')
+    expect(rowEnd(untitled).querySelector('small')?.textContent).toBe('30m ago')
 
     act(() =>
       port.update((snapshot) => ({
