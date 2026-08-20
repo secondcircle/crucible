@@ -76,6 +76,11 @@ interface Bound {
   running?: RunningTurn
   /** Bash runs waiting for the boundary that delivers them, oldest first. */
   readonly shares: PendingShare[]
+  /**
+   * A prompt sent to π but not yet in `session.messages`, which is the whole
+   * first minutes of a session as far as the titler can see.
+   */
+  asked?: string
 }
 
 interface PendingShare {
@@ -400,6 +405,11 @@ export function createSdkAdapter({
 
     const unsubscribe = session.subscribe((event) => {
       if (abandoned) return
+      // π's own list has the prompt now, so the copy kept for the titler is
+      // no longer the only record of it.
+      if (event.type === 'message_start' && event.message.role === 'user') {
+        bound.asked = undefined
+      }
       const mapped = mapper.map(event, { sessionId, turnId })
       if (mapped === undefined) return
       if (mapped.type === 'turn_error') {
@@ -766,8 +776,9 @@ export function createSdkAdapter({
       | { title: string; spend?: { tokens: number; cost: number } }
       | undefined
     > {
-      const { session } = requireBound(sessionId)
-      const input = titleInput(toTranscript(session.messages))
+      const bound = requireBound(sessionId)
+      const { session } = bound
+      const input = titleInput(toTranscript(session.messages), bound.asked)
       if (input === undefined) return undefined
 
       const [pi, models, model] = await Promise.all([
@@ -903,12 +914,19 @@ export function createSdkAdapter({
       text: string,
       images?: readonly ImageAttachment[]
     ): Promise<void> {
-      const { session } = requireBound(sessionId)
+      const bound = requireBound(sessionId)
+      const { session } = bound
       const options =
         images === undefined || images.length === 0
           ? undefined
           : { images: images.map(toImageContent) }
-      return runTurn(sessionId, turnId, () => session.prompt(text, options))
+      // Held from before the turn is announced, because the shell asks for a
+      // title the moment it hears the start and π appends the prompt to its
+      // own list some way into the call below.
+      bound.asked = text
+      return runTurn(sessionId, turnId, () => session.prompt(text, options)).finally(() => {
+        bound.asked = undefined
+      })
     },
 
     // The idle path: a turn whose content is the run itself, written in the

@@ -17,12 +17,23 @@ const INPUT_LIMIT = 4_000
 
 // Never tool output, thinking, summaries or bash runs: what the two speakers
 // said is what a session is about.
-export function titleInput(items: readonly TranscriptItem[]): string | undefined {
+//
+// `asked` is a prompt sent but not yet in the conversation the caller holds.
+// Without it the first title of a session would have nothing to read, and
+// every later one would name the session by the message before the newest.
+export function titleInput(
+  items: readonly TranscriptItem[],
+  asked?: string
+): string | undefined {
   const lines: string[] = []
   for (const item of items) {
     if (item.kind === 'user') lines.push(`user: ${clip(item.text)}`)
     else if (item.kind === 'assistant') lines.push(`assistant: ${clip(item.markdown)}`)
   }
+  // The conversation may have caught up with it in the meantime, and the same
+  // message twice says no more than once.
+  const pending = asked === undefined ? undefined : `user: ${clip(asked)}`
+  if (pending !== undefined && !lines.includes(pending)) lines.push(pending)
   // The newest messages say most about what a session is about now, so the
   // oldest are the ones dropped when the whole is too long.
   while (lines.length > 1 && joined(lines).length > INPUT_LIMIT) lines.shift()

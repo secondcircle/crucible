@@ -64,6 +64,33 @@ describe('what the titler sees', () => {
     expect(titleInput([{ kind: 'stopped' }])).toBeUndefined()
   })
 
+  it('reads a prompt the conversation does not hold yet', () => {
+    // The first seconds of a session: the turn has started and nothing of it
+    // has reached the conversation.
+    const input = titleInput([], 'rewrite the sidebar tree') ?? ''
+
+    expect(input).toBe('user: rewrite the sidebar tree')
+  })
+
+  it('puts that prompt after everything already said', () => {
+    const input =
+      titleInput(
+        [
+          { kind: 'user', text: 'first' },
+          { kind: 'assistant', markdown: 'second' }
+        ],
+        'third'
+      ) ?? ''
+
+    expect(input.indexOf('second')).toBeLessThan(input.indexOf('third'))
+  })
+
+  it('says a prompt the conversation caught up with only once', () => {
+    const input = titleInput([{ kind: 'user', text: 'catch up' }], 'catch up') ?? ''
+
+    expect(input).toBe('user: catch up')
+  })
+
   it('asks for what the sidebar has room for', () => {
     expect(TITLE_INSTRUCTION).toContain('5-8 word')
   })
