@@ -28,6 +28,8 @@ let refuseBind: string | undefined
 /** Set where a test wants to look at a session while its rebind is in flight. */
 let holdBind: boolean
 let releaseBind: (() => void) | undefined
+/** Every held bind, oldest first, where a test needs to land them in order. */
+let heldBinds: Array<() => void>
 
 function build(): void {
   const fake = createFakeAdapter({ pauseMs: 0 })
@@ -38,6 +40,7 @@ function build(): void {
       if (holdBind) {
         await new Promise<void>((resolve) => {
           releaseBind = resolve
+          heldBinds.push(resolve)
         })
       }
       return fake.bind(request)
@@ -84,6 +87,7 @@ beforeEach(() => {
   refuseBind = undefined
   holdBind = false
   releaseBind = undefined
+  heldBinds = []
   build()
 })
 
@@ -305,6 +309,40 @@ describe('while the rebind is in flight', () => {
     expect((await shell.snapshot()).sessions).toEqual([])
     expect(stored(sessionId)).toBeUndefined()
     expect(existsSync(worktreePath)).toBe(true)
+  })
+})
+
+describe('a conversation opened during the flip', () => {
+  // Anything that needs the conversation while the flip's rebind is in
+  // flight — opening the session tree, changing the model, fetching the
+  // transcript — starts a second bind from the not-yet-updated record. When
+  // that stale bind lands after the flip's own, it must not hand the session
+  // back to the checkout conversation.
+  it('does not point a worktree session back at the checkout conversation', async () => {
+    const { sessionId } = await freshSession()
+    holdBind = true
+
+    const flip = shell.setWorktree(sessionId, worktree())
+    await settled()
+    const tree = shell.sessionTree(sessionId)
+    await settled()
+    expect(heldBinds).toHaveLength(2)
+
+    // The flip's own rebind lands first; the stale bind lands after it.
+    heldBinds.shift()?.()
+    await settled()
+    holdBind = false
+    heldBinds.shift()?.()
+    await flip
+    await tree
+
+    await shell.prompt(sessionId, 'a sentence said after the flip')
+    await settled()
+
+    // The record says the worktree, so the words must be rooted there too.
+    expect(await sessionOf(sessionId)).toMatchObject({ worktree: worktree() })
+    expect(await adapter.searchHistory(worktreePath, 'after the flip')).toHaveLength(1)
+    expect(await adapter.searchHistory(WORKSPACE, 'after the flip')).toHaveLength(0)
   })
 })
 
