@@ -28,8 +28,12 @@ const harness = vi.hoisted(() => ({
 
 vi.mock('electron', () => ({
   app: {
+    isPackaged: false,
     getAppPath: () => harness.appPath,
     getPath: (name: string) => (name === 'userData' ? harness.userData : harness.appPath),
+    setPath: (name: string, value: string) => {
+      if (name === 'userData') harness.userData = value
+    },
     whenReady: () =>
       new Promise<void>((resolve) => {
         harness.releaseReady = () => resolve()

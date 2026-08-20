@@ -7,7 +7,7 @@ import type { LogRecord } from '../log/sink'
 import { createMemorySink } from '../log/sink'
 import { panelFixtures } from '../panel/fixtures'
 import { createPanelModel, memoryPanelPersistence } from '../panel/model'
-import { selectAdapter } from './select-adapter'
+import { decideFlavor, selectAdapter } from './select-adapter'
 
 function chooseWith(requested: string | undefined): {
   record: LogRecord
@@ -68,5 +68,25 @@ describe('which adapter a launch gets', () => {
 
   it('is the fake for an empty value, which is a variable set to nothing', () => {
     expect(chooseWith('').record).toMatchObject({ adapter: 'fake', requested: null })
+  })
+})
+
+// The packaged rule is decided by the pure function, so it is provable here
+// without constructing the SDK adapter it implies.
+describe('what a packaged launch decides', () => {
+  it('is the SDK adapter with nothing asked for, which is how the Dock launches it', () => {
+    expect(decideFlavor(undefined, true)).toEqual({ flavor: 'sdk', requested: null, reason: null })
+  })
+
+  it('ignores a request for the fake, and says why', () => {
+    expect(decideFlavor('fake', true)).toEqual({
+      flavor: 'sdk',
+      requested: 'fake',
+      reason: 'a packaged launch always runs the SDK adapter, so CRUCIBLE_AGENT=fake is ignored'
+    })
+  })
+
+  it('unpackaged, still answers the fake by default', () => {
+    expect(decideFlavor(undefined, false)).toEqual({ flavor: 'fake', requested: null, reason: null })
   })
 })

@@ -1,0 +1,25 @@
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg">
+  <!-- The installed app's icon: Ember. Source for build/icon.icns; regenerate
+       with scripts/make-icon.sh after editing. -->
+  <defs>
+    <radialGradient id="glow" cx="0.5" cy="0.72" r="0.62">
+      <stop offset="0%" stop-color="#ff9d5c"/>
+      <stop offset="28%" stop-color="#e8632c"/>
+      <stop offset="62%" stop-color="#6e2012"/>
+      <stop offset="100%" stop-color="#191419"/>
+    </radialGradient>
+    <radialGradient id="core" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0%" stop-color="#ffedbd"/>
+      <stop offset="40%" stop-color="#ffb45c"/>
+      <stop offset="100%" stop-color="#ff6b35" stop-opacity="0"/>
+    </radialGradient>
+    <clipPath id="plate">
+      <rect x="100" y="100" width="824" height="824" rx="185"/>
+    </clipPath>
+  </defs>
+  <g clip-path="url(#plate)">
+    <rect x="100" y="100" width="824" height="824" fill="#191419"/>
+    <rect x="100" y="100" width="824" height="824" fill="url(#glow)"/>
+    <circle cx="512" cy="737" r="170" fill="url(#core)"/>
+  </g>
+</svg>

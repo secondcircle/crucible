@@ -27,7 +27,7 @@ agent-browser connect 9222
 agent-browser snapshot
 ```
 
-The port exists in dev only — nothing here ships a packaged build — and it
+The port exists in dev only — the installed app never opens it — and it
 binds loopback (`127.0.0.1:9222`). Check it with
 `lsof -nP -iTCP:9222 -sTCP:LISTEN`. Only one launch can hold 9222: a second
 `npm run dev` still opens a window but logs `bind() failed: Address already in
@@ -57,3 +57,20 @@ evidence file. It is never part of `npm test`, and `npm test` constructs no SDK
 adapter at all.
 
 Other scripts: `npm run lint`, `npm run typecheck`, `npm test`.
+
+## The installed app
+
+`/Applications/Crucible.app` is the stable Crucible in the human's Dock —
+their daily instance, built from `main` by `npm run install:stable` (clean
+`main` checkouts only; it refuses anything else). A packaged launch always
+runs the SDK adapter: there is no flavor switch, no env var, no debug port.
+Its state lives in `~/Library/Application Support/Crucible`; every dev launch
+uses `Crucible-Dev` instead, so no worktree or branch under test can ever
+touch the installed app's sessions.
+
+Agents never touch the installed app or its state: don't launch it, don't
+reinstall it, don't read or write its userData. Testing happens through
+`npm run dev` (agent-driven) or `npm run dev:sdk` (for the human) in whatever
+checkout holds the code under test. After a merge to `main`, running
+`npm run install:stable` is how the human's app picks the merge up — do it
+when the human asks, and tell them to relaunch.

@@ -23,15 +23,33 @@ import { selectWorkspaceService } from './workspace/select-service'
 // the app is still starting.
 registerExhibitScheme()
 
+if (app.isPackaged) {
+  // Dock-launched apps inherit the bare GUI PATH, and the agent's tools need
+  // more than /usr/bin. Prepend the usual install prefixes once, here.
+  const path = process.env.PATH ?? ''
+  if (!path.includes('/opt/homebrew/bin')) {
+    process.env.PATH = `/opt/homebrew/bin:/usr/local/bin:${path}`
+  }
+} else {
+  // The data firewall between the installed app and every dev launch: dev
+  // state lives in Crucible-Dev, so no dev build can ever touch the installed
+  // app's sessions. Set before anything reads `userData`.
+  app.setPath('userData', join(app.getPath('appData'), 'Crucible-Dev'))
+}
+
 // One sink per launch, built here and passed everywhere: main is the sole
-// writer of the run log.
-const log = createFileSink(join(app.getAppPath(), 'logs'))
+// writer of the run log. Packaged, the app bundle is read-only, so the log
+// lives beside the rest of the app's state; in dev it stays in the repo.
+const log = createFileSink(
+  app.isPackaged ? join(app.getPath('userData'), 'logs') : join(app.getAppPath(), 'logs')
+)
 
 log.append({
   source: 'main',
   event: 'app_starting',
   pid: process.pid,
   electron: process.versions.electron,
+  packaged: app.isPackaged,
   dev: Boolean(process.env.ELECTRON_RENDERER_URL)
 })
 
@@ -61,7 +79,8 @@ const { adapter, flavor } = selectAdapter(
     openExternal: (url: string) => {
       void electronShell.openExternal(url)
     }
-  }
+  },
+  app.isPackaged
 )
 
 // One flavor decision governs every seam, so a fake-flavor launch reads no
