@@ -1,6 +1,10 @@
 import { useEffect, useState } from 'react'
 import type { SessionId, ShellSnapshot, WorkspaceId } from '../../../shared/agent/port'
+// Titles are the model's now, so the row shows a title and a relative time;
+// sessionLabel is gone.
 import { relativeTime } from '../labels'
+import type { QuotaView } from '../quota/use-quota'
+import { QuotaStrip } from './QuotaStrip'
 import './sidebar.css'
 
 const UNTITLED = 'New session'
@@ -23,7 +27,8 @@ export function Sidebar({
   onRemoveWorkspace,
   onActivateSession,
   onRemoveSession,
-  onResume
+  onResume,
+  quota
 }: {
   readonly snapshot: ShellSnapshot
   readonly onNewSession: () => void
@@ -33,6 +38,9 @@ export function Sidebar({
   readonly onActivateSession: (id: SessionId) => void
   readonly onRemoveSession: (id: SessionId) => void
   readonly onResume: () => void
+  // The quota strip's data. Absent without a quota service, and then no strip
+  // renders at all.
+  readonly quota?: QuotaView
 }): React.JSX.Element {
   const { workspaces, activeWorkspaceId, sessions, activeSessionId } = snapshot
   const now = useClock()
@@ -130,6 +138,10 @@ export function Sidebar({
           )
         })}
       </ul>
+
+      {/* Pinned at the foot: the workspace list above scrolls, this and Add
+          workspace stay put. */}
+      {quota === undefined ? null : <QuotaStrip snapshot={quota.snapshot} now={quota.now} />}
 
       <button className="addws" onClick={onAddWorkspace}>
         ＋ Add workspace

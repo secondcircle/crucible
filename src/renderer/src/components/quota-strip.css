@@ -1,0 +1,119 @@
+/* Every color is a token: a literal hex here would be a bug you can grep for.
+   Nothing animates, because whatever the numbers say this is never an alarm.
+
+   The `q` prefix on every class is deliberate: short general names like `bar`
+   and `num` collide with rules other components already own. */
+
+.quota {
+  border-top: 1px solid var(--line);
+  padding: 9px 14px 6px;
+}
+
+.qlabel {
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--faint);
+  margin-bottom: 7px;
+}
+
+.qrow {
+  margin-bottom: 9px;
+}
+
+.qrow:last-child {
+  margin-bottom: 2px;
+}
+
+/* Dimmed as one block, so no meter of a distrusted reading reads as current. */
+.qrow.qstale {
+  opacity: 0.5;
+}
+
+.qline {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  font-size: 11.5px;
+  color: var(--dim);
+}
+
+.qreset {
+  font: 10.5px var(--mono);
+  color: var(--faint);
+}
+
+.qreset .qout {
+  color: var(--accent);
+}
+
+.qmeter {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font: 11px var(--mono);
+  font-variant-numeric: tabular-nums;
+  margin-top: 3px;
+}
+
+.qmeter .qlbl {
+  color: var(--faint);
+  width: 36px;
+  flex: none;
+  overflow: hidden;
+}
+
+.qmeter .qbar {
+  flex: 1;
+  height: 5px;
+  border-radius: 3px;
+  background: var(--panel2);
+  overflow: hidden;
+  position: relative;
+}
+
+.qmeter .qbar i {
+  display: block;
+  height: 100%;
+  background: linear-gradient(90deg, var(--accent), var(--accent2));
+}
+
+.qmeter .qbar i.warn {
+  background: var(--accent);
+}
+
+.qmeter .qbar i.crit {
+  background: var(--error);
+}
+
+/* The pace tick: fill past it means spending faster than the window elapses. */
+.qmeter .qbar u {
+  position: absolute;
+  top: -1px;
+  bottom: -1px;
+  width: 1px;
+  background: color-mix(in srgb, var(--ink) 62%, transparent);
+}
+
+.qmeter .qnum {
+  width: 32px;
+  text-align: right;
+  color: var(--dim);
+}
+
+.qmeter .qnum.warn {
+  color: var(--accent);
+}
+
+.qmeter .qnum.crit {
+  color: var(--error);
+  font-weight: 600;
+}
+
+/* Past an hour a reading stops being evidence, so the row shows a dash. */
+.qdash {
+  color: var(--faint);
+  font: 11px var(--mono);
+  margin-top: 3px;
+  display: block;
+}

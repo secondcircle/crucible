@@ -13,6 +13,7 @@ import type {
 import type { AppUpdateService } from '../../shared/app-update/service'
 import type { CommandInfo, CommandService } from '../../shared/commands/service'
 import { commandFragment } from '../../shared/commands/template'
+import type { QuotaService } from '../../shared/quota/service'
 import type {
   RunId,
   WorkspaceEvent,
@@ -31,6 +32,7 @@ import { TopBar } from './components/TopBar'
 import { Transcript } from './components/Transcript'
 import { readAttachment, refuse } from './images'
 import { contextPercent } from './labels'
+import { useQuota } from './quota/use-quota'
 import { useAuth } from './settings/use-auth'
 import { knownEmpty, NOTHING_YET, reduce } from './state/shell-state'
 import './shell.css'
@@ -61,7 +63,8 @@ export function Shell({
   port,
   workspace: service,
   commands,
-  appUpdate
+  appUpdate,
+  quota
 }: {
   readonly port: AgentPort
   readonly workspace: WorkspaceService
@@ -71,8 +74,13 @@ export function Shell({
   // Absent everywhere but the installed app's window; without it no update
   // pill can ever render.
   readonly appUpdate?: AppUpdateService
+  // Beside the port, never behind it: quota is global, session-free provider
+  // data. Without this service no quota strip renders at all.
+  readonly quota?: QuotaService
 }): React.JSX.Element {
   const [state, dispatch] = useReducer(reduce, NOTHING_YET)
+  const quotaHold = useQuota(quota)
+  const refreshQuota = quotaHold.refresh
   // The waiting build's commit, once main has announced one.
   const [updateCommit, setUpdateCommit] = useState<string | undefined>(undefined)
 
@@ -231,6 +239,15 @@ export function Shell({
       if (event.type === 'panel_shown') {
         setCollapsed((current) => ({ ...current, [event.sessionId]: false }))
       }
+      // A cancelled or failed turn spent quota too. The TTL decides whether
+      // the ask becomes a fetch.
+      if (
+        event.type === 'turn_ended' ||
+        event.type === 'turn_cancelled' ||
+        event.type === 'turn_error'
+      ) {
+        refreshQuota()
+      }
     })
     void port
       .snapshot()
@@ -241,7 +258,7 @@ export function Shell({
       .then((listed) => dispatch({ type: 'models', models: listed }))
       .catch(report)
     return stop
-  }, [port, report, restore])
+  }, [port, report, restore, refreshQuota])
 
   // Settled history, once per session this document has not watched live.
   useEffect(() => {
@@ -919,6 +936,11 @@ export function Shell({
         onActivateSession={activateSession}
         onRemoveSession={removeSession}
         onResume={() => setPopover('resume')}
+        quota={
+          quota === undefined
+            ? undefined
+            : { snapshot: quotaHold.snapshot, now: quotaHold.now }
+        }
       />
 
       <main className="main">
