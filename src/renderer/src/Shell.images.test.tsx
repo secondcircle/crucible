@@ -249,8 +249,6 @@ describe('while the session works', () => {
     await paste(png())
     await type('and look at this')
 
-    const steer = screen.getByRole('button', { name: 'Steer ⏎' })
-    expect(steer).toBeDisabled()
     expect(screen.getByText(/images go with the next prompt/)).toBeInTheDocument()
 
     await act(async () => {
@@ -269,6 +267,5 @@ describe('while the session works', () => {
     })
 
     expect(chips()).toEqual([])
-    expect(screen.getByRole('button', { name: 'Steer ⏎' })).toBeDisabled()
   })
 })

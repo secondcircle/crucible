@@ -176,23 +176,6 @@ export function Composer({
     box?.focus()
   }
 
-  /** The mouse and dictation path to a grammar that is otherwise typed. */
-  function insertAt(text: string): void {
-    const box = boxRef?.current ?? null
-    if (text === '!' || text === '/') {
-      // Both modes are a property of the whole line, so the character goes in
-      // front of it rather than wherever the caret happens to sit. What was
-      // already typed is kept: it becomes the command's arguments.
-      if (!draft.startsWith(text)) onDraft(`${text}${draft}`)
-      box?.focus()
-      return
-    }
-    const caret = box === null ? draft.length : (box.selectionStart ?? draft.length)
-    onDraft(`${draft.slice(0, caret)}${text}${draft.slice(caret)}`)
-    onFileToken('')
-    box?.focus()
-  }
-
   function run(): void {
     if (!runnable || command === undefined) return
     onRunBash(command)
@@ -415,58 +398,23 @@ export function Composer({
             ) : null}
           </div>
 
-          {/* Typed grammar is an accelerator; these three are the mouse and
-              dictation path to the same thing. */}
-          <button
-            className="chip grammar"
-            aria-label="Browse commands"
-            disabled={disabled || bash}
-            onClick={() => insertAt('/')}
-          >
-            / command
-          </button>
-          <button
-            className="chip grammar"
-            aria-label="Mention a file"
-            disabled={disabled || bash}
-            onClick={() => insertAt('@')}
-          >
-            @ file
-          </button>
-          <button
-            className="chip grammar"
-            aria-label="Run a bash command"
-            disabled={disabled || bash}
-            onClick={() => insertAt('!')}
-          >
-            ! bash
-          </button>
-
+          {/* One slot, one footprint: Send while idle becomes Stop while
+              working, so nothing around it moves. Enter still steers. */}
           {bash ? (
             <button className="send" disabled={!runnable} onClick={run}>
               Run ⏎
             </button>
           ) : working ? (
-            /* Labelled for what it will do, because a hotkey is never the
-               only way to reach a capability. */
-            <button className="send steer" disabled={!sendable} onClick={onSend}>
-              Steer ⏎
+            <button className="stop" onClick={onStop}>
+              <span className="spin" aria-hidden="true" />
+              <span className="stopsq" aria-hidden="true" />
+              Stop
             </button>
           ) : (
             <button className="send" disabled={!sendable} onClick={onSend}>
               Send
             </button>
           )}
-
-          {/* A bash run is the user's own work, never the agent's: running one
-              mid-turn leaves the agent's Stop exactly where it was. */}
-          {working ? (
-            <button className="stop" onClick={onStop}>
-              <span className="spin" aria-hidden="true" />
-              <span className="stopsq" aria-hidden="true" />
-              Stop
-            </button>
-          ) : null}
         </div>
       </div>
 

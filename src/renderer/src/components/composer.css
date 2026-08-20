@@ -61,13 +61,25 @@
   cursor: default;
 }
 
-.send {
+/* Send and Stop trade the same slot, so both get the same box: swapping one
+   for the other moves nothing around them. */
+.send,
+.stop {
   margin-left: auto;
+  height: 31px;
+  width: 104px;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius);
+  padding: 0;
+}
+
+.send {
   background: var(--accent);
   color: var(--on-accent);
   border: none;
-  border-radius: var(--radius);
-  padding: 6px 14px;
   font-weight: 700;
 }
 
@@ -83,11 +95,7 @@
   background: var(--panel);
   color: var(--ink);
   border: 1px solid var(--accent);
-  border-radius: var(--radius);
-  display: flex;
-  align-items: center;
   gap: 8px;
-  padding: 5px 12px;
   font-weight: 600;
 }
 
@@ -238,10 +246,6 @@ kbd {
 /* images held back from a queued message are said out loud, never dropped */
 .esc .heldback {
   color: var(--error);
-}
-
-.chip.grammar {
-  font: 11.5px var(--mono);
 }
 
 .chips {

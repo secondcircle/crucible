@@ -171,18 +171,6 @@ describe('the @ popover', () => {
     expect(port.calls.map((call) => call.op)).not.toContain('prompt')
   })
 
-  it('opens from the composer chip, which is the mouse path to it', async () => {
-    const { workspace } = await shell()
-
-    await act(async () => {
-      fireEvent.click(screen.getByLabelText('Mention a file'))
-    })
-
-    expect(box()).toHaveValue('@')
-    expect(popover()).not.toBeNull()
-    expect(workspace.calls).toHaveLength(1)
-  })
-
   it('stays shut in bash mode, where `@` means nothing', async () => {
     await shell()
 

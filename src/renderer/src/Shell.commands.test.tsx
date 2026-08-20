@@ -152,35 +152,6 @@ describe('command mode', () => {
     expect(popover()).not.toBeNull()
   })
 
-  it('is reachable by mouse: the button prepends the slash and keeps the draft', async () => {
-    await shell()
-    await type('the command system')
-
-    await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: 'Browse commands' }))
-    })
-    await settled()
-
-    expect(box().value).toBe('/the command system')
-    // The name is no longer being typed, so there is nothing to browse.
-    expect(popover()).toBeNull()
-
-    await type('')
-    await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: 'Browse commands' }))
-    })
-    await settled()
-    expect(box().value).toBe('/')
-    expect(popover()).not.toBeNull()
-  })
-
-  it('has no button in bash mode', async () => {
-    await shell()
-
-    await type('!npm test')
-
-    expect(screen.getByRole('button', { name: 'Browse commands' })).toBeDisabled()
-  })
 })
 
 describe('sending a command', () => {

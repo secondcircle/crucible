@@ -67,13 +67,12 @@ describe('sending', () => {
 })
 
 describe('while a turn is live', () => {
-  it('offers Steer beside Stop, and leaves the box editable for a redirect', async () => {
+  it('offers Stop where Send was, and leaves the box editable for a redirect', async () => {
     await shellWithSession()
 
     await send('write the adapter')
 
     expect(screen.getByRole('button', { name: /Stop/ })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Steer ⏎' })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Send' })).toBeNull()
     expect(screen.getByLabelText('Message')).toBeEnabled()
   })

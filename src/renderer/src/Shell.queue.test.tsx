@@ -63,27 +63,15 @@ const entries = (): string[] =>
   Array.from(strip()?.querySelectorAll('.qitem') ?? []).map((item) => item.textContent ?? '')
 
 describe('the composer while a session works', () => {
-  it('offers Steer beside Stop, and the key map the mock spells out', async () => {
+  it('swaps Send for Stop in the same slot, and spells out the key map', async () => {
     await shellWithSession()
 
     await working()
 
-    expect(screen.getByRole('button', { name: 'Steer ⏎' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /Stop/ })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Send' })).toBeNull()
     const hint = screen.getByText(/agent working/).parentElement
     expect(hint).toHaveTextContent('⏎ steer · ⌥⏎ follow-up · esc stop · ⇧⏎ newline')
-  })
-
-  it('leaves Steer unavailable for a draft with nothing in it', async () => {
-    await shellWithSession()
-    await working()
-
-    expect(screen.getByRole('button', { name: 'Steer ⏎' })).toBeDisabled()
-
-    type('and check the tests')
-
-    expect(screen.getByRole('button', { name: 'Steer ⏎' })).toBeEnabled()
   })
 })
 

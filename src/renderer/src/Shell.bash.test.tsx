@@ -105,17 +105,6 @@ describe('bash mode', () => {
     expect(screen.getByRole('button', { name: 'Send' })).toBeInTheDocument()
   })
 
-  it('opens from the composer chip, which is the mouse path to it', async () => {
-    await shell()
-    await type('git status')
-
-    await act(async () => {
-      fireEvent.click(screen.getByLabelText('Run a bash command'))
-    })
-
-    expect(box()).toHaveValue('!git status')
-    expect(document.querySelector('.cbox.bash')).not.toBeNull()
-  })
 })
 
 describe('the drawer', () => {

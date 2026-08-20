@@ -28,6 +28,8 @@
   --font: -apple-system, 'Segoe UI', system-ui, sans-serif;
   --mono: ui-monospace, 'SF Mono', Menlo, monospace;
 
+  --bar-h: 50px;
+
   --radius: 8px;
   --radius-lg: 12px;
   --column: 680px;
