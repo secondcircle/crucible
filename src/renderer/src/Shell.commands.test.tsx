@@ -1,8 +1,7 @@
 // @vitest-environment jsdom
 //
-// `/` is Crucible's own grammar: the command service expands the invocation
-// and the agent port carries the delivered text alone. Driven over the
-// scripted port, so nothing here reads a folder or costs anything.
+// `/` is Crucible's own grammar: the service expands the invocation and the
+// agent port carries the delivered text alone. Nothing here reads a folder.
 import { act, fireEvent, render, screen } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 import { Shell } from './Shell'

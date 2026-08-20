@@ -54,7 +54,6 @@
   position: relative;
 }
 
-/* The active tab sits on the chat's own background, under an accent line. */
 .tab.active {
   color: var(--ink);
   background: var(--bg);

@@ -1,8 +1,7 @@
 // @vitest-environment jsdom
 //
-// The settings surface over the scripted port: providers as the adapter
-// reports them, a login Crucible only renders, and usage summed from what the
-// port answers. No SDK, no network, no cost.
+// Driven over the scripted port, so a login Crucible only renders and usage
+// summed from what the port answers cost no SDK call and no network.
 import { act, fireEvent, render, screen, within } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 import type { ProviderState, SessionUsage, ShellSnapshot } from '../../shared/agent/port'

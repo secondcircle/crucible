@@ -1,9 +1,7 @@
 import type { SessionId, TabId } from './port'
 
-// The one format both ends of the exhibit scheme know. The renderer builds
-// these URLs and main parses them, so the format lives in one module and the
-// two cannot drift. Like `port.ts`, this file takes on nothing: no Electron,
-// no Node, no SDK types, only the port's own two id aliases.
+// The renderer builds these URLs and main parses them, so the format lives in
+// one module and the two cannot drift. It takes on no Electron, Node or SDK.
 
 /** The scheme exhibits are served under; registered privileged in main. */
 export const EXHIBIT_SCHEME = 'exhibit'
@@ -24,9 +22,8 @@ export function exhibitUrl(sessionId: SessionId, tabId: TabId): string {
   return `${EXHIBIT_SCHEME}://${EXHIBIT_HOST}/${encodeURIComponent(sessionId)}/${encodeURIComponent(tabId)}`
 }
 
-// Anything that is not exactly the shape above is refused rather than
-// repaired, because a request main cannot read off the format is a request no
-// panel made.
+// Refused rather than repaired: a request main cannot read off the format is
+// a request no panel made.
 export function parseExhibitUrl(url: string): ExhibitRef | undefined {
   let parsed: URL
   try {

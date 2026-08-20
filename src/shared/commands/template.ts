@@ -1,8 +1,7 @@
 import type { CommandInfo } from './service'
 
-// One place, so the real service, the fake and the popover can never drift
-// into two readings of the same file. The semantics copy π's prompt templates,
-// so a file moves between the two systems unchanged.
+// One place, so the real service, the fake and the popover cannot drift into
+// two readings of one file. The semantics are π's, so a file moves unchanged.
 
 export interface CommandFile {
   /** The body with the frontmatter removed; substitution happens in it alone. */

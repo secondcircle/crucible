@@ -76,9 +76,8 @@ export interface PanelModel extends PanelTools {
   closeTab(sessionId: SessionId, tabId: TabId): void
   /** The exhibit's body, read at call time. Throws when it cannot be read. */
   exhibit(sessionId: SessionId, tabId: TabId): string
-  // What the exhibit scheme resolves a request against: a file is servable
-  // because some session's tab shows it, and for no other reason. Reads
-  // nothing off disk and changes nothing.
+  // A file is servable because some session's tab shows it, and for no other
+  // reason.
   exhibitFile(sessionId: SessionId, tabId: TabId): ExhibitFile | undefined
   /** Once per user instruction; drives "shown N turns ago" ages. */
   bumpTurn(sessionId: SessionId): void

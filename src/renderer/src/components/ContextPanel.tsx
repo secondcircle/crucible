@@ -134,10 +134,8 @@ export function PanelEdge({
   )
 }
 
-// What is on display. Either way the renderer knows a tab by its id and by
-// nothing else: a markdown body comes back through the port, and an HTML
-// exhibit is loaded by the frame itself from the exhibit scheme, which resolves
-// that same id against the panel model.
+// The renderer knows a tab by its id and by nothing else: no exhibit's path
+// reaches this side, whichever way its body arrives.
 function Exhibit({
   sessionId,
   tab,
@@ -150,12 +148,10 @@ function Exhibit({
   return (
     <div className="exhibit">
       {tab === undefined ? null : tab.kind === 'html' ? (
-        // Browser-page rules: the exhibit's own scripts run, under the policy
-        // its own response header carries, and nothing else is granted. No
-        // same-origin, no preload, no Node, no IPC, no reach into the app.
-        // The key is the tab's identity including its latest show, so a re-show
-        // remounts the frame and `no-store` makes the reload fetch the bytes
-        // that are on disk now.
+        // `allow-scripts` alone: the exhibit's own response header is its
+        // policy, and no same-origin means no reach into the app.
+
+        // `shownAt` is in the key so a re-show remounts and refetches.
         <iframe
           key={`${sessionId}:${tab.id}:${tab.shownAt}`}
           className="frame"

@@ -1,17 +1,16 @@
 import type { CommandInfo, CommandService, Expansion } from './service'
 import { expandBody, splitInvocation } from './template'
 
-// No folder is read, so an agent-driven check and every test cost nothing.
-// Imports neither Electron nor Node, exactly as the fake adapter does.
-//
-// The canned set covers all three origins and both hint styles, so the
-// popover's badges, hints and filtering are drivable for free.
+// Reads no folder and imports neither Electron nor Node, so an agent-driven
+// check and every test cost nothing.
 
 interface CannedCommand extends CommandInfo {
   /** Real template text, expanded by the same code the real service uses. */
   readonly body: string
 }
 
+// All three origins and both hint styles, so the popover's badges, hints and
+// filtering are drivable for free.
 export const CANNED_COMMANDS: readonly CannedCommand[] = [
   {
     name: 'align',

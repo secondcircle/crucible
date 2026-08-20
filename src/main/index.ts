@@ -20,8 +20,7 @@ import { serveWorkspaceChannel, type WorkspaceChannel } from './workspace/channe
 import { selectWorkspaceService } from './workspace/select-service'
 
 // Before anything else, because a scheme's privileges are only settable while
-// the app is still starting: the context panel's HTML exhibits are served
-// under their own origin, so the renderer's own script policy stays 'self'.
+// the app is still starting.
 registerExhibitScheme()
 
 // One sink per launch, built here and passed everywhere: main is the sole

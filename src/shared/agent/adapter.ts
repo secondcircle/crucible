@@ -52,9 +52,8 @@ export interface ResumeRequest {
   readonly ref: string
 }
 
-// Usage is asked for by identity, whether or not the session is bound: the
-// token is the same opaque string a bind carries, and only this adapter reads
-// it.
+// Asked for by identity whether or not the session is bound, which is why an
+// unbound one has to carry the opaque token a bind would have used.
 export interface UsageRequest {
   readonly sessionId: SessionId
   readonly workspacePath: string

@@ -1,8 +1,5 @@
 // This module imports nothing on purpose: it is a seam the renderer shares
 // with main, and any import here could smuggle Electron or Node across.
-//
-// An invocation is expanded before anything crosses the agent port, so the
-// port gains no command vocabulary of any kind.
 
 export type CommandOrigin = 'built-in' | 'user' | 'workspace'
 

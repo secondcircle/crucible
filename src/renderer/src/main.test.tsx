@@ -110,9 +110,8 @@ describe('the renderer entry point', () => {
 
     await launch()
 
-    // What launched is the shell over the stand-in's snapshot: the seeded
-    // workspace and session are on screen, so the snapshot crossed the
-    // preload surface — nothing in this test handed the renderer a port.
+    // Nothing here handed the renderer a port, so a seeded workspace and
+    // session on screen mean the snapshot crossed the preload surface.
     await screen.findByRole('button', { name: /^Session · / })
     expect(screen.getByRole('button', { name: 'crucible' })).toBeInTheDocument()
 

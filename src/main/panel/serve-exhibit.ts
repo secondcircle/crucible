@@ -3,14 +3,9 @@ import { basename } from 'node:path'
 import { parseExhibitUrl } from '../../shared/agent/exhibit-url'
 import type { PanelModel } from './model'
 
-// The whole decision of what the exhibit scheme answers with, as a plain
-// function of the panel model and the request: Electron holds nothing but the
-// translation into a `Response`. A file is servable because some session's tab
-// shows it, and for no other reason.
+// A plain function of the model and the request, so the decision is testable
+// without Electron. A file is servable only because some session's tab shows it.
 
-// The exhibit document's own policy, which is the point of giving it an
-// origin. Its inline script and inline styles run and its own `data:` images
-// draw; every network source, subresource, nested frame and object is denied.
 // `form-action` and `base-uri` are named because neither falls back to
 // `default-src`.
 export const EXHIBIT_POLICY = [

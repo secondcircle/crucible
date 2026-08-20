@@ -1,8 +1,7 @@
 import type { SessionUsage, UsageLine } from '../../shared/agent/port'
 
-// π reports usage per message and keeps no ledger; the arithmetic is
-// Crucible's. Kept pure and apart from the adapter so it can be tested without
-// constructing one (and therefore without a paid call).
+// π reports usage per message and keeps no ledger, so the arithmetic is
+// Crucible's; kept apart from the adapter so testing it costs nothing.
 
 /** π's per-message `Usage`, with every field treated as possibly missing. */
 export interface StoredUsage {

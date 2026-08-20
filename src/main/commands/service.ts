@@ -13,9 +13,8 @@ import {
   splitInvocation
 } from '../../shared/commands/template'
 
-// Reads folders and nothing else: the format and the grammar live in the
-// shared template module, so the fake and this cannot drift. The roots are
-// injected, which lets a test point the whole service at temp directories.
+// The format and the grammar live in the shared template module, so this and
+// the fake cannot drift. Injected roots let a test aim it at temp folders.
 
 export interface CommandRoots {
   /** The built-ins shipped with the app. */

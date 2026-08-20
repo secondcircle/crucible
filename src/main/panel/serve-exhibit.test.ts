@@ -1,8 +1,7 @@
 // @vitest-environment node
 //
-// The exhibit scheme's whole decision, over a real panel model and real files:
-// everything below this seam is the thing itself, and only Electron's
-// translation into a `Response` sits above it.
+// The whole decision, over a real panel model and real files: only Electron's
+// translation into a `Response` sits above what is exercised here.
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'

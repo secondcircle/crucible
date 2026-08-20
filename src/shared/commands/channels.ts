@@ -1,6 +1,6 @@
 // Preload and main have to agree letter for letter here too, and a mismatch is
 // silent until an operation goes unanswered in a running app.
-//
+
 // One channel, not two: every call reads the folders fresh, so there is no
 // cached state anyone would have to be told about.
 
