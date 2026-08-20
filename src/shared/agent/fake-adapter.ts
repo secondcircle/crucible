@@ -1082,9 +1082,8 @@ export function createFakeAdapter({
       )
     },
 
-    // Two scripts, one per method, both deterministic: an api-key login asks
-    // for a secret, an OAuth login opens a browser it never really opens and
-    // asks for the pasted code.
+    // Two deterministic scripts, one per method, so a login is drivable with
+    // no browser and no credential anywhere.
     login(providerId: string, method: AuthMethod): Promise<void> {
       if (liveLogin !== undefined) {
         return Promise.reject(

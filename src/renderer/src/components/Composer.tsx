@@ -291,7 +291,6 @@ export function Composer({
           onKeyDown={(pressed) => {
             // The command popover owns Enter while it is open, exactly as the
             // file popover does: nothing can send from under it.
-            // The popover is open exactly when there are rows to show.
             if (matches !== undefined) {
               if (matches.length === 0) {
                 if (pressed.key === 'Enter' && !pressed.shiftKey) {

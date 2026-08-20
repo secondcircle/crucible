@@ -260,8 +260,7 @@ export function Shell({
   }, [toast])
 
   // Read again every time the popover opens, so a command an agent wrote a
-  // moment ago is in this very list. Closing forgets it, which is what makes
-  // the next opening a fresh read.
+  // moment ago is in this very list.
   useEffect(() => {
     if (!browsingCommands || workspacePath === undefined) return
     let current = true

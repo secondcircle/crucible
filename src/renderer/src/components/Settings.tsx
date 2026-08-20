@@ -12,9 +12,8 @@ import { sessionLabel, tokens } from '../labels'
 import type { AskedPrompt, Auth } from '../settings/use-auth'
 import './settings.css'
 
-// The settings surface: providers as π's ModelRuntime reports them, and usage
-// as Crucible sums it from π's per-message numbers. π keeps no ledger, and
-// neither does Crucible: everything here is recomputed on demand.
+// Neither π nor Crucible keeps a usage ledger, so everything here is
+// recomputed on demand from π's per-message numbers.
 
 export type SettingsTab = 'providers' | 'usage'
 
@@ -319,9 +318,8 @@ function LoginDialog({ auth }: { readonly auth: Auth }): React.JSX.Element {
                 </button>
               ))
             ) : (
-              // Keyed by the question it answers, so a fresh one arrives with
-              // an empty field and nothing typed for one prompt is ever
-              // submitted for another.
+              // Keyed by the question it answers, so nothing typed for one
+              // prompt is ever submitted for another.
               <PromptField
                 key={asked.promptId}
                 asked={asked}

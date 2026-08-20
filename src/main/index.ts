@@ -8,6 +8,7 @@ import { selectCommandService } from './commands/select-service'
 import { readShippedAgentDoc } from './shipped'
 import { forwardRendererOutput } from './log/renderer-output'
 import { createFileSink } from './log/sink'
+import { registerExhibitScheme, serveExhibitScheme } from './panel/exhibit-scheme'
 import { panelFixtures } from './panel/fixtures'
 import { createPanelModel } from './panel/model'
 import { storePanelPersistence } from './panel/store-persistence'
@@ -17,6 +18,10 @@ import { createShellStore } from './shell/store'
 import { createMainWindow } from './window'
 import { serveWorkspaceChannel, type WorkspaceChannel } from './workspace/channel'
 import { selectWorkspaceService } from './workspace/select-service'
+
+// Before anything else, because a scheme's privileges are only settable while
+// the app is still starting.
+registerExhibitScheme()
 
 // One sink per launch, built here and passed everywhere: main is the sole
 // writer of the run log.
@@ -115,6 +120,10 @@ function openWindow(reason?: 'activate'): void {
 
 void app.whenReady().then(() => {
   log.append({ source: 'main', event: 'app_ready' })
+
+  // The handler answers out of the same panel model the tools write to, so a
+  // file is servable exactly while a tab shows it.
+  serveExhibitScheme(panel)
 
   openWindow()
 

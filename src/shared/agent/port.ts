@@ -373,9 +373,8 @@ export interface AgentPort {
   cancelLogin(): Promise<void>
   logout(providerId: string): Promise<void>
 
-  // Every usage-bearing message of the session's whole conversation, all
-  // branches: money spent does not vanish on a jump. Absent until the adapter
-  // has genuinely reported usage.
+  // Every branch of the conversation, because money spent does not vanish on
+  // a jump. Absent until the adapter has genuinely reported usage.
   sessionUsage(id: SessionId): Promise<SessionUsage | undefined>
 
   // Accepted, not finished: resolves once the turn is live. Images ride the

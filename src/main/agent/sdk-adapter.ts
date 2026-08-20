@@ -434,9 +434,8 @@ export function createSdkAdapter({
     // No usage event at all, rather than a guess, when the SDK reports
     // nothing.
     if (usage?.tokens != null) {
-      // The context percentage is path-based, as π reports it; the cost beside
-      // it is the whole conversation's, because money does not vanish on a
-      // jump.
+      // The percentage is path-based, as π reports it; the cost beside it is
+      // the whole conversation's, because money does not vanish on a jump.
       const spent = usageOf(session.sessionManager)
       emit({
         type: 'usage',
@@ -448,9 +447,8 @@ export function createSdkAdapter({
     }
   }
 
-  // π's `AuthInteraction` is an SDK type and cannot cross the port, so this is
-  // where it is translated: its questions leave as events, and the answers come
-  // back through `answerAuthPrompt`.
+  // π's `AuthInteraction` is an SDK type and cannot cross the port, so it is
+  // translated here: questions leave as events, answers come back by promptId.
   function interactionFor(flow: LiveLogin): AuthInteraction {
     return {
       signal: flow.abort.signal,
@@ -539,7 +537,7 @@ export function createSdkAdapter({
       try {
         session.dispose()
       } catch {
-        // Same.
+        // Nobody is left to tell here either.
       }
     })()
   }
@@ -733,9 +731,8 @@ export function createSdkAdapter({
       )
     },
 
-    // π's whole catalog, each provider with what a login could use and what its
-    // stored credentials currently say. The filtering into a list and a picker
-    // is the settings surface's, not this seam's.
+    // π's whole catalog, unfiltered: which providers become a list and which a
+    // picker is the settings surface's question, not this seam's.
     async listProviders(): Promise<readonly ProviderState[]> {
       const models = await runtime()
       return Promise.all(

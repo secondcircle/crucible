@@ -1,8 +1,7 @@
 import type { AuthMethod, ProviderState } from '../../shared/agent/port'
 
-// The classification π's provider catalog needs before it can be shown: kept
-// pure and apart from the adapter so it can be tested without constructing one
-// (and therefore without a paid call).
+// Kept apart from the adapter so this classification can be tested without
+// constructing one, and therefore without a paid call.
 
 /** What π's `Provider` says about itself, reduced to what a status needs. */
 export interface ProviderFacts {

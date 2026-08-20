@@ -3,6 +3,11 @@ import reactHooks from 'eslint-plugin-react-hooks'
 import globals from 'globals'
 import tseslint from 'typescript-eslint'
 
+// The renderer's script-src 'self' is this app's one mechanical backstop
+// against an HTML-injection bug, and the renderer holds the agent port.
+const DANGEROUS_HTML =
+  "The renderer's script-src 'self' is the app's backstop against HTML injection, and the renderer holds the agent port. Render text as text; a context panel exhibit gets its own origin instead. If a legitimate need appears, argue the exception in review rather than taking it silently."
+
 export default tseslint.config(
   // .crucible holds workflow records, not app code.
   { ignores: ['out/**', 'dist/**', 'logs/**', 'node_modules/**', '.crucible/**'] },
@@ -37,20 +42,44 @@ export default tseslint.config(
             "MemberExpression[object.name=/^(window|globalThis|self)$/][property.name='crucible']",
           message:
             'The renderer reaches agents only through the agent port (ADR 0001) and the OS only through the workspace service (ADR 0005). Take them as props; only src/renderer/src/bridge.ts may touch window.crucible.'
+        },
+        // Both spellings: the JSX attribute, and the object property that
+        // catches createElement props and spread objects.
+        {
+          selector: "JSXAttribute[name.name='dangerouslySetInnerHTML']",
+          message: DANGEROUS_HTML
+        },
+        {
+          selector: "Property[key.name='dangerouslySetInnerHTML']",
+          message: DANGEROUS_HTML
         }
       ]
     }
   },
   {
-    // These three are the renderer's only readers of the preload surface, so
-    // the fence would otherwise have nowhere to let them through.
+    // These four are the renderer's only readers of the preload surface, so
+    // the window.crucible fence lets them through — and only that fence. The
+    // dangerouslySetInnerHTML ban is restated rather than switched off with
+    // it, so widening this block can never quietly widen that one.
     files: [
       'src/renderer/src/bridge.ts',
       'src/renderer/src/agent/ipc-client.test.ts',
       'src/renderer/src/commands/ipc-client.test.ts',
       'src/renderer/src/workspace/ipc-client.test.ts'
     ],
-    rules: { 'no-restricted-syntax': 'off' }
+    rules: {
+      'no-restricted-syntax': [
+        'error',
+        {
+          selector: "JSXAttribute[name.name='dangerouslySetInnerHTML']",
+          message: DANGEROUS_HTML
+        },
+        {
+          selector: "Property[key.name='dangerouslySetInnerHTML']",
+          message: DANGEROUS_HTML
+        }
+      ]
+    }
   },
   {
     files: ['*.ts', '*.mjs', 'scripts/**/*.ts'],

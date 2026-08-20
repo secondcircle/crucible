@@ -1,9 +1,8 @@
 import type { CommandInfo, CommandService, Expansion } from '../../../shared/commands/service'
 import { expandBody, splitInvocation } from '../../../shared/commands/template'
 
-// Answers the way main's command service does, from a list a test writes, and
-// expands with the very same code the real service uses. Reads no folder, so a
-// component test is about the composer rather than about the filesystem.
+// Expands with the very same code the real service uses, and reads no folder,
+// so a component test is about the composer and not about the filesystem.
 
 export interface ScriptedCommand extends CommandInfo {
   /** The template text; absent means the file cannot be read at expansion time. */
