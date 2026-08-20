@@ -8,6 +8,7 @@ import type { SessionTree, TranscriptItem } from '../../shared/agent/port'
 import { Shell } from './Shell'
 import { createScriptedPort, oneSession, type ScriptedPort } from './testing/scripted-port'
 import { createScriptedWorkspace } from './testing/scripted-workspace'
+import { createScriptedCommands } from './testing/scripted-commands'
 import { settled } from './testing/settled'
 
 const TREE: SessionTree = {
@@ -61,7 +62,11 @@ async function shell(
   const port = createScriptedPort(oneSession({ working: options.working ?? false }))
   port.models = [{ id: 'fake/deterministic', label: 'Fake', thinkingLevels: ['off', 'low'] }]
   port.trees.set('s1', options.tree ?? TREE)
-  render(<Shell port={port} workspace={createScriptedWorkspace()} />)
+  render(<Shell
+      port={port}
+      workspace={createScriptedWorkspace()}
+      commands={createScriptedCommands()}
+    />)
   await screen.findAllByRole('button', { name: /^Session · / })
   await settled()
   return port

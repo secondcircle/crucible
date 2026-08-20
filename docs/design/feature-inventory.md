@@ -66,7 +66,7 @@ names the milestone from `m1-parity-core.md`. **never** means ruled out.
 | Image paste / drag | Ctrl+V, drag onto terminal | **built** — ⌘V and a full-window drop veil, thumbnail chips with a remove ×, png/jpeg/gif/webp up to 10 MB each, thumbnails on the sent message. No file-picker button yet; queued messages still carry text only |
 | ! bash commands | !cmd sends output to LLM, !!cmd doesn't | **built, diverged from π** — one grammar: any number of leading `!` runs locally, output lands in a dismissible drawer, and **Add to conversation** is the only way the model ever sees it. π's decide-upfront `!`/`!!` split is gone |
 | External editor | Ctrl+G opens $EDITOR | never — the composer is the editor |
-| Prompt templates | /templatename expands | later (M2+) |
+| Prompt templates | /templatename expands | **built as Crucible commands, diverged from π** — `/name args` over Crucible's own folders (`~/.crucible/commands/`, `<workspace>/.crucible/commands/`, built-ins shipped with the app), expanded by a main-process command service before anything crosses the port (ADR 0007). π's semantics copied, π's `.pi/prompts` folders ignored entirely |
 
 ## 6 · Extensibility & config
 
@@ -75,16 +75,17 @@ names the milestone from `m1-parity-core.md`. **never** means ruled out.
 | Skills | /skill:name | agent-side works now — stock π loads workspace skills through the SDK adapter (A17); UI exposure later |
 | Extensions | TUI extension API | never — not portable; legacy-system extensions are explicitly not loaded (A17); Crucible features replace them natively |
 | Themes | /settings themes | later — Ember is the theme |
-| Settings | /settings UI + settings.json | later — settings window eventually; today the chips cover it |
-| Login / logout | provider auth | later (M1 block 4) — today the picker reflects whatever the user's existing credentials reach (A14) |
+| Settings | /settings UI + settings.json | **built** — gear in the top bar opens a modal sheet with two tabs, Providers and Usage; delivery pacing stays deferred. No settings file: the sheet's own state is per window and nothing about it is persisted |
+| Login / logout | provider auth | **built** — Providers tab lists every credentialed provider with its status, an Add provider picker covers the rest of π's catalog, and Crucible renders π's login flow (browser OAuth with a paste fallback, API-key entry). π owns the flow, the token exchange and the storage |
+| Agent-facing docs | AGENTS.md, skills | **built** — Crucible ships a context doc about commands inside the app, injected into every SDK adapter session's system context (ADR 0006) |
 
 ## 7 · Instrumentation
 
 | π feature | π behavior | Crucible status |
 |---|---|---|
 | Context meter | footer context % | **built** — top-bar meter, shows a dash until the adapter reports real usage (A16, honest-data rule) |
-| Token/cost footer | ↑↓ tokens, cache, cost | later (M1 block 5) — per-session live cost, plus cache-health badge and transcript seam, all ruled in m1-parity-core |
-| Usage history | `pi usage` | later (M2+) — a workspace-level view |
+| Token/cost footer | ↑↓ tokens, cache, cost | **built, in part** — a cost-only chip beside the context meter, dashed until the adapter reports real cost, and a full input/output/cache breakdown in the Usage tab. The cache-health badge and the transcript seam are still later (M1 block 5) |
+| Usage history | `pi usage` | **built for the workspace** — Usage tab sums π's per-message usage for the active session and for every curated session of the workspace. No all-time or cross-workspace ledger, and nothing about usage is persisted |
 
 ## Principles that shaped the statuses
 

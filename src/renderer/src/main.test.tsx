@@ -18,7 +18,12 @@ import { act, fireEvent, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { PortRequest, PortResult } from '../../shared/agent/channels'
 import type { PortEvent } from '../../shared/agent/port'
+import type { CommandRequest, CommandResult } from '../../shared/commands/channels'
+import type { WorkspaceRequest, WorkspaceResult } from '../../shared/workspace/channels'
+import type { WorkspaceEvent } from '../../shared/workspace/service'
+import { createScriptedCommands, type ScriptedCommands } from './testing/scripted-commands'
 import { createScriptedPort, oneSession, type ScriptedPort } from './testing/scripted-port'
+import { createScriptedWorkspace, type ScriptedWorkspace } from './testing/scripted-workspace'
 
 const MODEL = {
   id: 'fake/deterministic',
@@ -45,24 +50,43 @@ function dispatch(port: ScriptedPort, { op, args }: PortRequest): Promise<unknow
 }
 
 /**
- * The preload surface a launched window has, over the port main would serve.
- * Failures become `{ ok: false }` values exactly as the channel answers them.
+ * The preload surface a launched window has, over the three seams main serves:
+ * the agent port, the workspace service and the command service. Failures
+ * become `{ ok: false }` values exactly as the channels answer them.
  */
-function pageWithPreload(port: ScriptedPort): void {
+function pageWithPreload(
+  port: ScriptedPort,
+  workspace: ScriptedWorkspace = createScriptedWorkspace(),
+  commands: ScriptedCommands = createScriptedCommands()
+): void {
+  async function answer(
+    on: object,
+    request: PortRequest | WorkspaceRequest | CommandRequest
+  ): Promise<PortResult> {
+    try {
+      return { ok: true, value: await dispatch(on as ScriptedPort, request) }
+    } catch (cause) {
+      return {
+        ok: false,
+        message: cause instanceof Error ? cause.message : 'the stand-in refused'
+      }
+    }
+  }
+
   Object.defineProperty(window, 'crucible', {
     value: {
       agent: {
-        request: async (request: PortRequest): Promise<PortResult> => {
-          try {
-            return { ok: true, value: await dispatch(port, request) }
-          } catch (cause) {
-            return {
-              ok: false,
-              message: cause instanceof Error ? cause.message : 'the stand-in refused'
-            }
-          }
-        },
+        request: (request: PortRequest): Promise<PortResult> => answer(port, request),
         onEvent: (listener: (event: PortEvent) => void): (() => void) => port.onEvent(listener)
+      },
+      workspace: {
+        request: (request: WorkspaceRequest): Promise<WorkspaceResult> =>
+          answer(workspace, request),
+        onEvent: (listener: (event: WorkspaceEvent) => void): (() => void) =>
+          workspace.onEvent(listener)
+      },
+      commands: {
+        request: (request: CommandRequest): Promise<CommandResult> => answer(commands, request)
       }
     },
     configurable: true

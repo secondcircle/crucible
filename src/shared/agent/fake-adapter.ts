@@ -5,19 +5,23 @@ import type {
   BindRequest,
   Binding,
   ConversationAdapter,
-  ResumeRequest
+  ResumeRequest,
+  UsageRequest
 } from './adapter'
 import type { PanelToolName, PanelTools } from './panel-tools'
 import type {
+  AuthMethod,
   BashRunShare,
   HistoryMatch,
   ImageAttachment,
   ModelId,
   ModelInfo,
+  ProviderState,
   QueuedKind,
   QueuedMessage,
   SessionId,
   SessionTree,
+  SessionUsage,
   ThinkingLevel,
   TranscriptItem,
   TreeNode,
@@ -36,6 +40,58 @@ export const FAKE_MODEL: ModelInfo = {
 }
 
 const CONTEXT_WINDOW = 200_000
+
+// What one scripted turn costs, in π's own per-message shape: Mock K's own
+// numbers, so one turn fills the cards exactly as the mock drew them. Fixed,
+// so the chip, the cards and both usage tables are checkable for free (USE-7).
+export const FAKE_TURN_USAGE = {
+  input: { tokens: 4_210, cost: 0.06 },
+  output: { tokens: 18_772, cost: 0.56 },
+  cacheRead: { tokens: 36_900, cost: 0.11 },
+  cacheWrite: { tokens: 2_100, cost: 0.11 }
+} as const
+
+/** 61,982 tokens and 84 cents a turn, every line of it visible at two decimals. */
+const TURN_TOKENS =
+  FAKE_TURN_USAGE.input.tokens +
+  FAKE_TURN_USAGE.output.tokens +
+  FAKE_TURN_USAGE.cacheRead.tokens +
+  FAKE_TURN_USAGE.cacheWrite.tokens
+
+const TURN_COST =
+  FAKE_TURN_USAGE.input.cost +
+  FAKE_TURN_USAGE.output.cost +
+  FAKE_TURN_USAGE.cacheRead.cost +
+  FAKE_TURN_USAGE.cacheWrite.cost
+
+/** Cents, so a sum of turns is exact rather than a float with a tail. */
+function dollars(cents: number): number {
+  return Math.round(cents) / 100
+}
+
+/** The canned catalog: one of every status kind, in Mock K's spirit. */
+const CANNED_PROVIDERS: readonly ProviderState[] = [
+  {
+    id: 'anthropic',
+    name: 'Anthropic',
+    methods: ['oauth', 'api-key'],
+    status: { kind: 'oauth', detail: 'Claude subscription' }
+  },
+  { id: 'openai', name: 'OpenAI', methods: ['api-key'], status: { kind: 'api-key' } },
+  {
+    id: 'google',
+    name: 'Google',
+    methods: ['api-key'],
+    status: { kind: 'env', variable: 'GEMINI_API_KEY' }
+  },
+  {
+    id: 'openrouter',
+    name: 'OpenRouter',
+    methods: ['oauth', 'api-key'],
+    status: { kind: 'none' }
+  },
+  { id: 'groq', name: 'Groq', methods: ['api-key'], status: { kind: 'none' } }
+]
 
 // Long enough that a turn visibly streams, short enough that it is over in
 // about two seconds. Tests pass zero and wait on no clock.
@@ -206,6 +262,9 @@ interface Conversation {
   leafId: string | null
   /** Monotonic within the conversation, and inside the context window. */
   usedTokens: number
+  // How many turns reported usage in this conversation, every branch of it: a
+  // jump abandons a path, never the money spent on it.
+  usageMessages: number
   /** ISO time of the last thing that happened in it. */
   at: string
   minted: number
@@ -232,6 +291,31 @@ interface Bound {
 interface RunningTurn {
   readonly turnId: TurnId
   abandon(reason: 'cancelled' | 'disposed'): void
+}
+
+/** The one login this adapter runs at a time, and the prompt it is waiting on. */
+interface FakeLogin {
+  readonly providerId: string
+  readonly method: AuthMethod
+  readonly promptId: string
+  settle(outcome: 'succeeded' | 'refused' | 'cancelled'): void
+}
+
+/** N turns of the canned per-message numbers, summed exactly as π's would be. */
+export function scaleUsage(messages: number): SessionUsage {
+  const line = (of: { tokens: number; cost: number }): { tokens: number; cost: number } => ({
+    tokens: of.tokens * messages,
+    cost: dollars(of.cost * messages * 100)
+  })
+  return {
+    messages,
+    input: line(FAKE_TURN_USAGE.input),
+    output: line(FAKE_TURN_USAGE.output),
+    cacheRead: line(FAKE_TURN_USAGE.cacheRead),
+    cacheWrite: line(FAKE_TURN_USAGE.cacheWrite),
+    totalTokens: TURN_TOKENS * messages,
+    totalCost: dollars(TURN_COST * messages * 100)
+  }
 }
 
 // Deliberately approximate: the number only has to be coherent and monotonic.
@@ -269,7 +353,14 @@ export function createFakeAdapter({
   const conversations = new Map<string, Conversation>()
   const sessions = new Map<SessionId, Bound>()
   const seeded = new Set<string>()
+  // Credentials last one app run and are written nowhere: a fake login flips a
+  // status in memory and no token exists to store.
+  const providers = new Map<string, ProviderState>(
+    CANNED_PROVIDERS.map((provider) => [provider.id, provider])
+  )
+  let liveLogin: FakeLogin | undefined
   let minted = 0
+  let prompts = 0
 
   function emit(event: AdapterEvent): void {
     // A copy, so a listener that unsubscribes while being called does not
@@ -326,6 +417,7 @@ export function createFakeAdapter({
       entries: [],
       leafId: null,
       usedTokens: 0,
+      usageMessages: 0,
       at: new Date().toISOString(),
       minted: 0
     }
@@ -559,13 +651,17 @@ export function createFakeAdapter({
         conversation.usedTokens + estimateTokens(counted)
       )
       bound.running = undefined
+      // One usage-bearing message per turn, whichever way the turn ended: a
+      // stopped turn was still paid for.
+      conversation.usageMessages += 1
       emit(terminal)
       // Reported after the turn, which is when it is genuinely known.
       emit({
         type: 'usage',
         sessionId,
         usedTokens: conversation.usedTokens,
-        contextWindow: CONTEXT_WINDOW
+        contextWindow: CONTEXT_WINDOW,
+        cost: dollars(conversation.usageMessages * TURN_COST * 100)
       })
     }
 
@@ -977,6 +1073,114 @@ export function createFakeAdapter({
         throw new Error('That thinking level is not one this model supports.')
       }
       requireBound(sessionId).thinkingLevel = level
+    },
+
+    async listProviders(): Promise<readonly ProviderState[]> {
+      // Reported in the catalog's own order, which is what the settings
+      // surface shows.
+      return CANNED_PROVIDERS.map(
+        (canned) => providers.get(canned.id) ?? canned
+      )
+    },
+
+    // Two scripts, one per method, both deterministic: an api-key login asks
+    // for a secret, an OAuth login opens a browser it never really opens and
+    // asks for the pasted code.
+    login(providerId: string, method: AuthMethod): Promise<void> {
+      if (liveLogin !== undefined) {
+        return Promise.reject(
+          new Error('A login is already under way. Finish or cancel it first.')
+        )
+      }
+      const provider = providers.get(providerId)
+      if (provider === undefined) {
+        return Promise.reject(new Error('Crucible does not know that provider.'))
+      }
+
+      prompts += 1
+      const promptId = `fake-auth-${prompts}`
+      const flow: FakeLogin = { providerId, method, promptId, settle: () => {} }
+
+      const finished = new Promise<void>((resolve, reject) => {
+        flow.settle = (outcome) => {
+          liveLogin = undefined
+          if (outcome === 'cancelled') {
+            reject(new Error('That login was cancelled.'))
+            return
+          }
+          if (outcome === 'refused') {
+            reject(new Error('That did not look like a key. Nothing was saved.'))
+            return
+          }
+          providers.set(providerId, {
+            ...provider,
+            status:
+              method === 'oauth'
+                ? { kind: 'oauth', detail: 'the fake flow, no network' }
+                : { kind: 'api-key' }
+          })
+          resolve()
+        }
+      })
+      liveLogin = flow
+
+      if (method === 'oauth') {
+        emit({
+          type: 'auth_notice',
+          notice: {
+            kind: 'auth-url',
+            message: 'Your browser opened for authorization.',
+            url: `https://example.invalid/authorize?provider=${providerId}`
+          }
+        })
+        emit({
+          type: 'auth_prompt',
+          promptId,
+          kind: 'manual-code',
+          message: "If it doesn't come back, paste the redirect URL or code here:",
+          placeholder: 'https://…/callback?code=…'
+        })
+      } else {
+        emit({
+          type: 'auth_prompt',
+          promptId,
+          kind: 'secret',
+          message: `Paste your ${provider.name} API key.`,
+          placeholder: 'sk-…'
+        })
+      }
+
+      return finished
+    },
+
+    async answerAuthPrompt(promptId: string, value: string): Promise<void> {
+      const flow = liveLogin
+      if (flow === undefined || flow.promptId !== promptId) return
+      // Any non-empty answer succeeds; an empty one fails display-safely.
+      flow.settle(value.trim() === '' ? 'refused' : 'succeeded')
+    },
+
+    async cancelLogin(): Promise<void> {
+      const flow = liveLogin
+      if (flow === undefined) return
+      emit({ type: 'auth_prompt_closed', promptId: flow.promptId })
+      flow.settle('cancelled')
+    },
+
+    async logout(providerId: string): Promise<void> {
+      const provider = providers.get(providerId)
+      if (provider === undefined) throw new Error('Crucible does not know that provider.')
+      providers.set(providerId, { ...provider, status: { kind: 'none' } })
+    },
+
+    // Bound or not: an unbound session is found by its own token, exactly as
+    // the SDK adapter finds one.
+    async sessionUsage(request: UsageRequest): Promise<SessionUsage | undefined> {
+      const conversation =
+        sessions.get(request.sessionId)?.conversation ??
+        (request.token === undefined ? undefined : conversations.get(request.token))
+      if (conversation === undefined || conversation.usageMessages === 0) return undefined
+      return scaleUsage(conversation.usageMessages)
     },
 
     prompt(

@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react'
 import type { ModelInfo, ThinkingLevel } from '../../../shared/agent/port'
+import type { CommandInfo } from '../../../shared/commands/service'
+import { commandFragment, filterCommands } from '../../../shared/commands/template'
 import './composer.css'
 
 // The textarea stays editable while the session works so the next instruction
@@ -19,10 +21,19 @@ const FILE_TOKEN = /@([\w./-]*)$/
 
 const FILE_ROWS = 7
 
+const COMMAND_ROWS = 7
+
 /** Any number of leading `!` is the same grammar, so `!!` never differs. */
 function bashCommandOf(draft: string): string | undefined {
   if (!draft.startsWith('!')) return undefined
   return draft.replace(/^!+/, '').trim()
+}
+
+/** What an origin badge says, in the words the glossary uses for the three origins. */
+const ORIGIN_LABEL: Record<CommandInfo['origin'], string> = {
+  workspace: 'workspace',
+  user: 'user',
+  'built-in': 'built-in'
 }
 
 export function Composer({
@@ -38,6 +49,7 @@ export function Composer({
   thinkingMenuOpen,
   attachments,
   files,
+  commands,
   workspaceName,
   workspacePath,
   boxRef,
@@ -69,6 +81,9 @@ export function Composer({
   readonly attachments: readonly Attachment[]
   /** The file popover's results; absent means the popover is closed. */
   readonly files?: readonly string[]
+  // Every command this workspace can reach, winners only. Absent means the
+  // list has not been read yet, which is not the same as an empty folder.
+  readonly commands?: readonly CommandInfo[]
   readonly workspaceName?: string
   readonly workspacePath?: string
   /** Held above, because what restores a queued message also focuses it. */
@@ -97,14 +112,40 @@ export function Composer({
     readonly of?: readonly string[]
     readonly at: number
   }>({ at: 0 })
+  // The command popover's selection is its own: a fresh set of rows is looked
+  // at from the top.
+  const [commandAt, setCommandAt] = useState<{ readonly of?: string; readonly at: number }>({
+    at: 0
+  })
   const command = bashCommandOf(draft)
   const bash = command !== undefined
   const shown = (files ?? []).slice(0, FILE_ROWS)
   const filesOpen = files !== undefined && !bash
   const selected = selection.of === files ? selection.at : 0
 
+  // The first character decides which grammar the draft is in, and nothing
+  // else does (COMP-1).
+  const commandMode = draft.startsWith('/')
+  const fragment = commandFragment(draft)
+  const matches =
+    fragment === undefined || commands === undefined
+      ? undefined
+      : filterCommands(commands, fragment).slice(0, COMMAND_ROWS)
+  const commandSelected = commandAt.of === fragment ? commandAt.at : 0
+
   function select(at: number): void {
     setSelection({ of: files, at })
+  }
+
+  function selectCommand(at: number): void {
+    setCommandAt({ of: fragment, at })
+  }
+
+  // Nothing is sent and nothing is expanded here: the name goes into the draft
+  // with the space the arguments follow (COMP-4).
+  function insertCommand(name: string): void {
+    onDraft(`/${name} `)
+    boxRef?.current?.focus()
   }
 
   // Sending and queueing ask the same question of a draft, except that
@@ -138,10 +179,11 @@ export function Composer({
   /** The mouse and dictation path to a grammar that is otherwise typed. */
   function insertAt(text: string): void {
     const box = boxRef?.current ?? null
-    if (text === '!') {
-      // Bash mode is a property of the whole line, so the bang goes in front
-      // of it rather than wherever the caret happens to sit.
-      onDraft(`!${draft}`)
+    if (text === '!' || text === '/') {
+      // Both modes are a property of the whole line, so the character goes in
+      // front of it rather than wherever the caret happens to sit. What was
+      // already typed is kept: it becomes the command's arguments.
+      if (!draft.startsWith(text)) onDraft(`${text}${draft}`)
       box?.focus()
       return
     }
@@ -158,6 +200,35 @@ export function Composer({
 
   return (
     <div className="composer">
+      {matches === undefined ? null : (
+        <div className="cmdpop" role="listbox" aria-label="Commands">
+          <div className="pophead">
+            Commands — type to filter, ⏎ inserts the name
+          </div>
+          {matches.length === 0 ? (
+            <div className="popempty">No command matches "{fragment}"</div>
+          ) : (
+            matches.map((found, index) => (
+              <button
+                key={`${found.origin}:${found.name}`}
+                className={`cmdrow${index === commandSelected ? ' sel' : ''}`}
+                role="option"
+                aria-selected={index === commandSelected}
+                onMouseDown={(clicked) => clicked.preventDefault()}
+                onClick={() => insertCommand(found.name)}
+              >
+                <span className="cname">/{found.name}</span>
+                {found.argumentHint === undefined ? null : (
+                  <span className="cargs">{found.argumentHint}</span>
+                )}
+                <span className="cdesc">{found.description}</span>
+                <span className={`scope ${found.origin}`}>{ORIGIN_LABEL[found.origin]}</span>
+              </button>
+            ))
+          )}
+        </div>
+      )}
+
       {files === undefined || bash ? null : (
         <div className="filepop" role="listbox" aria-label="Files in this workspace">
           <div className="pophead">
@@ -206,15 +277,21 @@ export function Composer({
         </div>
       )}
 
-      <div className={`cbox${bash ? ' bash' : ''}`}>
+      <div className={`cbox${bash ? ' bash' : ''}${commandMode ? ' cmd' : ''}`}>
         {bash ? (
           <div className="modebadge">
             bash <span className="cwd">· {workspacePath ?? ''}</span>
           </div>
+        ) : commandMode ? (
+          <div className="modebadge command">command</div>
         ) : null}
         <textarea
           aria-label="Message"
-          placeholder={disabled ? 'No session' : 'Message the agent — @ a file, ! runs bash, ⌘V pastes an image'}
+          placeholder={
+            disabled
+              ? 'No session'
+              : 'Message the agent — / for commands, @ a file, ! runs bash, ⌘V pastes an image'
+          }
           value={draft}
           disabled={disabled}
           onChange={(changed) => {
@@ -229,6 +306,30 @@ export function Composer({
           }}
           ref={boxRef}
           onKeyDown={(pressed) => {
+            // The command popover owns Enter while it is open, exactly as the
+            // file popover does: nothing can send from under it.
+            // The popover is open exactly when there are rows to show.
+            if (matches !== undefined) {
+              if (matches.length === 0) {
+                if (pressed.key === 'Enter' && !pressed.shiftKey) {
+                  pressed.preventDefault()
+                  return
+                }
+              } else {
+                if (pressed.key === 'ArrowDown' || pressed.key === 'ArrowUp') {
+                  pressed.preventDefault()
+                  const by = pressed.key === 'ArrowDown' ? 1 : matches.length - 1
+                  selectCommand((commandSelected + by) % matches.length)
+                  return
+                }
+                if (pressed.key === 'Enter' || pressed.key === 'Tab') {
+                  pressed.preventDefault()
+                  const found = matches[commandSelected]
+                  if (found !== undefined) insertCommand(found.name)
+                  return
+                }
+              }
+            }
             // While the popover is open Enter belongs to it, so nothing here
             // can send a draft nobody can unsend.
             if (filesOpen) {
@@ -314,8 +415,16 @@ export function Composer({
             ) : null}
           </div>
 
-          {/* Typed grammar is an accelerator; these two are the mouse and
+          {/* Typed grammar is an accelerator; these three are the mouse and
               dictation path to the same thing. */}
+          <button
+            className="chip grammar"
+            aria-label="Browse commands"
+            disabled={disabled || bash}
+            onClick={() => insertAt('/')}
+          >
+            / command
+          </button>
           <button
             className="chip grammar"
             aria-label="Mention a file"
@@ -384,6 +493,9 @@ export function Composer({
             <kbd>⇧⏎</kbd> newline
           </>
         )}
+        {commandMode && !working ? (
+          <span className="cmdnote"> — a command expands before it is sent</span>
+        ) : null}
       </div>
     </div>
   )

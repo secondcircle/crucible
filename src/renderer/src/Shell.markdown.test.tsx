@@ -7,6 +7,7 @@ import { describe, expect, it } from 'vitest'
 import { Shell } from './Shell'
 import { createScriptedPort, oneSession } from './testing/scripted-port'
 import { createScriptedWorkspace } from './testing/scripted-workspace'
+import { createScriptedCommands } from './testing/scripted-commands'
 import { settled } from './testing/settled'
 
 const REPLY = [
@@ -21,7 +22,11 @@ const REPLY = [
 
 async function replyWith(deltas: readonly string[]): Promise<void> {
   const port = createScriptedPort(oneSession())
-  render(<Shell port={port} workspace={createScriptedWorkspace()} />)
+  render(<Shell
+      port={port}
+      workspace={createScriptedWorkspace()}
+      commands={createScriptedCommands()}
+    />)
   await screen.findByRole('button', { name: /^Session · / })
   await settled()
 
@@ -95,7 +100,11 @@ describe('what a reply can never do', () => {
 describe('a person\u2019s own message', () => {
   it('is plain text, whatever it looks like', async () => {
     const port = createScriptedPort(oneSession())
-    render(<Shell port={port} workspace={createScriptedWorkspace()} />)
+    render(<Shell
+      port={port}
+      workspace={createScriptedWorkspace()}
+      commands={createScriptedCommands()}
+    />)
     await screen.findByRole('button', { name: /^Session · / })
 
     act(() => {

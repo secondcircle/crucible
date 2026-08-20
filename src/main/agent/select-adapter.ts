@@ -11,9 +11,21 @@ export interface SelectedAdapter {
   readonly flavor: Flavor
 }
 
+export interface SdkOptions {
+  // Crucible's shipped agent-facing doc (ADR 0006), read by the caller: the
+  // SDK adapter puts it into every session's system context.
+  readonly agentDoc?: string
+  /** Opening the OS browser during a login; only main can do it. */
+  readonly openExternal?: (url: string) => void
+}
+
 // The only reader of `CRUCIBLE_AGENT`, so no caller has to know the variable
 // exists. The fallback to the fake is silent, so every launch records it.
-export function selectAdapter(log: LogSink, panel: FakePanel): SelectedAdapter {
+export function selectAdapter(
+  log: LogSink,
+  panel: FakePanel,
+  sdk: SdkOptions = {}
+): SelectedAdapter {
   const requested = process.env.CRUCIBLE_AGENT
   const asked = requested === undefined || requested === '' ? null : requested
 
@@ -31,7 +43,11 @@ export function selectAdapter(log: LogSink, panel: FakePanel): SelectedAdapter {
     flavor,
     adapter:
       flavor === 'sdk'
-        ? createSdkAdapter({ panel: panel.tools })
+        ? createSdkAdapter({
+            panel: panel.tools,
+            ...(sdk.agentDoc === undefined ? {} : { agentDoc: sdk.agentDoc }),
+            ...(sdk.openExternal === undefined ? {} : { openExternal: sdk.openExternal })
+          })
         : createFakeAdapter({ panel })
   }
 }

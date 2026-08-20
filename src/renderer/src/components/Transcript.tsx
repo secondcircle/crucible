@@ -14,11 +14,16 @@ import './transcript.css'
 // up stops the follow, and nothing pulls them back down.
 export function Transcript({
   items,
-  sessionId
+  sessionId,
+  invocations
 }: {
   readonly items: readonly ViewItem[]
   /** Switching sessions starts the reader at the bottom of the new one again. */
   readonly sessionId: string
+  // Delivered text to the invocation that produced it, remembered by this
+  // document for this session. The port never learns commands exist (ADR
+  // 0007), so this mapping lives here and nowhere else.
+  readonly invocations?: ReadonlyMap<string, string>
 }): React.JSX.Element {
   const scroller = useRef<HTMLDivElement>(null)
   const content = useRef<HTMLOListElement>(null)
@@ -76,7 +81,11 @@ export function Transcript({
           // The session is part of the key, so what a reader opened in one
           // session can never be what another session shows opened.
           <li key={`${sessionId}:${row.key}`}>
-            {row.kind === 'chain' ? <Chain chain={row.chain} /> : <Item item={row.item} />}
+            {row.kind === 'chain' ? (
+              <Chain chain={row.chain} />
+            ) : (
+              <Item item={row.item} invocations={invocations} />
+            )}
           </li>
         ))}
       </ol>
@@ -84,9 +93,21 @@ export function Transcript({
   )
 }
 
-function Item({ item }: { readonly item: LoneItem }): React.JSX.Element {
+function Item({
+  item,
+  invocations
+}: {
+  readonly item: LoneItem
+  readonly invocations?: ReadonlyMap<string, string>
+}): React.JSX.Element {
   switch (item.kind) {
-    case 'user':
+    case 'user': {
+      // A message this document expanded from a command reads as the
+      // invocation, and opens to the delivered text byte for byte.
+      const invocation = invocations?.get(item.text)
+      if (invocation !== undefined) {
+        return <CommandMessage invocation={invocation} delivered={item.text} />
+      }
       return (
         <div className="msg user" aria-label="You">
           <div className="who">You</div>
@@ -106,6 +127,7 @@ function Item({ item }: { readonly item: LoneItem }): React.JSX.Element {
           )}
         </div>
       )
+    }
 
     // A run the user added to the conversation, in the tool row's own visual
     // grammar and marked for what it is: the model can see this one.
@@ -143,6 +165,37 @@ function Item({ item }: { readonly item: LoneItem }): React.JSX.Element {
         </div>
       )
   }
+}
+
+// Compact by default and honest underneath: the compact form is presentation,
+// never a different record, so what opens is exactly what crossed the port.
+function CommandMessage({
+  invocation,
+  delivered
+}: {
+  readonly invocation: string
+  readonly delivered: string
+}): React.JSX.Element {
+  const [open, setOpen] = useState(false)
+
+  return (
+    <div className="msg user command" aria-label="You">
+      <div className="who">You</div>
+      <button
+        className="bubble cmdbubble"
+        aria-expanded={open}
+        aria-label={`Command ${invocation}`}
+        onClick={() => setOpen(!open)}
+      >
+        <span className="disc" aria-hidden="true">
+          {open ? '▾' : '▸'}
+        </span>
+        <span className="cmdtext">{invocation}</span>
+        <span className="cmdsaid">{open ? 'delivered' : 'command'}</span>
+      </button>
+      {open ? <div className="bubble cmdfull">{delivered}</div> : null}
+    </div>
+  )
 }
 
 // A single dim element, no heading and no collapse: the header row stacked on

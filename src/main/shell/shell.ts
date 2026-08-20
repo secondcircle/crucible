@@ -2,6 +2,7 @@ import { basename } from 'node:path'
 import type { Binding, ConversationAdapter } from '../../shared/agent/adapter'
 import type {
   AgentPort,
+  AuthMethod,
   BashRunShare,
   HistoryMatch,
   ImageAttachment,
@@ -9,11 +10,13 @@ import type {
   ModelInfo,
   PortEvent,
   PortEventListener,
+  ProviderState,
   QueuedKind,
   QueueState,
   SessionId,
   SessionState,
   SessionTree,
+  SessionUsage,
   ShellSnapshot,
   TabId,
   ThinkingLevel,
@@ -86,7 +89,12 @@ export function createShell({
 }: ShellOptions): Shell {
   const listeners = new Set<PortEventListener>()
   const live = new Map<SessionId, LiveTurn>()
-  const usage = new Map<SessionId, { usedTokens: number; contextWindow: number }>()
+  // The cost rides in the same fold as the tokens: absent until the adapter
+  // has genuinely reported it.
+  const usage = new Map<
+    SessionId,
+    { usedTokens: number; contextWindow: number; cost?: number }
+  >()
   // Folded from `queue_changed` exactly as usage is, so the strip renders from
   // the snapshot and survives both a session switch and a renderer reload.
   const queues = new Map<SessionId, QueueState>()
@@ -418,10 +426,22 @@ export function createShell({
   // The subscription is the shell's own and lasts as long as the launch: it
   // records what the adapter did, not what some document happened to watch.
   adapter.onEvent((event) => {
+    // Credentials belong to the machine rather than to any conversation, so
+    // these events carry no session and pass straight through.
+    if (
+      event.type === 'auth_prompt' ||
+      event.type === 'auth_prompt_closed' ||
+      event.type === 'auth_notice'
+    ) {
+      emit(event)
+      return
+    }
+
     if (event.type === 'usage') {
       usage.set(event.sessionId, {
         usedTokens: event.usedTokens,
-        contextWindow: event.contextWindow
+        contextWindow: event.contextWindow,
+        ...(event.cost === undefined ? {} : { cost: event.cost })
       })
       emitState()
       return
@@ -712,6 +732,40 @@ export function createShell({
 
     listModels(): Promise<readonly ModelInfo[]> {
       return adapter.listModels()
+    },
+
+    listProviders(): Promise<readonly ProviderState[]> {
+      return adapter.listProviders()
+    },
+
+    async login(providerId: string, method: AuthMethod): Promise<void> {
+      await adapter.login(providerId, method)
+    },
+
+    async answerAuthPrompt(promptId: string, value: string): Promise<void> {
+      await adapter.answerAuthPrompt(promptId, value)
+    },
+
+    async cancelLogin(): Promise<void> {
+      await adapter.cancelLogin()
+    },
+
+    async logout(providerId: string): Promise<void> {
+      await adapter.logout(providerId)
+    },
+
+    // Curated sessions only, bound or not: the token is the adapter's own
+    // string and stays opaque on the way through.
+    async sessionUsage(id: SessionId): Promise<SessionUsage | undefined> {
+      const session = store.session(id)
+      if (session === undefined) return undefined
+      const workspace = store.workspace(session.workspaceId)
+      if (workspace === undefined) return undefined
+      return adapter.sessionUsage({
+        sessionId: id,
+        workspacePath: workspace.path,
+        ...(session.token === undefined ? {} : { token: session.token })
+      })
     },
 
     async setModel(sessionId: SessionId, model: ModelId): Promise<void> {

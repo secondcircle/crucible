@@ -1,5 +1,9 @@
 import type {
   AgentPort,
+  AuthMethod,
+  AuthNotice,
+  AuthPromptKind,
+  AuthPromptOption,
   BashRunShare,
   HistoryMatch,
   ImageAttachment,
@@ -9,12 +13,14 @@ import type {
   PanelTab,
   PortEvent,
   PortEventListener,
+  ProviderState,
   QueuedKind,
   QueuedMessage,
   QueueState,
   SessionId,
   SessionState,
   SessionTree,
+  SessionUsage,
   ShellSnapshot,
   TabId,
   ThinkingLevel,
@@ -59,6 +65,26 @@ export interface ScriptedPort extends AgentPort {
   // `state` event goes out, and `panel_shown` follows it.
   showTab(sessionId: SessionId, tab: PanelTab): void
   panelOf(sessionId: SessionId): PanelState | undefined
+
+  /** What `listProviders` answers with; a test may change it between calls. */
+  providers: readonly ProviderState[]
+  /** What `sessionUsage` answers with, per session; absent means no numbers yet. */
+  readonly usage: Map<SessionId, SessionUsage>
+  /** True while a login the renderer started has not settled. */
+  loginLive(): boolean
+  /** Settles that login the way main does, with success or a display-safe message. */
+  finishLogin(outcome: 'succeeded' | { readonly failure: string }): void
+  /** A login's question, exactly as main announces one. */
+  authPrompt(prompt: {
+    readonly promptId: string
+    readonly kind: AuthPromptKind
+    readonly message: string
+    readonly placeholder?: string
+    readonly options?: readonly AuthPromptOption[]
+  }): void
+  /** The flow resolved a pending question out of band. */
+  closeAuthPrompt(promptId: string): void
+  authNotice(notice: AuthNotice): void
 
   update(change: (snapshot: ShellSnapshot) => ShellSnapshot): void
   emit(event: PortEvent): void
@@ -178,11 +204,14 @@ export function createScriptedPort(initial: Partial<ShellSnapshot> = {}): Script
   }
 
   let held: ((outcome: 'delivered' | 'dropped') => void) | undefined
+  let login: { resolve: () => void; reject: (cause: Error) => void } | undefined
 
   const port: ScriptedPort = {
     calls,
     models: [],
     history: [],
+    providers: [],
+    usage: new Map(),
     transcripts: new Map(),
     trees: new Map(),
     exhibits: new Map(),
@@ -350,6 +379,65 @@ export function createScriptedPort(initial: Partial<ShellSnapshot> = {}): Script
     },
 
     listModels: () => record('listModels', [], port.models),
+
+    listProviders: () => record('listProviders', [], port.providers),
+
+    // Held open until the test settles it, which is what a login is: a flow
+    // that runs while its questions are answered.
+    login(providerId: string, method: AuthMethod): Promise<void> {
+      calls.push({ op: 'login', args: [providerId, method] })
+      if (login !== undefined) {
+        return Promise.reject(
+          new Error('A login is already under way. Finish or cancel it first.')
+        )
+      }
+      return new Promise<void>((resolve, reject) => {
+        login = { resolve, reject }
+      })
+    },
+
+    answerAuthPrompt(promptId: string, value: string): Promise<void> {
+      calls.push({ op: 'answerAuthPrompt', args: [promptId, value] })
+      return Promise.resolve()
+    },
+
+    cancelLogin(): Promise<void> {
+      calls.push({ op: 'cancelLogin', args: [] })
+      const live = login
+      login = undefined
+      live?.reject(new Error('That login was cancelled.'))
+      return Promise.resolve()
+    },
+
+    logout(providerId: string): Promise<void> {
+      calls.push({ op: 'logout', args: [providerId] })
+      return Promise.resolve()
+    },
+
+    sessionUsage: (id: SessionId) =>
+      record('sessionUsage', [id], port.usage.get(id)),
+
+    loginLive: () => login !== undefined,
+
+    finishLogin(outcome): void {
+      const live = login
+      login = undefined
+      if (live === undefined) return
+      if (outcome === 'succeeded') live.resolve()
+      else live.reject(new Error(outcome.failure))
+    },
+
+    authPrompt(prompt): void {
+      emit({ type: 'auth_prompt', ...prompt })
+    },
+
+    closeAuthPrompt(promptId): void {
+      emit({ type: 'auth_prompt_closed', promptId })
+    },
+
+    authNotice(notice): void {
+      emit({ type: 'auth_notice', notice })
+    },
 
     setModel(sessionId: SessionId, model: ModelId): Promise<void> {
       calls.push({ op: 'setModel', args: [sessionId, model] })

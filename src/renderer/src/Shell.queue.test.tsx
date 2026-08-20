@@ -9,6 +9,7 @@ import { sessionLabel } from './labels'
 import { Shell } from './Shell'
 import { createScriptedPort, oneSession, type ScriptedPort } from './testing/scripted-port'
 import { createScriptedWorkspace } from './testing/scripted-workspace'
+import { createScriptedCommands } from './testing/scripted-commands'
 import { settled } from './testing/settled'
 
 const TWO_SESSIONS: ShellSnapshot = {
@@ -26,7 +27,11 @@ async function shellWithSession(
 ): Promise<ScriptedPort> {
   const port = createScriptedPort(snapshot)
   port.models = [{ id: 'fake/deterministic', label: 'Fake', thinkingLevels: ['off', 'low'] }]
-  render(<Shell port={port} workspace={createScriptedWorkspace()} />)
+  render(<Shell
+      port={port}
+      workspace={createScriptedWorkspace()}
+      commands={createScriptedCommands()}
+    />)
   await screen.findAllByRole('button', { name: /^Session · / })
   await settled()
   return port

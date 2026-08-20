@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useReducer, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react'
 import type {
   AgentPort,
   HistoryMatch,
@@ -8,6 +8,8 @@ import type {
   ThinkingLevel,
   WorkspaceId
 } from '../../shared/agent/port'
+import type { CommandInfo, CommandService } from '../../shared/commands/service'
+import { commandFragment } from '../../shared/commands/template'
 import type {
   RunId,
   WorkspaceEvent,
@@ -20,10 +22,13 @@ import { ContextPanel, PanelEdge } from './components/ContextPanel'
 import { entriesOf, QueuedStrip } from './components/QueuedStrip'
 import { ResumeOverlay } from './components/ResumeOverlay'
 import { SessionTree } from './components/SessionTree'
+import { Settings, type SettingsTab } from './components/Settings'
 import { Sidebar } from './components/Sidebar'
 import { TopBar } from './components/TopBar'
 import { Transcript } from './components/Transcript'
 import { readAttachment, refuse } from './images'
+import { contextPercent } from './labels'
+import { useAuth } from './settings/use-auth'
 import { knownEmpty, NOTHING_YET, reduce } from './state/shell-state'
 import './shell.css'
 
@@ -51,10 +56,15 @@ const JUMPED_WITH_SUMMARY =
 
 export function Shell({
   port,
-  workspace: service
+  workspace: service,
+  commands
 }: {
   readonly port: AgentPort
   readonly workspace: WorkspaceService
+  // Beside the port, never behind it: a command is expanded here, in
+  // Crucible's own service, and the port never learns commands exist (ADR
+  // 0007).
+  readonly commands: CommandService
 }): React.JSX.Element {
   const [state, dispatch] = useReducer(reduce, NOTHING_YET)
   const [popover, setPopover] = useState<Popover>('none')
@@ -80,6 +90,21 @@ export function Shell({
   // the window. Both are this document's memory and neither outlives it.
   const [collapsed, setCollapsed] = useState<Readonly<Record<SessionId, boolean>>>({})
   const [panelWidth, setPanelWidth] = useState<number | undefined>(undefined)
+  // The commands this workspace can reach, read fresh every time the popover
+  // opens, and the Escape that closed it (CMD-8, COMP-4).
+  const [commandList, setCommandList] = useState<readonly CommandInfo[] | undefined>(undefined)
+  const [commandPopoverClosed, setCommandPopoverClosed] = useState(false)
+  // Delivered text back to the invocation that produced it, per session. The
+  // port never learns commands exist, so this memory is the document's and
+  // lasts exactly as long as it does (ROW-2, ROW-3).
+  const [invocations, setInvocations] = useState<
+    Readonly<Record<SessionId, Readonly<Record<string, string>>>>
+  >({})
+  // Open, and which tab: renderer state, per window, never persisted (SET-5).
+  const [settings, setSettings] = useState<{
+    readonly open: boolean
+    readonly tab: SettingsTab
+  }>({ open: false, tab: 'providers' })
   /** Sessions whose settled history this document has already asked for. */
   const fetched = useRef<Set<SessionId>>(new Set())
   // Restoring a queued message puts the caret back where the words are.
@@ -103,6 +128,17 @@ export function Shell({
   const model = models.find((candidate) => candidate.id === session?.model)
   const elapsedSeconds = useElapsedSeconds(working ? view?.turn?.startedAt : undefined)
   const chips = activeSessionId === undefined ? [] : (attachments[activeSessionId] ?? [])
+  const draft = activeSessionId === undefined ? '' : (drafts[activeSessionId] ?? '')
+  /** The folder a command list belongs to, which is what a fetch depends on. */
+  const workspacePath = active?.path
+  // The popover belongs to the name being typed, and Escape closes it until
+  // the next edit reopens it.
+  const browsingCommands =
+    session !== undefined && !commandPopoverClosed && commandFragment(draft) !== undefined
+  const shownInvocations = useMemo(() => {
+    const remembered = activeSessionId === undefined ? {} : (invocations[activeSessionId] ?? {})
+    return new Map(Object.entries(remembered))
+  }, [activeSessionId, invocations])
   // The visible panel is the active session's and no other's: a background
   // session's tabs wait in that session until the user switches to it.
   const panel = session?.panel
@@ -114,6 +150,20 @@ export function Shell({
   const report = useCallback((cause: unknown): void => {
     setFailure(cause instanceof Error ? cause.message : String(cause))
   }, [])
+
+  // What a completed login or logout changes above the port: the models the
+  // credentials now reach (PROV-4).
+  const refetchModels = useCallback((): void => {
+    void port
+      .listModels()
+      .then((listed) => dispatch({ type: 'models', models: listed }))
+      .catch(report)
+  }, [port, report])
+
+  const auth = useAuth(port, refetchModels)
+  // Read out here so the effects below depend on what they use rather than on
+  // an object that is new every render.
+  const { login: liveLogin, closeLogin, refresh: refreshProviders } = auth
 
   // A draft being typed is never destroyed: restored text lands above it,
   // where the words that were interrupted belong.
@@ -207,6 +257,32 @@ export function Shell({
     return () => clearTimeout(clear)
   }, [toast])
 
+  // Read again every time the popover opens, so a command an agent wrote a
+  // moment ago is in this very list. Closing forgets it, which is what makes
+  // the next opening a fresh read (CMD-8).
+  useEffect(() => {
+    if (!browsingCommands || workspacePath === undefined) return
+    let current = true
+    void commands
+      .list(workspacePath)
+      .then((listed) => {
+        if (current) setCommandList(listed)
+      })
+      .catch((cause: unknown) => {
+        if (current) report(cause)
+      })
+    return () => {
+      current = false
+      setCommandList(undefined)
+    }
+  }, [browsingCommands, workspacePath, commands, report])
+
+  // The providers are read when the tab that shows them is on screen, never
+  // held between openings: a credential may have changed elsewhere.
+  useEffect(() => {
+    if (settings.open && settings.tab === 'providers') refreshProviders()
+  }, [settings.open, settings.tab, refreshProviders])
+
   const cancel = useCallback((): void => {
     if (activeSessionId === undefined || !working) return
     void port.cancel(activeSessionId).catch(report)
@@ -230,6 +306,18 @@ export function Shell({
   useEffect(() => {
     function onKeyDown(pressed: KeyboardEvent): void {
       if (pressed.key !== 'Escape') return
+      // A login dialog closes before the sheet behind it, and the sheet before
+      // anything else Escape already does (SET-4).
+      if (liveLogin !== undefined) {
+        pressed.preventDefault()
+        closeLogin()
+        return
+      }
+      if (settings.open) {
+        pressed.preventDefault()
+        setSettings((current) => ({ ...current, open: false }))
+        return
+      }
       if (question !== undefined) {
         pressed.preventDefault()
         setQuestion(undefined)
@@ -238,6 +326,11 @@ export function Shell({
       if (popover !== 'none') {
         pressed.preventDefault()
         setPopover('none')
+        return
+      }
+      if (browsingCommands) {
+        pressed.preventDefault()
+        setCommandPopoverClosed(true)
         return
       }
       if (fileToken !== undefined) {
@@ -267,7 +360,20 @@ export function Shell({
     }
     document.addEventListener('keydown', onKeyDown)
     return () => document.removeEventListener('keydown', onKeyDown)
-  }, [question, popover, fileToken, treeOpen, activeSessionId, working, cancel, openTree])
+  }, [
+    question,
+    popover,
+    fileToken,
+    treeOpen,
+    activeSessionId,
+    working,
+    cancel,
+    openTree,
+    liveLogin,
+    closeLogin,
+    settings.open,
+    browsingCommands
+  ])
 
   // Paste and drag are the only ways in, and they do nothing with no session
   // to attach to.
@@ -317,10 +423,12 @@ export function Shell({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeSessionId])
 
-  const draft = activeSessionId === undefined ? '' : (drafts[activeSessionId] ?? '')
-
   function setDraft(text: string): void {
     if (activeSessionId === undefined) return
+    // Editing reopens a popover Escape closed, and clears whatever the last
+    // send or expansion had to say (COMP-7).
+    setCommandPopoverClosed(false)
+    setFailure(undefined)
     setDrafts((current) => ({ ...current, [activeSessionId]: text }))
   }
 
@@ -356,6 +464,34 @@ export function Shell({
     }))
   }
 
+  // A command is expanded before anything crosses the port, and what crosses
+  // is ordinary text: the queue, the transcript and the port see the delivered
+  // words and nothing command-shaped (COMP-7).
+  function expanded(id: SessionId, text: string, deliver: (text: string) => void): void {
+    if (!text.startsWith('/') || active === undefined) {
+      deliver(text)
+      return
+    }
+    void commands
+      .expand(active.path, text)
+      .then((expansion) => {
+        // A leading `/` that names no command is just text.
+        if (expansion.kind === 'plain') {
+          deliver(text)
+          return
+        }
+        // Remembered here, keyed by what was delivered, which is the only
+        // thing the transcript will ever see of it again.
+        setInvocations((current) => ({
+          ...current,
+          [id]: { ...(current[id] ?? {}), [expansion.text]: text }
+        }))
+        deliver(expansion.text)
+      })
+      // Nothing sends, and the draft stays exactly where it is.
+      .catch(report)
+  }
+
   /** Enter: a prompt while idle, a steering message while the session works. */
   function send(): void {
     const id = activeSessionId
@@ -365,20 +501,22 @@ export function Shell({
     // Steering and follow-up carry text only in this cut, so a message with
     // chips waits rather than losing them.
     if (working && chips.length > 0) return
-    setDrafts((current) => ({ ...current, [id]: '' }))
-    setFailure(undefined)
-    if (working) {
-      // Nothing is echoed into the transcript: a queued message appears only
-      // in the strip until the port says it was delivered.
-      void port.steer(id, text).catch(report)
-      return
-    }
-    const images = chips.map((chip) => ({ mimeType: chip.mimeType, data: chip.data }))
-    setAttachments((current) => ({ ...current, [id]: [] }))
-    // What was sent stands in the transcript at once; the turn it starts
-    // arrives as events.
-    dispatch({ type: 'sent', sessionId: id, text, images })
-    void port.prompt(id, text, images.length === 0 ? undefined : images).catch(report)
+    expanded(id, text, (delivered) => {
+      setDrafts((current) => ({ ...current, [id]: '' }))
+      setFailure(undefined)
+      if (working) {
+        // Nothing is echoed into the transcript: a queued message appears only
+        // in the strip until the port says it was delivered.
+        void port.steer(id, delivered).catch(report)
+        return
+      }
+      const images = chips.map((chip) => ({ mimeType: chip.mimeType, data: chip.data }))
+      setAttachments((current) => ({ ...current, [id]: [] }))
+      // What was sent stands in the transcript at once; the turn it starts
+      // arrives as events.
+      dispatch({ type: 'sent', sessionId: id, text: delivered, images })
+      void port.prompt(id, delivered, images.length === 0 ? undefined : images).catch(report)
+    })
   }
 
   /** Option+Enter: a follow-up while working, and exactly Enter while idle. */
@@ -392,9 +530,11 @@ export function Shell({
     if (chips.length > 0) return
     const text = draft.trim()
     if (text === '') return
-    setDrafts((current) => ({ ...current, [id]: '' }))
-    setFailure(undefined)
-    void port.followUp(id, text).catch(report)
+    expanded(id, text, (delivered) => {
+      setDrafts((current) => ({ ...current, [id]: '' }))
+      setFailure(undefined)
+      void port.followUp(id, delivered).catch(report)
+    })
   }
 
   function dequeue(kind: QueuedKind, text: string): void {
@@ -697,6 +837,8 @@ export function Shell({
             else openTree()
           }}
           onResetSession={resetSession}
+          onOpenSettings={() => setSettings({ open: true, tab: 'providers' })}
+          onOpenUsage={() => setSettings({ open: true, tab: 'usage' })}
         />
 
         {/* The tree overlays this region and nothing else: the composer below
@@ -717,7 +859,11 @@ export function Shell({
               </button>
             </div>
           ) : (
-            <Transcript items={items} sessionId={session.id} />
+            <Transcript
+              items={items}
+              sessionId={session.id}
+              invocations={shownInvocations}
+            />
           )}
 
           {treeOpen && session !== undefined ? (
@@ -769,6 +915,7 @@ export function Shell({
           thinkingMenuOpen={popover === 'thinking'}
           attachments={chips}
           files={shownFiles}
+          commands={browsingCommands ? commandList : undefined}
           workspaceName={active?.name}
           workspacePath={active?.path}
           onDraft={setDraft}
@@ -812,6 +959,22 @@ export function Shell({
 
       {popover === 'resume' ? (
         <ResumeOverlay onSearch={search} onChoose={resume} onClose={() => setPopover('none')} />
+      ) : null}
+
+      {settings.open ? (
+        <Settings
+          tab={settings.tab}
+          onTab={(tab) => setSettings((current) => ({ ...current, tab }))}
+          onClose={() => setSettings((current) => ({ ...current, open: false }))}
+          port={port}
+          auth={auth}
+          workspace={active}
+          sessions={snapshot.sessions.filter(
+            (candidate) => candidate.workspaceId === activeWorkspaceId
+          )}
+          activeSessionId={activeSessionId}
+          contextPercent={contextPercent(session?.usage)}
+        />
       ) : null}
 
       {question === undefined ? null : question.kind === 'reset' ? (

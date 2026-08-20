@@ -23,8 +23,36 @@
   color: var(--ok);
 }
 
+.top .spacer {
+  flex: 1;
+}
+
+/* Cost only: the context meter beside it keeps the percentage. */
+.top .cost {
+  font: 12px var(--mono);
+  color: var(--dim);
+  background: none;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 2px 9px;
+}
+
+.top .cost:hover,
+.top .gear:hover {
+  color: var(--ink);
+  border-color: var(--dim);
+}
+
+.top .gear {
+  background: none;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--dim);
+  padding: 2px 9px;
+  font-size: 13px;
+}
+
 .meter {
-  margin-left: auto;
   display: flex;
   align-items: center;
   gap: 8px;

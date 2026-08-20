@@ -1,6 +1,12 @@
 import { ipcMain, type BrowserWindow } from 'electron'
 import { EVENT_CHANNEL, REQUEST_CHANNEL, type PortResult } from '../../shared/agent/channels'
-import type { BashRunShare, ImageAttachment, PortEvent, QueuedKind } from '../../shared/agent/port'
+import type {
+  AuthMethod,
+  BashRunShare,
+  ImageAttachment,
+  PortEvent,
+  QueuedKind
+} from '../../shared/agent/port'
 import type { Shell } from '../shell/shell'
 import { displaySafeMessage } from './adapter-error'
 
@@ -118,6 +124,15 @@ async function invoke(shell: Shell, request: unknown): Promise<unknown> {
     return value
   }
 
+  /** One of the two ways a login may run, named, or a refusal. */
+  function method(position: number): AuthMethod {
+    const value = given[position]
+    if (value !== 'oauth' && value !== 'api-key') {
+      throw new Error(`${op} needs a login method to name, and that is not one.`)
+    }
+    return value
+  }
+
   /** The one option a jump takes, and it is not optional. */
   function summarize(position: number): boolean {
     const value = given[position]
@@ -154,6 +169,18 @@ async function invoke(shell: Shell, request: unknown): Promise<unknown> {
       return shell.setModel(text(0), text(1))
     case 'setThinkingLevel':
       return shell.setThinkingLevel(text(0), text(1))
+    case 'listProviders':
+      return shell.listProviders()
+    case 'login':
+      return shell.login(text(0), method(1))
+    case 'answerAuthPrompt':
+      return shell.answerAuthPrompt(text(0), text(1))
+    case 'cancelLogin':
+      return shell.cancelLogin()
+    case 'logout':
+      return shell.logout(text(0))
+    case 'sessionUsage':
+      return shell.sessionUsage(text(0))
     case 'sessionTree':
       return shell.sessionTree(text(0))
     case 'jump':

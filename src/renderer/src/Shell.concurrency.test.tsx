@@ -9,6 +9,7 @@ import { sessionLabel } from './labels'
 import { Shell } from './Shell'
 import { createScriptedPort, type ScriptedPort } from './testing/scripted-port'
 import { createScriptedWorkspace } from './testing/scripted-workspace'
+import { createScriptedCommands } from './testing/scripted-commands'
 import { settled } from './testing/settled'
 
 // The label is a local-time format, so the expected names are derived from the
@@ -28,7 +29,11 @@ const TWO_SESSIONS: ShellSnapshot = {
 
 async function twoStreamingSessions(): Promise<ScriptedPort> {
   const port = createScriptedPort(TWO_SESSIONS)
-  render(<Shell port={port} workspace={createScriptedWorkspace()} />)
+  render(<Shell
+      port={port}
+      workspace={createScriptedWorkspace()}
+      commands={createScriptedCommands()}
+    />)
   await screen.findByRole('button', { name: FIRST })
   await settled()
 

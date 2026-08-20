@@ -1,3 +1,4 @@
+import type { AuthEvent, AuthInteraction, AuthPrompt, Provider } from '@earendil-works/pi-ai'
 import type {
   AgentSession,
   CreateAgentSessionOptions,
@@ -14,18 +15,24 @@ import type {
   BindRequest,
   Binding,
   ConversationAdapter,
-  ResumeRequest
+  ResumeRequest,
+  UsageRequest
 } from '../../shared/agent/adapter'
 import type {
+  AuthMethod,
+  AuthNotice,
+  AuthPromptKind,
   BashRunShare,
   HistoryMatch,
   ImageAttachment,
   ModelId,
   ModelInfo,
+  ProviderState,
   QueuedKind,
   QueuedMessage,
   SessionId,
   SessionTree,
+  SessionUsage,
   ThinkingLevel,
   TranscriptItem,
   TreeNode,
@@ -37,7 +44,9 @@ import type {
 import { summarizeActivity } from '../../shared/agent/activity.ts'
 import { PANEL_TOOLS, type PanelTools } from '../../shared/agent/panel-tools.ts'
 import { displaySafeMessage } from './adapter-error.ts'
+import { toProviderState, type AuthFacts, type ProviderFacts } from './providers.ts'
 import { createEventMapper } from './sdk-events.ts'
+import { withAgentContext } from './system-context.ts'
 import {
   BASH_RUN_TYPE,
   deliveredBashRunId,
@@ -45,6 +54,7 @@ import {
   userTextOf,
   type StoredMessage
 } from './sdk-transcript.ts'
+import { sumUsage, type StoredUsage } from './usage.ts'
 
 // Imported dynamically because the SDK is ESM-only, so the CommonJS main
 // bundle cannot `require` it and a fake-flavor launch never loads it.
@@ -70,22 +80,40 @@ interface RunningTurn {
   abandon(): void
 }
 
+// A login π is running for us: its questions are out as port events and their
+// answers come back by promptId.
+interface LiveLogin {
+  readonly abort: AbortController
+  readonly waiting: Map<string, (answer: { value: string } | { closed: string }) => void>
+}
+
 const HISTORY_LIMIT = 50
 
 const PREVIEW_LIMIT = 140
 
 export function createSdkAdapter({
-  panel
+  panel,
+  agentDoc,
+  openExternal
 }: {
   // The same model the fake's scripts call and the same model the shell reads:
   // the tools registered below are its three behaviors and nothing more.
   readonly panel: PanelTools
+  // Crucible's agent-facing doc, shipped with the app (ADR 0006). It joins the
+  // system context of every session this adapter opens.
+  readonly agentDoc?: string
+  // Opening the OS browser is main's to do, and it is injected rather than
+  // imported so this module still loads under plain Node for `prove:sdk`.
+  readonly openExternal?: (url: string) => void
 }): ConversationAdapter {
   const listeners = new Set<AdapterEventListener>()
   const sessions = new Map<SessionId, Bound>()
   const resources = new Map<string, Promise<WorkspaceResources>>()
   let sdkModule: Promise<Sdk> | undefined
   let modelRuntime: Promise<ModelRuntime> | undefined
+  // One at a time: a second login while one is live is refused (PROV-6).
+  let liveLogin: LiveLogin | undefined
+  let prompts = 0
 
   interface WorkspaceResources {
     readonly resourceLoader: DefaultResourceLoader
@@ -128,7 +156,13 @@ export function createSdkAdapter({
         cwd: workspacePath,
         agentDir,
         settingsManager,
-        noExtensions: true
+        noExtensions: true,
+        // π's own prompt folders are not read at all: commands are Crucible's,
+        // and one command system is the whole point of ADR 0007.
+        noPromptTemplates: true,
+        // Appended rather than overriding: π's own system prompt stands, and
+        // Crucible's shipped doc joins it in every session of this workspace.
+        appendSystemPromptOverride: (base) => [...withAgentContext(base, agentDoc)]
       })
       await resourceLoader.reload()
       return { resourceLoader, settingsManager }
@@ -401,13 +435,96 @@ export function createSdkAdapter({
     // No usage event at all, rather than a guess, when the SDK reports
     // nothing.
     if (usage?.tokens != null) {
+      // The context percentage is path-based, as π reports it; the cost beside
+      // it is the whole conversation's, because money does not vanish on a
+      // jump.
+      const spent = usageOf(session.sessionManager)
       emit({
         type: 'usage',
         sessionId,
         usedTokens: usage.tokens,
-        contextWindow: usage.contextWindow
+        contextWindow: usage.contextWindow,
+        ...(spent === undefined ? {} : { cost: spent.totalCost })
       })
     }
+  }
+
+  // π's `AuthInteraction` is an SDK type and cannot cross the port, so this is
+  // where it is translated: its questions leave as events, and the answers come
+  // back through `answerAuthPrompt`.
+  function interactionFor(flow: LiveLogin): AuthInteraction {
+    return {
+      signal: flow.abort.signal,
+
+      prompt(asked: AuthPrompt): Promise<string> {
+        prompts += 1
+        const promptId = `auth-${prompts}`
+        return new Promise<string>((resolve, reject) => {
+          flow.waiting.set(promptId, (answer) => {
+            flow.waiting.delete(promptId)
+            if ('value' in answer) resolve(answer.value)
+            else reject(new Error(answer.closed))
+          })
+          // π aborts one prompt when the flow resolved it another way — the
+          // browser callback beating the paste field.
+          asked.signal?.addEventListener('abort', () => {
+            const settle = flow.waiting.get(promptId)
+            if (settle === undefined) return
+            emit({ type: 'auth_prompt_closed', promptId })
+            settle({ closed: 'That step was answered another way.' })
+          })
+          // A question carries either a placeholder or a list of options,
+          // never both: which one is what π's own kinds differ by.
+          const placeholder = 'placeholder' in asked ? asked.placeholder : undefined
+          const options = 'options' in asked ? asked.options : undefined
+          emit({
+            type: 'auth_prompt',
+            promptId,
+            kind: promptKind(asked.type),
+            message: asked.message,
+            ...(placeholder === undefined ? {} : { placeholder }),
+            ...(options === undefined
+              ? {}
+              : {
+                  options: options.map((option) => ({
+                    id: option.id,
+                    label: option.label,
+                    ...(option.description === undefined
+                      ? {}
+                      : { description: option.description })
+                  }))
+                })
+          })
+        })
+      },
+
+      notify(event: AuthEvent): void {
+        const notice = toNotice(event)
+        if (notice === undefined) return
+        emit({ type: 'auth_notice', notice })
+        // The renderer gets no open-external capability of its own: the browser
+        // is opened here, in main (PROV-9).
+        if (notice.kind === 'auth-url') openExternal?.(notice.url)
+      }
+    }
+  }
+
+  /** Nothing may be left waiting on a flow that is over, however it ended. */
+  function closePrompts(flow: LiveLogin, why: string): void {
+    for (const [promptId, settle] of [...flow.waiting]) {
+      emit({ type: 'auth_prompt_closed', promptId })
+      settle({ closed: why })
+    }
+  }
+
+  /** π's per-message usage over a whole conversation, every branch of it. */
+  function usageOf(manager: SessionManager): SessionUsage | undefined {
+    return sumUsage(
+      manager.getEntries().map((entry) => {
+        const carrier = entry as { message?: { usage?: StoredUsage }; usage?: StoredUsage }
+        return carrier.message?.usage ?? carrier.usage
+      })
+    )
   }
 
   // Stop the work before letting go of the session, or an in-flight request
@@ -617,6 +734,88 @@ export function createSdkAdapter({
       )
     },
 
+    // π's whole catalog, each provider with what a login could use and what its
+    // stored credentials currently say. The filtering into a list and a picker
+    // is the settings surface's, not this seam's.
+    async listProviders(): Promise<readonly ProviderState[]> {
+      const models = await runtime()
+      return Promise.all(
+        models.getProviders().map(async (provider) => {
+          // A provider whose check fails is reported as having no credential
+          // rather than taking the whole list down with it.
+          const check = await models
+            .checkAuth(provider.id)
+            .catch(() => undefined)
+          return toProviderState(
+            facts(provider),
+            check === undefined
+              ? undefined
+              : ({ type: check.type, source: check.source } as AuthFacts)
+          )
+        })
+      )
+    },
+
+    // π owns the flow, the token exchange and the storage; Crucible renders it.
+    async login(providerId: string, method: AuthMethod): Promise<void> {
+      if (liveLogin !== undefined) {
+        throw new Error('A login is already under way. Finish or cancel it first.')
+      }
+      const flow: LiveLogin = { abort: new AbortController(), waiting: new Map() }
+      liveLogin = flow
+      try {
+        const models = await runtime()
+        await models.login(
+          providerId,
+          method === 'oauth' ? 'oauth' : 'api_key',
+          interactionFor(flow)
+        )
+      } catch (cause) {
+        // Including π's `CredentialSynchronizationError`: the sentence is
+        // display-safe and the detail goes to the run log through the shell.
+        throw new Error(displaySafeMessage(cause, 'That login did not finish.'), { cause })
+      } finally {
+        closePrompts(flow, 'That login is over.')
+        liveLogin = undefined
+      }
+    },
+
+    // A stale answer names a prompt nobody is waiting on any more, which is a
+    // no-op rather than an error.
+    async answerAuthPrompt(promptId: string, value: string): Promise<void> {
+      liveLogin?.waiting.get(promptId)?.({ value })
+    },
+
+    async cancelLogin(): Promise<void> {
+      const flow = liveLogin
+      if (flow === undefined) return
+      closePrompts(flow, 'That login was cancelled.')
+      flow.abort.abort()
+    },
+
+    async logout(providerId: string): Promise<void> {
+      try {
+        await (await runtime()).logout(providerId)
+      } catch (cause) {
+        throw new Error(displaySafeMessage(cause, 'That logout did not finish.'), { cause })
+      }
+    },
+
+    // Works for any curated session of the workspace, bound or not: an unbound
+    // one is read from its own token, which stays opaque above this module.
+    async sessionUsage(request: UsageRequest): Promise<SessionUsage | undefined> {
+      const bound = sessions.get(request.sessionId)
+      if (bound !== undefined) return usageOf(bound.session.sessionManager)
+      if (request.token === undefined) return undefined
+      const pi = await sdk()
+      try {
+        return usageOf(pi.SessionManager.open(request.token, undefined, request.workspacePath))
+      } catch {
+        // The conversation is gone; a session with no numbers shows dashes.
+        return undefined
+      }
+    },
+
     prompt(
       sessionId: SessionId,
       turnId: TurnId,
@@ -736,6 +935,59 @@ export function createSdkAdapter({
         dropShares(bound)
       }
     }
+  }
+}
+
+function promptKind(type: AuthPrompt['type']): AuthPromptKind {
+  return type === 'manual_code' ? 'manual-code' : type
+}
+
+// What the dialog shows while π works. An event Crucible has no rendering for
+// is dropped rather than shown as something it is not.
+function toNotice(event: AuthEvent): AuthNotice | undefined {
+  switch (event.type) {
+    case 'info':
+      return { kind: 'info', message: event.message }
+    case 'progress':
+      return { kind: 'progress', message: event.message }
+    case 'auth_url':
+      return {
+        kind: 'auth-url',
+        message: event.instructions ?? 'Your browser opened for authorization.',
+        url: event.url
+      }
+    case 'device_code':
+      return {
+        kind: 'device-code',
+        message: 'Enter this code to authorize Crucible.',
+        userCode: event.userCode,
+        verificationUri: event.verificationUri
+      }
+    default:
+      return undefined
+  }
+}
+
+// A provider reduced to the facts a status needs. An api-key provider with no
+// `login` is ambient-only: it can be shown, never logged into.
+function facts(provider: Provider): ProviderFacts {
+  const { apiKey, oauth } = provider.auth
+  return {
+    id: provider.id,
+    name: provider.name,
+    ...(oauth === undefined
+      ? {}
+      : {
+          oauth: {
+            ...(oauth.name === undefined ? {} : { name: oauth.name }),
+            ...(oauth.isSubscription === undefined
+              ? {}
+              : { isSubscription: oauth.isSubscription })
+          }
+        }),
+    ...(apiKey === undefined
+      ? {}
+      : { apiKey: { interactive: typeof apiKey.login === 'function' } })
   }
 }
 

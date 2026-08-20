@@ -1,13 +1,19 @@
 import type {
+  AuthMethod,
+  AuthNotice,
+  AuthPromptKind,
+  AuthPromptOption,
   BashRunShare,
   HistoryMatch,
   ImageAttachment,
   ModelId,
   ModelInfo,
+  ProviderState,
   QueuedKind,
   QueuedMessage,
   SessionId,
   SessionTree,
+  SessionUsage,
   ThinkingLevel,
   TranscriptItem,
   TurnId,
@@ -44,6 +50,16 @@ export interface ResumeRequest {
   readonly workspacePath: string
   /** An opaque `ref` from `searchHistory`. */
   readonly ref: string
+}
+
+// Usage is asked for by identity, whether or not the session is bound: the
+// token is the same opaque string a bind carries, and only this adapter reads
+// it.
+export interface UsageRequest {
+  readonly sessionId: SessionId
+  readonly workspacePath: string
+  /** Absent for a session that was never given a conversation. */
+  readonly token?: string
 }
 
 // The port's turn events minus `state`, which only main can produce, plus
@@ -98,7 +114,21 @@ export type AdapterEvent =
       readonly sessionId: SessionId
       readonly usedTokens: number
       readonly contextWindow: number
+      /** The conversation's dollars so far; absent until genuinely known. */
+      readonly cost?: number
     }
+  // A live login's questions and running commentary. Session-less, because
+  // credentials belong to the machine rather than to any conversation.
+  | {
+      readonly type: 'auth_prompt'
+      readonly promptId: string
+      readonly kind: AuthPromptKind
+      readonly message: string
+      readonly placeholder?: string
+      readonly options?: readonly AuthPromptOption[]
+    }
+  | { readonly type: 'auth_prompt_closed'; readonly promptId: string }
+  | { readonly type: 'auth_notice'; readonly notice: AuthNotice }
   // The whole queue after any change, session-scoped like `usage`: main folds
   // it into the snapshot rather than correlating it with a turn.
   | {
@@ -159,6 +189,18 @@ export interface ConversationAdapter {
   listModels(): Promise<readonly ModelInfo[]>
   setModel(sessionId: SessionId, model: ModelId): Promise<void>
   setThinkingLevel(sessionId: SessionId, level: ThinkingLevel): Promise<void>
+
+  // Credentials are the agent side's, so they live behind this seam with the
+  // models they unlock.
+  listProviders(): Promise<readonly ProviderState[]>
+  login(providerId: string, method: AuthMethod): Promise<void>
+  answerAuthPrompt(promptId: string, value: string): Promise<void>
+  cancelLogin(): Promise<void>
+  logout(providerId: string): Promise<void>
+
+  // Summed over the whole conversation, every branch of it. `undefined` means
+  // nothing usage-bearing has been recorded yet.
+  sessionUsage(request: UsageRequest): Promise<SessionUsage | undefined>
 
   // A rejection means the turn never ran, and the caller then owes it a
   // terminal event.

@@ -357,13 +357,17 @@ describe('concurrent sessions', () => {
     const events: AdapterEvent[] = []
     adapter.onEvent((event) => events.push(event))
     adapter.onEvent((event) => {
-      if (event.sessionId === 'a' && event.type === 'text_delta') void adapter.cancel('a')
+      if (event.type === 'text_delta' && event.sessionId === 'a') void adapter.cancel('a')
     })
 
     await Promise.all([adapter.prompt('a', 't-a', 'one'), adapter.prompt('b', 't-b', 'two')])
 
-    const forA = events.filter((event) => event.sessionId === 'a')
-    const forB = events.filter((event) => event.sessionId === 'b')
+    // Auth events carry no session at all, which is why membership is
+    // checked before the id is read.
+    const ofSession = (id: string): AdapterEvent[] =>
+      events.filter((event) => 'sessionId' in event && event.sessionId === id)
+    const forA = ofSession('a')
+    const forB = ofSession('b')
     expect(types(forA)).toContain('turn_cancelled')
     expect(types(forA)).not.toContain('turn_ended')
     expect(types(forB)).toContain('turn_ended')

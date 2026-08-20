@@ -8,6 +8,7 @@ import type { ModelInfo } from '../../shared/agent/port'
 import { Shell } from './Shell'
 import { createScriptedPort, oneSession, type ScriptedPort } from './testing/scripted-port'
 import { createScriptedWorkspace } from './testing/scripted-workspace'
+import { createScriptedCommands } from './testing/scripted-commands'
 import { settled } from './testing/settled'
 
 const MODELS: readonly ModelInfo[] = [
@@ -20,7 +21,11 @@ async function shellWithModels(): Promise<ScriptedPort> {
     oneSession({ model: 'fake/deterministic', thinkingLevel: 'low' })
   )
   port.models = MODELS
-  render(<Shell port={port} workspace={createScriptedWorkspace()} />)
+  render(<Shell
+      port={port}
+      workspace={createScriptedWorkspace()}
+      commands={createScriptedCommands()}
+    />)
   await screen.findByRole('button', { name: 'Model: Fake · deterministic' })
   await settled()
   return port

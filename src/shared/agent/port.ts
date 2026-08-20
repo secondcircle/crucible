@@ -72,8 +72,13 @@ export interface SessionState {
   readonly model?: ModelId
   readonly thinkingLevel?: ThinkingLevel
   readonly working: boolean
-  // Absent until the adapter has reported real usage.
-  readonly usage?: { readonly usedTokens: number; readonly contextWindow: number }
+  // Absent until the adapter has reported real usage. `cost` is the whole
+  // conversation's dollars so far and is absent until that too is known.
+  readonly usage?: {
+    readonly usedTokens: number
+    readonly contextWindow: number
+    readonly cost?: number
+  }
   /** Absent when nothing is queued. */
   readonly queue?: QueueState
   // The context panel's tabs, folded in exactly as the queue is. Absent when
@@ -167,6 +172,60 @@ export interface HistoryMatch {
   readonly at: string
 }
 
+// π's per-message numbers, summed by Crucible: π keeps no ledger of its own.
+export interface UsageLine {
+  readonly tokens: number
+  readonly cost: number
+}
+
+export interface SessionUsage {
+  /** How many usage-bearing messages were summed. */
+  readonly messages: number
+  readonly input: UsageLine
+  readonly output: UsageLine
+  readonly cacheRead: UsageLine
+  readonly cacheWrite: UsageLine
+  readonly totalTokens: number
+  readonly totalCost: number
+}
+
+/** The two ways a login may be carried out; π's `AuthType`, in Crucible's words. */
+export type AuthMethod = 'oauth' | 'api-key'
+
+export interface ProviderState {
+  readonly id: string
+  readonly name: string
+  /** Methods a login may use; empty means not loggable from Crucible. */
+  readonly methods: readonly AuthMethod[]
+  readonly status:
+    | { readonly kind: 'none' }
+    | { readonly kind: 'oauth'; readonly detail?: string }
+    | { readonly kind: 'api-key' }
+    // Managed outside Crucible: shown, never edited.
+    | { readonly kind: 'env'; readonly variable?: string }
+}
+
+export type AuthPromptKind = 'text' | 'secret' | 'select' | 'manual-code'
+
+export interface AuthPromptOption {
+  readonly id: string
+  readonly label: string
+  readonly description?: string
+}
+
+// Everything a live login flow says that is not a question. π's `AuthEvent`,
+// rewritten in Crucible's own words so no SDK type crosses.
+export type AuthNotice =
+  | { readonly kind: 'info'; readonly message: string }
+  | { readonly kind: 'progress'; readonly message: string }
+  | { readonly kind: 'auth-url'; readonly message: string; readonly url: string }
+  | {
+      readonly kind: 'device-code'
+      readonly message: string
+      readonly userCode: string
+      readonly verificationUri: string
+    }
+
 export type PortEvent =
   | { readonly type: 'state'; readonly snapshot: ShellSnapshot }
   | { readonly type: 'turn_started'; readonly sessionId: SessionId; readonly turnId: TurnId }
@@ -242,6 +301,21 @@ export type PortEvent =
       /** Display-safe; the detail went to the run log. */
       readonly message: string
     }
+  // A login flow's question, answered with `answerAuthPrompt`. Not tied to any
+  // session: credentials are global.
+  | {
+      readonly type: 'auth_prompt'
+      readonly promptId: string
+      readonly kind: AuthPromptKind
+      readonly message: string
+      readonly placeholder?: string
+      /** Present for `select`; the answer is an option's id. */
+      readonly options?: readonly AuthPromptOption[]
+    }
+  // The flow resolved that question out of band — the browser callback won the
+  // race against the paste field — so the input goes away unanswered.
+  | { readonly type: 'auth_prompt_closed'; readonly promptId: string }
+  | { readonly type: 'auth_notice'; readonly notice: AuthNotice }
 
 export type PortEventListener = (event: PortEvent) => void
 
@@ -285,6 +359,21 @@ export interface AgentPort {
   listModels(): Promise<readonly ModelInfo[]>
   setModel(sessionId: SessionId, model: ModelId): Promise<void>
   setThinkingLevel(sessionId: SessionId, level: ThinkingLevel): Promise<void>
+
+  /** Every provider the agent side knows, credentialed or not, in its order. */
+  listProviders(): Promise<readonly ProviderState[]>
+  // Resolves on success, rejects display-safely on failure or cancel. The
+  // flow's questions arrive as `auth_prompt` events while it runs.
+  login(providerId: string, method: AuthMethod): Promise<void>
+  answerAuthPrompt(promptId: string, value: string): Promise<void>
+  /** Aborts the live flow. Harmless when no login is running. */
+  cancelLogin(): Promise<void>
+  logout(providerId: string): Promise<void>
+
+  // Every usage-bearing message of the session's whole conversation, all
+  // branches: money spent does not vanish on a jump. Absent until the adapter
+  // has genuinely reported usage.
+  sessionUsage(id: SessionId): Promise<SessionUsage | undefined>
 
   // Accepted, not finished: resolves once the turn is live. Images ride the
   // prompt they were attached to and nothing else.

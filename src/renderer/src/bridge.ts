@@ -1,5 +1,6 @@
 import type { PortRequest, PortResult } from '../../shared/agent/channels'
 import type { PortEvent } from '../../shared/agent/port'
+import type { CommandRequest, CommandResult } from '../../shared/commands/channels'
 import type { WorkspaceRequest, WorkspaceResult } from '../../shared/workspace/channels'
 import type { WorkspaceEvent } from '../../shared/workspace/service'
 
@@ -18,9 +19,18 @@ export interface CrucibleWorkspace {
   onEvent(listener: (event: WorkspaceEvent) => void): () => void
 }
 
+/** The command half. One member: the service answers questions and announces nothing. */
+export interface CrucibleCommands {
+  request(request: CommandRequest): Promise<CommandResult>
+}
+
 declare global {
   interface Window {
-    crucible?: { agent?: CrucibleAgent; workspace?: CrucibleWorkspace }
+    crucible?: {
+      agent?: CrucibleAgent
+      workspace?: CrucibleWorkspace
+      commands?: CrucibleCommands
+    }
   }
 }
 
@@ -40,4 +50,12 @@ export function workspaceBridge(): CrucibleWorkspace {
     throw new Error('renderer: window.crucible.workspace is missing — the preload did not load')
   }
   return workspace
+}
+
+export function commandsBridge(): CrucibleCommands {
+  const commands = window.crucible?.commands
+  if (commands === undefined) {
+    throw new Error('renderer: window.crucible.commands is missing — the preload did not load')
+  }
+  return commands
 }

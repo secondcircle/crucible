@@ -1,8 +1,11 @@
 import { join } from 'node:path'
-import { app, BrowserWindow, dialog } from 'electron'
+import { app, BrowserWindow, dialog, shell as electronShell } from 'electron'
 import { type AgentChannel, serveAgentChannel } from './agent/channel'
 import { selectAdapter } from './agent/select-adapter'
 import { withLogging } from './agent/with-logging'
+import { type CommandChannel, serveCommandChannel } from './commands/channel'
+import { selectCommandService } from './commands/select-service'
+import { readShippedAgentDoc } from './shipped'
 import { forwardRendererOutput } from './log/renderer-output'
 import { createFileSink } from './log/sink'
 import { panelFixtures } from './panel/fixtures'
@@ -43,14 +46,24 @@ const panel = createPanelModel({ persistence: storePanelPersistence(store) })
 
 // Decided once, before any window exists: one adapter for the launch, whichever
 // window is holding it at the time.
-const { adapter, flavor } = selectAdapter(log, {
-  tools: panel,
-  exhibits: panelFixtures(app.getAppPath())
-})
+const { adapter, flavor } = selectAdapter(
+  log,
+  { tools: panel, exhibits: panelFixtures(app.getAppPath()) },
+  {
+    // What the agent is taught about Crucible, shipped with the app and read
+    // once per launch (ADR 0006).
+    agentDoc: readShippedAgentDoc(app.getAppPath()),
+    // A login's browser is opened here; the renderer gets no such capability.
+    openExternal: (url: string) => {
+      void electronShell.openExternal(url)
+    }
+  }
+)
 
-// One flavor decision governs both seams, so a fake-flavor launch reads no
-// folder and starts no process either.
+// One flavor decision governs every seam, so a fake-flavor launch reads no
+// folder, starts no process and serves canned commands.
 const workspace = selectWorkspaceService(flavor, log)
+const commands = selectCommandService(flavor, log, app.getAppPath())
 
 // The dialog is the main process's to open, which is why adding a workspace is
 // an operation on the port rather than an argument to one.
@@ -84,6 +97,7 @@ const shell = withLogging(
 
 let channel: AgentChannel | undefined
 let workspaceChannel: WorkspaceChannel | undefined
+let commandChannel: CommandChannel | undefined
 
 function openWindow(reason?: 'activate'): void {
   const window = createMainWindow()
@@ -92,6 +106,7 @@ function openWindow(reason?: 'activate'): void {
   forwardRendererOutput(window.webContents, log)
   channel = serveAgentChannel(shell, window)
   workspaceChannel = serveWorkspaceChannel(workspace.service, window)
+  commandChannel = serveCommandChannel(commands, window)
   log.append(
     reason === undefined
       ? { source: 'main', event: 'window_created' }
@@ -120,6 +135,7 @@ app.on('will-quit', () => {
   // Whatever was still running is dropped rather than left running unseen.
   channel?.dispose()
   workspaceChannel?.dispose()
+  commandChannel?.dispose()
   workspace.dispose()
   log.append({ source: 'main', event: 'app_quitting' })
 })

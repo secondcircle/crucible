@@ -7,6 +7,7 @@ import { describe, expect, it } from 'vitest'
 import { Shell } from './Shell'
 import { createScriptedPort, oneSession, type ScriptedPort } from './testing/scripted-port'
 import { createScriptedWorkspace, type ScriptedWorkspace } from './testing/scripted-workspace'
+import { createScriptedCommands } from './testing/scripted-commands'
 import { settled } from './testing/settled'
 
 const FILES: readonly string[] = [
@@ -21,7 +22,7 @@ async function shell(): Promise<{ port: ScriptedPort; workspace: ScriptedWorkspa
   const port = createScriptedPort(oneSession())
   port.models = [{ id: 'fake/deterministic', label: 'Fake', thinkingLevels: ['off'] }]
   const workspace = createScriptedWorkspace(FILES)
-  render(<Shell port={port} workspace={workspace} />)
+  render(<Shell port={port} workspace={workspace} commands={createScriptedCommands()} />)
   await screen.findAllByRole('button', { name: /^Session · / })
   await settled()
   return { port, workspace }

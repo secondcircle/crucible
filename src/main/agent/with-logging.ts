@@ -81,6 +81,19 @@ export function withLogging(shell: Shell, log: LogSink, adapter: string): Shell 
       shell.setThinkingLevel(sessionId, level)
     ),
 
+    listProviders: op('listProviders', () => shell.listProviders()),
+    login: op('login', (providerId, method) => shell.login(providerId, method)),
+    // The value is the credential itself, so only the prompt it answers is
+    // recorded: nothing a person pasted reaches the run log.
+    answerAuthPrompt: op(
+      'answerAuthPrompt',
+      (promptId, value) => shell.answerAuthPrompt(promptId, value),
+      (promptId, value) => [promptId, { characters: value.length }]
+    ),
+    cancelLogin: op('cancelLogin', () => shell.cancelLogin()),
+    logout: op('logout', (providerId) => shell.logout(providerId)),
+    sessionUsage: op('sessionUsage', (id) => shell.sessionUsage(id)),
+
     sessionTree: op('sessionTree', (id) => shell.sessionTree(id)),
     jump: op('jump', (id, ref, options) => shell.jump(id, ref, options)),
     setLabel: op('setLabel', (id, ref, label) => shell.setLabel(id, ref, label)),

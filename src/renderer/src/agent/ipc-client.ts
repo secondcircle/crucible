@@ -1,14 +1,17 @@
 import type {
   AgentPort,
+  AuthMethod,
   BashRunShare,
   HistoryMatch,
   ImageAttachment,
   ModelId,
   ModelInfo,
   PortEventListener,
+  ProviderState,
   QueuedKind,
   SessionId,
   SessionTree,
+  SessionUsage,
   ShellSnapshot,
   TabId,
   ThinkingLevel,
@@ -72,6 +75,15 @@ export function createIpcClient(): AgentPort {
       label === undefined ? call<void>('setLabel', id, ref) : call<void>('setLabel', id, ref, label),
 
     listModels: () => call<readonly ModelInfo[]>('listModels'),
+
+    listProviders: () => call<readonly ProviderState[]>('listProviders'),
+    login: (providerId: string, method: AuthMethod) => call<void>('login', providerId, method),
+    answerAuthPrompt: (promptId: string, value: string) =>
+      call<void>('answerAuthPrompt', promptId, value),
+    cancelLogin: () => call<void>('cancelLogin'),
+    logout: (providerId: string) => call<void>('logout', providerId),
+    sessionUsage: (id: SessionId) => call<SessionUsage | undefined>('sessionUsage', id),
+
     setModel: (sessionId: SessionId, model: ModelId) => call<void>('setModel', sessionId, model),
     setThinkingLevel: (sessionId: SessionId, level: ThinkingLevel) =>
       call<void>('setThinkingLevel', sessionId, level),

@@ -8,6 +8,7 @@ import type { PanelTab, ShellSnapshot } from '../../shared/agent/port'
 import { Shell } from './Shell'
 import { createScriptedPort, oneSession, type ScriptedPort } from './testing/scripted-port'
 import { createScriptedWorkspace } from './testing/scripted-workspace'
+import { createScriptedCommands } from './testing/scripted-commands'
 import { settled } from './testing/settled'
 
 const SHOWN = '2026-08-19T14:14:00.000Z'
@@ -29,7 +30,11 @@ async function shellWith(snapshot: Partial<ShellSnapshot>): Promise<ScriptedPort
   port.models = [{ id: 'fake/deterministic', label: 'Fake', thinkingLevels: ['off', 'low'] }]
   port.exhibits.set('plan', '# The plan\n\nOne paragraph of it.')
   port.exhibits.set('benchmark', '<p id="out">measured</p><script>void 0</script>')
-  render(<Shell port={port} workspace={createScriptedWorkspace()} />)
+  render(<Shell
+      port={port}
+      workspace={createScriptedWorkspace()}
+      commands={createScriptedCommands()}
+    />)
   await screen.findAllByRole('button', { name: /^Session · / })
   await settled()
   return port
@@ -198,7 +203,11 @@ describe('the exhibit', () => {
     const port = createScriptedPort(withTabs([PLAN], 'plan'))
     port.models = []
     port.exhibitRefusal = 'That exhibit could not be read: plan.md'
-    render(<Shell port={port} workspace={createScriptedWorkspace()} />)
+    render(<Shell
+      port={port}
+      workspace={createScriptedWorkspace()}
+      commands={createScriptedCommands()}
+    />)
     await screen.findAllByRole('button', { name: /^Session · / })
     await settled()
 

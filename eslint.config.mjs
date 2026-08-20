@@ -47,6 +47,7 @@ export default tseslint.config(
     files: [
       'src/renderer/src/bridge.ts',
       'src/renderer/src/agent/ipc-client.test.ts',
+      'src/renderer/src/commands/ipc-client.test.ts',
       'src/renderer/src/workspace/ipc-client.test.ts'
     ],
     rules: { 'no-restricted-syntax': 'off' }

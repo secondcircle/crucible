@@ -361,3 +361,38 @@
   overflow: auto;
   white-space: pre-wrap;
 }
+
+/* a command invocation: compact, and it opens to the delivered text */
+.msg.user .cmdbubble {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  width: 100%;
+  text-align: left;
+  border-color: var(--thinking);
+  color: var(--ink);
+  font: 13px var(--mono);
+}
+
+.msg.user .cmdbubble .disc {
+  color: var(--thinking);
+}
+
+.msg.user .cmdbubble .cmdtext {
+  color: var(--thinking);
+}
+
+.msg.user .cmdbubble .cmdsaid {
+  margin-left: auto;
+  font: 10px var(--mono);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--faint);
+}
+
+.msg.user .cmdfull {
+  margin-top: 6px;
+  white-space: pre-wrap;
+  font: 12.5px/1.6 var(--mono);
+  color: var(--dim);
+}

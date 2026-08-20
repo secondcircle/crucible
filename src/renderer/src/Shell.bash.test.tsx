@@ -8,6 +8,7 @@ import type { ShellSnapshot } from '../../shared/agent/port'
 import { Shell } from './Shell'
 import { createScriptedPort, oneSession, type ScriptedPort } from './testing/scripted-port'
 import { createScriptedWorkspace, type ScriptedWorkspace } from './testing/scripted-workspace'
+import { createScriptedCommands } from './testing/scripted-commands'
 import { settled } from './testing/settled'
 
 const TWO_WORKSPACES: ShellSnapshot = {
@@ -29,7 +30,7 @@ async function shell(
   const port = createScriptedPort(snapshot)
   port.models = [{ id: 'fake/deterministic', label: 'Fake', thinkingLevels: ['off'] }]
   const workspace = createScriptedWorkspace()
-  render(<Shell port={port} workspace={workspace} />)
+  render(<Shell port={port} workspace={workspace} commands={createScriptedCommands()} />)
   await screen.findAllByRole('button', { name: /^Session · / })
   await settled()
   return { port, workspace }
@@ -295,7 +296,11 @@ describe('add to conversation', () => {
     port.transcripts.set('s1', [
       { kind: 'bashRun', command: 'git status', output: 'clean\n', exitCode: 0 }
     ])
-    render(<Shell port={port} workspace={createScriptedWorkspace()} />)
+    render(<Shell
+      port={port}
+      workspace={createScriptedWorkspace()}
+      commands={createScriptedCommands()}
+    />)
 
     const row = await screen.findByLabelText('Shared bash run: git status')
     expect(row).toHaveTextContent('shared with model')

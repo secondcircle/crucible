@@ -8,6 +8,7 @@ import type { ShellSnapshot } from '../../shared/agent/port'
 import { Shell } from './Shell'
 import { createScriptedPort, oneSession, type ScriptedPort } from './testing/scripted-port'
 import { createScriptedWorkspace } from './testing/scripted-workspace'
+import { createScriptedCommands } from './testing/scripted-commands'
 import { settled } from './testing/settled'
 
 const TWO_SESSIONS: ShellSnapshot = {
@@ -28,7 +29,11 @@ function png(name = 'screenshot.png', bytes = 4): File {
 async function shell(snapshot: Partial<ShellSnapshot> = oneSession()): Promise<ScriptedPort> {
   const port = createScriptedPort(snapshot)
   port.models = [{ id: 'fake/deterministic', label: 'Fake', thinkingLevels: ['off'] }]
-  render(<Shell port={port} workspace={createScriptedWorkspace()} />)
+  render(<Shell
+      port={port}
+      workspace={createScriptedWorkspace()}
+      commands={createScriptedCommands()}
+    />)
   if ((snapshot.sessions ?? []).length > 0) {
     await screen.findAllByRole('button', { name: /^Session · / })
   } else {
@@ -204,7 +209,11 @@ describe('sending', () => {
         images: [{ mimeType: 'image/png', data: 'AAAAAA==' }]
       }
     ])
-    render(<Shell port={port} workspace={createScriptedWorkspace()} />)
+    render(<Shell
+      port={port}
+      workspace={createScriptedWorkspace()}
+      commands={createScriptedCommands()}
+    />)
     await screen.findByText('what is in this screenshot?')
 
     expect(screen.getByAltText('Attached image 1')).toHaveAttribute(

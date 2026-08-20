@@ -188,6 +188,15 @@ function heard(state: ShellState, event: PortEvent, at: number): ShellState {
   // A shown tab is in the snapshot the `state` event before it carried; the
   // transcript has nothing to say about it.
   if (event.type === 'panel_shown') return state
+  // A login's questions belong to the settings surface and to no session at
+  // all: no transcript changes because someone signed in.
+  if (
+    event.type === 'auth_prompt' ||
+    event.type === 'auth_prompt_closed' ||
+    event.type === 'auth_notice'
+  ) {
+    return state
+  }
 
   const { sessionId } = event
   const view = state.views[sessionId] ?? EMPTY_VIEW

@@ -29,6 +29,15 @@ export function relativeTime(iso: string, now = Date.now()): string {
   return days === 1 ? 'yesterday' : `${days}d ago`
 }
 
+// The meter's percentage, and nothing at all until the adapter has reported
+// real usage: one reading, so the top bar and the Usage tab cannot disagree.
+export function contextPercent(
+  usage: { readonly usedTokens: number; readonly contextWindow: number } | undefined
+): number | undefined {
+  if (usage === undefined || usage.contextWindow <= 0) return undefined
+  return Math.min(100, Math.round((usage.usedTokens / usage.contextWindow) * 100))
+}
+
 /** Whole thousands, the way a context meter says them: `68k`. */
 export function tokens(count: number): string {
   if (count < 1000) return String(count)

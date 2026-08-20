@@ -7,6 +7,11 @@ import {
 } from '../shared/agent/channels'
 import type { PortEvent } from '../shared/agent/port'
 import {
+  COMMAND_REQUEST_CHANNEL,
+  type CommandRequest,
+  type CommandResult
+} from '../shared/commands/channels'
+import {
   WORKSPACE_EVENT_CHANNEL,
   WORKSPACE_REQUEST_CHANNEL,
   type WorkspaceRequest,
@@ -45,6 +50,14 @@ contextBridge.exposeInMainWorld('crucible', {
 
     onEvent: (listener: (event: WorkspaceEvent) => void): (() => void) =>
       forwarder(WORKSPACE_EVENT_CHANNEL, listener)
+  },
+
+  // Beside the agent as well: a command is expanded before anything crosses
+  // the port, and the port never learns commands exist (ADR 0007). Questions
+  // only — the service announces nothing.
+  commands: {
+    request: (request: CommandRequest): Promise<CommandResult> =>
+      ipcRenderer.invoke(COMMAND_REQUEST_CHANNEL, request)
   }
 })
 

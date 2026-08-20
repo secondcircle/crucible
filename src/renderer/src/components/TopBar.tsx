@@ -1,5 +1,5 @@
 import type { ModelInfo, SessionState, WorkspaceState } from '../../../shared/agent/port'
-import { sessionLabel, tokens } from '../labels'
+import { contextPercent, sessionLabel, tokens } from '../labels'
 import './topbar.css'
 
 // The meter shows a dash until the adapter reports real usage: a context meter
@@ -12,7 +12,9 @@ export function TopBar({
   treeOpen,
   onToggleMenu,
   onToggleTree,
-  onResetSession
+  onResetSession,
+  onOpenSettings,
+  onOpenUsage
 }: {
   readonly session?: SessionState
   readonly workspace?: WorkspaceState
@@ -22,16 +24,17 @@ export function TopBar({
   readonly onToggleMenu: () => void
   readonly onToggleTree: () => void
   readonly onResetSession: () => void
+  /** The gear: providers are global, so it is there with no session too. */
+  readonly onOpenSettings: () => void
+  /** The cost chip, which lands on the same sheet's Usage tab. */
+  readonly onOpenUsage: () => void
 }): React.JSX.Element {
   const usage = session?.usage
+  const percent = contextPercent(usage)
   const meter =
-    usage === undefined || usage.contextWindow <= 0
+    usage === undefined || percent === undefined
       ? undefined
-      : {
-          percent: Math.min(100, Math.round((usage.usedTokens / usage.contextWindow) * 100)),
-          used: tokens(usage.usedTokens),
-          window: tokens(usage.contextWindow)
-        }
+      : { percent, used: tokens(usage.usedTokens), window: tokens(usage.contextWindow) }
 
   return (
     <header className="top">
@@ -59,6 +62,17 @@ export function TopBar({
         </button>
       )}
 
+      {/* Everything from here is right-aligned, as mocked. */}
+      <span className="spacer" />
+
+      {/* A dash until the adapter has reported real cost, exactly the meter's
+          honesty rule. */}
+      {session === undefined ? null : (
+        <button className="cost" aria-label="Session cost" onClick={onOpenUsage}>
+          {usage?.cost === undefined ? '—' : `$${usage.cost.toFixed(2)}`}
+        </button>
+      )}
+
       <div className="meter" aria-label="Context usage">
         {meter === undefined ? (
           <span className="empty">— ctx</span>
@@ -74,6 +88,10 @@ export function TopBar({
           </>
         )}
       </div>
+
+      <button className="gear" aria-label="Settings" onClick={onOpenSettings}>
+        <span aria-hidden="true">⚙</span>
+      </button>
 
       {session === undefined ? null : (
         <div className="sessionmenu">

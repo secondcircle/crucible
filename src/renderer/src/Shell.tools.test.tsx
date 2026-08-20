@@ -7,11 +7,16 @@ import { describe, expect, it } from 'vitest'
 import { Shell } from './Shell'
 import { createScriptedPort, oneSession, type ScriptedPort } from './testing/scripted-port'
 import { createScriptedWorkspace } from './testing/scripted-workspace'
+import { createScriptedCommands } from './testing/scripted-commands'
 import { settled } from './testing/settled'
 
 async function streaming(): Promise<ScriptedPort> {
   const port = createScriptedPort(oneSession())
-  render(<Shell port={port} workspace={createScriptedWorkspace()} />)
+  render(<Shell
+      port={port}
+      workspace={createScriptedWorkspace()}
+      commands={createScriptedCommands()}
+    />)
   await screen.findByRole('button', { name: /^Session · / })
   await settled()
   await act(async () => {
@@ -189,7 +194,11 @@ describe('drilling into a chain', () => {
       ],
       activeSessionId: 's1'
     })
-    render(<Shell port={port} workspace={createScriptedWorkspace()} />)
+    render(<Shell
+      port={port}
+      workspace={createScriptedWorkspace()}
+      commands={createScriptedCommands()}
+    />)
     await screen.findAllByRole('button', { name: /^Session · / })
 
     await act(async () => {
@@ -220,7 +229,11 @@ describe('drilling into a chain', () => {
       { kind: 'assistant', markdown: 'Both are fine.' },
       { kind: 'tool', name: 'read', summary: 'package.json', ok: false, output: 'ENOENT' }
     ])
-    render(<Shell port={port} workspace={createScriptedWorkspace()} />)
+    render(<Shell
+      port={port}
+      workspace={createScriptedWorkspace()}
+      commands={createScriptedCommands()}
+    />)
 
     const rows = await screen.findAllByRole('button', { name: /^Tool chain/ })
 
