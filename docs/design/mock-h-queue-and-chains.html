@@ -1,0 +1,390 @@
+<!doctype html>
+<!-- Mock H — queued messages (steer / follow-up) and tool chains.
+     Interactive: the third chain animates live (replay button, top right);
+     click a chain row to expand its calls; click a call to see its output;
+     click a queued entry to pull it back into the composer. -->
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Mock H — queue &amp; tool chains</title>
+<style>
+  /* tokens, verbatim from src/renderer/src/styles/tokens.css */
+  :root {
+    --bg: #191419; --bg2: #211a20; --panel: #241c23; --panel2: #2e242d;
+    --line: #3a2e38; --code: #120e12; --code-deep: #0d0a0d; --user: #2c2230;
+    --think-bg: #161018; --error-bg: #1d1113;
+    --ink: #e8dfe2; --dim: #9b8a94; --faint: #6b5d66;
+    --code-ink: #d7c9b8; --output-ink: #cbbfa4; --on-accent: #1c120c;
+    --accent: #e07a4f; --accent2: #f0a37c; --ok: #7fb069; --error: #d96a5a;
+    --thinking: #b08cc9;
+    --font: -apple-system, 'Segoe UI', system-ui, sans-serif;
+    --mono: ui-monospace, 'SF Mono', Menlo, monospace;
+    --radius: 8px; --radius-lg: 12px; --column: 680px;
+  }
+  * { box-sizing: border-box; margin: 0; }
+  html, body { height: 100%; }
+  body {
+    background: var(--bg); color: var(--ink);
+    font: 14px/1.55 var(--font); overflow: hidden;
+    display: flex; flex-direction: column;
+  }
+  button, textarea { font: inherit; color: inherit; }
+  button { cursor: pointer; }
+
+  .mockbar {
+    flex: none; display: flex; align-items: center; gap: 10px;
+    padding: 8px 16px; border-bottom: 1px solid var(--line);
+    font-size: 11.5px; color: var(--faint);
+  }
+  .mockbar .replay {
+    margin-left: auto; background: none; border: 1px solid var(--line);
+    border-radius: 6px; padding: 3px 10px; color: var(--dim); font-size: 12px;
+  }
+  .mockbar .replay:hover { color: var(--ink); border-color: var(--dim); }
+
+  .chat { flex: 1; overflow-y: auto; padding: 28px 0; min-height: 0; }
+  ::-webkit-scrollbar { width: 10px; }
+  ::-webkit-scrollbar-thumb { background: var(--line); border-radius: 6px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+
+  .msg { max-width: var(--column); margin: 0 auto 20px; padding: 0 24px; }
+  .msg .who {
+    font-size: 11px; text-transform: uppercase; letter-spacing: 0.1em;
+    color: var(--faint); margin-bottom: 6px;
+  }
+  .msg.agent .who { color: var(--accent); }
+  .msg.user .bubble {
+    background: var(--user); border: 1px solid var(--line);
+    border-radius: 10px; padding: 10px 14px; white-space: pre-wrap;
+  }
+
+  .think {
+    max-width: var(--column); margin: 0 auto 10px; padding: 0 24px;
+  }
+  .thinkbody {
+    border-left: 3px solid var(--thinking); background: var(--think-bg);
+    color: var(--dim); font-size: 12px; padding: 8px 12px;
+    border-radius: 6px; white-space: pre-wrap; font-style: italic;
+  }
+
+  /* ——— the tool chain ——— */
+  .chain { max-width: var(--column); margin: 0 auto 10px; padding: 0 24px; }
+
+  .chainhead {
+    display: flex; gap: 10px; align-items: center; width: 100%;
+    font: 12px var(--mono); color: var(--dim);
+    background: var(--code); border: 1px solid var(--line);
+    border-left: 3px solid var(--ok); border-radius: 6px;
+    padding: 7px 12px; text-align: left;
+  }
+  .chain.running > .chainhead { border-left-color: var(--accent); }
+  .chain.failed  > .chainhead { border-left-color: var(--error); }
+
+  .chainhead .disc { color: var(--faint); flex: none; width: 10px; }
+  .counts { color: var(--ink); white-space: nowrap; flex: none; }
+  .counts .n { color: var(--accent2); }
+  .live {
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    color: var(--dim); font-style: italic;
+  }
+  .chainstate { margin-left: auto; color: var(--faint); flex: none; }
+  .chain.failed .chainstate { color: var(--error); }
+
+  .spin {
+    width: 11px; height: 11px; border-radius: 50%;
+    border: 2px solid var(--line); border-top-color: var(--accent);
+    animation: rot 0.8s linear infinite; display: inline-block; flex: none;
+  }
+  @keyframes rot { to { transform: rotate(360deg); } }
+
+  /* a freshly landed call pulses its count once */
+  .counts .n.tick { animation: tick 0.45s ease-out; }
+  @keyframes tick {
+    0% { color: var(--ink); transform: scale(1.35); display: inline-block; }
+    100% { color: var(--accent2); transform: scale(1); }
+  }
+
+  .calls { margin: 2px 0 0 14px; display: none; }
+  .chain.open > .calls { display: block; }
+
+  .tool { margin-bottom: 2px; }
+  .toolhead {
+    display: flex; gap: 8px; align-items: center; width: 100%;
+    font: 12px var(--mono); color: var(--dim);
+    background: var(--code); border: 1px solid var(--line);
+    border-left: 3px solid var(--ok); border-radius: 6px;
+    padding: 6px 12px; text-align: left;
+  }
+  .tool.running .toolhead { border-left-color: var(--accent); }
+  .tool.failed  .toolhead { border-left-color: var(--error); }
+  .toolname { color: var(--ink); flex: none; }
+  .toolsummary { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .toolstate { margin-left: auto; color: var(--faint); flex: none; }
+  .tool.failed .toolstate { color: var(--error); }
+  .toolout {
+    display: none; background: var(--code-deep); border: 1px solid var(--line);
+    border-top: none; border-radius: 0 0 6px 6px; padding: 10px 14px;
+    font: 11.5px/1.5 var(--mono); color: var(--output-ink);
+    max-height: 140px; overflow: auto; white-space: pre-wrap;
+  }
+  .tool.open .toolout { display: block; }
+
+  /* ——— queued messages ——— */
+  .queue { max-width: var(--column); width: 100%; margin: 0 auto; padding: 0 24px; flex: none; }
+  .qitem {
+    display: flex; gap: 10px; align-items: baseline; width: 100%;
+    background: none; border: 1px dashed var(--line); border-radius: 8px;
+    padding: 6px 12px; margin-bottom: 6px; text-align: left;
+    color: var(--dim); font-size: 12.5px;
+  }
+  .qitem:hover { border-color: var(--dim); }
+  .qkind {
+    flex: none; font-size: 10.5px; text-transform: uppercase;
+    letter-spacing: 0.08em; padding: 1px 7px; border-radius: 9px;
+    border: 1px solid var(--line);
+  }
+  .qkind.steer { color: var(--accent2); border-color: var(--accent); }
+  .qkind.follow { color: var(--thinking); border-color: var(--thinking); }
+  .qtext { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .qhint { margin-left: auto; flex: none; color: var(--faint); font-size: 11px; }
+
+  /* ——— composer (working state) ——— */
+  .composer { max-width: var(--column); width: 100%; margin: 0 auto; padding: 0 24px 18px; flex: none; }
+  .cbox {
+    background: var(--panel); border: 1px solid var(--line);
+    border-radius: var(--radius-lg); padding: 12px 14px 10px;
+  }
+  .cbox textarea {
+    width: 100%; background: none; border: none; resize: none; outline: none;
+    height: 46px; font: 14px/1.5 var(--font); color: var(--ink);
+  }
+  .cbox textarea::placeholder { color: var(--faint); }
+  .crow { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
+  .chip {
+    font-size: 12px; color: var(--dim); border: 1px solid var(--line);
+    border-radius: 14px; padding: 3px 10px; background: none;
+    display: flex; gap: 6px; align-items: center;
+  }
+  .chip b { color: var(--ink); font-weight: 600; }
+  .send {
+    background: var(--accent); color: var(--on-accent); border: none;
+    border-radius: var(--radius); padding: 6px 14px; font-weight: 700;
+  }
+  .send.steer { margin-left: auto; }
+  .stop {
+    background: var(--panel); color: var(--ink); border: 1px solid var(--accent);
+    border-radius: var(--radius); display: flex; align-items: center; gap: 8px;
+    padding: 5px 12px; font-weight: 600;
+  }
+  .stopsq { width: 9px; height: 9px; background: var(--accent); border-radius: 2px; }
+  .esc { text-align: center; font-size: 11.5px; color: var(--faint); margin-top: 8px; }
+  .esc .workingnote { color: var(--accent2); }
+  kbd {
+    font: 11px var(--mono); border: 1px solid var(--line); border-radius: 4px;
+    padding: 1px 5px; color: var(--dim);
+  }
+</style>
+</head>
+<body>
+
+<div class="mockbar">
+  mock H — queued messages &amp; tool chains · click a chain to expand · click a call for output · click a queued entry to dequeue
+  <button class="replay" onclick="replay()">↻ replay live chain</button>
+</div>
+
+<div class="chat" id="chat">
+
+  <div class="msg user">
+    <div class="who">You</div>
+    <div class="bubble">Look at how the transcript renders tool calls and tell me what you'd change.</div>
+  </div>
+
+  <div class="think"><div class="thinkbody">Planning source code inspection</div></div>
+
+  <!-- settled chain -->
+  <div class="chain done" onclick="toggleChain(event, this)">
+    <button class="chainhead">
+      <span class="disc">▸</span>
+      <span class="counts"><span class="n">3</span> bash · <span class="n">2</span> read</span>
+      <span class="live"></span>
+      <span class="chainstate">done</span>
+    </button>
+    <div class="calls">
+      <div class="tool ok"><button class="toolhead"><span class="toolname">bash</span><span class="toolsummary">find src -maxdepth 4 -type f | sort</span><span class="toolstate">done</span></button><pre class="toolout">src/main/index.ts
+src/preload/index.ts
+src/renderer/src/main.tsx
+src/renderer/src/components/Transcript.tsx</pre></div>
+      <div class="tool ok"><button class="toolhead"><span class="toolname">bash</span><span class="toolsummary">find docs -maxdepth 3 -type f | sort</span><span class="toolstate">done</span></button><pre class="toolout">docs/adr/0001-ui-reaches-agents-only-through-the-agent-port.md
+docs/design/m1-parity-core.md</pre></div>
+      <div class="tool ok"><button class="toolhead"><span class="toolname">bash</span><span class="toolsummary">git status --short</span><span class="toolstate">done</span></button><pre class="toolout">M src/renderer/src/components/Transcript.tsx</pre></div>
+      <div class="tool ok"><button class="toolhead"><span class="toolname">read</span><span class="toolsummary">src/shared/agent/port.ts</span><span class="toolstate">done</span></button><pre class="toolout">// This module imports nothing on purpose …</pre></div>
+      <div class="tool ok"><button class="toolhead"><span class="toolname">read</span><span class="toolsummary">src/renderer/src/components/Transcript.tsx</span><span class="toolstate">done</span></button><pre class="toolout">import { useEffect, useLayoutEffect … }</pre></div>
+    </div>
+  </div>
+
+  <div class="think"><div class="thinkbody">Planning design document and architecture</div></div>
+
+  <!-- chain with a failure -->
+  <div class="chain failed" onclick="toggleChain(event, this)">
+    <button class="chainhead">
+      <span class="disc">▸</span>
+      <span class="counts"><span class="n">2</span> read · <span class="n">1</span> bash</span>
+      <span class="live"></span>
+      <span class="chainstate">1 error</span>
+    </button>
+    <div class="calls">
+      <div class="tool ok"><button class="toolhead"><span class="toolname">read</span><span class="toolsummary">docs/design/m1-parity-core.md</span><span class="toolstate">done</span></button><pre class="toolout"># M1 parity — core …</pre></div>
+      <div class="tool failed"><button class="toolhead"><span class="toolname">read</span><span class="toolsummary">docs/design/feature-inventory.md</span><span class="toolstate">error</span></button><pre class="toolout">ENOENT: no such file or directory</pre></div>
+      <div class="tool ok"><button class="toolhead"><span class="toolname">bash</span><span class="toolsummary">ls docs/design/</span><span class="toolstate">done</span></button><pre class="toolout">m1-parity-core.md
+mock-a-ember.html</pre></div>
+    </div>
+  </div>
+
+  <!-- chain of one -->
+  <div class="chain done" onclick="toggleChain(event, this)">
+    <button class="chainhead">
+      <span class="disc">▸</span>
+      <span class="counts"><span class="n">1</span> read</span>
+      <span class="live"></span>
+      <span class="chainstate">done</span>
+    </button>
+    <div class="calls">
+      <div class="tool ok"><button class="toolhead"><span class="toolname">read</span><span class="toolsummary">package.json</span><span class="toolstate">done</span></button><pre class="toolout">{ "name": "crucible" … }</pre></div>
+    </div>
+  </div>
+
+  <div class="msg agent">
+    <div class="who">Agent</div>
+    <div>The transcript stacks every call as its own row; grouping consecutive calls would recover most of the vertical space.</div>
+  </div>
+
+  <div class="msg user">
+    <div class="who">You</div>
+    <div class="bubble">Good — now check the tests and the adapter too.</div>
+  </div>
+
+  <div class="think"><div class="thinkbody">Checking adapters and test coverage</div></div>
+
+  <!-- live chain, animated by script -->
+  <div class="chain running" id="livechain" onclick="toggleChain(event, this)">
+    <button class="chainhead">
+      <span class="spin"></span>
+      <span class="counts" id="livecounts"></span>
+      <span class="live" id="livesummary"></span>
+      <span class="chainstate">running</span>
+    </button>
+    <div class="calls" id="livecalls"></div>
+  </div>
+
+</div>
+
+<!-- queued messages -->
+<div class="queue">
+  <button class="qitem" onclick="dequeue(this)">
+    <span class="qkind steer">steer</span>
+    <span class="qtext">Skip the adapter tests, focus on the renderer ones.</span>
+    <span class="qhint">queued · click or ⌥↑ to edit</span>
+  </button>
+  <button class="qitem" onclick="dequeue(this)">
+    <span class="qkind follow">follow-up</span>
+    <span class="qtext">When you're done, summarize what you'd refactor first.</span>
+    <span class="qhint">queued · click or ⌥↑ to edit</span>
+  </button>
+</div>
+
+<!-- composer, working state -->
+<div class="composer">
+  <div class="cbox">
+    <textarea id="draft" placeholder="Message the agent…"></textarea>
+    <div class="crow">
+      <button class="chip"><span>⌾</span> <b>fake-model</b></button>
+      <button class="chip"><span>✦</span> think: <b>low</b></button>
+      <button class="send steer">Steer ⏎</button>
+      <button class="stop"><span class="spin"></span><span class="stopsq"></span>Stop</button>
+    </div>
+  </div>
+  <div class="esc">
+    <span class="workingnote">agent working · 14s</span> —
+    <kbd>⏎</kbd> steer · <kbd>⌥⏎</kbd> follow-up · <kbd>esc</kbd> stop · <kbd>⇧⏎</kbd> newline
+  </div>
+</div>
+
+<script>
+  function toggleChain(event, chain) {
+    // clicks inside an individual call toggle that call, not the chain
+    const tool = event.target.closest('.tool')
+    if (tool !== null) { tool.classList.toggle('open'); return }
+    chain.classList.toggle('open')
+    chain.querySelector('.disc')?.replaceChildren(chain.classList.contains('open') ? '▾' : '▸')
+  }
+
+  function dequeue(item) {
+    const draft = document.getElementById('draft')
+    draft.value = item.querySelector('.qtext').textContent
+    item.remove()
+    draft.focus()
+  }
+
+  // ——— live chain script: calls arrive with uneven durations ———
+  const script = [
+    { name: 'bash', summary: 'npm test -- --reporter=dot', ms: 2600, output: '205 passing (4s)' },
+    { name: 'read', summary: 'src/shared/agent/fake-adapter.ts', ms: 900,  output: 'const SCRIPT = [ … ]' },
+    { name: 'read', summary: 'src/main/agent/sdk-adapter.ts',   ms: 1100, output: 'async prompt(sessionId, turnId, text) { … }' },
+    { name: 'bash', summary: 'npm run typecheck', ms: 3200, output: 'tsc --noEmit — no errors' },
+    { name: 'read', summary: 'src/renderer/src/Shell.tools.test.tsx', ms: 800, output: "test('tool output expands', …)" }
+  ]
+  let timers = []
+
+  function renderCounts(done) {
+    const counts = {}
+    for (const call of done) counts[call.name] = (counts[call.name] ?? 0) + 1
+    const el = document.getElementById('livecounts')
+    el.replaceChildren()
+    Object.entries(counts).forEach(([name, n], i) => {
+      if (i > 0) el.append(' · ')
+      const num = document.createElement('span')
+      num.className = 'n tick'
+      num.textContent = n
+      el.append(num, ' ' + name)
+    })
+  }
+
+  function replay() {
+    timers.forEach(clearTimeout); timers = []
+    const chain = document.getElementById('livechain')
+    chain.classList.add('running'); chain.classList.remove('done')
+    chain.querySelector('.chainstate').textContent = 'running'
+    const head = chain.querySelector('.chainhead')
+    if (!head.querySelector('.spin')) {
+      const spin = document.createElement('span'); spin.className = 'spin'
+      head.prepend(spin)
+    }
+    document.getElementById('livecalls').replaceChildren()
+    document.getElementById('livecounts').replaceChildren()
+
+    const done = []
+    let at = 400
+    script.forEach((call, index) => {
+      timers.push(setTimeout(() => {
+        document.getElementById('livesummary').textContent = `${call.name} ${call.summary}`
+      }, at))
+      at += call.ms
+      timers.push(setTimeout(() => {
+        done.push(call); renderCounts(done)
+        const row = document.createElement('div')
+        row.className = 'tool ok'
+        row.innerHTML = `<button class="toolhead"><span class="toolname">${call.name}</span><span class="toolsummary">${call.summary}</span><span class="toolstate">done</span></button><pre class="toolout">${call.output}</pre>`
+        document.getElementById('livecalls').append(row)
+        if (index === script.length - 1) {
+          chain.classList.remove('running'); chain.classList.add('done')
+          chain.querySelector('.chainstate').textContent = 'done'
+          head.querySelector('.spin')?.replaceWith(Object.assign(document.createElement('span'), { className: 'disc', textContent: chain.classList.contains('open') ? '▾' : '▸' }))
+          document.getElementById('livesummary').textContent = ''
+        }
+      }, at))
+    })
+  }
+  replay()
+</script>
+</body>
+</html>

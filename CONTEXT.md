@@ -49,6 +49,22 @@ _Avoid_: project, repository.
 A user-curated workspace sidebar item holding one agent conversation. It appears only when the user creates or adds it in Crucible; adapter-managed history never populates the sidebar by discovery.
 _Avoid_: thread, chat, backing-store record.
 
+**Steering message**:
+A message queued while a session is working, delivered at the next boundary
+between tool calls to redirect the live turn. π's meaning, adopted verbatim.
+_Avoid_: interrupt, injection, mid-turn message.
+
+**Follow-up message**:
+A message queued while a session is working, held until the agent fully
+stops, then sent as the next prompt. π's meaning, adopted verbatim.
+_Avoid_: queued prompt, deferred message.
+
+**Tool chain**:
+A run of consecutive tool calls in a transcript, rendered as one collapsible
+element; thinking or assistant text ends one chain and starts the next. A
+lone call is a chain of one.
+_Avoid_: call group, tool run, tool stack.
+
 **Session reset**:
 Replacement of a session's conversation with a fresh stock π session while keeping the same sidebar identity.
 _Avoid_: new session, clear chat.
