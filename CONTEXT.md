@@ -107,6 +107,19 @@ so re-showing the same file refreshes it in place. Per-session, like the
 panel itself.
 _Avoid_: pane, exhibit slot, window.
 
+**Branch board**:
+The workspace-scoped view of every branch the user owns in that repository,
+grouped by whether the work has landed, and of the host pull requests that
+name the user. It reports; it never deletes or checks out anything.
+_Avoid_: git panel, branch manager, PR dashboard.
+
+**Landed**:
+A branch whose work is already in the trunk — either its commits are
+ancestors of the trunk, or the host records its pull request as merged. The
+host's record wins where a host is connected, because a squash merge leaves
+no ancestry for git to find.
+_Avoid_: merged (ambiguous once squashing is in play), stale, dead.
+
 **Session reset**:
 Replacement of a session's conversation with a fresh stock π session while keeping the same sidebar identity.
 _Avoid_: new session, clear chat.
