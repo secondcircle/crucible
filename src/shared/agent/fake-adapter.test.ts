@@ -4,9 +4,16 @@
 // on is pinned here.
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { AdapterEvent } from './adapter'
-import { createFakeAdapter, FAKE_MODEL } from './fake-adapter'
+import { createFakeAdapter, FAKE_MODEL, FAKE_TURN_USAGE } from './fake-adapter'
 
 const WORKSPACE = '/workspaces/crucible'
+
+/** What one scripted turn costs, which is the whole of a first turn's money. */
+const TURN_COST =
+  FAKE_TURN_USAGE.input.cost +
+  FAKE_TURN_USAGE.output.cost +
+  FAKE_TURN_USAGE.cacheRead.cost +
+  FAKE_TURN_USAGE.cacheWrite.cost
 
 async function withSession(sessionId = 's1'): Promise<{
   adapter: ReturnType<typeof createFakeAdapter>
@@ -19,7 +26,13 @@ async function withSession(sessionId = 's1'): Promise<{
   return { adapter, events }
 }
 
-const types = (events: readonly AdapterEvent[]): string[] => events.map((event) => event.type)
+// Usage rides along with the work now, so a sequence that is about the work
+// leaves it out; where it lands is pinned by the two usage tests below.
+const types = (events: readonly AdapterEvent[]): string[] =>
+  events.map((event) => event.type).filter((type) => type !== 'usage')
+
+const usageOf = (events: readonly AdapterEvent[]): AdapterEvent[] =>
+  events.filter((event) => event.type === 'usage')
 
 // One test below drives the paced script under fake timers; every other builds
 // the adapter with no pause and waits on no clock.
@@ -43,7 +56,7 @@ const pendingCall = (beats: number, chunks: number): string[] => [
 ]
 
 describe('the scripted turn', () => {
-  it('runs thinking, a chain of calls, a lone call, a reply, usage, then the end', async () => {
+  it('runs thinking, a chain of calls, a lone call, a reply, then the end', async () => {
     const { adapter, events } = await withSession()
 
     await adapter.prompt('s1', 't-1', 'hello')
@@ -62,8 +75,7 @@ describe('the scripted turn', () => {
       'text_delta',
       ...call(1),
       ...Array.from({ length: 13 }, () => 'text_delta'),
-      'turn_ended',
-      'usage'
+      'turn_ended'
     ])
   })
 
@@ -112,12 +124,50 @@ describe('the scripted turn', () => {
 
     await adapter.prompt('s1', 't-1', 'hello')
     await adapter.prompt('s1', 't-2', 'again')
-    const usage = events.filter((event) => event.type === 'usage')
+    const usage = usageOf(events)
 
-    expect(usage).toHaveLength(2)
-    expect(usage[0].usedTokens).toBeGreaterThan(0)
-    expect(usage[1].usedTokens).toBeGreaterThan(usage[0].usedTokens)
-    expect(usage[1].usedTokens).toBeLessThan(usage[1].contextWindow)
+    const counts = usage.map((event) => (event.type === 'usage' ? event.usedTokens : 0))
+    expect(counts[0]).toBeGreaterThan(0)
+    expect([...counts].sort((a, b) => a - b)).toEqual(counts)
+    const last = usage.at(-1)
+    expect(last?.type === 'usage' ? last.usedTokens : 0).toBeLessThan(
+      last?.type === 'usage' ? last.contextWindow : 0
+    )
+  })
+
+  // A meter that only moves once a turn is over is a meter that says nothing
+  // during the minutes it matters, which is what a long turn is.
+  it('moves the meter during the turn, and settles the money at the end', async () => {
+    const { adapter, events } = await withSession()
+
+    await adapter.prompt('s1', 't-1', 'hello')
+    const ended = events.findIndex((event) => event.type === 'turn_ended')
+    const during = usageOf(events.slice(0, ended))
+    const after = usageOf(events.slice(ended))
+
+    expect(during.length).toBeGreaterThan(1)
+    // Money is a finished turn's, so the chip keeps its dash while the tokens
+    // are already climbing.
+    expect(during.every((event) => event.type === 'usage' && event.cost === undefined)).toBe(true)
+    expect(after).toHaveLength(1)
+    expect(after[0].type === 'usage' ? after[0].cost : 0).toBeCloseTo(TURN_COST, 5)
+  })
+
+  // Nothing prompts a resumed conversation before it is looked at, so a meter
+  // that waits for a turn is a dash for as long as the reading lasts.
+  it('reports what a restored conversation already holds, before any turn', async () => {
+    const adapter = createFakeAdapter({ pauseMs: 0 })
+    await adapter.bind({ sessionId: 's1', workspacePath: WORKSPACE })
+    await adapter.prompt('s1', 't-1', 'hello')
+    const token = (await adapter.bind({ sessionId: 's1', workspacePath: WORKSPACE })).token
+
+    const events: AdapterEvent[] = []
+    adapter.onEvent((event) => events.push(event))
+    adapter.release('s1')
+    await adapter.bind({ sessionId: 's1', workspacePath: WORKSPACE, token })
+
+    expect(usageOf(events)).toHaveLength(1)
+    expect(usageOf(events)[0]).toMatchObject({ sessionId: 's1' })
   })
 })
 
@@ -147,10 +197,13 @@ describe('queued messages', () => {
 
     await adapter.prompt('s1', 't-1', 'hello')
 
-    const at = types(events).indexOf('user_message')
+    // The turn's own events, without the meter's, because this is about where
+    // a queued message lands.
+    const flow = events.filter((event) => event.type !== 'usage')
+    const at = flow.findIndex((event) => event.type === 'user_message')
     // The whole queue lands as a group, between the call that was running and
     // the next one.
-    expect(types(events).slice(at - 1, at + 5)).toEqual([
+    expect(types(flow).slice(at - 1, at + 5)).toEqual([
       'tool_ended',
       'user_message',
       'queue_changed',
@@ -158,12 +211,12 @@ describe('queued messages', () => {
       'queue_changed',
       'tool_started'
     ])
-    expect(events.slice(at).filter((event) => event.type === 'user_message')).toMatchObject([
+    expect(flow.slice(at).filter((event) => event.type === 'user_message')).toMatchObject([
       { text: 'check the adapter too' },
       { text: 'and the tests' }
     ])
-    expect(events[at + 1]).toMatchObject({ steering: ['and the tests'] })
-    expect(events[at + 3]).toMatchObject({ steering: [], followUp: [] })
+    expect(flow[at + 1]).toMatchObject({ steering: ['and the tests'] })
+    expect(flow[at + 3]).toMatchObject({ steering: [], followUp: [] })
   })
 
   it('holds a follow-up until the reply is done, answers it, and only then ends', async () => {
@@ -181,8 +234,7 @@ describe('queued messages', () => {
       'user_message',
       'queue_changed',
       'text_delta',
-      'turn_ended',
-      'usage'
+      'turn_ended'
     ])
   })
 
@@ -317,8 +369,10 @@ describe('cancellation', () => {
     expect(types(events)).not.toContain('turn_ended')
     const terminal = events.findIndex((event) => event.type === 'turn_cancelled')
     expect(terminal).toBeGreaterThan(0)
-    // Only usage follows a terminal event, and nothing of the turn does.
-    expect(types(events).slice(terminal + 1)).toEqual(['usage'])
+    // Nothing of the turn follows a terminal event: the last word after it is
+    // the meter's, which a stopped turn still owes.
+    expect(types(events).slice(terminal + 1)).toEqual([])
+    expect(usageOf(events.slice(terminal + 1))).toHaveLength(1)
   })
 
   it('leaves the partial reply and a stopped marker in the conversation', async () => {

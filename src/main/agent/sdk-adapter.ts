@@ -76,11 +76,19 @@ interface Bound {
   running?: RunningTurn
   /** Bash runs waiting for the boundary that delivers them, oldest first. */
   readonly shares: PendingShare[]
+  /** The last numbers reported for this conversation, so a still count is not re-sent. */
+  reported?: ReportedUsage
   /**
    * A prompt sent to π but not yet in `session.messages`, which is the whole
    * first minutes of a session as far as the titler can see.
    */
   asked?: string
+}
+
+interface ReportedUsage {
+  readonly usedTokens: number
+  readonly contextWindow: number
+  readonly cost?: number
 }
 
 interface PendingShare {
@@ -411,17 +419,28 @@ export function createSdkAdapter({
         bound.asked = undefined
       }
       const mapped = mapper.map(event, { sessionId, turnId })
-      if (mapped === undefined) return
-      if (mapped.type === 'turn_error') {
+      if (mapped?.type === 'turn_error') {
         outcome = mapped
-        return
+      } else if (mapped !== undefined) {
+        if (mapped.type === 'text_delta') {
+          // Text arriving after a failed message is the SDK's own retry
+          // succeeding: the turn is no longer failing.
+          outcome = { type: 'turn_ended', sessionId, turnId }
+        }
+        emit(mapped)
       }
-      if (mapped.type === 'text_delta') {
-        // Text arriving after a failed message is the SDK's own retry
-        // succeeding: the turn is no longer failing.
-        outcome = { type: 'turn_ended', sessionId, turnId }
+
+      // The three moments the context genuinely moved: an answer landed with
+      // its own token count, a tool result was appended after it, or a
+      // compaction threw most of the conversation away. Deltas are skipped
+      // because a per-character re-estimate would say nothing new.
+      if (
+        event.type === 'message_end' ||
+        event.type === 'tool_execution_end' ||
+        event.type === 'compaction_end'
+      ) {
+        reportUsage(sessionId, bound)
       }
-      emit(mapped)
     })
 
     bound.running = {
@@ -462,21 +481,9 @@ export function createSdkAdapter({
     // abort happened.
     emit(cancelled ? { type: 'turn_cancelled', sessionId, turnId } : outcome)
 
-    const usage = session.getContextUsage()
-    // No usage event at all, rather than a guess, when the SDK reports
-    // nothing.
-    if (usage?.tokens != null) {
-      // The percentage is path-based, as π reports it; the cost beside it is
-      // the whole conversation's, because money does not vanish on a jump.
-      const spent = usageOf(session.sessionManager)
-      emit({
-        type: 'usage',
-        sessionId,
-        usedTokens: usage.tokens,
-        contextWindow: usage.contextWindow,
-        ...(spent === undefined ? {} : { cost: spent.totalCost })
-      })
-    }
+    // The last word on the turn: the cost is only whole once the final message
+    // has been written with its usage.
+    reportUsage(sessionId, bound)
   }
 
   // π's `AuthInteraction` is an SDK type and cannot cross the port, so it is
@@ -544,6 +551,38 @@ export function createSdkAdapter({
       emit({ type: 'auth_prompt_closed', promptId })
       settle({ closed: why })
     }
+  }
+
+  // π keeps no context counter: it recomputes the estimate from the branch on
+  // every read, so this is worth asking for whenever the conversation grows —
+  // on the bind, after each answer and tool result, and once the turn is over.
+  function reportUsage(sessionId: SessionId, bound: Bound): void {
+    const usage = bound.session.getContextUsage()
+    // Nothing at all rather than a guess when π reports nothing: right after a
+    // compaction it genuinely does not know yet.
+    if (usage?.tokens == null) return
+
+    // The tokens are the current path's, as π counts them; the cost beside
+    // them is the whole conversation's, because money does not vanish on a
+    // jump.
+    const spent = usageOf(bound.session.sessionManager)
+    const next: ReportedUsage = {
+      usedTokens: usage.tokens,
+      contextWindow: usage.contextWindow,
+      ...(spent === undefined ? {} : { cost: spent.totalCost })
+    }
+    const last = bound.reported
+    if (
+      last !== undefined &&
+      last.usedTokens === next.usedTokens &&
+      last.contextWindow === next.contextWindow &&
+      last.cost === next.cost
+    ) {
+      return
+    }
+
+    bound.reported = next
+    emit({ type: 'usage', sessionId, ...next })
   }
 
   /** π's per-message usage over a whole conversation, every branch of it. */
@@ -621,6 +660,11 @@ export function createSdkAdapter({
         shares: []
       }
       sessions.set(request.sessionId, bound)
+      // A conversation that came back is already holding context, and it is
+      // holding it before anyone prompts it again: without this the meter
+      // reads as a dash from launch until the next turn ends. A fresh
+      // conversation says nothing, so nothing is reported for one.
+      if (restored) reportUsage(request.sessionId, bound)
       return describe(bound, restored)
     },
 
@@ -645,6 +689,9 @@ export function createSdkAdapter({
       )
       bound.session = session
       bound.token = tokenOf(session)
+      // The old conversation's numbers described a conversation this session
+      // no longer has.
+      bound.reported = undefined
       return describe(bound, false)
     },
 
@@ -668,6 +715,7 @@ export function createSdkAdapter({
         shares: []
       }
       sessions.set(request.sessionId, bound)
+      reportUsage(request.sessionId, bound)
       return describe(bound, true)
     },
 
@@ -730,9 +778,12 @@ export function createSdkAdapter({
       ref: string,
       summarize: boolean
     ): Promise<{ editorText?: string }> {
-      const { session } = requireBound(sessionId)
-      const navigated = await session.navigateTree(ref, { summarize })
+      const bound = requireBound(sessionId)
+      const navigated = await bound.session.navigateTree(ref, { summarize })
       if (navigated.cancelled) throw new Error('That jump did not happen.')
+      // The branch under the session changed, so whatever was last reported
+      // counted messages that are no longer on the path.
+      bound.reported = undefined
       return navigated.editorText === undefined ? {} : { editorText: navigated.editorText }
     },
 

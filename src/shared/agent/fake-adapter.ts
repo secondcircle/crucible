@@ -376,6 +376,27 @@ export function createFakeAdapter({
     for (const listener of [...listeners]) listener(event)
   }
 
+  // The rule the SDK adapter follows too: the count goes out whenever the
+  // conversation grew, which is on the bind and at every step of a turn, not
+  // only once a turn is over. `growth` is what the live turn has added so far.
+  function reportUsage(sessionId: SessionId, conversation: Conversation, growth = 0): void {
+    const usedTokens = Math.min(CONTEXT_WINDOW, conversation.usedTokens + growth)
+    // An empty conversation has reported nothing, and a dash is what nothing
+    // looks like.
+    if (usedTokens === 0) return
+    emit({
+      type: 'usage',
+      sessionId,
+      usedTokens,
+      contextWindow: CONTEXT_WINDOW,
+      // Money is only known per finished turn, so a conversation that has paid
+      // for none keeps its dash while its tokens are already on the meter.
+      ...(conversation.usageMessages === 0
+        ? {}
+        : { cost: dollars(conversation.usageMessages * TURN_COST * 100) })
+    })
+  }
+
   // The kind is in the token because canned conversations come back identical
   // next launch, so a stale live token has to match nothing rather than them.
   function mintToken(kind: 'canned' | 'live'): string {
@@ -639,10 +660,17 @@ export function createFakeAdapter({
           ? `${opening.command}\n${opening.output}`
           : ''
 
+    // Every place the turn adds to what the conversation holds goes through
+    // here, so the meter moves with the work rather than jumping at the end.
+    function add(text: string): void {
+      counted += text
+      reportUsage(sessionId, conversation, estimateTokens(counted))
+    }
+
     function settleSpoken(): void {
       if (spoken === '') return
       pending.push({ kind: 'assistant', markdown: spoken })
-      counted += spoken
+      add(spoken)
       spoken = ''
     }
 
@@ -663,14 +691,9 @@ export function createFakeAdapter({
       // stopped turn was still paid for.
       conversation.usageMessages += 1
       emit(terminal)
-      // Reported after the turn, which is when it is genuinely known.
-      emit({
-        type: 'usage',
-        sessionId,
-        usedTokens: conversation.usedTokens,
-        contextWindow: CONTEXT_WINDOW,
-        cost: dollars(conversation.usageMessages * TURN_COST * 100)
-      })
+      // The last word: the tokens are settled and the turn's money is now
+      // known, which the counts crossing mid-turn could not say.
+      reportUsage(sessionId, conversation)
     }
 
     /** False once the script has been abandoned, which ends every loop. */
@@ -695,7 +718,7 @@ export function createFakeAdapter({
         thinking += delta
         emit({ type: 'thinking_delta', sessionId, turnId, delta })
       }
-      counted += thinking
+      add(thinking)
       pending.push({
         kind: 'thinking',
         text: thinking,
@@ -733,7 +756,7 @@ export function createFakeAdapter({
         output = cause instanceof Error ? cause.message : String(cause)
       }
       emit({ type: 'tool_ended', sessionId, turnId, callId, ok, output })
-      counted += output
+      add(output)
       pending.push({ kind: 'tool', name: scripted.name, summary: scripted.summary, ok, output })
       return true
     }
@@ -775,7 +798,7 @@ export function createFakeAdapter({
       await beat()
       if (stopped !== undefined) return false
       emit({ type: 'tool_ended', sessionId, turnId, callId, ok: scripted.ok, output })
-      counted += output
+      add(output)
       pending.push({
         kind: 'tool',
         name: scripted.name,
@@ -795,7 +818,7 @@ export function createFakeAdapter({
         if (stopped !== undefined) return false
         const message = queue.shift() ?? ''
         settleSpoken()
-        counted += message
+        add(message)
         pending.push({ kind: 'user', text: message })
         emit({ type: 'user_message', sessionId, turnId, text: message })
         emitQueue(bound, sessionId)
@@ -812,7 +835,7 @@ export function createFakeAdapter({
         const share = bound.shares.shift()
         if (share === undefined) break
         settleSpoken()
-        counted += `${share.run.command}\n${share.run.output}`
+        add(`${share.run.command}\n${share.run.output}`)
         pending.push({
           kind: 'bashRun',
           command: share.run.command,
@@ -965,6 +988,9 @@ export function createFakeAdapter({
         shares: []
       }
       sessions.set(request.sessionId, bound)
+      // A conversation that came back is already holding context: without this
+      // the meter reads as a dash from launch until a turn ends.
+      if (existing !== undefined) reportUsage(request.sessionId, conversation)
       return {
         token: conversation.token,
         model: bound.model,
@@ -1001,6 +1027,7 @@ export function createFakeAdapter({
         shares: []
       }
       sessions.set(request.sessionId, bound)
+      reportUsage(request.sessionId, conversation)
       return {
         token: conversation.token,
         model: bound.model,

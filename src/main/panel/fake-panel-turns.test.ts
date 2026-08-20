@@ -21,7 +21,10 @@ async function bind(sessionId = 's1'): Promise<void> {
   await adapter.bind({ sessionId, workspacePath: WORKSPACE })
 }
 
-const types = (): string[] => events.map((event) => event.type)
+// Usage rides along all through a turn, and where it lands is pinned in the
+// adapter's own test rather than in every sequence that happens to see it.
+const types = (): string[] =>
+  events.map((event) => event.type).filter((type) => type !== 'usage')
 
 const calls = (): Array<{ name: string; summary: string; ok: boolean; output: string }> =>
   events
@@ -75,8 +78,7 @@ describe('a panel prompt', () => {
       'tool_started',
       'tool_ended',
       'text_delta',
-      'turn_ended',
-      'usage'
+      'turn_ended'
     ])
 
     expect(calls()).toEqual([
@@ -206,7 +208,7 @@ describe('a message queued into a panel turn', () => {
           event.type === 'user_message' && event.text === 'and close the second one after'
       )
     ).toBe(true)
-    expect(types().at(-2)).toBe('turn_ended')
+    expect(types().at(-1)).toBe('turn_ended')
   })
 })
 
