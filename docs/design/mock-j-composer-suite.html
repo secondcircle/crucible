@@ -1,0 +1,440 @@
+<!doctype html>
+<!-- Mock J — the composer suite: @ file search, image paste/drag, ! bash.
+     Interactive:
+       · type "@" then letters → fuzzy file popover; ⏎ or click inserts path
+       · click "simulate ⌘V screenshot" (or actually paste an image) → chip
+       · drag an image file anywhere onto the page → drop veil, then chip
+       · start the line with "!" → composer flips to bash mode; ⏎ runs it,
+         output lands in a dismissible drawer; "Add to conversation" turns it
+         into a transcript row marked as shared with the model -->
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Mock J — composer suite</title>
+<style>
+  /* tokens, verbatim from src/renderer/src/styles/tokens.css */
+  :root {
+    --bg: #191419; --bg2: #211a20; --panel: #241c23; --panel2: #2e242d;
+    --line: #3a2e38; --code: #120e12; --code-deep: #0d0a0d; --user: #2c2230;
+    --think-bg: #161018; --error-bg: #1d1113;
+    --ink: #e8dfe2; --dim: #9b8a94; --faint: #6b5d66;
+    --code-ink: #d7c9b8; --output-ink: #cbbfa4; --on-accent: #1c120c;
+    --accent: #e07a4f; --accent2: #f0a37c; --ok: #7fb069; --error: #d96a5a;
+    --thinking: #b08cc9;
+    --font: -apple-system, 'Segoe UI', system-ui, sans-serif;
+    --mono: ui-monospace, 'SF Mono', Menlo, monospace;
+    --radius: 8px; --radius-lg: 12px; --column: 680px;
+  }
+  * { box-sizing: border-box; margin: 0; }
+  html, body { height: 100%; }
+  body {
+    background: var(--bg); color: var(--ink);
+    font: 14px/1.55 var(--font); overflow: hidden;
+    display: flex; flex-direction: column;
+  }
+  button, textarea { font: inherit; color: inherit; }
+  button { cursor: pointer; }
+  ::-webkit-scrollbar { width: 10px; }
+  ::-webkit-scrollbar-thumb { background: var(--line); border-radius: 6px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+
+  .mockbar {
+    flex: none; display: flex; align-items: center; gap: 10px;
+    padding: 8px 16px; border-bottom: 1px solid var(--line);
+    font-size: 11.5px; color: var(--faint);
+  }
+  .mockbar button {
+    background: none; border: 1px solid var(--line); border-radius: 6px;
+    padding: 3px 10px; color: var(--dim); font-size: 12px;
+  }
+  .mockbar button:hover { color: var(--ink); border-color: var(--dim); }
+
+  .chat { flex: 1; overflow-y: auto; padding: 28px 0; min-height: 0; }
+  .msg { max-width: var(--column); margin: 0 auto 20px; padding: 0 24px; }
+  .msg .who {
+    font-size: 11px; text-transform: uppercase; letter-spacing: 0.1em;
+    color: var(--faint); margin-bottom: 6px;
+  }
+  .msg.agent .who { color: var(--accent); }
+  .msg.user .bubble {
+    background: var(--user); border: 1px solid var(--line);
+    border-radius: 10px; padding: 10px 14px; white-space: pre-wrap;
+  }
+  .msg .thumbs { display: flex; gap: 8px; margin-top: 8px; }
+  .msg .thumbs img, .msg .thumbs .ph {
+    height: 72px; border-radius: 6px; border: 1px solid var(--line);
+  }
+  .ph {
+    width: 110px; background:
+      linear-gradient(135deg, var(--panel2) 25%, var(--panel) 25%, var(--panel) 50%,
+      var(--panel2) 50%, var(--panel2) 75%, var(--panel) 75%);
+    background-size: 16px 16px; display: flex; align-items: center;
+    justify-content: center; color: var(--faint); font-size: 10px;
+  }
+
+  /* bash row in the transcript (tool-chain grammar) */
+  .bashrow { max-width: var(--column); margin: 0 auto 10px; padding: 0 24px; }
+  .bashhead {
+    display: flex; gap: 10px; align-items: center; width: 100%;
+    font: 12px var(--mono); color: var(--dim);
+    background: var(--code); border: 1px solid var(--line);
+    border-left: 3px solid var(--ok); border-radius: 6px;
+    padding: 7px 12px; text-align: left;
+  }
+  .bashhead .cmd { color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .bashhead .sharetag {
+    margin-left: auto; flex: none; font: 10.5px var(--font);
+    text-transform: uppercase; letter-spacing: 0.06em;
+    color: var(--accent2); border: 1px solid var(--accent);
+    border-radius: 9px; padding: 1px 8px;
+  }
+  .bashout {
+    background: var(--code-deep); border: 1px solid var(--line); border-top: none;
+    border-radius: 0 0 6px 6px; padding: 10px 14px;
+    font: 11.5px/1.5 var(--mono); color: var(--output-ink);
+    max-height: 140px; overflow: auto; white-space: pre-wrap;
+  }
+
+  /* ——— composer region ——— */
+  .dock { flex: none; padding: 0 0 18px; }
+  .inner { max-width: var(--column); margin: 0 auto; padding: 0 24px; position: relative; }
+
+  /* the bash drawer */
+  .drawer {
+    display: none; background: var(--code); border: 1px solid var(--line);
+    border-radius: var(--radius); margin-bottom: 10px; overflow: hidden;
+  }
+  .drawer.open { display: block; }
+  .drawerhead {
+    display: flex; gap: 10px; align-items: center; padding: 7px 12px;
+    font: 12px var(--mono); color: var(--dim); border-bottom: 1px solid var(--line);
+  }
+  .drawerhead .prompt { color: var(--accent2); flex: none; }
+  .drawerhead .cmd { color: var(--ink); }
+  .exit {
+    margin-left: auto; flex: none; font: 10.5px var(--font);
+    padding: 1px 8px; border-radius: 9px;
+  }
+  .exit.ok { color: var(--ok); border: 1px solid var(--ok); }
+  .exit.bad { color: var(--error); border: 1px solid var(--error); }
+  .drawerout {
+    padding: 10px 14px; font: 11.5px/1.5 var(--mono); color: var(--output-ink);
+    max-height: 180px; overflow: auto; white-space: pre-wrap;
+  }
+  .drawerfoot {
+    display: flex; gap: 8px; padding: 8px 12px; border-top: 1px solid var(--line);
+  }
+  .drawerfoot button {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 7px;
+    padding: 4px 12px; font-size: 12px; color: var(--ink);
+  }
+  .drawerfoot button:hover { border-color: var(--accent); color: var(--accent2); }
+  .drawerfoot .closeb { margin-left: auto; color: var(--dim); }
+  .drawerfoot .closeb:hover { color: var(--ink); border-color: var(--dim); }
+  .drawerfoot .note { font-size: 11px; color: var(--faint); align-self: center; }
+
+  /* attachment chips */
+  .chips { display: none; gap: 8px; margin-bottom: 8px; flex-wrap: wrap; }
+  .chips.haschips { display: flex; }
+  .chip {
+    position: relative; border: 1px solid var(--line); border-radius: 6px;
+    overflow: hidden; height: 52px;
+  }
+  .chip img, .chip .ph { height: 100%; display: block; border: none; border-radius: 0; }
+  .chip .x {
+    position: absolute; top: 2px; right: 2px; width: 16px; height: 16px;
+    border-radius: 50%; background: rgba(0,0,0,0.65); border: none;
+    color: var(--ink); font-size: 10px; line-height: 1; padding: 0;
+  }
+  .chip .x:hover { background: var(--error); }
+
+  /* composer box */
+  .box {
+    background: var(--panel); border: 1px solid var(--line);
+    border-radius: var(--radius-lg); padding: 10px 12px;
+    transition: border-color 0.15s;
+  }
+  .box.bash { border-color: var(--accent); background: var(--code); }
+  .modebadge {
+    display: none; font-size: 10.5px; text-transform: uppercase;
+    letter-spacing: 0.08em; color: var(--accent2); margin-bottom: 6px;
+  }
+  .modebadge .cwd { color: var(--faint); text-transform: none; letter-spacing: 0; font: 11px var(--mono); }
+  .box.bash .modebadge { display: block; }
+  textarea {
+    width: 100%; background: none; border: none; outline: none; resize: none;
+    color: var(--ink); font-size: 14px; min-height: 44px;
+  }
+  .box.bash textarea { font: 13px var(--mono); color: var(--code-ink); }
+  .boxrow { display: flex; gap: 10px; align-items: center; margin-top: 6px; }
+  .chipbtn {
+    background: none; border: 1px solid var(--line); border-radius: 6px;
+    padding: 2px 9px; font-size: 11.5px; color: var(--dim);
+  }
+  .send {
+    margin-left: auto; background: var(--accent); color: var(--on-accent);
+    border: none; border-radius: 7px; padding: 5px 14px; font-size: 12.5px;
+    font-weight: 600;
+  }
+  .hint { font-size: 11px; color: var(--faint); }
+
+  /* @ file popover */
+  .pop {
+    display: none; position: absolute; left: 24px; right: 24px; bottom: 100%;
+    margin-bottom: 8px; background: var(--panel2); border: 1px solid var(--line);
+    border-radius: var(--radius); overflow: hidden; z-index: 5;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+  }
+  .pop.open { display: block; }
+  .pop .pophead {
+    padding: 6px 12px; font-size: 11px; color: var(--faint);
+    border-bottom: 1px solid var(--line);
+  }
+  .pop .item {
+    display: flex; gap: 10px; width: 100%; text-align: left;
+    background: none; border: none; padding: 7px 12px;
+    font: 12.5px var(--mono); color: var(--dim);
+  }
+  .pop .item .file { color: var(--ink); }
+  .pop .item.sel, .pop .item:hover { background: var(--panel); }
+  .pop .item.sel .file { color: var(--accent2); }
+  .pop .empty { padding: 10px 12px; font-size: 12px; color: var(--faint); }
+
+  /* drop veil */
+  .veil {
+    display: none; position: fixed; inset: 0; z-index: 50;
+    background: rgba(25,20,25,0.85); border: 2px dashed var(--accent);
+    border-radius: 12px; margin: 10px;
+    align-items: center; justify-content: center;
+    font-size: 15px; color: var(--accent2);
+  }
+  .veil.on { display: flex; }
+</style>
+</head>
+<body>
+
+<div class="mockbar">
+  Mock J — composer suite · type <b>@</b> for files · start with <b>!</b> for bash · ⌘V works for real here
+  <button id="simpaste" style="margin-left:auto">simulate ⌘V screenshot</button>
+</div>
+
+<div class="chat" id="chat">
+  <div class="msg user">
+    <div class="who">You</div>
+    <div class="bubble">Here's the glitch — the composer border flashes when switching sessions. See @src/renderer/src/components/composer.css</div>
+    <div class="thumbs"><span class="ph">screenshot 1102×687</span></div>
+  </div>
+  <div class="msg agent">
+    <div class="who">Agent</div>
+    <div>I see it — the transition fires on mount. The fix is scoping the transition to state changes…</div>
+  </div>
+</div>
+
+<div class="dock"><div class="inner">
+
+  <div class="pop" id="pop">
+    <div class="pophead">Files in ~/repos/crucible — type to filter, ⏎ inserts the path</div>
+    <div id="popitems"></div>
+  </div>
+
+  <div class="drawer" id="drawer">
+    <div class="drawerhead">
+      <span class="prompt">!</span><span class="cmd" id="dcmd"></span>
+      <span class="exit ok" id="dexit">exit 0</span>
+    </div>
+    <div class="drawerout" id="dout"></div>
+    <div class="drawerfoot">
+      <button id="dsend">Add to conversation</button>
+      <span class="note">stays local unless you add it</span>
+      <button class="closeb" id="dclose">Close ×</button>
+    </div>
+  </div>
+
+  <div class="chips" id="chips"></div>
+
+  <div class="box" id="box">
+    <div class="modebadge">bash <span class="cwd">· ~/repos/crucible</span></div>
+    <textarea id="ta" rows="2" placeholder="Message the agent — @ mentions a file, ! runs bash, ⌘V pastes a screenshot"></textarea>
+    <div class="boxrow">
+      <span class="hint" id="modehint">claude-opus-4-6 · thinking high</span>
+      <button class="send" id="send">Send ⏎</button>
+    </div>
+  </div>
+
+</div></div>
+
+<div class="veil" id="veil">Drop images to attach</div>
+
+<script>
+  const files = [
+    'src/renderer/src/components/Composer.tsx',
+    'src/renderer/src/components/composer.css',
+    'src/renderer/src/components/Transcript.tsx',
+    'src/renderer/src/components/transcript.css',
+    'src/renderer/src/components/Sidebar.tsx',
+    'src/renderer/src/shell-state.ts',
+    'src/shared/agent/port.ts',
+    'src/main/agent/sdk-adapter.ts',
+    'src/main/agent/fake-adapter.ts',
+    'docs/design/mock-a-ember.html',
+    'package.json',
+  ];
+
+  const ta = document.getElementById('ta'), box = document.getElementById('box');
+  const pop = document.getElementById('pop'), popitems = document.getElementById('popitems');
+  const send = document.getElementById('send'), modehint = document.getElementById('modehint');
+  const chips = document.getElementById('chips'), chat = document.getElementById('chat');
+  const drawer = document.getElementById('drawer');
+  let sel = 0, matches = [];
+
+  // ——— mode detection ———
+  function refresh() {
+    const bash = ta.value.startsWith('!');
+    box.classList.toggle('bash', bash);
+    send.textContent = bash ? 'Run ⏎' : 'Send ⏎';
+    modehint.textContent = bash
+      ? 'runs locally in the workspace — nothing goes to the model'
+      : 'claude-opus-4-6 · thinking high';
+
+    // @ token under the caret?
+    const upto = ta.value.slice(0, ta.selectionStart ?? ta.value.length);
+    const m = bash ? null : upto.match(/@([\w./-]*)$/);
+    if (m) openPop(m[1]); else pop.classList.remove('open');
+  }
+  ta.addEventListener('input', refresh);
+  ta.addEventListener('click', refresh);
+
+  // ——— @ popover ———
+  function openPop(q) {
+    matches = files.filter(f => fuzzy(f, q)).slice(0, 7);
+    sel = 0;
+    popitems.innerHTML = matches.length
+      ? matches.map((f, i) => {
+          const j = f.lastIndexOf('/');
+          return `<button class="item ${i === sel ? 'sel' : ''}" data-f="${f}">
+            <span class="file">${j < 0 ? f : f.slice(j + 1)}</span><span>${j < 0 ? '' : f.slice(0, j)}</span></button>`;
+        }).join('')
+      : '<div class="empty">No files match</div>';
+    pop.classList.add('open');
+    popitems.querySelectorAll('.item').forEach(b =>
+      b.addEventListener('click', () => insert(b.dataset.f)));
+  }
+  function fuzzy(f, q) {
+    let i = 0; q = q.toLowerCase(); f = f.toLowerCase();
+    for (const c of q) { i = f.indexOf(c, i); if (i < 0) return false; i++; }
+    return true;
+  }
+  function insert(f) {
+    const pos = ta.selectionStart ?? ta.value.length;
+    const upto = ta.value.slice(0, pos).replace(/@[\w./-]*$/, '@' + f + ' ');
+    ta.value = upto + ta.value.slice(pos);
+    pop.classList.remove('open');
+    ta.focus();
+  }
+  ta.addEventListener('keydown', e => {
+    if (pop.classList.contains('open') && matches.length) {
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        e.preventDefault();
+        sel = (sel + (e.key === 'ArrowDown' ? 1 : matches.length - 1)) % matches.length;
+        popitems.querySelectorAll('.item').forEach((b, i) => b.classList.toggle('sel', i === sel));
+        return;
+      }
+      if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); insert(matches[sel]); return; }
+      if (e.key === 'Escape') { pop.classList.remove('open'); return; }
+    }
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); submit(); }
+  });
+  send.addEventListener('click', submit);
+
+  // ——— submit: send or run ———
+  function submit() {
+    const v = ta.value.trim();
+    if (!v) return;
+    if (v.startsWith('!')) runBash(v.replace(/^!+\s*/, ''));
+    else sendMsg(v);
+    ta.value = ''; refresh();
+  }
+  function sendMsg(text) {
+    const div = document.createElement('div');
+    div.className = 'msg user';
+    div.innerHTML = '<div class="who">You</div><div class="bubble"></div>';
+    div.querySelector('.bubble').textContent = text;
+    if (chips.children.length) {
+      const t = document.createElement('div'); t.className = 'thumbs';
+      [...chips.querySelectorAll('img, .ph')].forEach(el => t.appendChild(el.cloneNode(true)));
+      div.appendChild(t);
+      chips.innerHTML = ''; chips.classList.remove('haschips');
+    }
+    chat.appendChild(div); chat.scrollTop = chat.scrollHeight;
+  }
+
+  // ——— bash drawer ———
+  const canned = {
+    default: { out: 'On branch crucible/ember-shell\nnothing to commit, working tree clean', exit: 0 },
+    fail: { out: 'npm ERR! missing script: dploy\nnpm ERR! Did you mean deploy?', exit: 1 },
+  };
+  let lastCmd = '';
+  function runBash(cmd) {
+    lastCmd = cmd;
+    const c = /dploy|fail/.test(cmd) ? canned.fail : canned.default;
+    document.getElementById('dcmd').textContent = cmd;
+    const exit = document.getElementById('dexit');
+    exit.textContent = 'exit ' + c.exit;
+    exit.className = 'exit ' + (c.exit === 0 ? 'ok' : 'bad');
+    const dout = document.getElementById('dout');
+    dout.textContent = '';
+    drawer.classList.add('open');
+    // fake stream
+    let i = 0;
+    const id = setInterval(() => {
+      dout.textContent = c.out.slice(0, i += 7);
+      if (i >= c.out.length) clearInterval(id);
+    }, 20);
+  }
+  document.getElementById('dclose').addEventListener('click', () => drawer.classList.remove('open'));
+  document.getElementById('dsend').addEventListener('click', () => {
+    const row = document.createElement('div');
+    row.className = 'bashrow';
+    row.innerHTML = `<div class="bashhead"><span>$</span><span class="cmd"></span>
+      <span class="sharetag">shared with model</span></div><div class="bashout"></div>`;
+    row.querySelector('.cmd').textContent = lastCmd;
+    row.querySelector('.bashout').textContent = document.getElementById('dout').textContent;
+    chat.appendChild(row); chat.scrollTop = chat.scrollHeight;
+    drawer.classList.remove('open');
+  });
+
+  // ——— images: simulate, real paste, real drag ———
+  document.getElementById('simpaste').addEventListener('click', () =>
+    addChipPlaceholder('screenshot ' + (900 + Math.floor(Math.random() * 400)) + '×' + (500 + Math.floor(Math.random() * 300))));
+  function addChipPlaceholder(labelText) {
+    addChip(null, labelText);
+  }
+  function addChip(url, labelText) {
+    const chip = document.createElement('div'); chip.className = 'chip';
+    chip.innerHTML = url
+      ? `<img src="${url}" alt="" /><button class="x">×</button>`
+      : `<span class="ph">${labelText}</span><button class="x">×</button>`;
+    chip.querySelector('.x').addEventListener('click', () => {
+      chip.remove();
+      chips.classList.toggle('haschips', chips.children.length > 0);
+    });
+    chips.appendChild(chip); chips.classList.add('haschips');
+  }
+  window.addEventListener('paste', e => {
+    for (const item of e.clipboardData?.items ?? [])
+      if (item.type.startsWith('image/'))
+        addChip(URL.createObjectURL(item.getAsFile()));
+  });
+  const veil = document.getElementById('veil');
+  window.addEventListener('dragover', e => { e.preventDefault(); veil.classList.add('on'); });
+  veil.addEventListener('dragleave', () => veil.classList.remove('on'));
+  window.addEventListener('drop', e => {
+    e.preventDefault(); veil.classList.remove('on');
+    for (const f of e.dataTransfer?.files ?? [])
+      if (f.type.startsWith('image/')) addChip(URL.createObjectURL(f));
+  });
+
+  refresh();
+</script>
+</body>
+</html>

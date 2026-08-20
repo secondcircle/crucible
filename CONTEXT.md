@@ -65,6 +65,23 @@ element; thinking or assistant text ends one chain and starts the next. A
 lone call is a chain of one.
 _Avoid_: call group, tool run, tool stack.
 
+**Session tree**:
+A session's full branching conversation history, every point ever reached,
+navigable to continue from any earlier point. π's tree structure, surfaced
+in Crucible's own view.
+_Avoid_: history view, checkpoints, timeline.
+
+**Jump**:
+Continuing a session from a chosen point in its session tree, in place:
+same session, same sidebar identity, every other path preserved in the tree.
+_Avoid_: rewind, time travel, checkout, restore.
+
+**Bash run**:
+A shell command executed locally in the workspace from the composer's `!`
+grammar. Local by default; it touches the conversation only when explicitly
+added to it.
+_Avoid_: terminal, shell session, bang command.
+
 **Session reset**:
 Replacement of a session's conversation with a fresh stock π session while keeping the same sidebar identity.
 _Avoid_: new session, clear chat.
