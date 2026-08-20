@@ -159,6 +159,9 @@ export type TranscriptItem =
       readonly output: string
       readonly exitCode?: number
     }
+  // The context a jump-with-summary or a compaction carried forward: what
+  // the conversation is standing on now, shown so nobody starts blind.
+  | { readonly kind: 'summary'; readonly text: string }
   /** The quiet marker that closes a cancelled turn. */
   | { readonly kind: 'stopped' }
   | { readonly kind: 'error'; readonly message: string }

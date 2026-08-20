@@ -77,6 +77,8 @@ export function Shell({
   const [veil, setVeil] = useState(false)
   const [tree, setTree] = useState<Tree | undefined>(undefined)
   const [treeOpen, setTreeOpen] = useState(false)
+  // A summarizing jump pays for an LLM call, so the tree says it is working.
+  const [jumping, setJumping] = useState<'jump' | 'summarize' | undefined>(undefined)
   const [toast, setToast] = useState<string | undefined>(undefined)
   // The file popover's token, and the answer the workspace service gave for it.
   const [fileToken, setFileToken] = useState<string | undefined>(undefined)
@@ -663,6 +665,7 @@ export function Shell({
     const id = activeSessionId
     if (id === undefined) return
     setFailure(undefined)
+    setJumping(summarize ? 'summarize' : 'jump')
     void port
       .jump(id, ref, { summarize })
       .then(async ({ editorText }) => {
@@ -675,6 +678,7 @@ export function Shell({
         dispatch({ type: 'jumped', sessionId: id, items: path })
       })
       .catch(report)
+      .finally(() => setJumping(undefined))
   }
 
   function label(ref: string, text?: string): void {
@@ -882,6 +886,7 @@ export function Shell({
               <SessionTree
                 tree={tree}
                 working={working}
+                busy={jumping}
                 onJump={jump}
                 onLabel={label}
                 onClose={() => setTreeOpen(false)}

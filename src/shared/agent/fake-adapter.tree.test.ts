@@ -112,7 +112,7 @@ describe('a jump', () => {
     await adapter.jump('s1', second?.ref ?? '', true)
 
     const items = await adapter.transcript('s1')
-    expect(items.at(-1)).toEqual({ kind: 'assistant', markdown: FAKE_BRANCH_SUMMARY })
+    expect(items.at(-1)).toEqual({ kind: 'summary', text: FAKE_BRANCH_SUMMARY })
   })
 })
 

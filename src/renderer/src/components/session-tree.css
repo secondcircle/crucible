@@ -79,7 +79,6 @@
 .node {
   position: relative;
   padding-left: 22px;
-  margin-bottom: 2px;
 }
 
 .node::before {
@@ -100,7 +99,7 @@
 .node .dot {
   position: absolute;
   left: 2px;
-  top: 14px;
+  top: 11px;
   width: 12px;
   height: 12px;
   border-radius: 50%;
@@ -117,15 +116,19 @@
   border-color: var(--accent);
 }
 
+/* One row: text, then the label chip and the time on the same line, so a
+   one-line message costs one line of tree. */
 .nodecard {
-  display: block;
+  display: flex;
+  align-items: center;
+  gap: 8px;
   width: 100%;
   text-align: left;
   background: var(--panel);
   border: 1px solid var(--line);
   border-radius: var(--radius);
-  padding: 8px 12px;
-  margin: 4px 0;
+  padding: 5px 10px;
+  margin: 3px 0;
   color: var(--ink);
   font-size: 13px;
 }
@@ -144,20 +147,15 @@
 }
 
 .nodetext {
+  flex: 1;
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
 
-.noderow {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-  margin-top: 4px;
-}
-
 .label {
+  flex: none;
   font-size: 10.5px;
   padding: 1px 8px;
   border-radius: 9px;
@@ -167,18 +165,8 @@
   letter-spacing: 0.06em;
 }
 
-.youarehere {
-  font-size: 10.5px;
-  color: var(--on-accent);
-  background: var(--accent);
-  padding: 1px 8px;
-  border-radius: 9px;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-}
-
 .when {
-  margin-left: auto;
+  flex: none;
   font-size: 10.5px;
   color: var(--faint);
 }
@@ -273,6 +261,14 @@
   font-size: 11px;
   color: var(--faint);
   margin-top: 7px;
+}
+
+/* a summarizing jump pays for a real call; the wait is said, not hidden */
+.actnote.busy {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--accent2);
 }
 
 .nonodes {

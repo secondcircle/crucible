@@ -1040,7 +1040,7 @@ export function createFakeAdapter({
       if (summarize) {
         // π summarizes the branch that was left; this one says the same thing
         // the same way every time, so the two actions are told apart for free.
-        append(conversation, { kind: 'assistant', markdown: FAKE_BRANCH_SUMMARY })
+        append(conversation, { kind: 'summary', text: FAKE_BRANCH_SUMMARY })
       }
       conversation.at = new Date().toISOString()
       return entry.item.kind === 'user' ? { editorText: entry.item.text } : {}

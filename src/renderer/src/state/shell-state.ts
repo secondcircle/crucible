@@ -42,6 +42,7 @@ export type ViewItem =
       readonly output: string
       readonly exitCode?: number
     }
+  | { readonly kind: 'summary'; readonly text: string }
   | { readonly kind: 'stopped' }
   | { readonly kind: 'error'; readonly message: string }
 
@@ -170,6 +171,7 @@ function restored(item: TranscriptItem): ViewItem {
         running: false
       }
     case 'bashRun':
+    case 'summary':
     case 'stopped':
     case 'error':
       return item

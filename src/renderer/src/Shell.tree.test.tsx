@@ -183,7 +183,8 @@ describe('what the rail shows', () => {
     expect(screen.getByText('checkpoint')).toBeInTheDocument()
     expect(screen.getByText('assistant · 2 edit · 1 bash')).toBeInTheDocument()
     expect(screen.getByText(/⑂ branch · abandoned/)).toBeInTheDocument()
-    expect(screen.getByText('you are here')).toBeInTheDocument()
+    // The current point is marked by its solid dot alone; no chip repeats it.
+    expect(document.querySelector('.node.leaf .dot')).not.toBeNull()
   })
 
   it('says the session is still working after the last point on the path', async () => {
@@ -326,11 +327,27 @@ describe('a jump', () => {
     expect(screen.getByRole('status')).toHaveTextContent('Jumped —')
   })
 
-  it('summarizes when asked, through the same jump', async () => {
-    const port = await jumped(/Continue with summary/)
+  it('summarizes when asked, and shows the context the jump landed on', async () => {
+    const port = await shell()
+    port.jumpText = 'Hook the overlay up to ⌘O.'
+    port.transcripts.set('s1', [
+      ...PATH,
+      { kind: 'summary', text: 'The branch explored a modal dialog and was abandoned.' }
+    ])
+    await open()
+    await act(async () => {
+      fireEvent.click(screen.getByText('Hook the overlay up to ⌘O.'))
+    })
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /Continue with summary/ }))
+    })
 
     expect(port.calls).toContainEqual({ op: 'jump', args: ['s1', 'n2', { summarize: true }] })
     expect(screen.getByRole('status')).toHaveTextContent('Jumped with summary')
+    // The summary is the context now, so the transcript shows it in full.
+    expect(screen.getByLabelText('Context summary')).toHaveTextContent(
+      'The branch explored a modal dialog and was abandoned.'
+    )
   })
 
   it('stacks the restored message above a draft already being typed', async () => {

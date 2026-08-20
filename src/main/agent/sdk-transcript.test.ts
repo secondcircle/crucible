@@ -113,6 +113,22 @@ describe('a restored conversation', () => {
     ])
   })
 
+  it('reads branch and compaction summaries back as context, never dropped', () => {
+    const items = toTranscript(
+      messages(
+        { role: 'branchSummary', summary: 'The abandoned branch tried a modal.', fromId: 'x1' },
+        { role: 'compactionSummary', summary: 'Earlier: tokens were discussed.', tokensBefore: 9 },
+        { role: 'user', content: 'Continue.' }
+      )
+    )
+
+    expect(items).toEqual([
+      { kind: 'summary', text: 'The abandoned branch tried a modal.' },
+      { kind: 'summary', text: 'Earlier: tokens were discussed.' },
+      { kind: 'user', text: 'Continue.' }
+    ])
+  })
+
   it('reads a shared bash run back as a run, not as prose', () => {
     const items = toTranscript(
       messages({

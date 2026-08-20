@@ -33,6 +33,10 @@ export function summarizeActivity(items: readonly TranscriptItem[]): string | un
       case 'error':
         failed = true
         break
+      case 'summary':
+        // Context carried across a jump; the tree's connective line does not
+        // count it as activity.
+        break
       case 'user':
         // A user message is a node of its own and never part of the line
         // between two nodes.

@@ -49,6 +49,13 @@ export function toTranscript(messages: readonly StoredMessage[]): TranscriptItem
       continue
     }
 
+    // π writes these when a branch is left with a summary or the context is
+    // compacted: the summary IS the context now, so the transcript shows it.
+    if (message.role === 'branchSummary' || message.role === 'compactionSummary') {
+      items.push({ kind: 'summary', text: message.summary })
+      continue
+    }
+
     if (message.role === 'toolResult') {
       const call = calls.get(message.toolCallId)
       items.push({

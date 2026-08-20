@@ -276,6 +276,26 @@
   letter-spacing: 0.1em;
 }
 
+/* the context a jump or compaction carried forward: a card, read like meta */
+.summarycard {
+  max-width: var(--column);
+  margin: 0 auto 16px;
+  padding: 10px 14px;
+  border: 1px solid color-mix(in srgb, var(--thinking) 45%, transparent);
+  border-radius: var(--radius);
+  background: var(--think-bg);
+  font-size: 12.5px;
+  color: var(--dim);
+}
+
+.summarycard .sumtag {
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--thinking);
+  margin-bottom: 6px;
+}
+
 /* errors are cards in the transcript, never toasts */
 .errcard {
   max-width: var(--column);

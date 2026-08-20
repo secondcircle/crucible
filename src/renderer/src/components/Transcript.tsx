@@ -154,6 +154,16 @@ function Item({
     case 'thinking':
       return <Thinking text={item.text} running={item.running} />
 
+    // The context the conversation now stands on — a branch summary or a
+    // compaction — shown in full so nobody wonders what the agent knows.
+    case 'summary':
+      return (
+        <div className="summarycard" aria-label="Context summary">
+          <div className="sumtag">context summary</div>
+          <Markdown markdown={item.text} />
+        </div>
+      )
+
     case 'stopped':
       return <div className="stopped">Stopped</div>
 

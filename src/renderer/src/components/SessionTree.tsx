@@ -30,6 +30,7 @@ type Row =
 export function SessionTree({
   tree,
   working,
+  busy,
   onJump,
   onLabel,
   onClose
@@ -37,6 +38,8 @@ export function SessionTree({
   readonly tree: Tree
   /** Continuing is refused while the session works; browsing never is. */
   readonly working: boolean
+  /** A jump already in flight: summarizing takes real seconds and says so. */
+  readonly busy?: 'jump' | 'summarize'
   readonly onJump: (ref: string, summarize: boolean) => void
   /** An absent label clears it. */
   readonly onLabel: (ref: string, label?: string) => void
@@ -74,7 +77,7 @@ export function SessionTree({
   }
 
   function jump(ref: string | undefined, summarize: boolean): void {
-    if (ref === undefined || working) return
+    if (ref === undefined || working || busy !== undefined) return
     onJump(ref, summarize)
   }
 
@@ -155,11 +158,9 @@ export function SessionTree({
               return (
                 <div className="node onpath leaf" key="here">
                   <span className="dot" aria-hidden="true" />
+                  {/* The solid dot is the marker; the card says no more. */}
                   <div className="nodecard here">
                     <div className="nodetext">Current point</div>
-                    <div className="noderow">
-                      <span className="youarehere">you are here</span>
-                    </div>
                   </div>
                 </div>
               )
@@ -204,10 +205,8 @@ export function SessionTree({
                   onClick={() => setSelected(open ? undefined : node.ref)}
                 >
                   <span className="nodetext">{node.text}</span>
-                  <span className="noderow">
-                    {node.label === undefined ? null : <span className="label">{node.label}</span>}
-                    <span className="when">{clockTime(node.at)}</span>
-                  </span>
+                  {node.label === undefined ? null : <span className="label">{node.label}</span>}
+                  <span className="when">{clockTime(node.at)}</span>
                 </button>
 
                 {open ? (
@@ -215,14 +214,14 @@ export function SessionTree({
                     <div className="row">
                       <button
                         className="act"
-                        disabled={working}
+                        disabled={working || busy !== undefined}
                         onClick={() => jump(node.ref, false)}
                       >
                         Continue from here <span className="k">⏎</span>
                       </button>
                       <button
                         className="act"
-                        disabled={working}
+                        disabled={working || busy !== undefined}
                         onClick={() => jump(node.ref, true)}
                       >
                         Continue with summary <span className="k">s</span>
@@ -252,8 +251,15 @@ export function SessionTree({
                       </div>
                     ) : null}
 
-                    <div className="actnote">
-                      {working
+                    <div className={`actnote${busy === undefined ? '' : ' busy'}`}>
+                      {busy !== undefined ? (
+                        <>
+                          <span className="spin" aria-hidden="true" />
+                          {busy === 'summarize'
+                            ? 'Summarizing the branch you are leaving…'
+                            : 'Jumping…'}
+                        </>
+                      ) : working
                         ? 'This session is working — stop the agent first to continue from a point.'
                         : row.onPath
                           ? 'Continuing from a user message puts it back in the composer, unsent — the conversation stands at the moment before you pressed enter.'
