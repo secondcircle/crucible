@@ -41,7 +41,7 @@ names the milestone from `m1-parity-core.md`. **never** means ruled out.
 | Session reset | (n/a — TUI /new discards) | **built** — Reset session in the header menu, confirm when non-empty; same sidebar identity, fresh conversation, old one stays findable via Resume (A12, A19, A25) |
 | /name | rename session | later — deliberately deferred, neutral placeholder label for now (A26) |
 | /session info | file, ID, tokens, cost | partial — context meter is in the top bar; per-session cost display not built (M1 block 5 instrumentation) |
-| /tree · double-esc | jump to any point, branch, continue; labels, search, filters | later (M2 headliner) — **the big one.** Nothing in GUI-chat-land to copy; design it early, build it after parity |
+| /tree · double-esc | jump to any point, branch, continue; labels, search, filters | **built** — full overlay over the transcript (Mock I): ⑂ Tree button and double-Esc, user messages as nodes with a dim activity line between them, type-to-search, free-text labels, and two continue actions (plain jump, jump with summary). Jumps are in place. Filters and fold/unfold are still later |
 | /fork | new session from a previous user message | later (M2) — action in the tree view: "fork from here" |
 | /clone | duplicate active branch to new session | later (M2) — session context menu |
 | /compact | manual + auto compaction | partial — auto-compaction is SDK plumbing and works; the notice card in the transcript is not built (M1) |
@@ -62,9 +62,9 @@ names the milestone from `m1-parity-core.md`. **never** means ruled out.
 
 | π feature | π behavior | Crucible status |
 |---|---|---|
-| @ file search | fuzzy-search project files | later (M2+) |
-| Image paste / drag | Ctrl+V, drag onto terminal | later (M2+) — attachment control deliberately absent (A2) |
-| ! bash commands | !cmd sends output to LLM, !!cmd doesn't | ruled back in (2026-08-19) — the "TUI-ism" call was an over-interpretation; the need is real, mechanism in design |
+| @ file search | fuzzy-search project files | **built** — popover over the workspace service's file list, gitignore-aware; picking a result inserts the workspace-relative path as plain text, and nothing is attached |
+| Image paste / drag | Ctrl+V, drag onto terminal | **built** — ⌘V and a full-window drop veil, thumbnail chips with a remove ×, png/jpeg/gif/webp up to 10 MB each, thumbnails on the sent message. No file-picker button yet; queued messages still carry text only |
+| ! bash commands | !cmd sends output to LLM, !!cmd doesn't | **built, diverged from π** — one grammar: any number of leading `!` runs locally, output lands in a dismissible drawer, and **Add to conversation** is the only way the model ever sees it. π's decide-upfront `!`/`!!` split is gone |
 | External editor | Ctrl+G opens $EDITOR | never — the composer is the editor |
 | Prompt templates | /templatename expands | later (M2+) |
 

@@ -1,6 +1,8 @@
 import type {
   AgentPort,
+  BashRunShare,
   HistoryMatch,
+  ImageAttachment,
   ModelId,
   ModelInfo,
   PortEvent,
@@ -10,9 +12,11 @@ import type {
   QueueState,
   SessionId,
   SessionState,
+  SessionTree,
   ShellSnapshot,
   ThinkingLevel,
   TranscriptItem,
+  TreeNode,
   TurnId,
   WorkspaceId
 } from '../../../shared/agent/port'
@@ -28,6 +32,19 @@ export interface ScriptedPort extends AgentPort {
   readonly transcripts: Map<SessionId, readonly TranscriptItem[]>
   /** What the folder picker will answer with; `null` is a cancelled picker. */
   folder: string | null
+  /** What `sessionTree` answers with, per session. */
+  readonly trees: Map<SessionId, SessionTree>
+  /** What a jump hands back to the composer, and what the path becomes. */
+  jumpText?: string
+  /** Set where a test wants the refusal main gives a working session. */
+  jumpRefusal?: string
+  /** How the next `shareBashRun` settles; delivered unless a test says else. */
+  shareOutcome: 'delivered' | 'dropped'
+  // Held open where a test wants the waiting state: the promise settles when
+  // the test says so.
+  holdShare?: boolean
+  /** Settles a held share, as the port does when it reaches its delivery point. */
+  settleShare(outcome: 'delivered' | 'dropped'): void
   // Set only where a test needs the race: otherwise `dequeue` answers by
   // whether the entry was really there, the way main does.
   dequeueAnswer?: boolean
@@ -36,6 +53,8 @@ export interface ScriptedPort extends AgentPort {
   emit(event: PortEvent): void
 
   turnOf(sessionId: SessionId): TurnId | undefined
+  /** Announces a shared run at its delivery point, the way main does. */
+  bashRunShared(sessionId: SessionId, run: BashRunShare): void
   userMessage(sessionId: SessionId, text: string): void
   /** Hands queued messages back the way a stop or a failed turn does. */
   flushQueue(sessionId: SessionId, messages: readonly QueuedMessage[]): void
@@ -133,12 +152,16 @@ export function createScriptedPort(initial: Partial<ShellSnapshot> = {}): Script
     return Promise.resolve()
   }
 
+  let held: ((outcome: 'delivered' | 'dropped') => void) | undefined
+
   const port: ScriptedPort = {
     calls,
     models: [],
     history: [],
     transcripts: new Map(),
+    trees: new Map(),
     folder: null,
+    shareOutcome: 'delivered',
 
     get snapshotNow() {
       return snapshot
@@ -267,6 +290,39 @@ export function createScriptedPort(initial: Partial<ShellSnapshot> = {}): Script
       return Promise.resolve(id)
     },
 
+    sessionTree(id: SessionId): Promise<SessionTree> {
+      return record('sessionTree', [id], port.trees.get(id) ?? { roots: [], path: [] })
+    },
+
+    jump(id: SessionId, ref: string, options: { readonly summarize: boolean }) {
+      calls.push({ op: 'jump', args: [id, ref, options] })
+      if (port.jumpRefusal !== undefined) return Promise.reject(new Error(port.jumpRefusal))
+      return Promise.resolve(
+        port.jumpText === undefined ? {} : { editorText: port.jumpText }
+      )
+    },
+
+    setLabel(id: SessionId, ref: string, label?: string): Promise<void> {
+      calls.push({ op: 'setLabel', args: [id, ref, label] })
+      const tree = port.trees.get(id)
+      if (tree !== undefined) port.trees.set(id, relabel(tree, ref, label))
+      return Promise.resolve()
+    },
+
+    shareBashRun(sessionId: SessionId, run: BashRunShare): Promise<'delivered' | 'dropped'> {
+      calls.push({ op: 'shareBashRun', args: [sessionId, run] })
+      if (port.holdShare !== true) return Promise.resolve(port.shareOutcome)
+      return new Promise((resolve) => {
+        held = resolve
+      })
+    },
+
+    settleShare(outcome): void {
+      const settle = held
+      held = undefined
+      settle?.(outcome)
+    },
+
     listModels: () => record('listModels', [], port.models),
 
     setModel(sessionId: SessionId, model: ModelId): Promise<void> {
@@ -287,8 +343,15 @@ export function createScriptedPort(initial: Partial<ShellSnapshot> = {}): Script
       return Promise.resolve()
     },
 
-    prompt(sessionId: SessionId, text: string): Promise<TurnId> {
-      calls.push({ op: 'prompt', args: [sessionId, text] })
+    prompt(
+      sessionId: SessionId,
+      text: string,
+      images?: readonly ImageAttachment[]
+    ): Promise<TurnId> {
+      calls.push({
+        op: 'prompt',
+        args: images === undefined ? [sessionId, text] : [sessionId, text, images]
+      })
       const turnId = `t-${(minted += 1)}`
       turns.set(sessionId, turnId)
       changeSession(sessionId, (session) => ({ ...session, working: true }))
@@ -338,6 +401,17 @@ export function createScriptedPort(initial: Partial<ShellSnapshot> = {}): Script
     emit,
 
     turnOf: (sessionId) => turns.get(sessionId),
+
+    bashRunShared(sessionId, run) {
+      emit({
+        type: 'bash_run_shared',
+        sessionId,
+        turnId: turns.get(sessionId) ?? 't-shared',
+        command: run.command,
+        output: run.output,
+        ...(run.exitCode === undefined ? {} : { exitCode: run.exitCode })
+      })
+    },
 
     userMessage(sessionId, text) {
       emit({ type: 'user_message', sessionId, turnId: turn(sessionId), text })
@@ -393,4 +467,24 @@ export function oneSession(
     sessions: [{ id: 's1', workspaceId: 'w1', createdAt: NOW, working: false, ...overrides }],
     activeSessionId: 's1'
   }
+}
+
+/** A label change the way an adapter applies one: the tree is read back. */
+function relabel(tree: SessionTree, ref: string, label?: string): SessionTree {
+  function walk(nodes: readonly TreeNode[]): TreeNode[] {
+    return nodes.map((node) => {
+      const children = walk(node.children)
+      if (node.ref !== ref) return { ...node, children }
+      // Rebuilt rather than spread, so a cleared label is genuinely absent.
+      return {
+        ref: node.ref,
+        text: node.text,
+        at: node.at,
+        ...(label === undefined || label === '' ? {} : { label }),
+        ...(node.activity === undefined ? {} : { activity: node.activity }),
+        children
+      }
+    })
+  }
+  return { ...tree, roots: walk(tree.roots) }
 }

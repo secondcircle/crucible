@@ -68,10 +68,55 @@ export interface ShellSnapshot {
   readonly activeSessionId?: SessionId
 }
 
+// What a person attached to a message: bytes, never a path, so nothing about
+// where the file sat on disk crosses.
+export interface ImageAttachment {
+  /** One of image/png, image/jpeg, image/gif, image/webp. */
+  readonly mimeType: string
+  /** Base64, no `data:` prefix. The original file is no larger than 10 MiB. */
+  readonly data: string
+}
+
+export interface TreeNode {
+  // Adapter-minted and opaque, like `HistoryMatch.ref`: no π storage concept
+  // crosses.
+  readonly ref: string
+  /** The user message, verbatim. */
+  readonly text: string
+  /** ISO time the message entered the conversation. */
+  readonly at: string
+  readonly label?: string
+  // The dim connective line for what followed this message, derived from the
+  // real entries, e.g. "assistant · 2 edit · 1 bash". Absent when nothing
+  // followed it yet.
+  readonly activity?: string
+  /** Creation order. More than one child is a branch point. */
+  readonly children: readonly TreeNode[]
+}
+
+export interface SessionTree {
+  readonly roots: readonly TreeNode[]
+  /** Refs from root to the current position, oldest first. Empty when fresh. */
+  readonly path: readonly string[]
+}
+
+export interface BashRunShare {
+  readonly command: string
+  /** stdout and stderr interleaved, as streamed. */
+  readonly output: string
+  /** Absent when the run was stopped before exiting. */
+  readonly exitCode?: number
+}
+
 // Restored history and live stream items share this shape so both render
 // through the same code.
 export type TranscriptItem =
-  | { readonly kind: 'user'; readonly text: string }
+  | {
+      readonly kind: 'user'
+      readonly text: string
+      /** Present only for images that were genuinely sent with the message. */
+      readonly images?: readonly ImageAttachment[]
+    }
   | { readonly kind: 'assistant'; readonly markdown: string }
   | { readonly kind: 'thinking'; readonly text: string; readonly seconds?: number }
   | {
@@ -80,6 +125,14 @@ export type TranscriptItem =
       readonly summary: string
       readonly ok: boolean
       readonly output: string
+    }
+  // A bash run the user added to the conversation: local runs never appear
+  // here at all.
+  | {
+      readonly kind: 'bashRun'
+      readonly command: string
+      readonly output: string
+      readonly exitCode?: number
     }
   /** The quiet marker that closes a cancelled turn. */
   | { readonly kind: 'stopped' }
@@ -140,6 +193,16 @@ export type PortEvent =
       readonly turnId: TurnId
       readonly text: string
     }
+  // Announced at the moment a shared bash run genuinely enters the
+  // conversation, which is its delivery point and never before it.
+  | {
+      readonly type: 'bash_run_shared'
+      readonly sessionId: SessionId
+      readonly turnId: TurnId
+      readonly command: string
+      readonly output: string
+      readonly exitCode?: number
+    }
   // Queued messages handed back rather than delivered, steering first. Nothing
   // flushed is delivered afterwards.
   | {
@@ -184,12 +247,39 @@ export interface AgentPort {
   /** Adds the conversation to the curated sidebar and activates it. */
   resumeSession(workspaceId: WorkspaceId, ref: string): Promise<SessionId>
 
+  /** The session's full branching history. Allowed while the session works. */
+  sessionTree(id: SessionId): Promise<SessionTree>
+  // A jump: continue in place from the moment before `ref` was sent. Refused
+  // while the session works, in the same refusal style as `setModel`.
+  // `editorText` is the jumped-to user message, returned to the composer
+  // unsent.
+  jump(
+    id: SessionId,
+    ref: string,
+    options: { readonly summarize: boolean }
+  ): Promise<{ readonly editorText?: string }>
+  /** Free-text label on a node; absent or empty clears it. Allowed anytime. */
+  setLabel(id: SessionId, ref: string, label?: string): Promise<void>
+
   listModels(): Promise<readonly ModelInfo[]>
   setModel(sessionId: SessionId, model: ModelId): Promise<void>
   setThinkingLevel(sessionId: SessionId, level: ThinkingLevel): Promise<void>
 
-  // Accepted, not finished: resolves once the turn is live.
-  prompt(sessionId: SessionId, text: string): Promise<TurnId>
+  // Accepted, not finished: resolves once the turn is live. Images ride the
+  // prompt they were attached to and nothing else.
+  prompt(
+    sessionId: SessionId,
+    text: string,
+    images?: readonly ImageAttachment[]
+  ): Promise<TurnId>
+
+  // Adds a bash run to the conversation. With a live turn it is delivered as a
+  // steering message at the next boundary between tool calls; idle, it becomes
+  // the next prompt and starts a turn. `'delivered'` means the run is in the
+  // conversation and `bash_run_shared` was emitted; `'dropped'` means the live
+  // turn stopped first and nothing entered the conversation. Never delivered
+  // after a stop: nothing fires at a plan the user killed.
+  shareBashRun(sessionId: SessionId, run: BashRunShare): Promise<'delivered' | 'dropped'>
 
   // Never lost and never refused: with no live turn to take it, the message is
   // sent as the next prompt. Nothing enters the transcript at queue time.

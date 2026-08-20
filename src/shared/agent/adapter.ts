@@ -1,10 +1,13 @@
 import type {
+  BashRunShare,
   HistoryMatch,
+  ImageAttachment,
   ModelId,
   ModelInfo,
   QueuedKind,
   QueuedMessage,
   SessionId,
+  SessionTree,
   ThinkingLevel,
   TranscriptItem,
   TurnId,
@@ -136,6 +139,18 @@ export interface ConversationAdapter {
 
   searchHistory(workspacePath: string, query: string): Promise<readonly HistoryMatch[]>
 
+  /** The conversation's full branching history, current position included. */
+  sessionTree(sessionId: SessionId): Promise<SessionTree>
+  // Moves the conversation to the moment before `ref` was sent, in place: the
+  // abandoned path stays in the tree and stays reachable.
+  jump(
+    sessionId: SessionId,
+    ref: string,
+    summarize: boolean
+  ): Promise<{ readonly editorText?: string }>
+  /** Persisted with the conversation; an absent or empty label clears it. */
+  setLabel(sessionId: SessionId, ref: string, label?: string): Promise<void>
+
   // Both strings are this adapter's own, so this is the only place either may
   // be interpreted.
   sameConversation(token: string, ref: string): boolean
@@ -147,7 +162,24 @@ export interface ConversationAdapter {
 
   // A rejection means the turn never ran, and the caller then owes it a
   // terminal event.
-  prompt(sessionId: SessionId, turnId: TurnId, text: string): Promise<void>
+  prompt(
+    sessionId: SessionId,
+    turnId: TurnId,
+    text: string,
+    images?: readonly ImageAttachment[]
+  ): Promise<void>
+
+  // `'idle'` closes the same race `steer` does: no live run took the run, so
+  // the caller begins a turn for it with `promptBashRun`. `'dropped'` means a
+  // live run was stopped before the boundary that would have delivered it.
+  shareBashRun(
+    sessionId: SessionId,
+    run: BashRunShare
+  ): Promise<'delivered' | 'dropped' | 'idle'>
+
+  // The idle path: a turn whose content is the run itself. The caller
+  // announces it as `bash_run_shared`, never as a user message.
+  promptBashRun(sessionId: SessionId, turnId: TurnId, run: BashRunShare): Promise<void>
 
   // `'idle'` closes the race between the caller's view of `working` and the
   // adapter's: nothing was queued, so the caller sends the text as a prompt.

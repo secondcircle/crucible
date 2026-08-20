@@ -91,7 +91,7 @@ describe('a restored conversation', () => {
     ])
   })
 
-  it('drops what a transcript item cannot carry', () => {
+  it('drops what a transcript item cannot carry, and keeps the images that were sent', () => {
     const items = toTranscript(
       messages(
         { role: 'custom', customType: 'x', content: 'internal' },
@@ -100,6 +100,26 @@ describe('a restored conversation', () => {
       )
     )
 
-    expect(items).toEqual([{ kind: 'user', text: 'and a question' }])
+    expect(items).toEqual([
+      // An extension's own custom entry is not conversation, and is dropped;
+      // an image that was genuinely sent is, and renders again.
+      { kind: 'user', text: '', images: [{ mimeType: 'image/png', data: 'AAAA' }] },
+      { kind: 'user', text: 'and a question' }
+    ])
+  })
+
+  it('reads a shared bash run back as a run, not as prose', () => {
+    const items = toTranscript(
+      messages({
+        role: 'custom',
+        customType: 'crucible.bashRun',
+        content: 'the text the model saw',
+        details: { id: 'share-1', command: 'git status', output: 'clean\n', exitCode: 0 }
+      })
+    )
+
+    expect(items).toEqual([
+      { kind: 'bashRun', command: 'git status', output: 'clean\n', exitCode: 0 }
+    ])
   })
 })

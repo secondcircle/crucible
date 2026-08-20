@@ -7,6 +7,7 @@ import { describe, expect, it } from 'vitest'
 import type { ModelInfo } from '../../shared/agent/port'
 import { Shell } from './Shell'
 import { createScriptedPort, oneSession, type ScriptedPort } from './testing/scripted-port'
+import { createScriptedWorkspace } from './testing/scripted-workspace'
 
 const MODELS: readonly ModelInfo[] = [
   { id: 'fake/deterministic', label: 'Fake · deterministic', thinkingLevels: ['off', 'low', 'high'] },
@@ -18,7 +19,7 @@ async function shellWithModels(): Promise<ScriptedPort> {
     oneSession({ model: 'fake/deterministic', thinkingLevel: 'low' })
   )
   port.models = MODELS
-  render(<Shell port={port} />)
+  render(<Shell port={port} workspace={createScriptedWorkspace()} />)
   await screen.findByRole('button', { name: 'Model: Fake · deterministic' })
   return port
 }

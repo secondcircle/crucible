@@ -2,7 +2,9 @@ import { basename } from 'node:path'
 import type { Binding, ConversationAdapter } from '../../shared/agent/adapter'
 import type {
   AgentPort,
+  BashRunShare,
   HistoryMatch,
+  ImageAttachment,
   ModelId,
   ModelInfo,
   PortEvent,
@@ -11,6 +13,7 @@ import type {
   QueueState,
   SessionId,
   SessionState,
+  SessionTree,
   ShellSnapshot,
   ThinkingLevel,
   TranscriptItem,
@@ -38,6 +41,13 @@ export interface ShellOptions {
   readonly seedWorkspacePath?: string
 }
 
+// What this shell put into the conversation itself and therefore owes an
+// announcement for: a caller of `prompt()` echoes its own message and needs
+// none.
+type Announcement =
+  | { readonly kind: 'text'; readonly text: string }
+  | { readonly kind: 'bashRun'; readonly run: BashRunShare }
+
 interface LiveTurn {
   readonly turnId: TurnId
   started: boolean
@@ -47,9 +57,9 @@ interface LiveTurn {
   // An undispatched turn is ended here rather than by the adapter, and this
   // mark keeps it from being dispatched afterwards.
   cancelled: boolean
-  // Set when this turn carries a message nobody echoed, which is then
+  // Set when this turn carries something nobody echoed, which is then
   // announced right after the turn starts.
-  readonly announce?: string
+  readonly announce?: Announcement
   /** Resolves when the shell stops treating this turn as live. */
   readonly over: Promise<void>
   settled(): void
@@ -164,7 +174,7 @@ export function createShell({
     return binding
   }
 
-  function mintTurn(announce?: string): LiveTurn {
+  function mintTurn(announce?: Announcement): LiveTurn {
     turns += 1
     let settled: () => void = () => {}
     const over = new Promise<void>((resolve) => {
@@ -193,10 +203,23 @@ export function createShell({
   function announceStart(sessionId: SessionId, turn: LiveTurn): void {
     if (turn.started) return
     turn.started = true
-    emit({ type: 'turn_started', sessionId, turnId: turn.turnId })
-    if (turn.announce !== undefined) {
-      emit({ type: 'user_message', sessionId, turnId: turn.turnId, text: turn.announce })
+    const turnId = turn.turnId
+    emit({ type: 'turn_started', sessionId, turnId })
+    const announce = turn.announce
+    if (announce === undefined) return
+    if (announce.kind === 'text') {
+      emit({ type: 'user_message', sessionId, turnId, text: announce.text })
+      return
     }
+    // A shared bash run is not a user message and never reads as one.
+    emit({
+      type: 'bash_run_shared',
+      sessionId,
+      turnId,
+      command: announce.run.command,
+      output: announce.run.output,
+      ...(announce.run.exitCode === undefined ? {} : { exitCode: announce.run.exitCode })
+    })
   }
 
   // A turn the adapter never ran still owes its listeners a start before its
@@ -208,9 +231,14 @@ export function createShell({
     emitState()
   }
 
-  // `announce` is the text of a message this shell delivered itself; a plain
-  // prompt has none, because its caller echoed it.
-  function beginTurn(sessionId: SessionId, text: string, announce?: string): TurnId {
+  // `dispatch` runs the turn once the session is bound; `announce` is what
+  // this shell delivered itself, and a plain prompt has none because its
+  // caller echoed it.
+  function beginTurn(
+    sessionId: SessionId,
+    dispatch: (turnId: TurnId) => Promise<void>,
+    announce?: Announcement
+  ): TurnId {
     requireSession(sessionId)
     // Checked and claimed in the same tick, so nothing can slip between the
     // two.
@@ -229,7 +257,7 @@ export function createShell({
         // and the adapter must never be asked to run work the user stopped.
         if (live.get(sessionId) !== turn) return
         turn.dispatched = true
-        await adapter.prompt(sessionId, turnId, text)
+        await dispatch(turnId)
       })
       .then(() => {
         // A turn the adapter finished without saying so still ends exactly
@@ -311,7 +339,52 @@ export function createShell({
       await turn.over
     }
 
-    beginTurn(sessionId, text, text)
+    beginTurn(sessionId, (turnId) => adapter.prompt(sessionId, turnId, text), {
+      kind: 'text',
+      text
+    })
+  }
+
+  // A run is never lost and never queued: either a live turn takes it at its
+  // next boundary between tool calls, or it starts a turn of its own, or the
+  // turn it was offered to stopped first and it stays local.
+  async function shareRun(
+    sessionId: SessionId,
+    share: BashRunShare
+  ): Promise<'delivered' | 'dropped'> {
+    requireSession(sessionId)
+
+    for (;;) {
+      const turn = live.get(sessionId)
+      if (turn === undefined) break
+      await ensureBound(sessionId)
+      // The turn ended while the bind was in flight, so whatever is live next
+      // is offered the run instead.
+      if (live.get(sessionId) !== turn) continue
+      const answer = await adapter.shareBashRun(sessionId, share)
+      if (answer === 'dropped') return 'dropped'
+      if (answer === 'delivered') {
+        // The delivery point, which is the only place this may be said.
+        emit({
+          type: 'bash_run_shared',
+          sessionId,
+          turnId: turn.turnId,
+          command: share.command,
+          output: share.output,
+          ...(share.exitCode === undefined ? {} : { exitCode: share.exitCode })
+        })
+        return 'delivered'
+      }
+      // The adapter has no live run: this shell's turn is on its way out, so
+      // the run waits it out and starts a turn of its own.
+      await turn.over
+    }
+
+    beginTurn(sessionId, (turnId) => adapter.promptBashRun(sessionId, turnId, share), {
+      kind: 'bashRun',
+      run: share
+    })
+    return 'delivered'
   }
 
   // A turn is live from the moment its prompt is accepted, seconds before its
@@ -573,6 +646,38 @@ export function createShell({
       return stored.id
     },
 
+    // Browsing is allowed whatever the session is doing: opening the tree
+    // never touches a live turn.
+    async sessionTree(id: SessionId): Promise<SessionTree> {
+      requireSession(id)
+      await ensureBound(id)
+      return adapter.sessionTree(id)
+    },
+
+    async jump(
+      id: SessionId,
+      ref: string,
+      options: { readonly summarize: boolean }
+    ): Promise<{ editorText?: string }> {
+      requireSession(id)
+      // Read again after the bind, because a turn can start while a first-time
+      // bind is in flight.
+      if (live.has(id)) refuse('That session is working. Stop it first.')
+      await ensureBound(id)
+      if (live.has(id)) refuse('That session is working. Stop it first.')
+      const jumped = await adapter.jump(id, ref, options.summarize)
+      // The conversation behind the identity moved; the sidebar entry did not.
+      usage.delete(id)
+      emitState()
+      return jumped
+    },
+
+    async setLabel(id: SessionId, ref: string, label?: string): Promise<void> {
+      requireSession(id)
+      await ensureBound(id)
+      await adapter.setLabel(id, ref, label)
+    },
+
     listModels(): Promise<readonly ModelInfo[]> {
       return adapter.listModels()
     },
@@ -602,8 +707,19 @@ export function createShell({
 
     // Async so that a refusal crosses the port as a rejection rather than as a
     // synchronous throw.
-    async prompt(sessionId: SessionId, text: string): Promise<TurnId> {
-      return beginTurn(sessionId, text)
+    async prompt(
+      sessionId: SessionId,
+      text: string,
+      images?: readonly ImageAttachment[]
+    ): Promise<TurnId> {
+      return beginTurn(sessionId, (turnId) => adapter.prompt(sessionId, turnId, text, images))
+    },
+
+    async shareBashRun(
+      sessionId: SessionId,
+      share: BashRunShare
+    ): Promise<'delivered' | 'dropped'> {
+      return shareRun(sessionId, share)
     },
 
     async steer(sessionId: SessionId, text: string): Promise<void> {

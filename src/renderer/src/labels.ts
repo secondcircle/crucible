@@ -8,6 +8,13 @@ export function sessionLabel(session: Pick<SessionState, 'createdAt'>): string {
   return `Session · ${at.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}`
 }
 
+/** The clock time a tree node carries: `2:04 PM`, and nothing when unknown. */
+export function clockTime(iso: string): string {
+  const at = new Date(iso)
+  if (Number.isNaN(at.getTime())) return ''
+  return at.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
+}
+
 /** How long ago, in the shorthand a search result has room for. */
 export function relativeTime(iso: string, now = Date.now()): string {
   const at = new Date(iso).getTime()

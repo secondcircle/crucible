@@ -36,15 +36,20 @@ export default tseslint.config(
           selector:
             "MemberExpression[object.name=/^(window|globalThis|self)$/][property.name='crucible']",
           message:
-            'The renderer reaches agents only through the agent port (ADR 0001). Take a port as a prop; only src/renderer/src/agent/ipc-client.ts may touch window.crucible.'
+            'The renderer reaches agents only through the agent port (ADR 0001) and the OS only through the workspace service (ADR 0005). Take them as props; only src/renderer/src/bridge.ts may touch window.crucible.'
         }
       ]
     }
   },
   {
-    // The IPC client is the renderer's one adapter over the preload surface,
-    // and its test stands in for that surface, so both sit inside the fence.
-    files: ['src/renderer/src/agent/ipc-client.ts', 'src/renderer/src/agent/ipc-client.test.ts'],
+    // The bridge is the renderer's one reader of the preload surface, and the
+    // client tests stand in for that surface, so all three sit inside the
+    // fence.
+    files: [
+      'src/renderer/src/bridge.ts',
+      'src/renderer/src/agent/ipc-client.test.ts',
+      'src/renderer/src/workspace/ipc-client.test.ts'
+    ],
     rules: { 'no-restricted-syntax': 'off' }
   },
   {

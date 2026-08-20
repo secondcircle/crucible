@@ -6,11 +6,12 @@ import { act, fireEvent, render, screen } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 import { Shell } from './Shell'
 import { createScriptedPort, oneSession, type ScriptedPort } from './testing/scripted-port'
+import { createScriptedWorkspace } from './testing/scripted-workspace'
 
 async function shellWithSession(): Promise<ScriptedPort> {
   const port = createScriptedPort(oneSession())
   port.models = [{ id: 'fake/deterministic', label: 'Fake', thinkingLevels: ['off', 'low'] }]
-  render(<Shell port={port} />)
+  render(<Shell port={port} workspace={createScriptedWorkspace()} />)
   await screen.findByRole('button', { name: /^Session · / })
   return port
 }

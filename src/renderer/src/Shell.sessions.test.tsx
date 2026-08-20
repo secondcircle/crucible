@@ -6,13 +6,14 @@ import { act, fireEvent, render, screen, within } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 import { Shell } from './Shell'
 import { createScriptedPort, oneSession, type ScriptedPort } from './testing/scripted-port'
+import { createScriptedWorkspace } from './testing/scripted-workspace'
 
 const MODEL = { id: 'fake/deterministic', label: 'Fake', thinkingLevels: ['off', 'low'] }
 
 async function shellWithSession(): Promise<ScriptedPort> {
   const port = createScriptedPort(oneSession({ model: MODEL.id, thinkingLevel: 'low' }))
   port.models = [MODEL]
-  render(<Shell port={port} />)
+  render(<Shell port={port} workspace={createScriptedWorkspace()} />)
   await screen.findByRole('button', { name: /^Session · / })
   return port
 }
@@ -25,7 +26,7 @@ const sessionRows = (): HTMLElement[] =>
 describe('workspaces', () => {
   it('opens the folder picker, and changes nothing when it is cancelled', async () => {
     const port = createScriptedPort()
-    render(<Shell port={port} />)
+    render(<Shell port={port} workspace={createScriptedWorkspace()} />)
     await screen.findByRole('button', { name: '＋ Add workspace' })
     port.folder = null
 
@@ -39,7 +40,7 @@ describe('workspaces', () => {
 
   it('adds and activates the folder that was picked', async () => {
     const port = createScriptedPort()
-    render(<Shell port={port} />)
+    render(<Shell port={port} workspace={createScriptedWorkspace()} />)
     await screen.findByRole('button', { name: '＋ Add workspace' })
     port.folder = '/repos/crucible'
 
@@ -55,7 +56,7 @@ describe('workspaces', () => {
 
   it('offers Add workspace, and no usable composer, when there are none', async () => {
     const port = createScriptedPort()
-    render(<Shell port={port} />)
+    render(<Shell port={port} workspace={createScriptedWorkspace()} />)
     await screen.findByRole('button', { name: 'Add workspace' })
 
     expect(screen.getByLabelText('Message')).toBeDisabled()
@@ -68,7 +69,7 @@ describe('workspaces', () => {
       activeWorkspaceId: 'w1',
       sessions: []
     })
-    render(<Shell port={port} />)
+    render(<Shell port={port} workspace={createScriptedWorkspace()} />)
     await screen.findByRole('button', { name: 'crucible' })
 
     expect(screen.getByLabelText('Message')).toBeDisabled()
@@ -133,7 +134,7 @@ describe('sessions', () => {
       { kind: 'assistant', markdown: 'That the sidebar is **curated**.' },
       { kind: 'stopped' }
     ])
-    render(<Shell port={port} />)
+    render(<Shell port={port} workspace={createScriptedWorkspace()} />)
 
     expect(await screen.findByText('what did we decide?')).toBeInTheDocument()
     expect(screen.getByText('curated').tagName).toBe('STRONG')

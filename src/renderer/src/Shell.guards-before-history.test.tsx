@@ -7,6 +7,7 @@ import { expect, it } from 'vitest'
 import type { TranscriptItem } from '../../shared/agent/port'
 import { Shell } from './Shell'
 import { createScriptedPort, oneSession, type ScriptedPort } from './testing/scripted-port'
+import { createScriptedWorkspace } from './testing/scripted-workspace'
 
 const MODEL = { id: 'fake/deterministic', label: 'Fake', thinkingLevels: ['off', 'low', 'high'] }
 
@@ -30,7 +31,7 @@ async function shellStillFetching(): Promise<{ port: ScriptedPort; release: () =
     return original(id)
   }
 
-  render(<Shell port={port} />)
+  render(<Shell port={port} workspace={createScriptedWorkspace()} />)
   await screen.findByRole('button', { name: /^Session · / })
   return { port, release }
 }

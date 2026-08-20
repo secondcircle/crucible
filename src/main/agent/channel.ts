@@ -1,6 +1,6 @@
 import { ipcMain, type BrowserWindow } from 'electron'
 import { EVENT_CHANNEL, REQUEST_CHANNEL, type PortResult } from '../../shared/agent/channels'
-import type { PortEvent, QueuedKind } from '../../shared/agent/port'
+import type { BashRunShare, ImageAttachment, PortEvent, QueuedKind } from '../../shared/agent/port'
 import type { Shell } from '../shell/shell'
 import { displaySafeMessage } from './adapter-error'
 
@@ -75,6 +75,56 @@ async function invoke(shell: Shell, request: unknown): Promise<unknown> {
     return value
   }
 
+  /** Absent is allowed and means none; anything else is checked shape by shape. */
+  function images(position: number): readonly ImageAttachment[] | undefined {
+    const value = given[position]
+    if (value === undefined || value === null) return undefined
+    if (!Array.isArray(value)) throw new Error(`${op} needs a list of images where it was given none.`)
+    return value.map((entry) => {
+      const { mimeType, data } = (entry ?? {}) as { mimeType?: unknown; data?: unknown }
+      if (typeof mimeType !== 'string' || typeof data !== 'string') {
+        throw new Error(`${op} was given something that is not an image.`)
+      }
+      return { mimeType, data }
+    })
+  }
+
+  /** A command, its output and how it ended: nothing else is a bash run. */
+  function run(position: number): BashRunShare {
+    const value = given[position]
+    if (typeof value !== 'object' || value === null) {
+      throw new Error(`${op} needs a bash run where it was given none.`)
+    }
+    const { command, output, exitCode } = value as {
+      command?: unknown
+      output?: unknown
+      exitCode?: unknown
+    }
+    if (typeof command !== 'string' || typeof output !== 'string') {
+      throw new Error(`${op} needs a bash run where it was given none.`)
+    }
+    return {
+      command,
+      output,
+      ...(typeof exitCode === 'number' ? { exitCode } : {})
+    }
+  }
+
+  /** Absent, or a label: an empty one clears rather than sets. */
+  function label(position: number): string | undefined {
+    const value = given[position]
+    if (value === undefined || value === null) return undefined
+    if (typeof value !== 'string') throw new Error(`${op} needs text where it was given none.`)
+    return value
+  }
+
+  /** The one option a jump takes, and it is not optional. */
+  function summarize(position: number): boolean {
+    const value = given[position]
+    const asked = (value ?? {}) as { summarize?: unknown }
+    return asked.summarize === true
+  }
+
   switch (op) {
     case 'snapshot':
       return shell.snapshot()
@@ -104,8 +154,20 @@ async function invoke(shell: Shell, request: unknown): Promise<unknown> {
       return shell.setModel(text(0), text(1))
     case 'setThinkingLevel':
       return shell.setThinkingLevel(text(0), text(1))
-    case 'prompt':
-      return shell.prompt(text(0), text(1))
+    case 'sessionTree':
+      return shell.sessionTree(text(0))
+    case 'jump':
+      return shell.jump(text(0), text(1), { summarize: summarize(2) })
+    case 'setLabel':
+      return shell.setLabel(text(0), text(1), label(2))
+    case 'prompt': {
+      const attached = images(2)
+      return attached === undefined
+        ? shell.prompt(text(0), text(1))
+        : shell.prompt(text(0), text(1), attached)
+    }
+    case 'shareBashRun':
+      return shell.shareBashRun(text(0), run(1))
     case 'steer':
       return shell.steer(text(0), text(1))
     case 'followUp':

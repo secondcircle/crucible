@@ -6,10 +6,11 @@ import { act, fireEvent, render, screen } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 import { Shell } from './Shell'
 import { createScriptedPort, oneSession, type ScriptedPort } from './testing/scripted-port'
+import { createScriptedWorkspace } from './testing/scripted-workspace'
 
 async function streaming(): Promise<ScriptedPort> {
   const port = createScriptedPort(oneSession())
-  render(<Shell port={port} />)
+  render(<Shell port={port} workspace={createScriptedWorkspace()} />)
   await screen.findByRole('button', { name: /^Session · / })
   await act(async () => {
     await port.prompt('s1', 'run the tests')
@@ -186,7 +187,7 @@ describe('drilling into a chain', () => {
       ],
       activeSessionId: 's1'
     })
-    render(<Shell port={port} />)
+    render(<Shell port={port} workspace={createScriptedWorkspace()} />)
     await screen.findAllByRole('button', { name: /^Session · / })
 
     await act(async () => {
@@ -217,7 +218,7 @@ describe('drilling into a chain', () => {
       { kind: 'assistant', markdown: 'Both are fine.' },
       { kind: 'tool', name: 'read', summary: 'package.json', ok: false, output: 'ENOENT' }
     ])
-    render(<Shell port={port} />)
+    render(<Shell port={port} workspace={createScriptedWorkspace()} />)
 
     const rows = await screen.findAllByRole('button', { name: /^Tool chain/ })
 

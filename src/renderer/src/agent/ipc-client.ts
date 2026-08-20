@@ -1,13 +1,14 @@
-import type { PortRequest, PortResult } from '../../../shared/agent/channels'
 import type {
   AgentPort,
+  BashRunShare,
   HistoryMatch,
+  ImageAttachment,
   ModelId,
   ModelInfo,
-  PortEvent,
   PortEventListener,
   QueuedKind,
   SessionId,
+  SessionTree,
   ShellSnapshot,
   ThinkingLevel,
   TranscriptItem,
@@ -15,34 +16,13 @@ import type {
   Unsubscribe,
   WorkspaceId
 } from '../../../shared/agent/port'
+import { agentBridge } from '../bridge'
 
-// The one module in the renderer that may name `window.crucible`. It holds no
-// state: correlation, guards and staleness are all main's.
-
-/** The preload surface, as the renderer sees it: one object, two members. */
-interface CrucibleAgent {
-  request(request: PortRequest): Promise<PortResult>
-  onEvent(listener: (event: PortEvent) => void): () => void
-}
-
-declare global {
-  interface Window {
-    crucible?: { agent: CrucibleAgent }
-  }
-}
-
-// A missing surface means the preload did not load, which is worth saying
-// plainly rather than failing on an undefined member later.
-function surface(): CrucibleAgent {
-  const agent = window.crucible?.agent
-  if (agent === undefined) {
-    throw new Error('renderer: window.crucible is missing — the preload did not load')
-  }
-  return agent
-}
+// The renderer's side of the agent channel. It holds no state: correlation,
+// guards and staleness are all main's.
 
 export function createIpcClient(): AgentPort {
-  const agent = surface()
+  const agent = agentBridge()
   const listeners = new Set<PortEventListener>()
 
   agent.onEvent((event) => {
@@ -82,12 +62,25 @@ export function createIpcClient(): AgentPort {
     resumeSession: (workspaceId: WorkspaceId, ref: string) =>
       call<SessionId>('resumeSession', workspaceId, ref),
 
+    sessionTree: (id: SessionId) => call<SessionTree>('sessionTree', id),
+    jump: (id: SessionId, ref: string, options: { readonly summarize: boolean }) =>
+      call<{ editorText?: string }>('jump', id, ref, options),
+    // Nothing optional is sent as an absent argument: the wire carries what
+    // there is, so a request reads as what was asked for.
+    setLabel: (id: SessionId, ref: string, label?: string) =>
+      label === undefined ? call<void>('setLabel', id, ref) : call<void>('setLabel', id, ref, label),
+
     listModels: () => call<readonly ModelInfo[]>('listModels'),
     setModel: (sessionId: SessionId, model: ModelId) => call<void>('setModel', sessionId, model),
     setThinkingLevel: (sessionId: SessionId, level: ThinkingLevel) =>
       call<void>('setThinkingLevel', sessionId, level),
 
-    prompt: (sessionId: SessionId, text: string) => call<TurnId>('prompt', sessionId, text),
+    prompt: (sessionId: SessionId, text: string, images?: readonly ImageAttachment[]) =>
+      images === undefined || images.length === 0
+        ? call<TurnId>('prompt', sessionId, text)
+        : call<TurnId>('prompt', sessionId, text, images),
+    shareBashRun: (sessionId: SessionId, run: BashRunShare) =>
+      call<'delivered' | 'dropped'>('shareBashRun', sessionId, run),
     steer: (sessionId: SessionId, text: string) => call<void>('steer', sessionId, text),
     followUp: (sessionId: SessionId, text: string) => call<void>('followUp', sessionId, text),
     dequeue: (sessionId: SessionId, kind: QueuedKind, text: string) =>

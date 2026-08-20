@@ -9,14 +9,18 @@ export function TopBar({
   workspace,
   model,
   menuOpen,
+  treeOpen,
   onToggleMenu,
+  onToggleTree,
   onResetSession
 }: {
   readonly session?: SessionState
   readonly workspace?: WorkspaceState
   readonly model?: ModelInfo
   readonly menuOpen: boolean
+  readonly treeOpen: boolean
   readonly onToggleMenu: () => void
+  readonly onToggleTree: () => void
   readonly onResetSession: () => void
 }): React.JSX.Element {
   const usage = session?.usage
@@ -41,6 +45,19 @@ export function TopBar({
           ● working
         </span>
       ) : null}
+
+      {/* The mouse and dictation path into the tree; double-Esc is only an
+          accelerator for it. */}
+      {session === undefined ? null : (
+        <button
+          className={`treebtn${treeOpen ? ' active' : ''}`}
+          aria-label="Session tree"
+          aria-expanded={treeOpen}
+          onClick={onToggleTree}
+        >
+          <span aria-hidden="true">⑂</span> Tree <span className="hint">esc esc</span>
+        </button>
+      )}
 
       <div className="meter" aria-label="Context usage">
         {meter === undefined ? (

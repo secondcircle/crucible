@@ -1,3 +1,4 @@
+import { summarizeActivity } from './activity'
 import type {
   AdapterEvent,
   AdapterEventListener,
@@ -7,14 +8,18 @@ import type {
   ResumeRequest
 } from './adapter'
 import type {
+  BashRunShare,
   HistoryMatch,
+  ImageAttachment,
   ModelId,
   ModelInfo,
   QueuedKind,
   QueuedMessage,
   SessionId,
+  SessionTree,
   ThinkingLevel,
   TranscriptItem,
+  TreeNode,
   TurnId
 } from './port'
 
@@ -115,6 +120,17 @@ const FOLLOW_UP_ANSWER_DELTAS: readonly string[] = [
   'Follow-up taken, once the rest was done. Still the same scripted answer.'
 ]
 
+// What the script says about a run it was shown, so a shared run is visibly
+// answered rather than silently absorbed.
+const SHARED_RUN_ANSWER_DELTAS: readonly string[] = [
+  'That command output is in the conversation now, and the script read it.'
+]
+
+// The one sentence a summarizing jump leaves behind, so the two continue
+// actions are told apart without a paid call.
+export const FAKE_BRANCH_SUMMARY =
+  'Summary of the abandoned branch: the fake adapter summarizes deterministically, in one sentence.'
+
 // Every workspace starts with these, so resume has something to find.
 const CANNED_HISTORY: readonly { readonly preview: string; readonly items: TranscriptItem[] }[] = [
   {
@@ -144,14 +160,34 @@ const CANNED_HISTORY: readonly { readonly preview: string; readonly items: Trans
   }
 ]
 
+// The conversation is a tree, not a list: every item is an entry with a parent,
+// the leaf is where the conversation stands, and a jump moves the leaf without
+// removing anything. That is what makes the tree real rather than a picture.
+interface Entry {
+  readonly id: string
+  readonly parentId: string | null
+  readonly item: TranscriptItem
+  /** ISO time the entry joined the conversation. */
+  readonly at: string
+  label?: string
+}
+
 interface Conversation {
   readonly token: string
   readonly workspacePath: string
-  readonly items: TranscriptItem[]
+  readonly entries: Entry[]
+  /** Where the conversation stands; `null` means before any entry. */
+  leafId: string | null
   /** Monotonic within the conversation, and inside the context window. */
   usedTokens: number
   /** ISO time of the last thing that happened in it. */
   at: string
+  minted: number
+}
+
+interface PendingShare {
+  readonly run: BashRunShare
+  readonly settle: (outcome: 'delivered' | 'dropped') => void
 }
 
 interface Bound {
@@ -162,6 +198,9 @@ interface Bound {
   /** π's two queues, oldest first, undelivered only. */
   readonly steering: string[]
   readonly followUp: string[]
+  // Bash runs waiting for a delivery point. They are not queued messages: they
+  // never appear in queue state and are never handed back to the composer.
+  readonly shares: PendingShare[]
 }
 
 interface RunningTurn {
@@ -210,18 +249,56 @@ export function createFakeAdapter({
     return `fake-${kind}-${minted}`
   }
 
+  /** Appends as a child of the leaf and advances it, which is how π grows too. */
+  function append(conversation: Conversation, item: TranscriptItem): Entry {
+    conversation.minted += 1
+    const entry: Entry = {
+      id: `${conversation.token}-e${conversation.minted}`,
+      parentId: conversation.leafId,
+      item,
+      at: new Date().toISOString()
+    }
+    conversation.entries.push(entry)
+    conversation.leafId = entry.id
+    return entry
+  }
+
+  function entryOf(conversation: Conversation, id: string): Entry | undefined {
+    return conversation.entries.find((entry) => entry.id === id)
+  }
+
+  /** Leaf to root, reversed: the path the conversation currently stands on. */
+  function pathEntries(conversation: Conversation): readonly Entry[] {
+    const path: Entry[] = []
+    let at = conversation.leafId
+    while (at !== null) {
+      const entry = entryOf(conversation, at)
+      if (entry === undefined) break
+      path.push(entry)
+      at = entry.parentId
+    }
+    return path.reverse()
+  }
+
   function newConversation(
     workspacePath: string,
-    items: TranscriptItem[] = [],
+    items: readonly TranscriptItem[] = [],
     kind: 'canned' | 'live' = 'live'
   ): Conversation {
     const conversation: Conversation = {
       token: mintToken(kind),
       workspacePath,
-      items,
-      usedTokens: items.reduce((sum, item) => sum + estimateTokens(JSON.stringify(item)), 0),
-      at: new Date().toISOString()
+      entries: [],
+      leafId: null,
+      usedTokens: 0,
+      at: new Date().toISOString(),
+      minted: 0
     }
+    for (const item of items) append(conversation, item)
+    conversation.usedTokens = items.reduce(
+      (sum, item) => sum + estimateTokens(JSON.stringify(item)),
+      0
+    )
     conversations.set(conversation.token, conversation)
     return conversation
   }
@@ -230,7 +307,7 @@ export function createFakeAdapter({
     if (seeded.has(workspacePath)) return
     seeded.add(workspacePath)
     for (const canned of CANNED_HISTORY) {
-      newConversation(workspacePath, [...canned.items], 'canned')
+      newConversation(workspacePath, canned.items, 'canned')
     }
   }
 
@@ -266,32 +343,93 @@ export function createFakeAdapter({
     bound.followUp.length = 0
   }
 
+  // A run that never reached a delivery point stays local, and its caller is
+  // told so rather than left waiting.
+  function dropShares(bound: Bound): void {
+    const waiting = bound.shares.splice(0, bound.shares.length)
+    for (const share of waiting) share.settle('dropped')
+  }
+
   function previewOf(conversation: Conversation): string {
-    for (const item of [...conversation.items].reverse()) {
-      if (item.kind === 'user') return clip(`you: ${item.text}`)
-      if (item.kind === 'assistant') return clip(`agent: ${item.markdown}`)
+    for (const entry of [...pathEntries(conversation)].reverse()) {
+      if (entry.item.kind === 'user') return clip(`you: ${entry.item.text}`)
+      if (entry.item.kind === 'assistant') return clip(`agent: ${entry.item.markdown}`)
     }
     return 'an empty conversation'
   }
 
-  // A search reads the whole conversation, not just the preview beside it: a
-  // person looking for a sentence they typed expects to find it.
+  // A search reads the whole conversation, every branch of it, not just the
+  // preview beside it: a person looking for a sentence they typed expects to
+  // find it wherever they left it.
   function searchableText(conversation: Conversation): string {
-    return conversation.items
-      .map((item) => {
+    return conversation.entries
+      .map(({ item }) => {
         if (item.kind === 'user') return item.text
         if (item.kind === 'assistant') return item.markdown
         if (item.kind === 'thinking') return item.text
         if (item.kind === 'tool') return `${item.name} ${item.summary}`
+        if (item.kind === 'bashRun') return `${item.command}\n${item.output}`
         return ''
       })
       .join('\n')
       .toLowerCase()
   }
 
+  // User messages are the nodes; everything between them is the dim connective
+  // line. Tool calls and thinking never become nodes.
+  function treeOf(conversation: Conversation): SessionTree {
+    const childrenOf = new Map<string | null, Entry[]>()
+    for (const entry of conversation.entries) {
+      const siblings = childrenOf.get(entry.parentId)
+      if (siblings === undefined) childrenOf.set(entry.parentId, [entry])
+      else siblings.push(entry)
+    }
+
+    function collect(parentId: string | null): {
+      nodes: TreeNode[]
+      passed: TranscriptItem[]
+    } {
+      const nodes: TreeNode[] = []
+      const passed: TranscriptItem[] = []
+      for (const entry of childrenOf.get(parentId) ?? []) {
+        const below = collect(entry.id)
+        if (entry.item.kind === 'user') {
+          const activity = summarizeActivity(below.passed)
+          nodes.push({
+            ref: entry.id,
+            text: entry.item.text,
+            at: entry.at,
+            ...(entry.label === undefined ? {} : { label: entry.label }),
+            ...(activity === undefined ? {} : { activity }),
+            children: below.nodes
+          })
+          continue
+        }
+        // Not a node: it belongs to the line above it, and whatever nodes hang
+        // below it belong to the level it was found at.
+        passed.push(entry.item)
+        passed.push(...below.passed)
+        nodes.push(...below.nodes)
+      }
+      return { nodes, passed }
+    }
+
+    return {
+      roots: collect(null).nodes,
+      path: pathEntries(conversation)
+        .filter((entry) => entry.item.kind === 'user')
+        .map((entry) => entry.id)
+    }
+  }
+
   // Every beat is preceded by a pause and followed by an abandonment check, so
   // a cancel lands promptly wherever the script stands.
-  function run(bound: Bound, sessionId: SessionId, turnId: TurnId, text: string): Promise<void> {
+  function run(
+    bound: Bound,
+    sessionId: SessionId,
+    turnId: TurnId,
+    opening: TranscriptItem
+  ): Promise<void> {
     let stopped: 'cancelled' | 'disposed' | undefined
     let timer: ReturnType<typeof setTimeout> | undefined
     let release: (() => void) | undefined
@@ -316,9 +454,17 @@ export function createFakeAdapter({
     }
 
     const conversation = bound.conversation
-    const pending: TranscriptItem[] = [{ kind: 'user', text }]
+    // What opened the turn is in the conversation from the moment it was sent,
+    // which is what makes it a node of the tree while the turn is still live.
+    append(conversation, opening)
+    const pending: TranscriptItem[] = []
     let spoken = ''
-    let counted = text
+    let counted =
+      opening.kind === 'user'
+        ? opening.text
+        : opening.kind === 'bashRun'
+          ? `${opening.command}\n${opening.output}`
+          : ''
 
     function settleSpoken(): void {
       if (spoken === '') return
@@ -332,7 +478,8 @@ export function createFakeAdapter({
       if (terminal.type === 'turn_cancelled') pending.push({ kind: 'stopped' })
       // Delivered messages are settled at their delivery point, so a restored
       // transcript reads as the live one did.
-      conversation.items.push(...pending)
+      for (const item of pending) append(conversation, item)
+      pending.length = 0
       conversation.at = new Date().toISOString()
       conversation.usedTokens = Math.min(
         CONTEXT_WINDOW,
@@ -433,6 +580,34 @@ export function createFakeAdapter({
       return true
     }
 
+    // The same boundary a steering message lands at, which is what Q23 asked
+    // for. The caller learns of the delivery from the promise it is holding.
+    async function deliverShares(): Promise<boolean> {
+      while (bound.shares.length > 0) {
+        await beat()
+        if (stopped !== undefined) return false
+        const share = bound.shares.shift()
+        if (share === undefined) break
+        settleSpoken()
+        counted += `${share.run.command}\n${share.run.output}`
+        pending.push({
+          kind: 'bashRun',
+          command: share.run.command,
+          output: share.run.output,
+          ...(share.run.exitCode === undefined ? {} : { exitCode: share.run.exitCode })
+        })
+        share.settle('delivered')
+        if (!(await say(SHARED_RUN_ANSWER_DELTAS))) return false
+      }
+      return true
+    }
+
+    /** Every delivery point in the script: queued messages, then shared runs. */
+    async function boundary(): Promise<boolean> {
+      if (!(await deliver('steering'))) return false
+      return deliverShares()
+    }
+
     // The turn ends only when both queues are empty: steering first, because a
     // follow-up waits for the agent to have fully stopped.
     async function drain(): Promise<boolean> {
@@ -440,6 +615,12 @@ export function createFakeAdapter({
         if (bound.steering.length > 0) {
           if (!(await deliver('steering'))) return false
           if (!(await say(STEERING_ANSWER_DELTAS))) return false
+          continue
+        }
+        if (bound.shares.length > 0) {
+          // Its own answer, because a run the script was shown is not a
+          // message the user steered it with.
+          if (!(await deliverShares())) return false
           continue
         }
         if (bound.followUp.length > 0) {
@@ -461,12 +642,12 @@ export function createFakeAdapter({
         number += 1
         if (!(await call(scripted, number))) return finish()
         // The boundary between two tool calls is where steering lands.
-        if (!(await deliver('steering'))) return finish()
+        if (!(await boundary())) return finish()
       }
 
       if (!(await say(BETWEEN_DELTAS))) return finish()
       if (!(await call(LONE_CALL, number + 1))) return finish()
-      if (!(await deliver('steering'))) return finish()
+      if (!(await boundary())) return finish()
       if (!(await say(REPLY_DELTAS))) return finish()
 
       // The session is still running during this last pause, so the queues are
@@ -475,12 +656,15 @@ export function createFakeAdapter({
         if (!(await drain())) return finish()
         await beat()
         if (stopped !== undefined) return finish()
-        if (bound.steering.length === 0 && bound.followUp.length === 0) break
+        if (bound.steering.length + bound.followUp.length + bound.shares.length === 0) break
       }
       finish()
     }
 
     function finish(): void {
+      // A run that was never delivered stays local: nothing fires at a plan
+      // the user killed, and nothing is delivered to a turn that is over.
+      dropShares(bound)
       if (stopped === 'disposed') {
         // The document that asked is gone, so the turn says nothing more at
         // all, not even a terminal event.
@@ -529,7 +713,8 @@ export function createFakeAdapter({
         model: FAKE_MODEL.id,
         thinkingLevel: preferredLevel(request.preferredThinkingLevel),
         steering: [],
-        followUp: []
+        followUp: [],
+        shares: []
       }
       sessions.set(request.sessionId, bound)
       return {
@@ -564,7 +749,8 @@ export function createFakeAdapter({
         model: FAKE_MODEL.id,
         thinkingLevel: 'low',
         steering: [],
-        followUp: []
+        followUp: [],
+        shares: []
       }
       sessions.set(request.sessionId, bound)
       return {
@@ -576,13 +762,16 @@ export function createFakeAdapter({
     },
 
     async transcript(sessionId: SessionId): Promise<readonly TranscriptItem[]> {
-      return [...requireBound(sessionId).conversation.items]
+      return pathEntries(requireBound(sessionId).conversation).map((entry) => entry.item)
     },
 
     release(sessionId: SessionId): void {
       const bound = sessions.get(sessionId)
       bound?.running?.abandon('disposed')
-      if (bound !== undefined) discardQueue(bound)
+      if (bound !== undefined) {
+        discardQueue(bound)
+        dropShares(bound)
+      }
       // The conversation itself stays in `conversations`: removal forgets the
       // sidebar entry, never the history behind it.
       sessions.delete(sessionId)
@@ -602,6 +791,38 @@ export function createFakeAdapter({
           at: conversation.at
         }))
         .sort((left, right) => right.at.localeCompare(left.at))
+    },
+
+    async sessionTree(sessionId: SessionId): Promise<SessionTree> {
+      return treeOf(requireBound(sessionId).conversation)
+    },
+
+    // In place: the leaf moves to the moment before the chosen message was
+    // sent, and every abandoned entry stays exactly where it is.
+    async jump(
+      sessionId: SessionId,
+      ref: string,
+      summarize: boolean
+    ): Promise<{ editorText?: string }> {
+      const bound = requireBound(sessionId)
+      const { conversation } = bound
+      const entry = entryOf(conversation, ref)
+      if (entry === undefined) throw new Error('That point is no longer in this conversation.')
+
+      conversation.leafId = entry.parentId
+      if (summarize) {
+        // π summarizes the branch that was left; this one says the same thing
+        // the same way every time, so the two actions are told apart for free.
+        append(conversation, { kind: 'assistant', markdown: FAKE_BRANCH_SUMMARY })
+      }
+      conversation.at = new Date().toISOString()
+      return entry.item.kind === 'user' ? { editorText: entry.item.text } : {}
+    },
+
+    async setLabel(sessionId: SessionId, ref: string, label?: string): Promise<void> {
+      const entry = entryOf(requireBound(sessionId).conversation, ref)
+      if (entry === undefined) throw new Error('That point is no longer in this conversation.')
+      entry.label = label === undefined || label.trim() === '' ? undefined : label.trim()
     },
 
     // Token and ref are the same opaque string in this adapter, which nothing
@@ -626,9 +847,20 @@ export function createFakeAdapter({
       requireBound(sessionId).thinkingLevel = level
     },
 
-    prompt(sessionId: SessionId, turnId: TurnId, text: string): Promise<void> {
+    prompt(
+      sessionId: SessionId,
+      turnId: TurnId,
+      text: string,
+      images?: readonly ImageAttachment[]
+    ): Promise<void> {
       const bound = requireBound(sessionId)
-      return run(bound, sessionId, turnId, text)
+      return run(bound, sessionId, turnId, {
+        kind: 'user',
+        text,
+        // Only what was genuinely sent is kept, so a restored transcript shows
+        // the thumbnails the live one did and no others.
+        ...(images === undefined || images.length === 0 ? {} : { images: [...images] })
+      })
     },
 
     // Nothing is queued into a session with no live run, so the caller is told
@@ -647,6 +879,29 @@ export function createFakeAdapter({
       bound.followUp.push(text)
       emitQueue(bound, sessionId)
       return 'queued'
+    },
+
+    // Never in the queue state and never handed back to the composer: a share
+    // is either delivered at a boundary or dropped with the turn.
+    shareBashRun(
+      sessionId: SessionId,
+      run: BashRunShare
+    ): Promise<'delivered' | 'dropped' | 'idle'> {
+      const bound = requireBound(sessionId)
+      if (bound.running === undefined) return Promise.resolve('idle')
+      return new Promise((resolve) => {
+        bound.shares.push({ run, settle: resolve })
+      })
+    },
+
+    promptBashRun(sessionId: SessionId, turnId: TurnId, share: BashRunShare): Promise<void> {
+      const bound = requireBound(sessionId)
+      return run(bound, sessionId, turnId, {
+        kind: 'bashRun',
+        command: share.command,
+        output: share.output,
+        ...(share.exitCode === undefined ? {} : { exitCode: share.exitCode })
+      })
     },
 
     async dequeue(sessionId: SessionId, kind: QueuedKind, text: string): Promise<boolean> {
@@ -679,6 +934,7 @@ export function createFakeAdapter({
       for (const bound of sessions.values()) {
         bound.running?.abandon('disposed')
         discardQueue(bound)
+        dropShares(bound)
       }
     }
   }

@@ -4,6 +4,7 @@ import type {
   DefaultResourceLoader,
   ModelRuntime,
   SessionManager,
+  SessionTreeNode,
   SettingsManager
 } from '@earendil-works/pi-coding-agent'
 import type {
@@ -15,22 +16,32 @@ import type {
   ResumeRequest
 } from '../../shared/agent/adapter'
 import type {
+  BashRunShare,
   HistoryMatch,
+  ImageAttachment,
   ModelId,
   ModelInfo,
   QueuedKind,
   QueuedMessage,
   SessionId,
+  SessionTree,
   ThinkingLevel,
   TranscriptItem,
+  TreeNode,
   TurnId,
   Unsubscribe
 } from '../../shared/agent/port'
 // Spelled with their extensions so plain Node can load this module too: its
 // ESM resolver does no extension guessing.
+import { summarizeActivity } from '../../shared/agent/activity.ts'
 import { displaySafeMessage } from './adapter-error.ts'
 import { createEventMapper } from './sdk-events.ts'
-import { toTranscript } from './sdk-transcript.ts'
+import {
+  BASH_RUN_TYPE,
+  toTranscript,
+  userTextOf,
+  type StoredMessage
+} from './sdk-transcript.ts'
 
 // Imported dynamically because the SDK is ESM-only, so the CommonJS main
 // bundle cannot `require` it and a fake-flavor launch never loads it.
@@ -41,6 +52,13 @@ interface Bound {
   readonly workspacePath: string
   token: string
   running?: RunningTurn
+  /** Bash runs waiting for the boundary that delivers them, oldest first. */
+  readonly shares: PendingShare[]
+}
+
+interface PendingShare {
+  readonly run: BashRunShare
+  readonly settle: (outcome: 'delivered' | 'dropped') => void
 }
 
 interface RunningTurn {
@@ -180,6 +198,73 @@ export function createSdkAdapter(): ConversationAdapter {
     return bound
   }
 
+  // A run that never reached a delivery point stays local, and whoever is
+  // holding its promise is told so rather than left waiting.
+  function dropShares(bound: Bound): void {
+    for (const share of bound.shares.splice(0, bound.shares.length)) share.settle('dropped')
+  }
+
+  // π's tree, read as Crucible's: user messages are the nodes, everything else
+  // collapses into the dim line above the next one.
+  function treeOf(sessionManager: SessionManager): SessionTree {
+    function collect(subtrees: readonly SessionTreeNode[]): {
+      nodes: TreeNode[]
+      passed: TranscriptItem[]
+    } {
+      const nodes: TreeNode[] = []
+      const passed: TranscriptItem[] = []
+
+      for (const subtree of subtrees) {
+        const below = collect(subtree.children)
+        const { entry } = subtree
+        const message =
+          entry.type === 'message' && entry.message.role === 'user' ? entry.message : undefined
+
+        if (message !== undefined) {
+          const activity = summarizeActivity(below.passed)
+          nodes.push({
+            ref: entry.id,
+            text: userTextOf(message.content),
+            at: entry.timestamp,
+            ...(subtree.label === undefined ? {} : { label: subtree.label }),
+            ...(activity === undefined ? {} : { activity }),
+            children: below.nodes
+          })
+          continue
+        }
+
+        // Not a node: it belongs to the line above it, and whatever nodes hang
+        // below it belong to the level it was found at.
+        passed.push(...toTranscript(entriesToMessages(entry)))
+        passed.push(...below.passed)
+        nodes.push(...below.nodes)
+      }
+
+      return { nodes, passed }
+    }
+
+    // Walked by parent link rather than trusted from a list, so the path is
+    // the one π's own leaf pointer describes.
+    const path: string[] = []
+    let at = sessionManager.getLeafId()
+    const guard = new Set<string>()
+    while (at !== null && at !== undefined && !guard.has(at)) {
+      guard.add(at)
+      const entry = sessionManager.getEntry(at)
+      if (entry === undefined) break
+      if (entry.type === 'message' && entry.message.role === 'user') path.push(entry.id)
+      at = entry.parentId
+    }
+
+    return { roots: collect(sessionManager.getTree()).nodes, path: path.reverse() }
+  }
+
+  // One entry's worth of message, if it carries one: the activity line counts
+  // real entries and invents nothing.
+  function entriesToMessages(entry: { type: string; message?: unknown }): StoredMessage[] {
+    return entry.type === 'message' ? [entry.message as StoredMessage] : []
+  }
+
   // `clearQueue()` removes and returns in one step, so nothing can be
   // delivered between reading the queue and emptying it.
   function flushQueue(bound: Bound, sessionId: SessionId): void {
@@ -190,6 +275,94 @@ export function createSdkAdapter(): ConversationAdapter {
     ]
     if (messages.length === 0) return
     emit({ type: 'queue_flushed', sessionId, messages })
+  }
+
+  // One turn, whatever put it there: a typed prompt and a shared bash run
+  // differ only in what `deliver` sends, never in how the turn is watched,
+  // stopped or ended.
+  async function runTurn(
+    sessionId: SessionId,
+    turnId: TurnId,
+    deliver: () => Promise<unknown>
+  ): Promise<void> {
+    const bound = requireBound(sessionId)
+    const { session } = bound
+    const mapper = createEventMapper()
+
+    let cancelled = false
+    let abandoned = false
+    // A reported failure is remembered rather than emitted, because the SDK
+    // retries transient ones behind this seam and only its last word counts.
+    let outcome: AdapterEvent = { type: 'turn_ended', sessionId, turnId }
+
+    emit({ type: 'turn_started', sessionId, turnId })
+
+    const unsubscribe = session.subscribe((event) => {
+      if (abandoned) return
+      const mapped = mapper.map(event, { sessionId, turnId })
+      if (mapped === undefined) return
+      if (mapped.type === 'turn_error') {
+        outcome = mapped
+        return
+      }
+      if (mapped.type === 'text_delta') {
+        // Text arriving after a failed message is the SDK's own retry
+        // succeeding: the turn is no longer failing.
+        outcome = { type: 'turn_ended', sessionId, turnId }
+      }
+      emit(mapped)
+    })
+
+    bound.running = {
+      cancel(): void {
+        cancelled = true
+        // Aborting the run is what stops a paid request from streaming on
+        // unseen.
+        void session.abort()
+      },
+      abandon(): void {
+        abandoned = true
+        void session.abort()
+      }
+    }
+
+    try {
+      await deliver()
+    } catch (cause) {
+      outcome = {
+        type: 'turn_error',
+        sessionId,
+        turnId,
+        message: displaySafeMessage(cause)
+      }
+    } finally {
+      unsubscribe()
+      bound.running = undefined
+    }
+
+    if (abandoned) return
+
+    // A message still queued when a run is over was never delivered, so it
+    // goes back to the composer rather than into the next run; a run that was
+    // never delivered stays local.
+    flushQueue(bound, sessionId)
+    dropShares(bound)
+
+    // Decided here because only the adapter that called `abort()` knows an
+    // abort happened.
+    emit(cancelled ? { type: 'turn_cancelled', sessionId, turnId } : outcome)
+
+    const usage = session.getContextUsage()
+    // No usage event at all, rather than a guess, when the SDK reports
+    // nothing.
+    if (usage?.tokens != null) {
+      emit({
+        type: 'usage',
+        sessionId,
+        usedTokens: usage.tokens,
+        contextWindow: usage.contextWindow
+      })
+    }
   }
 
   // Stop the work before letting go of the session, or an in-flight request
@@ -243,7 +416,8 @@ export function createSdkAdapter(): ConversationAdapter {
       const bound: Bound = {
         session,
         workspacePath: request.workspacePath,
-        token: tokenOf(session)
+        token: tokenOf(session),
+        shares: []
       }
       sessions.set(request.sessionId, bound)
       return describe(bound, restored)
@@ -287,7 +461,8 @@ export function createSdkAdapter(): ConversationAdapter {
       const bound: Bound = {
         session,
         workspacePath: request.workspacePath,
-        token: tokenOf(session)
+        token: tokenOf(session),
+        shares: []
       }
       sessions.set(request.sessionId, bound)
       return describe(bound, true)
@@ -301,6 +476,7 @@ export function createSdkAdapter(): ConversationAdapter {
       const bound = sessions.get(sessionId)
       if (bound === undefined) return
       bound.running?.abandon()
+      dropShares(bound)
       // The session object is let go; its file is not touched. Removal forgets
       // a sidebar entry and nothing else.
       close(bound.session)
@@ -336,6 +512,32 @@ export function createSdkAdapter(): ConversationAdapter {
       return token === ref
     },
 
+    // π's own tree, read through π's own API: no session file is opened, parsed
+    // or written here (ADR 0004).
+    async sessionTree(sessionId: SessionId): Promise<SessionTree> {
+      return treeOf(requireBound(sessionId).session.sessionManager)
+    },
+
+    // In place, in the same session file: π moves the leaf and keeps every
+    // abandoned entry exactly where it is.
+    async jump(
+      sessionId: SessionId,
+      ref: string,
+      summarize: boolean
+    ): Promise<{ editorText?: string }> {
+      const { session } = requireBound(sessionId)
+      const navigated = await session.navigateTree(ref, { summarize })
+      if (navigated.cancelled) throw new Error('That jump did not happen.')
+      return navigated.editorText === undefined ? {} : { editorText: navigated.editorText }
+    },
+
+    // Labels live with the conversation, which is π's own label API and not a
+    // store of Crucible's.
+    async setLabel(sessionId: SessionId, ref: string, label?: string): Promise<void> {
+      const trimmed = label === undefined || label.trim() === '' ? undefined : label.trim()
+      requireBound(sessionId).session.sessionManager.appendLabelChange(ref, trimmed)
+    },
+
     async listModels(): Promise<readonly ModelInfo[]> {
       const [pi, available] = await Promise.all([
         import('@earendil-works/pi-ai'),
@@ -362,83 +564,68 @@ export function createSdkAdapter(): ConversationAdapter {
       )
     },
 
-    async prompt(sessionId: SessionId, turnId: TurnId, text: string): Promise<void> {
+    prompt(
+      sessionId: SessionId,
+      turnId: TurnId,
+      text: string,
+      images?: readonly ImageAttachment[]
+    ): Promise<void> {
+      const { session } = requireBound(sessionId)
+      const options =
+        images === undefined || images.length === 0
+          ? undefined
+          : { images: images.map(toImageContent) }
+      return runTurn(sessionId, turnId, () => session.prompt(text, options))
+    },
+
+    // The idle path: a turn whose content is the run itself, written in the
+    // same wire format a delivered share uses.
+    promptBashRun(sessionId: SessionId, turnId: TurnId, run: BashRunShare): Promise<void> {
+      const { session } = requireBound(sessionId)
+      return runTurn(sessionId, turnId, () =>
+        session.sendCustomMessage(bashRunMessage(run), { triggerTurn: true })
+      )
+    },
+
+    // Delivered as a steering message at the next boundary between tool calls,
+    // which is where π pulls a queued message from.
+    shareBashRun(
+      sessionId: SessionId,
+      run: BashRunShare
+    ): Promise<'delivered' | 'dropped' | 'idle'> {
       const bound = requireBound(sessionId)
+      if (bound.running === undefined) return Promise.resolve('idle')
       const { session } = bound
-      const mapper = createEventMapper()
+      const message = bashRunMessage(run)
 
-      let cancelled = false
-      let abandoned = false
-      // A reported failure is remembered rather than emitted, because the SDK
-      // retries transient ones behind this seam and only its last word counts.
-      let outcome: AdapterEvent = { type: 'turn_ended', sessionId, turnId }
-
-      emit({ type: 'turn_started', sessionId, turnId })
-
-      const unsubscribe = session.subscribe((event) => {
-        if (abandoned) return
-        const mapped = mapper.map(event, { sessionId, turnId })
-        if (mapped === undefined) return
-        if (mapped.type === 'turn_error') {
-          outcome = mapped
-          return
+      return new Promise<'delivered' | 'dropped' | 'idle'>((resolve, reject) => {
+        const share: PendingShare = {
+          run,
+          settle: (outcome) => {
+            stop()
+            resolve(outcome)
+          }
         }
-        if (mapped.type === 'text_delta') {
-          // Text arriving after a failed message is the SDK's own retry
-          // succeeding: the turn is no longer failing.
-          outcome = { type: 'turn_ended', sessionId, turnId }
-        }
-        emit(mapped)
-      })
-
-      bound.running = {
-        cancel(): void {
-          cancelled = true
-          // Aborting the run is what stops a paid request from streaming on
-          // unseen.
-          void session.abort()
-        },
-        abandon(): void {
-          abandoned = true
-          void session.abort()
-        }
-      }
-
-      try {
-        await session.prompt(text)
-      } catch (cause) {
-        outcome = {
-          type: 'turn_error',
-          sessionId,
-          turnId,
-          message: displaySafeMessage(cause)
-        }
-      } finally {
-        unsubscribe()
-        bound.running = undefined
-      }
-
-      if (abandoned) return
-
-      // A message still queued when a run is over was never delivered, so it
-      // goes back to the composer rather than into the next run.
-      flushQueue(bound, sessionId)
-
-      // Decided here because only the adapter that called `abort()` knows an
-      // abort happened.
-      emit(cancelled ? { type: 'turn_cancelled', sessionId, turnId } : outcome)
-
-      const usage = session.getContextUsage()
-      // No usage event at all, rather than a guess, when the SDK reports
-      // nothing.
-      if (usage?.tokens != null) {
-        emit({
-          type: 'usage',
-          sessionId,
-          usedTokens: usage.tokens,
-          contextWindow: usage.contextWindow
+        // The entry landing in the session is the moment the run genuinely
+        // enters the conversation, which is the only honest delivery point.
+        const stop = session.subscribe((event) => {
+          if (event.type !== 'entry_appended') return
+          const { entry } = event
+          if (entry.type !== 'custom_message' || entry.customType !== BASH_RUN_TYPE) return
+          if ((entry.details as { id?: unknown } | undefined)?.id !== message.details.id) return
+          const at = bound.shares.indexOf(share)
+          if (at !== -1) bound.shares.splice(at, 1)
+          share.settle('delivered')
         })
-      }
+
+        bound.shares.push(share)
+        void session.sendCustomMessage(message, { deliverAs: 'steer' }).catch((cause: unknown) => {
+          const at = bound.shares.indexOf(share)
+          if (at !== -1) bound.shares.splice(at, 1)
+          stop()
+          reject(cause instanceof Error ? cause : new Error(String(cause)))
+        })
+      })
     },
 
     // `running` rather than the SDK's `isStreaming`, which lags by a microtask
@@ -475,9 +662,10 @@ export function createSdkAdapter(): ConversationAdapter {
     async cancel(sessionId: SessionId): Promise<void> {
       const bound = sessions.get(sessionId)
       if (bound?.running === undefined) return
-      // Cleared before the abort, so nothing queued can fire at a plan the
-      // user just killed.
+      // Cleared before the abort, so nothing queued and no shared run can fire
+      // at a plan the user just killed.
       flushQueue(bound, sessionId)
+      dropShares(bound)
       bound.running.cancel()
     },
 
@@ -491,9 +679,51 @@ export function createSdkAdapter(): ConversationAdapter {
     // The work is dropped; the bindings are not. The document that comes back
     // after a reload finds its sessions still bound and prompts immediately.
     dispose(): void {
-      for (const bound of sessions.values()) bound.running?.abandon()
+      for (const bound of sessions.values()) {
+        bound.running?.abandon()
+        dropShares(bound)
+      }
     }
   }
+}
+
+// The wire format, minted once per share: the id is what tells this run's
+// arrival from another's when the entry lands.
+function bashRunMessage(run: BashRunShare): {
+  customType: string
+  content: string
+  display: boolean
+  details: { id: string; command: string; output: string; exitCode?: number }
+} {
+  shared += 1
+  return {
+    customType: BASH_RUN_TYPE,
+    // What the model receives: the command, its output and how it ended, said
+    // plainly as a command the user ran locally.
+    content:
+      `The user ran this command locally and shared its output with you.\n\n` +
+      `$ ${run.command}\n${run.output}\n` +
+      (run.exitCode === undefined ? '(stopped before it exited)' : `(exit ${run.exitCode})`),
+    display: true,
+    details: {
+      id: `share-${shared}`,
+      command: run.command,
+      output: run.output,
+      ...(run.exitCode === undefined ? {} : { exitCode: run.exitCode })
+    }
+  }
+}
+
+let shared = 0
+
+// π's own image shape, built from the port's: base64 bytes and a media type,
+// which is all an attachment ever was.
+function toImageContent(image: ImageAttachment): {
+  type: 'image'
+  data: string
+  mimeType: string
+} {
+  return { type: 'image', data: image.data, mimeType: image.mimeType }
 }
 
 function preview(text: string): string {

@@ -8,6 +8,7 @@ import type { ShellSnapshot } from '../../shared/agent/port'
 import { sessionLabel } from './labels'
 import { Shell } from './Shell'
 import { createScriptedPort, type ScriptedPort } from './testing/scripted-port'
+import { createScriptedWorkspace } from './testing/scripted-workspace'
 
 // The label is a local-time format, so the expected names are derived from the
 // same helper the sidebar uses rather than written out in one timezone.
@@ -26,7 +27,7 @@ const TWO_SESSIONS: ShellSnapshot = {
 
 async function twoStreamingSessions(): Promise<ScriptedPort> {
   const port = createScriptedPort(TWO_SESSIONS)
-  render(<Shell port={port} />)
+  render(<Shell port={port} workspace={createScriptedWorkspace()} />)
   await screen.findByRole('button', { name: FIRST })
 
   await act(async () => {

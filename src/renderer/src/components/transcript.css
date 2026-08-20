@@ -292,3 +292,74 @@
 .errcard b {
   color: var(--error);
 }
+
+/* thumbnails on a sent message: only images that were genuinely sent */
+.msg .thumbs {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+  flex-wrap: wrap;
+}
+
+.msg .thumb {
+  height: 72px;
+  border-radius: 6px;
+  border: 1px solid var(--line);
+}
+
+/* a shared bash run, in the tool row's grammar (Mock J) */
+.bashrow {
+  max-width: var(--column);
+  margin: 0 auto 16px;
+  padding: 0 24px;
+}
+
+.bashhead {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  font: 12px var(--mono);
+  color: var(--dim);
+  background: var(--code);
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--ok);
+  border-radius: 6px;
+  padding: 7px 12px;
+}
+
+.bashhead.failed {
+  border-left-color: var(--error);
+}
+
+.bashhead .cmd {
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bashhead .sharetag {
+  margin-left: auto;
+  flex: none;
+  font: 10.5px var(--font);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--accent2);
+  border: 1px solid var(--accent);
+  border-radius: 9px;
+  padding: 1px 8px;
+}
+
+.bashout {
+  background: var(--code-deep);
+  border: 1px solid var(--line);
+  border-top: none;
+  border-radius: 0 0 6px 6px;
+  padding: 10px 14px;
+  font: 11.5px/1.5 var(--mono);
+  color: var(--output-ink);
+  margin: 0;
+  max-height: 140px;
+  overflow: auto;
+  white-space: pre-wrap;
+}

@@ -2,6 +2,7 @@ import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { createIpcClient } from './agent/ipc-client'
 import { Shell } from './Shell'
+import { createWorkspaceClient } from './workspace/ipc-client'
 import './styles/base.css'
 
 // Always the IPC client: which adapter answers is main's choice, so anything
@@ -12,7 +13,7 @@ function mountApp(): void {
 
   createRoot(container).render(
     <StrictMode>
-      <Shell port={createIpcClient()} />
+      <Shell port={createIpcClient()} workspace={createWorkspaceClient()} />
     </StrictMode>
   )
 }

@@ -7,6 +7,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { REQUEST_CHANNEL } from '../shared/agent/channels'
+import { WORKSPACE_REQUEST_CHANNEL } from '../shared/workspace/channels'
 import type { LogRecord } from './log/sink'
 
 const harness = vi.hoisted(() => ({
@@ -111,7 +112,7 @@ afterEach(() => {
 
 describe('what a launch does', () => {
   it('writes the launch records before a window exists', () => {
-    expect(events()).toEqual(['app_starting', 'adapter_selected'])
+    expect(events()).toEqual(['app_starting', 'adapter_selected', 'workspace_service_selected'])
     expect(records()[1]).toMatchObject({ adapter: 'fake' })
     expect(harness.windowsCreated).toBe(0)
   })
@@ -122,7 +123,16 @@ describe('what a launch does', () => {
 
     expect(harness.windowsCreated).toBe(1)
     expect(harness.ipcHandlers.has(REQUEST_CHANNEL)).toBe(true)
-    expect(events()).toEqual(['app_starting', 'adapter_selected', 'app_ready', 'window_created'])
+    // Both seams are served over the same window: the agent port and, beside
+    // it, the workspace service.
+    expect(harness.ipcHandlers.has(WORKSPACE_REQUEST_CHANNEL)).toBe(true)
+    expect(events()).toEqual([
+      'app_starting',
+      'adapter_selected',
+      'workspace_service_selected',
+      'app_ready',
+      'window_created'
+    ])
   })
 
   it('forwards what the renderer says into the same log', async () => {

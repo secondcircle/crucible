@@ -92,6 +92,32 @@ function Item({ item }: { readonly item: LoneItem }): React.JSX.Element {
           <div className="who">You</div>
           {/* Plain text, always: a person's own message is never markdown. */}
           <div className="bubble">{item.text}</div>
+          {item.images === undefined || item.images.length === 0 ? null : (
+            <div className="thumbs">
+              {item.images.map((image, index) => (
+                <img
+                  key={`${image.mimeType}-${index}`}
+                  className="thumb"
+                  src={`data:${image.mimeType};base64,${image.data}`}
+                  alt={`Attached image ${index + 1}`}
+                />
+              ))}
+            </div>
+          )}
+        </div>
+      )
+
+    // A run the user added to the conversation, in the tool row's own visual
+    // grammar and marked for what it is: the model can see this one.
+    case 'bashRun':
+      return (
+        <div className="bashrow" aria-label={`Shared bash run: ${item.command}`}>
+          <div className={`bashhead ${item.exitCode === 0 ? 'ok' : 'failed'}`}>
+            <span aria-hidden="true">$</span>
+            <span className="cmd">{item.command}</span>
+            <span className="sharetag">shared with model</span>
+          </div>
+          {item.output === '' ? null : <pre className="bashout">{item.output}</pre>}
         </div>
       )
 

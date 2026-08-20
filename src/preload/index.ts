@@ -6,25 +6,46 @@ import {
   type PortResult
 } from '../shared/agent/channels'
 import type { PortEvent } from '../shared/agent/port'
+import {
+  WORKSPACE_EVENT_CHANNEL,
+  WORKSPACE_REQUEST_CHANNEL,
+  type WorkspaceRequest,
+  type WorkspaceResult
+} from '../shared/workspace/channels'
+import type { WorkspaceEvent } from '../shared/workspace/service'
 
-// The whole of what the sandboxed renderer can reach of Electron: two members,
-// no general passthrough, and nothing carrying a `sender` may cross.
+// Never `ipcRenderer.on(channel, listener)`: that hands the caller the Electron
+// event as its first argument.
+function forwarder<T>(channel: string, listener: (event: T) => void): () => void {
+  const forward = (_electronEvent: IpcRendererEvent, event: T): void => {
+    listener(event)
+  }
+  ipcRenderer.on(channel, forward)
+  return () => {
+    ipcRenderer.off(channel, forward)
+  }
+}
+
+// The whole of what the sandboxed renderer can reach of Electron: two seams of
+// two members each, no general passthrough, and nothing carrying a `sender` may
+// cross.
 contextBridge.exposeInMainWorld('crucible', {
   agent: {
     request: (request: PortRequest): Promise<PortResult> =>
       ipcRenderer.invoke(REQUEST_CHANNEL, request),
 
-    onEvent: (listener: (event: PortEvent) => void): (() => void) => {
-      // Never `ipcRenderer.on(EVENT_CHANNEL, listener)`: that hands the caller
-      // the Electron event as its first argument.
-      const forward = (_electronEvent: IpcRendererEvent, event: PortEvent): void => {
-        listener(event)
-      }
-      ipcRenderer.on(EVENT_CHANNEL, forward)
-      return () => {
-        ipcRenderer.off(EVENT_CHANNEL, forward)
-      }
-    }
+    onEvent: (listener: (event: PortEvent) => void): (() => void) =>
+      forwarder(EVENT_CHANNEL, listener)
+  },
+
+  // Beside the agent, never behind it: file search and bash runs are OS facts
+  // about the workspace folder (ADR 0005).
+  workspace: {
+    request: (request: WorkspaceRequest): Promise<WorkspaceResult> =>
+      ipcRenderer.invoke(WORKSPACE_REQUEST_CHANNEL, request),
+
+    onEvent: (listener: (event: WorkspaceEvent) => void): (() => void) =>
+      forwarder(WORKSPACE_EVENT_CHANNEL, listener)
   }
 })
 

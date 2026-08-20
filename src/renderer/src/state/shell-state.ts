@@ -1,4 +1,5 @@
 import type {
+  ImageAttachment,
   ModelInfo,
   PortEvent,
   SessionId,
@@ -11,7 +12,12 @@ import type {
 // may replay this reducer under StrictMode without elapsed times drifting.
 
 export type ViewItem =
-  | { readonly kind: 'user'; readonly text: string }
+  | {
+      readonly kind: 'user'
+      readonly text: string
+      /** Only images that were genuinely sent with the message. */
+      readonly images?: readonly ImageAttachment[]
+    }
   | { readonly kind: 'assistant'; readonly markdown: string; readonly streaming: boolean }
   | {
       readonly kind: 'thinking'
@@ -29,6 +35,12 @@ export type ViewItem =
       readonly output: string
       readonly ok?: boolean
       readonly running: boolean
+    }
+  | {
+      readonly kind: 'bashRun'
+      readonly command: string
+      readonly output: string
+      readonly exitCode?: number
     }
   | { readonly kind: 'stopped' }
   | { readonly kind: 'error'; readonly message: string }
@@ -66,8 +78,20 @@ export type ShellAction =
       readonly sessionId: SessionId
       readonly items: readonly TranscriptItem[]
     }
-  | { readonly type: 'sent'; readonly sessionId: SessionId; readonly text: string }
+  | {
+      readonly type: 'sent'
+      readonly sessionId: SessionId
+      readonly text: string
+      readonly images?: readonly ImageAttachment[]
+    }
   | { readonly type: 'reset'; readonly sessionId: SessionId }
+  // A jump replaced the conversation behind the identity: what this document
+  // held of the abandoned path goes with it.
+  | {
+      readonly type: 'jumped'
+      readonly sessionId: SessionId
+      readonly items: readonly TranscriptItem[]
+    }
   | { readonly type: 'event'; readonly event: PortEvent; readonly at: number }
 
 const EMPTY_VIEW: SessionView = { items: [], loaded: false }
@@ -96,11 +120,28 @@ export function reduce(state: ShellState, action: ShellAction): ShellState {
       // is in the new one: it was detached, not cleared.
       return withView(state, action.sessionId, { items: [], loaded: true })
 
+    case 'jumped':
+      // The session stands where the jump put it, so the whole view is the
+      // path that was refetched and nothing of the old one survives.
+      return withView(state, action.sessionId, {
+        items: action.items.map(restored),
+        loaded: true
+      })
+
     case 'sent': {
       const view = state.views[action.sessionId] ?? EMPTY_VIEW
       return withView(state, action.sessionId, {
         ...view,
-        items: [...view.items, { kind: 'user', text: action.text }]
+        items: [
+          ...view.items,
+          {
+            kind: 'user',
+            text: action.text,
+            ...(action.images === undefined || action.images.length === 0
+              ? {}
+              : { images: action.images })
+          }
+        ]
       })
     }
 
@@ -111,6 +152,10 @@ export function reduce(state: ShellState, action: ShellAction): ShellState {
 
 function restored(item: TranscriptItem): ViewItem {
   switch (item.kind) {
+    case 'user':
+      return item.images === undefined
+        ? { kind: 'user', text: item.text }
+        : { kind: 'user', text: item.text, images: item.images }
     case 'assistant':
       return { kind: 'assistant', markdown: item.markdown, streaming: false }
     case 'thinking':
@@ -124,7 +169,9 @@ function restored(item: TranscriptItem): ViewItem {
         ok: item.ok,
         running: false
       }
-    default:
+    case 'bashRun':
+    case 'stopped':
+    case 'error':
       return item
   }
 }
@@ -141,6 +188,24 @@ function heard(state: ShellState, event: PortEvent, at: number): ShellState {
 
   const { sessionId } = event
   const view = state.views[sessionId] ?? EMPTY_VIEW
+
+  // A run that was genuinely added to the conversation is shown wherever the
+  // session stands, because the delivery already happened: it is the one
+  // announcement that does not belong to a turn this document is watching.
+  if (event.type === 'bash_run_shared') {
+    return withView(state, sessionId, {
+      ...view,
+      items: [
+        ...settle(view.items, at),
+        {
+          kind: 'bashRun',
+          command: event.command,
+          output: event.output,
+          ...(event.exitCode === undefined ? {} : { exitCode: event.exitCode })
+        }
+      ]
+    })
+  }
 
   if (event.type === 'turn_started') {
     if (view.turn !== undefined) return state

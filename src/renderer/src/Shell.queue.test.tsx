@@ -8,6 +8,7 @@ import type { ShellSnapshot } from '../../shared/agent/port'
 import { sessionLabel } from './labels'
 import { Shell } from './Shell'
 import { createScriptedPort, oneSession, type ScriptedPort } from './testing/scripted-port'
+import { createScriptedWorkspace } from './testing/scripted-workspace'
 
 const TWO_SESSIONS: ShellSnapshot = {
   workspaces: [{ id: 'w1', name: 'crucible', path: '/repos/crucible' }],
@@ -24,7 +25,7 @@ async function shellWithSession(
 ): Promise<ScriptedPort> {
   const port = createScriptedPort(snapshot)
   port.models = [{ id: 'fake/deterministic', label: 'Fake', thinkingLevels: ['off', 'low'] }]
-  render(<Shell port={port} />)
+  render(<Shell port={port} workspace={createScriptedWorkspace()} />)
   await screen.findAllByRole('button', { name: /^Session · / })
   return port
 }
@@ -213,7 +214,8 @@ describe('pulling a queued message back', () => {
       fireEvent.click(screen.getAllByRole('button', { name: /queued/ })[0])
     })
 
-    expect(box()).toHaveValue('and one more thing\n\ncheck the adapter too')
+    // Restored on top, the draft below: the same stacking a jump uses.
+    expect(box()).toHaveValue('check the adapter too\n\nand one more thing')
     expect(ops(port)).toContain('dequeue')
   })
 })
@@ -247,7 +249,7 @@ describe('a flush', () => {
       port.failTurn('s1', 'The provider is overloaded.')
     })
 
-    expect(box()).toHaveValue('a half-typed sentence\n\nnever delivered')
+    expect(box()).toHaveValue('never delivered\n\na half-typed sentence')
     expect(screen.getByRole('alert')).toHaveTextContent('The provider is overloaded.')
   })
 })

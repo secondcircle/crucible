@@ -1,0 +1,117 @@
+/* The bash run drawer (Mock J), above the composer and below the transcript. */
+.drawer {
+  max-width: var(--column);
+  width: 100%;
+  margin: 0 auto 10px;
+  background: var(--code);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  overflow: hidden;
+  flex: none;
+}
+
+.drawerhead {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  padding: 7px 12px;
+  font: 12px var(--mono);
+  color: var(--dim);
+  border-bottom: 1px solid var(--line);
+}
+
+.drawerhead .prompt {
+  color: var(--accent2);
+  flex: none;
+}
+
+.drawerhead .dcmd {
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.drawerhead .spin {
+  margin-left: auto;
+}
+
+.dstop {
+  flex: none;
+  background: var(--panel);
+  border: 1px solid var(--accent);
+  border-radius: 7px;
+  padding: 2px 10px;
+  font: 11.5px var(--font);
+  color: var(--ink);
+}
+
+.exit {
+  margin-left: auto;
+  flex: none;
+  font: 10.5px var(--font);
+  padding: 1px 8px;
+  border-radius: 9px;
+}
+
+.exit.ok {
+  color: var(--ok);
+  border: 1px solid var(--ok);
+}
+
+.exit.bad {
+  color: var(--error);
+  border: 1px solid var(--error);
+}
+
+.exit.stopped {
+  color: var(--dim);
+  border: 1px solid var(--line);
+}
+
+.drawerout {
+  margin: 0;
+  padding: 10px 14px;
+  font: 11.5px/1.5 var(--mono);
+  color: var(--output-ink);
+  max-height: 180px;
+  overflow: auto;
+  white-space: pre-wrap;
+}
+
+.drawerfoot {
+  display: flex;
+  gap: 8px;
+  padding: 8px 12px;
+  border-top: 1px solid var(--line);
+  align-items: center;
+}
+
+.drawerfoot button {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  padding: 4px 12px;
+  font-size: 12px;
+  color: var(--ink);
+}
+
+.drawerfoot button:hover:enabled {
+  border-color: var(--accent);
+  color: var(--accent2);
+}
+
+.drawerfoot button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.drawerfoot .closeb {
+  margin-left: auto;
+  color: var(--dim);
+}
+
+.drawerfoot .note {
+  font-size: 11px;
+  color: var(--faint);
+}

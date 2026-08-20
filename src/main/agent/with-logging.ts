@@ -1,3 +1,4 @@
+import type { ImageAttachment } from '../../shared/agent/port'
 import type { Shell } from '../shell/shell'
 import type { LogSink } from '../log/sink'
 
@@ -12,13 +13,20 @@ export function withLogging(shell: Shell, log: LogSink, adapter: string): Shell 
   })
 
   // Arguments are logged verbatim, prompt text included: a local run log that
-  // cannot be read back against what was asked tells a reader nothing.
+  // cannot be read back against what was asked tells a reader nothing. The one
+  // exception is `describe`, for arguments no reader wants in full.
   function op<A extends unknown[], R>(
     name: string,
-    run: (...args: A) => Promise<R>
+    run: (...args: A) => Promise<R>,
+    describe?: (...args: A) => unknown[]
   ): (...args: A) => Promise<R> {
     return async (...args: A): Promise<R> => {
-      log.append({ source: 'main', event: name, adapter, args })
+      log.append({
+        source: 'main',
+        event: name,
+        adapter,
+        args: describe === undefined ? args : describe(...args)
+      })
       try {
         const result = await run(...args)
         if (result !== undefined) {
@@ -32,7 +40,7 @@ export function withLogging(shell: Shell, log: LogSink, adapter: string): Shell 
           source: 'main',
           event: `${name}_refused`,
           adapter,
-          args,
+          args: describe === undefined ? args : describe(...args),
           message: cause instanceof Error ? cause.message : String(cause),
           stack: cause instanceof Error ? cause.stack : undefined
         })
@@ -68,7 +76,19 @@ export function withLogging(shell: Shell, log: LogSink, adapter: string): Shell 
       shell.setThinkingLevel(sessionId, level)
     ),
 
-    prompt: op('prompt', (sessionId, text) => shell.prompt(sessionId, text)),
+    sessionTree: op('sessionTree', (id) => shell.sessionTree(id)),
+    jump: op('jump', (id, ref, options) => shell.jump(id, ref, options)),
+    setLabel: op('setLabel', (id, ref, label) => shell.setLabel(id, ref, label)),
+
+    prompt: op(
+      'prompt',
+      (sessionId, text, images) => shell.prompt(sessionId, text, images),
+      // Base64 bytes never reach the run log: what a reader needs of an
+      // attachment is its type and how big it was.
+      (sessionId, text, images) =>
+        images === undefined ? [sessionId, text] : [sessionId, text, images.map(describeImage)]
+    ),
+    shareBashRun: op('shareBashRun', (sessionId, run) => shell.shareBashRun(sessionId, run)),
     steer: op('steer', (sessionId, text) => shell.steer(sessionId, text)),
     followUp: op('followUp', (sessionId, text) => shell.followUp(sessionId, text)),
     dequeue: op('dequeue', (sessionId, kind, text) => shell.dequeue(sessionId, kind, text)),
@@ -79,4 +99,10 @@ export function withLogging(shell: Shell, log: LogSink, adapter: string): Shell 
       shell.dispose()
     }
   }
+}
+
+function describeImage(image: ImageAttachment): { mimeType: string; bytes: number } {
+  // The base64 length, which is within a few bytes of the file's own size and
+  // costs nothing to measure.
+  return { mimeType: image.mimeType, bytes: Math.floor((image.data.length * 3) / 4) }
 }

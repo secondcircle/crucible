@@ -204,3 +204,156 @@ kbd {
   background: var(--panel2);
   color: var(--accent2);
 }
+
+/* bash mode: the whole box says what pressing enter will do (Mock J) */
+.cbox.bash {
+  border-color: var(--accent);
+  background: var(--code);
+}
+
+.cbox.bash textarea {
+  font: 13px/1.5 var(--mono);
+  color: var(--code-ink);
+}
+
+.modebadge {
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--accent2);
+  margin-bottom: 6px;
+}
+
+.modebadge .cwd {
+  color: var(--faint);
+  text-transform: none;
+  letter-spacing: 0;
+  font: 11px var(--mono);
+}
+
+.esc .bashnote {
+  color: var(--accent2);
+}
+
+/* images held back from a queued message are said out loud, never dropped */
+.esc .heldback {
+  color: var(--error);
+}
+
+.chip.grammar {
+  font: 11.5px var(--mono);
+}
+
+/* attachment chips, above the box and part of the session's draft */
+.chips {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+
+.imgchip {
+  position: relative;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  overflow: hidden;
+  height: 52px;
+  display: block;
+}
+
+.imgchip img {
+  height: 100%;
+  display: block;
+}
+
+.imgchip .x {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: rgb(0 0 0 / 65%);
+  border: none;
+  color: var(--ink);
+  font-size: 10px;
+  line-height: 1;
+  padding: 0;
+}
+
+.imgchip .x:hover {
+  background: var(--error);
+}
+
+/* the @ file popover, above the composer and as wide as it */
+.composer {
+  position: relative;
+}
+
+.filepop {
+  position: absolute;
+  left: 24px;
+  right: 24px;
+  bottom: 100%;
+  margin-bottom: 8px;
+  background: var(--panel2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  overflow: hidden;
+  z-index: 5;
+  box-shadow: 0 10px 30px rgb(0 0 0 / 50%);
+}
+
+.filepop .pophead {
+  padding: 6px 12px;
+  font-size: 11px;
+  color: var(--faint);
+  border-bottom: 1px solid var(--line);
+}
+
+.popitem {
+  display: flex;
+  gap: 10px;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: none;
+  padding: 7px 12px;
+  font: 12.5px var(--mono);
+  color: var(--dim);
+}
+
+.popitem .file {
+  color: var(--ink);
+}
+
+.popitem.sel,
+.popitem:hover {
+  background: var(--panel);
+}
+
+.popitem.sel .file {
+  color: var(--accent2);
+}
+
+.popempty {
+  padding: 10px 12px;
+  font-size: 12px;
+  color: var(--faint);
+}
+
+/* the full-window drop veil */
+.veil {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  background: rgb(25 20 25 / 85%);
+  border: 2px dashed var(--accent);
+  border-radius: 12px;
+  margin: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 15px;
+  color: var(--accent2);
+}

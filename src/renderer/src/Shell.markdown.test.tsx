@@ -6,6 +6,7 @@ import { act, render, screen, within } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 import { Shell } from './Shell'
 import { createScriptedPort, oneSession } from './testing/scripted-port'
+import { createScriptedWorkspace } from './testing/scripted-workspace'
 
 const REPLY = [
   'Two adapters implement the agent port.\n\n',
@@ -19,7 +20,7 @@ const REPLY = [
 
 async function replyWith(deltas: readonly string[]): Promise<void> {
   const port = createScriptedPort(oneSession())
-  render(<Shell port={port} />)
+  render(<Shell port={port} workspace={createScriptedWorkspace()} />)
   await screen.findByRole('button', { name: /^Session · / })
 
   await act(async () => {
@@ -92,7 +93,7 @@ describe('what a reply can never do', () => {
 describe('a person\u2019s own message', () => {
   it('is plain text, whatever it looks like', async () => {
     const port = createScriptedPort(oneSession())
-    render(<Shell port={port} />)
+    render(<Shell port={port} workspace={createScriptedWorkspace()} />)
     await screen.findByRole('button', { name: /^Session · / })
 
     act(() => {
