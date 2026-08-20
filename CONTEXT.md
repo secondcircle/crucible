@@ -42,12 +42,37 @@ supporting mocks. The name of the look, not of any feature.
 _Avoid_: the theme, the skin, the dark mode.
 
 **Workspace**:
-An OS folder opened in Crucible as an agent working directory and as the home of that folder's sessions.
+An OS folder opened in Crucible: the home of that folder's sessions and the default place their agents work.
 _Avoid_: project, repository.
+
+**Checkout**:
+The workspace folder's own git working directory, where a session works unless it has a worktree.
+_Avoid_: local, live checkout.
+
+**Worktree**:
+A git worktree of the workspace's repository, created for exactly one session to work in place of the checkout. Crucible creates worktrees and never deletes them.
+_Avoid_: venue, sandbox, branch (a worktree holds a branch; it is not one).
 
 **Session**:
 A user-curated workspace sidebar item holding one agent conversation. It appears only when the user creates or adds it in Crucible; adapter-managed history never populates the sidebar by discovery.
 _Avoid_: thread, chat, backing-store record.
+
+**Session title**:
+The short description of what a session is about, written by a small model
+from that session's user and assistant messages and refreshed as the session
+goes. What the sidebar shows in place of a timestamp.
+_Avoid_: session name, summary, label.
+
+**Model alias**:
+The short display name Crucible shows for a model it knows by heart — `Opus`
+for `Claude Opus 5`. Display only: the picker still lists what the port
+reported, under the port's own labels.
+_Avoid_: nickname, friendly name, short name.
+
+**Model ring**:
+The ordered handful of models Shift-Tab cycles through without opening the
+picker. A build-time constant, and nothing in the UI names the key.
+_Avoid_: favorites, model cycle, quick switch.
 
 **Steering message**:
 A message queued while a session is working, delivered at the next boundary
@@ -130,6 +155,25 @@ is and the generic guidelines of that job. Authored by Crucible and passed as
 a full override; π's stock prompt is never used. One role exists today: the
 interactive coding agent.
 _Avoid_: system prompt (the composed whole), base prompt.
+
+**Quota strip**:
+The block at the foot of the sidebar, above Add workspace, showing how much of
+each provider subscription this machine has spent. Global: one per app, not per
+workspace and not per session.
+_Avoid_: usage strip, usage panel (the Settings sheet's Usage tab means session
+tokens and cost), limits, meters panel.
+
+**Quota meter**:
+One window of one plan in the quota strip — a short label, a percent used, and
+the instant it resets. A provider has as many as its plan reports; nothing in
+Crucible fixes the count or the labels.
+_Avoid_: window (the payload's word, ambiguous beside the context window),
+bar, gauge.
+
+**Pace tick**:
+The hairline on a weekly quota meter marking where an even burn would have put
+you by now. Fill past the tick means spending faster than the window elapses.
+_Avoid_: velocity, burn rate, forecast, projection line.
 
 **Standing prompt**:
 The text appended to every agent Crucible starts, whatever its role prompt

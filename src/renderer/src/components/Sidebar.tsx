@@ -4,6 +4,10 @@ import './sidebar.css'
 
 // A row's working state is in its accessible name and not the colored dot
 // alone: the dot is the eye's version, the name is everybody else's.
+//
+// Every workspace lists its sessions, active or not, because work in one
+// workspace keeps running while another is in front. Only the human removes a
+// session from the list. A workspace with no sessions still gets its row.
 export function Sidebar({
   snapshot,
   needYou,
@@ -80,7 +84,7 @@ export function Sidebar({
                 </button>
               </div>
 
-              {active ? (
+              {own.length > 0 || active ? (
                 <ul className="sessions">
                   {own.map((session) => {
                     const label = sessionLabel(session)
@@ -109,11 +113,13 @@ export function Sidebar({
                       </li>
                     )
                   })}
-                  <li>
-                    <button className="more" onClick={onResume}>
-                      Resume session…
-                    </button>
-                  </li>
+                  {active ? (
+                    <li>
+                      <button className="more" onClick={onResume}>
+                        Resume session…
+                      </button>
+                    </li>
+                  ) : null}
                 </ul>
               ) : null}
             </li>

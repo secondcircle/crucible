@@ -18,21 +18,38 @@ agent/SDK boundary so tests can run against fakes.
 
 ## Driving the app
 
-`npm run dev` starts the app with Chromium remote debugging on the fixed port
-**9222**, so an agent can drive the running window:
+`npm run dev` starts the app with Chromium remote debugging on **this
+checkout's own port**, so an agent can drive the running window:
 
 ```
-npm run dev            # electron-vite dev --remoteDebuggingPort=9222
-agent-browser connect 9222
+npm run dev                                   # prints the port as it starts
+PORT=$(npm run dev:port --silent)             # the same port, any time
+agent-browser connect "$PORT"
 agent-browser snapshot
 ```
 
-The port exists in dev only — the installed app never opens it — and it
-binds loopback (`127.0.0.1:9222`). Check it with
-`lsof -nP -iTCP:9222 -sTCP:LISTEN`. Only one launch can hold 9222: a second
-`npm run dev` still opens a window but logs `bind() failed: Address already in
-use` and is not debuggable, and `agent-browser connect 9222` silently attaches
-to the *first* app. Quit the stale one before connecting.
+The port is 9222 in the primary clone and a stable port in 9223-9292 in every
+run worktree, derived from its path by `scripts/dev-port.sh` — so concurrent
+runs never contend, and a given worktree answers on the same port every time.
+`CRUCIBLE_DEBUG_PORT` overrides it. Never hard-code 9222: in a worktree it is
+the wrong window, and connecting to it means driving somebody else's app.
+
+The port exists in dev only — the installed app never opens it — and it binds
+loopback. Check yours with `lsof -nP -iTCP:$(npm run dev:port --silent)
+-sTCP:LISTEN`.
+
+**Never kill by name or pattern.** `pkill -f Crucible` and `killall Electron`
+match `/Applications/Crucible.app` and take down the human's live app, its
+running turn with it. That is the one unrecoverable mistake available here. To
+stop *your own* dev launch, take the PID off your own port and kill only that:
+
+```
+kill $(lsof -tnP -iTCP:$(npm run dev:port --silent) -sTCP:LISTEN)
+```
+
+Usually you need not stop anything at all — your port is yours. If it is
+already held, the holder is your own earlier launch in this same checkout, so
+reconnect to it instead of restarting it.
 
 `npm run dev` is the **fake** launch flavor: canned replies, no paid call, and
 what every agent-driven check should use. That is the fake flavor's *only*
