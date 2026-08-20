@@ -2,6 +2,9 @@
    the quota strip and Add workspace stay at the foot however long the list
    grows. */
 .side {
+  /* One right edge for the whole rail: times, counters, quota numbers and
+     both × buttons stop here, so nothing in the column looks loose. */
+  --gutter: 14px;
   width: 248px;
   flex: none;
   background: var(--bg2);
@@ -56,8 +59,10 @@
 }
 
 .ws {
+  position: relative;
   display: flex;
   align-items: center;
+  padding-right: var(--gutter);
 }
 
 .ws .wsname {
@@ -114,12 +119,22 @@
   background: var(--ok);
 }
 
+/* A 20px square, big enough to hit and the same square on every row. The glyph
+   is right-aligned inside it rather than centered, so the × lands on the same
+   edge as the time it covers. */
 .rowaction {
+  flex: none;
+  width: 20px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
   border: none;
   background: none;
   color: transparent;
-  padding: 4px 10px;
-  font-size: 13px;
+  padding: 0;
+  font-size: 15px;
+  line-height: 1;
 }
 
 .ws:hover .rowaction,
@@ -196,7 +211,6 @@
    the × over both on hover. Right-aligned and centered, so the block never
    moves the title and never rides high on a two-line row. */
 .rowend {
-  position: relative;
   flex: none;
   align-self: center;
   display: flex;
@@ -205,7 +219,7 @@
   justify-content: center;
   gap: 4px;
   min-width: 34px;
-  padding: 0 10px 0 6px;
+  padding: 0 var(--gutter) 0 6px;
 }
 
 .rowend small {
@@ -271,14 +285,31 @@
   }
 }
 
+/* The workspace row works the same way: the × covers the count rather than
+   standing beside it, so the count keeps the gutter every other number ends
+   on and the name keeps the width. */
+.ws .rowaction {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  right: var(--gutter);
+  height: auto;
+}
+
+.ws:hover .n,
+.ws:focus-within .n {
+  visibility: hidden;
+}
+
+/* Over the time rather than beside it, on the gutter and as tall as the row,
+   so hovering swaps the two without moving the title and the target is the
+   whole height of what the cursor is already on. */
 .sessrow .rowaction {
   position: absolute;
-  inset: 0;
-  padding: 0;
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  line-height: 1;
+  top: 0;
+  bottom: 0;
+  right: var(--gutter);
+  height: auto;
 }
 
 .sessrow:hover .rowend small,

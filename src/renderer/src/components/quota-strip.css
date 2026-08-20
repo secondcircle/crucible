@@ -6,7 +6,9 @@
 
 .quota {
   border-top: 1px solid var(--line);
-  padding: 9px 14px 6px;
+  /* The rail's own right edge, so the percentages line up with the times and
+     the × buttons above them. */
+  padding: 9px var(--gutter, 14px) 6px;
 }
 
 .qlabel {
