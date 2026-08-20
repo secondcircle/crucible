@@ -1,0 +1,193 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Session worktrees — sidebar iconography and the composer control</title>
+<style>
+  :root{
+    --bg:#191419; --bg2:#211a20; --panel:#241c23; --panel2:#2e242d; --line:#3a2e38;
+    --ink:#e8dfe2; --dim:#9b8a94; --faint:#6b5d66;
+    --accent:#e07a4f; --accent2:#f0a37c; --ok:#7fb069; --error:#d9705f;
+    --mono:ui-monospace,'SF Mono',Menlo,monospace;
+  }
+  *{box-sizing:border-box;margin:0}
+  body{background:#100d10;color:var(--ink);font:13.5px/1.5 -apple-system,'Segoe UI',sans-serif;padding:30px;display:flex;gap:40px;flex-wrap:wrap;align-items:flex-start}
+  .label{font-size:11px;text-transform:uppercase;letter-spacing:.12em;color:var(--faint);margin-bottom:8px}
+  .note{font-size:11.5px;color:var(--faint);max-width:300px;margin-top:10px;line-height:1.55}
+  .note b{color:var(--dim);font-weight:600}
+  .caption{font-size:11px;color:var(--faint);margin:14px 0 4px}
+
+  /* --- sidebar --- */
+  .side{width:250px;background:var(--bg2);border:1px solid var(--line);border-radius:10px;padding:10px 0;box-shadow:0 10px 28px rgba(0,0,0,.4)}
+  .brand{padding:6px 16px 10px;font-weight:700;letter-spacing:.06em;font-size:14px}
+  .brand em{color:var(--accent);font-style:normal}
+  .wslabel{padding:2px 16px;font-size:10.5px;text-transform:uppercase;letter-spacing:.12em;color:var(--faint)}
+  .ws{padding:6px 16px;font-size:13px;color:var(--dim);display:flex;align-items:center;gap:8px}
+  .ws .dot{width:7px;height:7px;border-radius:50%;background:var(--faint)}
+  .ws.active{color:var(--ink);background:var(--panel)}
+  .ws.active .dot{background:var(--accent);box-shadow:0 0 6px var(--accent)}
+  .sessions{margin-left:22px;border-left:1px solid var(--line);padding:2px 0 6px}
+  .sess{padding:5px 12px;font-size:12.5px;line-height:1.35;color:var(--dim);cursor:pointer;
+        display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+  .sess.active{color:var(--accent2)}
+  .sess .dot{display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--faint);margin-right:7px;vertical-align:1px}
+  .sess.active .dot{background:var(--accent2)}
+  .sess .dot.working{background:var(--accent);box-shadow:0 0 6px var(--accent)}
+  .sess small{color:var(--faint);font-size:10.5px;margin-left:6px;white-space:nowrap}
+  /* the whole of the at-a-glance worktree signal */
+  .sess .wt{display:inline-block;color:var(--faint);margin-right:5px;font-size:11.5px;vertical-align:0}
+  .sess.active .wt{color:var(--accent2)}
+
+  /* --- composer --- */
+  .col{width:560px}
+  .comp{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:10px 12px 8px;margin-bottom:6px}
+  .ta{min-height:44px;color:var(--faint);font-size:13.5px}
+  .ta i{border-right:1.5px solid var(--accent);padding-right:1px;font-style:normal}
+  .crow{display:flex;align-items:center;gap:8px;margin-top:8px}
+  .chip{border:1px solid var(--line);border-radius:8px;padding:3px 9px;font-size:11.5px;color:var(--dim);cursor:pointer;white-space:nowrap}
+  .chip b{color:var(--ink);font-weight:600}
+  .chip.on{border-color:var(--accent);color:var(--accent2)}
+  .chip .g{color:var(--faint);margin-right:5px}
+  .chip.on .g{color:var(--accent2)}
+  .chip.busy{border-color:var(--line);color:var(--accent2)}
+  .chip.busy .g{color:var(--accent2);animation:pulse 1.1s ease-in-out infinite}
+  @keyframes pulse{0%,100%{opacity:.35}50%{opacity:1}}
+  .chip.locked{opacity:.5;cursor:default}
+  .chip.branch b{font:11px var(--mono);font-weight:500}
+  .send{margin-left:auto;background:var(--accent);color:#1b1116;border:none;border-radius:8px;padding:5px 16px;font-size:12.5px;font-weight:600}
+  .send.off{background:var(--panel2);color:var(--faint)}
+  .esc{text-align:center;font-size:11.5px;color:var(--faint);margin-top:8px;min-height:17px}
+  .esc kbd{font:11px var(--mono);border:1px solid var(--line);border-radius:4px;padding:1px 5px;color:var(--dim)}
+  .esc .err{color:var(--error)}
+  .out{background:#120e12;border:1px solid var(--line);border-radius:8px;padding:8px 10px;margin-top:8px;
+       font:11px/1.5 var(--mono);color:var(--error);white-space:pre-wrap}
+</style></head><body>
+
+<div>
+  <div class="label">1 · Sidebar — which sessions are in a worktree</div>
+  <div class="side">
+    <div class="brand"><em>◆</em> CRUCIBLE</div>
+    <div class="wslabel">Workspaces</div>
+    <div class="ws active"><span class="dot"></span> crucible</div>
+    <div class="sessions">
+      <div class="sess active"><span class="dot"></span><span class="wt">⑂</span>Session worktrees, sidebar and composer <small>2m</small></div>
+      <div class="sess"><span class="dot working"></span><span class="wt">⑂</span>Provider quota strip at the sidebar foot <small>now</small></div>
+      <div class="sess"><span class="dot"></span>Why the merge gate rejected the branch board <small>18m</small></div>
+      <div class="sess"><span class="dot"></span><span class="wt">⑂</span>Model aliases and the Shift-Tab ring <small>1h</small></div>
+      <div class="sess"><span class="dot"></span>Reading the legacy venue machinery <small>3h</small></div>
+    </div>
+    <div class="ws"><span class="dot"></span> notes</div>
+  </div>
+  <div class="note">
+    <b>⑂ before the title, nothing else.</b> Q15(1) asks only that the sidebar
+    distinguish worktree sessions. The glyph sits between the working dot and
+    the title so the two-line clamp is unaffected and the column still reads as
+    one list. Checkout sessions get no glyph at all rather than a competing
+    one — absence is the quieter half of a binary, and most sessions are
+    checkout sessions.<br><br>
+    The branch name is deliberately absent here: Q15(2) puts it in the composer
+    control and nowhere else. A 250px column clamped at two lines cannot afford
+    it, and the user said knowing <i>that</i> beats knowing <i>which</i>.
+  </div>
+</div>
+
+<div class="col">
+  <div class="label">2 · The composer control, state by state</div>
+
+  <div class="caption">a — fresh session, on the checkout (the default; one click of New session lands here)</div>
+  <div class="comp">
+    <div class="ta"><i>&nbsp;</i></div>
+    <div class="crow">
+      <span class="chip"><b>Opus</b></span>
+      <span class="chip">think <b>low</b></span>
+      <span class="chip"><span class="g">◇</span>checkout</span>
+      <button class="send off">Send</button>
+    </div>
+    <div class="esc"></div>
+  </div>
+
+  <div class="caption">b — flipped: creating the worktree, blocking, ADR 0010's visible working state</div>
+  <div class="comp">
+    <div class="ta"><i>&nbsp;</i></div>
+    <div class="crow">
+      <span class="chip"><b>Opus</b></span>
+      <span class="chip">think <b>low</b></span>
+      <span class="chip busy"><span class="g">⑂</span>creating worktree…</span>
+      <button class="send off">Send</button>
+    </div>
+    <div class="esc"></div>
+  </div>
+
+  <div class="caption">c — ready, unlocked: the branch name is the chip's label</div>
+  <div class="comp">
+    <div class="ta"><i>&nbsp;</i></div>
+    <div class="crow">
+      <span class="chip"><b>Opus</b></span>
+      <span class="chip">think <b>low</b></span>
+      <span class="chip on branch"><span class="g">⑂</span><b>crucible/9f3a2c</b></span>
+      <button class="send off">Send</button>
+    </div>
+    <div class="esc"></div>
+  </div>
+
+  <div class="caption">d — locked by the first message: identical, minus the affordance</div>
+  <div class="comp">
+    <div class="ta">Read <i>src/main/shell/store.ts</i> and tell me where the session record is written.</div>
+    <div class="crow">
+      <span class="chip"><b>Opus</b></span>
+      <span class="chip">think <b>low</b></span>
+      <span class="chip on branch locked"><span class="g">⑂</span><b>crucible/9f3a2c</b></span>
+      <button class="send">Send</button>
+    </div>
+    <div class="esc"></div>
+  </div>
+
+  <div class="caption">e — creation failed: the output plainly, the session stays on the checkout (Q14)</div>
+  <div class="comp">
+    <div class="ta"><i>&nbsp;</i></div>
+    <div class="crow">
+      <span class="chip"><b>Opus</b></span>
+      <span class="chip">think <b>low</b></span>
+      <span class="chip"><span class="g">◇</span>checkout</span>
+      <button class="send off">Send</button>
+    </div>
+    <div class="out">.crucible/worktree exited 1
+fatal: invalid reference: HEAD
+  (this repository has no commits yet)</div>
+    <div class="esc"></div>
+  </div>
+
+  <div class="caption">f — non-git workspace: the control is not there</div>
+  <div class="comp">
+    <div class="ta"><i>&nbsp;</i></div>
+    <div class="crow">
+      <span class="chip"><b>Opus</b></span>
+      <span class="chip">think <b>low</b></span>
+      <button class="send off">Send</button>
+    </div>
+    <div class="esc"></div>
+  </div>
+</div>
+
+<div class="note" style="max-width:320px;margin-top:34px">
+  <b>Why the chip and not a toggle.</b> Q5 asks for a control beside model and
+  thinking, and those are chips. A switch would be the only switch in the row.
+  The chip carries its own state as its label, which is what lets one element
+  cover all six states above.<br><br>
+
+  <b>◇ checkout / ⑂ branch.</b> Q11 struck any umbrella word, so the chip never
+  says "venue" or "isolation" — it says where the session works, in the two
+  terms CONTEXT.md now defines. Clicking the checkout chip creates a worktree;
+  there is no third state and no menu, per Q12.<br><br>
+
+  <b>Locked is dimmer, not annotated.</b> Q5: "merely non-interactable — no
+  explanatory text, nothing over the top." State d drops opacity and the
+  pointer, and says nothing. A session reset returns it to state a or c.<br><br>
+
+  <b>Failure borrows the transcript's code styling</b> rather than inventing an
+  error surface, and the chip is already back to <i>checkout</i> before the
+  user reads it, so the two agree. No bootstrap-spec document, per Q14.<br><br>
+
+  <b>Open to you.</b> The glyph itself (⑂ is git's fork mark and reads at
+  11px), whether the branch chip should truncate a long script-minted name from
+  the left, and whether state b should block Send or merely look busy.
+</div>
+
+</body></html>
