@@ -48,6 +48,12 @@ type Announcement =
   | { readonly kind: 'text'; readonly text: string }
   | { readonly kind: 'bashRun'; readonly run: BashRunShare }
 
+// Why a turn stopped being live, told to whoever waited it out. 'stopped' is
+// every end the user asked for (stop, reset, removal, shutdown); everything
+// else, including a turn that failed, is 'ended'. Work parked on a turn has to
+// know the difference: nothing may auto-fire at a plan the user killed.
+type TurnOutcome = 'ended' | 'stopped'
+
 interface LiveTurn {
   readonly turnId: TurnId
   started: boolean
@@ -60,9 +66,9 @@ interface LiveTurn {
   // Set when this turn carries something nobody echoed, which is then
   // announced right after the turn starts.
   readonly announce?: Announcement
-  /** Resolves when the shell stops treating this turn as live. */
-  readonly over: Promise<void>
-  settled(): void
+  /** Resolves, with why, when the shell stops treating this turn as live. */
+  readonly over: Promise<TurnOutcome>
+  settled(outcome: TurnOutcome): void
 }
 
 function queued(queue: QueueState | undefined): boolean {
@@ -176,8 +182,8 @@ export function createShell({
 
   function mintTurn(announce?: Announcement): LiveTurn {
     turns += 1
-    let settled: () => void = () => {}
-    const over = new Promise<void>((resolve) => {
+    let settled: (outcome: TurnOutcome) => void = () => {}
+    const over = new Promise<TurnOutcome>((resolve) => {
       settled = resolve
     })
     return {
@@ -195,7 +201,7 @@ export function createShell({
   // left waiting.
   function endTurn(sessionId: SessionId, turn: LiveTurn): void {
     live.delete(sessionId)
-    turn.settled()
+    turn.settled(turn.cancelled ? 'stopped' : 'ended')
   }
 
   // A message this shell put into the conversation itself is announced right
@@ -335,7 +341,9 @@ export function createShell({
       if (turn === undefined) break
       if (await offerToTurn(sessionId, kind, text, turn)) return
       // That turn will take nothing more, so the message waits it out and is
-      // offered again to whatever is live next.
+      // offered again to whatever is live next. A message the user typed is
+      // never lost, whichever way the turn ended: a stop leaves it as the next
+      // prompt rather than dropping the only copy of the text.
       await turn.over
     }
 
@@ -358,26 +366,32 @@ export function createShell({
       const turn = live.get(sessionId)
       if (turn === undefined) break
       await ensureBound(sessionId)
-      // The turn ended while the bind was in flight, so whatever is live next
-      // is offered the run instead.
-      if (live.get(sessionId) !== turn) continue
-      const answer = await adapter.shareBashRun(sessionId, share)
-      if (answer === 'dropped') return 'dropped'
-      if (answer === 'delivered') {
-        // The delivery point, which is the only place this may be said.
-        emit({
-          type: 'bash_run_shared',
-          sessionId,
-          turnId: turn.turnId,
-          command: share.command,
-          output: share.output,
-          ...(share.exitCode === undefined ? {} : { exitCode: share.exitCode })
-        })
-        return 'delivered'
+      // A turn that ended while the bind was in flight was never offered the
+      // run; it is waited out below all the same, because how it ended decides
+      // as much as an answer would have.
+      if (live.get(sessionId) === turn) {
+        const answer = await adapter.shareBashRun(sessionId, share)
+        if (answer === 'dropped') return 'dropped'
+        if (answer === 'delivered') {
+          // The delivery point, which is the only place this may be said.
+          emit({
+            type: 'bash_run_shared',
+            sessionId,
+            turnId: turn.turnId,
+            command: share.command,
+            output: share.output,
+            ...(share.exitCode === undefined ? {} : { exitCode: share.exitCode })
+          })
+          return 'delivered'
+        }
       }
-      // The adapter has no live run: this shell's turn is on its way out, so
-      // the run waits it out and starts a turn of its own.
-      await turn.over
+      // No live run at the adapter took it, so the run waits this turn out,
+      // and why the turn ended is the whole answer. A turn that ended on its
+      // own leaves the run to whatever is live next, or to a turn of its own.
+      // A turn the user stopped takes the run down with it: the run stays
+      // local and nothing fires at a plan the user killed. That rule is this
+      // shell's own, and it holds whatever an adapter answered.
+      if ((await turn.over) === 'stopped') return 'dropped'
     }
 
     beginTurn(sessionId, (turnId) => adapter.promptBashRun(sessionId, turnId, share), {
@@ -746,7 +760,9 @@ export function createShell({
     },
 
     dispose(): void {
-      for (const turn of live.values()) turn.settled()
+      // The launch is going away: work parked on these turns must not start
+      // new ones behind it.
+      for (const turn of live.values()) turn.settled('stopped')
       live.clear()
       adapter.dispose()
     }

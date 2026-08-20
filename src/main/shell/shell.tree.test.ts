@@ -148,6 +148,24 @@ describe('sharing a bash run', () => {
     expect(items.some((item) => item.kind === 'bashRun')).toBe(false)
   })
 
+  it('drops a run offered to a turn the user stopped before it was dispatched', async () => {
+    const sessionId = await withSession()
+
+    // Nothing is awaited between these three, so the stop lands while the
+    // share is still reaching for its binding and the turn is gone by the
+    // time the share looks again. That is the other way a share can find
+    // itself with no turn: it must still stay local.
+    void shell.prompt(sessionId, 'first')
+    const share = shell.shareBashRun(sessionId, RUN)
+    await shell.cancel(sessionId)
+    await idle()
+
+    await expect(share).resolves.toBe('dropped')
+    expect(types()).not.toContain('bash_run_shared')
+    const items = await shell.transcript(sessionId)
+    expect(items.some((item) => item.kind === 'bashRun')).toBe(false)
+  })
+
   it('reaches the conversation at a tool boundary while a turn is live', async () => {
     const sessionId = await withSession()
     await shell.prompt(sessionId, 'first')
