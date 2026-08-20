@@ -42,9 +42,8 @@ export default tseslint.config(
     }
   },
   {
-    // The bridge is the renderer's one reader of the preload surface, and the
-    // client tests stand in for that surface, so all three sit inside the
-    // fence.
+    // These three are the renderer's only readers of the preload surface, so
+    // the fence would otherwise have nowhere to let them through.
     files: [
       'src/renderer/src/bridge.ts',
       'src/renderer/src/agent/ipc-client.test.ts',

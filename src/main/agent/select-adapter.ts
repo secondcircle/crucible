@@ -13,8 +13,6 @@ export interface SelectedAdapter {
 
 // The only reader of `CRUCIBLE_AGENT`, so no caller has to know the variable
 // exists. The fallback to the fake is silent, so every launch records it.
-// `panel` is the one context panel of the launch: whichever flavor answers,
-// its three tools are that same model's (ADR 0008).
 export function selectAdapter(log: LogSink, panel: FakePanel): SelectedAdapter {
   const requested = process.env.CRUCIBLE_AGENT
   const asked = requested === undefined || requested === '' ? null : requested

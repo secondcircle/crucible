@@ -1,12 +1,7 @@
 import type { SessionId } from './port'
 
-// The one place the context panel's tool surface is written down. The SDK
-// adapter registers π `customTools` from it, the fake adapter scripts calls by
-// the same names, and a test pins it, so the three tools cannot drift into
-// meaning different things in the two flavors.
-//
-// This module imports nothing but the port's types: it is read in main and in
-// the renderer's test build alike.
+// Both adapters build their tools from these definitions, so the three tools
+// cannot drift into meaning different things in the two flavors.
 
 export type PanelToolName = 'panel_show' | 'panel_list' | 'panel_close'
 
@@ -27,10 +22,8 @@ export interface PanelToolDefinition {
   readonly guidelines?: readonly string[]
 }
 
-// Carried over from the legacy system with one word-level amendment: Crucible
-// is not a TUI, so the first line says chat where the legacy said TUI. This is
-// the feature's shipped agent-facing documentation (ADR 0006): it reaches
-// every session, so it stays current with the behavior below it.
+// This text reaches every session as system prompt, so it stays current with
+// the behavior below it.
 export const PANEL_SHOW_GUIDELINES: readonly string[] = [
   "The context panel is the user's primary display; they may not notice messages in the chat. Content shown there is what the user relies on to follow the work.",
   "The panel's value comes from curation, not accumulation: it should reflect only what is relevant to the current conversation. Stale tabs actively obscure what matters now — close them once they have served their purpose (e.g. a plan that has been accepted).",
@@ -69,11 +62,10 @@ export function panelTool(name: PanelToolName): PanelToolDefinition {
   return found
 }
 
-// What an adapter is handed instead of panel state: the three tool behaviors,
-// session-scoped, each answering with the text the model built. A failure
-// throws, carrying exactly the text the tool result must show.
+// An adapter is handed behaviors rather than panel state. A failure throws,
+// carrying exactly the text the tool result must show.
 export interface PanelTools {
-  /** Relative paths resolve against `workspacePath`, as the legacy tool did. */
+  /** Relative paths resolve against `workspacePath`. */
   show(sessionId: SessionId, workspacePath: string, path: string, title: string): string
   list(sessionId: SessionId): string
   /** `"all"` closes every tab. */

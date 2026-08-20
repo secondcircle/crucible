@@ -1,9 +1,7 @@
 // @vitest-environment node
 //
-// The tool contract, tested once rather than once per adapter: both adapters
-// delegate here, so these texts are what a π session and a scripted turn both
-// answer with. Real files in a temp directory, because the model's answers
-// depend on what is genuinely on disk.
+// Both adapters delegate here, so these texts are what a π session and a
+// scripted turn both answer with. Real files, because the answers depend on them.
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -83,8 +81,6 @@ describe('panel_show', () => {
     panel.show(SESSION, workspace, path, 'the accepted plan')
     const after = panel.state(SESSION)
 
-    // Same id, no second tab, the new title, and the active tab is the one
-    // just shown.
     expect(after?.tabs.map((tab) => tab.id)).toEqual(['plan', 'other'])
     expect(after?.tabs[0].title).toBe('the accepted plan')
     expect(after?.activeTabId).toBe('plan')

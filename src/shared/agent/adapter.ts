@@ -169,9 +169,8 @@ export interface ConversationAdapter {
     images?: readonly ImageAttachment[]
   ): Promise<void>
 
-  // `'idle'` closes the same race `steer` does: no live run took the run, so
-  // the caller begins a turn for it with `promptBashRun`. `'dropped'` means a
-  // live run was stopped before the boundary that would have delivered it.
+  // `'idle'` closes the same race `steer` does, and the caller then begins a
+  // turn with `promptBashRun`; `'dropped'` means the live run was stopped first.
   shareBashRun(
     sessionId: SessionId,
     run: BashRunShare

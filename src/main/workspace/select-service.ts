@@ -10,9 +10,8 @@ export interface SelectedWorkspaceService {
   dispose(): void
 }
 
-// One flavor decision per launch governs both seams: the fake-adapter launch
-// gets the fake workspace service, so an agent-driven check reads no folder and
-// starts no process, and the SDK launch gets the real one.
+// One flavor decision governs both seams, so a fake-adapter launch reads no
+// folder and starts no process either.
 export function selectWorkspaceService(flavor: Flavor, log: LogSink): SelectedWorkspaceService {
   log.append({ source: 'main', event: 'workspace_service_selected', service: flavor })
 

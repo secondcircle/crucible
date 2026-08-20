@@ -1,9 +1,7 @@
 // @vitest-environment node
 //
-// The fake flavor's panel turns, driven against the real panel model and the
-// fixture exhibits that ship in the repository: every context panel behavior is
-// exercised here at zero cost, which is what an agent driving `npm run dev`
-// relies on.
+// Driven against the real panel model and the shipped fixture exhibits, so
+// every panel behavior is proved at the zero-cost flavor an agent drives.
 import { existsSync, readFileSync } from 'node:fs'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AdapterEvent } from '../../shared/agent/adapter'

@@ -37,8 +37,8 @@ export interface Shell extends AgentPort {
 export interface ShellOptions {
   readonly store: ShellStore
   readonly adapter: ConversationAdapter
-  // The same model the adapter's panel tools call: panel state crosses the
-  // port from here and from nowhere else (ADR 0008).
+  // The same model the adapter's panel tools call, so panel state crosses the
+  // port from here and from nowhere else.
   readonly panel: PanelModel
   /** `null` means the user cancelled the picker. */
   readonly pickFolder: () => Promise<string | null>
@@ -47,8 +47,7 @@ export interface ShellOptions {
 }
 
 // What this shell put into the conversation itself and therefore owes an
-// announcement for: a caller of `prompt()` echoes its own message and needs
-// none.
+// announcement for; a caller of `prompt()` echoes its own message and needs none.
 type Announcement =
   | { readonly kind: 'text'; readonly text: string }
   | { readonly kind: 'bashRun'; readonly run: BashRunShare }
@@ -245,9 +244,8 @@ export function createShell({
     emitState()
   }
 
-  // `dispatch` runs the turn once the session is bound; `announce` is what
-  // this shell delivered itself, and a plain prompt has none because its
-  // caller echoed it.
+  // `announce` is what this shell delivered itself, and a plain prompt has
+  // none because its caller echoed it.
   function beginTurn(
     sessionId: SessionId,
     dispatch: (turnId: TurnId) => Promise<void>,
@@ -362,9 +360,8 @@ export function createShell({
     panel.bumpTurn(sessionId)
   }
 
-  // A run is never lost and never queued: either a live turn takes it at its
-  // next boundary between tool calls, or it starts a turn of its own, or the
-  // turn it was offered to stopped first and it stays local.
+  // A run is never lost and never queued: a live turn takes it, or it starts a
+  // turn of its own, or the turn it was offered to stopped and it stays local.
   async function shareRun(
     sessionId: SessionId,
     share: BashRunShare
@@ -375,9 +372,8 @@ export function createShell({
       const turn = live.get(sessionId)
       if (turn === undefined) break
       await ensureBound(sessionId)
-      // A turn that ended while the bind was in flight was never offered the
-      // run; it is waited out below all the same, because how it ended decides
-      // as much as an answer would have.
+      // A turn that ended while the bind was in flight is waited out below all
+      // the same, because how it ended decides as much as an answer would have.
       if (live.get(sessionId) === turn) {
         const answer = await adapter.shareBashRun(sessionId, share)
         if (answer === 'dropped') return 'dropped'
@@ -484,10 +480,8 @@ export function createShell({
     emit(event)
   })
 
-  // Panel changes are announced as a fresh snapshot, and a show says so after
-  // it, so a listener already holds the state the event names. Shows in a
-  // background session are announced too: nothing about the panel assumes the
-  // session is the active one.
+  // The snapshot goes out before the show, so a listener already holds the
+  // state the event names. A background session's shows are announced too.
   panel.onChange(({ sessionId, shownTabId }) => {
     if (store.session(sessionId) === undefined) return
     emitState()
@@ -783,9 +777,8 @@ export function createShell({
       return adapter.dequeue(sessionId, kind, text)
     },
 
-    // The user's own panel actions, which reach the shared model and nothing
-    // else: the agent is told nothing and learns the state at its next
-    // panel_list or panel_show.
+    // Nothing is pushed at the agent: it learns of the user's own panel actions
+    // at its next `panel_list` or `panel_show`.
     async activateTab(sessionId: SessionId, tabId: TabId): Promise<void> {
       if (store.session(sessionId) === undefined) return
       panel.activate(sessionId, tabId)

@@ -1,5 +1,4 @@
-/* Sidebar, chat, and the context panel the agent curates on the right. The
-   panel region is there only while the active session has tabs. */
+/* The panel region is there only while the active session has tabs. */
 .shell {
   display: flex;
   height: 100%;

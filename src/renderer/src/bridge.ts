@@ -3,9 +3,8 @@ import type { PortEvent } from '../../shared/agent/port'
 import type { WorkspaceRequest, WorkspaceResult } from '../../shared/workspace/channels'
 import type { WorkspaceEvent } from '../../shared/workspace/service'
 
-// The one module in the renderer that may name `window.crucible`. It holds no
-// state and knows nothing of either seam's meaning: it says what the preload
-// exposes and complains loudly when the preload did not load.
+// The one module in the renderer that may name `window.crucible`, so a missing
+// preload is caught in one place instead of surfacing as an absent method.
 
 /** The agent half of the preload surface: one object, two members. */
 export interface CrucibleAgent {

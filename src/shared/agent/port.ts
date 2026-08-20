@@ -45,7 +45,6 @@ export interface QueueState {
   readonly followUp: readonly string[]
 }
 
-/** One entry in the context panel. */
 export type TabId = string
 
 export type ExhibitKind = 'html' | 'markdown'
@@ -108,9 +107,8 @@ export interface TreeNode {
   /** ISO time the message entered the conversation. */
   readonly at: string
   readonly label?: string
-  // The dim connective line for what followed this message, derived from the
-  // real entries, e.g. "assistant · 2 edit · 1 bash". Absent when nothing
-  // followed it yet.
+  // Derived from the real entries, e.g. "assistant · 2 edit · 1 bash", and
+  // absent when nothing followed this message yet.
   readonly activity?: string
   /** Creation order. More than one child is a branch point. */
   readonly children: readonly TreeNode[]
@@ -232,9 +230,8 @@ export type PortEvent =
       readonly sessionId: SessionId
       readonly messages: readonly QueuedMessage[]
     }
-  // A tab was shown, new or refreshed, in any session. It follows the `state`
-  // event carrying that show, so a listener already holds the snapshot this
-  // names. Nothing is said when the user switches or closes a tab.
+  // Follows the `state` event carrying the show, so a listener already holds
+  // the snapshot this names. A user's own switch or close says nothing.
   | { readonly type: 'panel_shown'; readonly sessionId: SessionId; readonly tabId: TabId }
   | { readonly type: 'turn_ended'; readonly sessionId: SessionId; readonly turnId: TurnId }
   | { readonly type: 'turn_cancelled'; readonly sessionId: SessionId; readonly turnId: TurnId }

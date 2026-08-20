@@ -1,8 +1,7 @@
 // @vitest-environment node
 //
-// The panel as it crosses the port: snapshots, the two events a show produces,
-// the user's own operations, and what a relaunch finds. Driven against the real
-// panel model and a real store, with no Electron and no IPC.
+// Driven against the real panel model and a real store, with no Electron and
+// no IPC, which is the point of having put the rules here.
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'

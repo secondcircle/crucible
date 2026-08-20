@@ -3,9 +3,8 @@ import type { SessionTree as Tree, TreeNode } from '../../../shared/agent/port'
 import { clockTime } from '../labels'
 import './session-tree.css'
 
-// The full overlay over the transcript region. It reads a tree it was handed
-// and never interprets a `ref`: what a node is called on the other side of the
-// port is the adapter's business.
+// A `ref` is never interpreted here: what a node is called on the other side
+// of the port is the adapter's business.
 
 /** What the label input starts on when a node has no label yet. */
 const DEFAULT_LABEL = 'checkpoint'
@@ -309,9 +308,8 @@ function hasMatch(node: TreeNode, keep: (node: TreeNode) => boolean): boolean {
   return keep(node) || node.children.some((child) => hasMatch(child, keep))
 }
 
-// One walk produces what is drawn and, with it, the order the arrow keys move
-// in: the two can never disagree about what is on screen. While a filter is
-// active the connective lines and the fork tags are not drawn at all.
+// One walk produces what is drawn and the order the arrow keys move in, so
+// the two can never disagree about what is on screen.
 function layout(
   tree: Tree,
   working: boolean,

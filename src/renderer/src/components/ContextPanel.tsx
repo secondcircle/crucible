@@ -3,10 +3,8 @@ import type { AgentPort, PanelState, SessionId, TabId } from '../../../shared/ag
 import { Markdown } from './Markdown'
 import './context-panel.css'
 
-// The agent-curated display, split off the right of the chat: a tab strip over
-// one exhibit. Every tab fact comes from the snapshot and every user action
-// goes back through the port, so the model behind it and the view here can
-// never disagree about what is open.
+// Every tab fact comes from the snapshot and every user action goes back
+// through the port, so the model and this view cannot disagree about what is open.
 
 /** Below this the panel stops being readable. */
 const MIN_PANEL = 280
@@ -120,7 +118,6 @@ export function ContextPanel({
   )
 }
 
-/** The collapsed panel: an edge strip that says how many tabs are waiting. */
 export function PanelEdge({
   count,
   onOpen

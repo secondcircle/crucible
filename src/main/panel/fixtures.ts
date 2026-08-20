@@ -1,8 +1,7 @@
 import { join } from 'node:path'
 
-// The two exhibits the fake flavor shows. They ship in the repository so every
-// panel behavior is drivable at zero cost, by a test or by an agent under
-// `npm run dev`.
+// These exhibits ship with the app so every panel behavior is drivable at zero
+// cost, by a test or by an agent driving the fake flavor.
 export const PANEL_FIXTURE_DIRECTORY = join('fixtures', 'panel')
 
 export interface PanelFixtures {

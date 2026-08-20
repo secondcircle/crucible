@@ -1,9 +1,7 @@
 // @vitest-environment node
 //
-// The tool surface the SDK adapter registers and the fake adapter scripts. No
-// SDK adapter is constructed anywhere in `npm test`, so this is what keeps the
-// registration from drifting: it is pinned here, word for word, because it is
-// also this feature's shipped agent-facing documentation (ADR 0006).
+// No SDK adapter is ever constructed under test, so pinning these texts word
+// for word is what keeps the registration from drifting.
 import { describe, expect, it } from 'vitest'
 import { PANEL_SHOW_GUIDELINES, PANEL_TOOLS, panelTool } from './panel-tools'
 

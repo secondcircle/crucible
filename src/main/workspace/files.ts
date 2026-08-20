@@ -2,9 +2,8 @@ import { spawn } from 'node:child_process'
 import { readdirSync, readFileSync, type Dirent } from 'node:fs'
 import { join, relative, sep } from 'node:path'
 
-// Listing a workspace's files, gitignore and all. Kept apart from the service
-// so the walk and the ignore rules can be tested against a temp folder without
-// a process or an event stream in the way.
+// Kept apart from the service so the walk and the ignore rules can be tested
+// against a temp folder, with no process or event stream in the way.
 
 /** Never listed, never walked into, in a git workspace or outside one. */
 const ALWAYS_SKIPPED = '.git'

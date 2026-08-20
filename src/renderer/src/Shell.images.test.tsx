@@ -49,9 +49,8 @@ function clipboard(files: readonly File[]): Event {
   return pasted
 }
 
-// The bytes are read through promises this test does not own: jsdom's for the
-// file, then Crucible's for the base64. Counting ticks would be guessing at how
-// many that is, so the chain is settled against a task boundary instead.
+// The bytes are read through promises this test does not own, so counting
+// ticks would be guesswork; a task boundary settles the chain whatever it is.
 async function settle(): Promise<void> {
   await act(async () => {
     await new Promise((resolve) => setTimeout(resolve, 0))

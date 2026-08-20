@@ -26,9 +26,8 @@ function forwarder<T>(channel: string, listener: (event: T) => void): () => void
   }
 }
 
-// The whole of what the sandboxed renderer can reach of Electron: two seams of
-// two members each, no general passthrough, and nothing carrying a `sender` may
-// cross.
+// The whole of what the sandboxed renderer may reach of Electron: no general
+// passthrough, and nothing carrying a `sender` crosses.
 contextBridge.exposeInMainWorld('crucible', {
   agent: {
     request: (request: PortRequest): Promise<PortResult> =>

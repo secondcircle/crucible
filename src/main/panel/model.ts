@@ -9,13 +9,8 @@ import type {
   Unsubscribe
 } from '../../shared/agent/port'
 
-// The one holder of context panel semantics: tab state per session, the three
-// tool behaviors, the result texts, persistence and restore. Both adapters
-// delegate here, so a fake-flavor panel and an SDK-flavor panel cannot mean
-// different things (ADR 0008).
-//
-// Plain Node: fs and path, no Electron and no π SDK, and its persistence is an
-// argument, so a test constructs it with a map and a temp directory.
+// Both adapters delegate here, so a fake-flavor panel and an SDK-flavor panel
+// cannot mean different things. Persistence is an argument for the same reason.
 
 /** A tab as it is persisted, path and turn included. */
 export interface StoredPanelTab {
@@ -136,9 +131,8 @@ export function createPanelModel({
     panel.activeTabId = panel.tabs.at(-1)?.id ?? null
   }
 
-  // The first access in a launch restores from the store and silently drops
-  // every tab whose file is gone: no snapshot ever exposes one, and honest
-  // data means a vanished exhibit is never resurrected.
+  // A restored tab whose file is gone is dropped rather than resurrected, so
+  // no snapshot ever offers an exhibit that cannot be read.
   function panelOf(sessionId: SessionId): Panel {
     const already = panels.get(sessionId)
     if (already !== undefined) return already

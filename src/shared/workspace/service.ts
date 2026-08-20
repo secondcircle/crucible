@@ -1,6 +1,5 @@
-// This module imports nothing on purpose, exactly as the agent port does: it
-// is the second seam the renderer shares with main, and any import here could
-// smuggle Electron or Node across.
+// This module imports nothing on purpose: it is a seam the renderer shares
+// with main, and any import here could smuggle Electron or Node across.
 
 export type RunId = string
 

@@ -192,9 +192,8 @@ function heard(state: ShellState, event: PortEvent, at: number): ShellState {
   const { sessionId } = event
   const view = state.views[sessionId] ?? EMPTY_VIEW
 
-  // A run that was genuinely added to the conversation is shown wherever the
-  // session stands, because the delivery already happened: it is the one
-  // announcement that does not belong to a turn this document is watching.
+  // The one announcement that belongs to no turn this document is watching:
+  // the delivery already happened, so it is shown wherever the session stands.
   if (event.type === 'bash_run_shared') {
     return withView(state, sessionId, {
       ...view,

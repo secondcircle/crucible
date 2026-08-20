@@ -151,12 +151,11 @@ export function createSdkAdapter({
     return found
   }
 
-  // π's own tool registration, one set per session, each `execute` delegating
-  // to the shared panel model with this session's identity and folder.
+  // One set per session, because a tool call has to reach the panel model with
+  // the identity and folder of the session it came from.
   function panelCustomTools(sessionId: SessionId, workspacePath: string): ToolDefinition[] {
     return PANEL_TOOLS.map((tool): ToolDefinition => {
-      // The JSON Schema a required-string object compiles to, written out so
-      // this module needs no schema library beside the SDK's.
+      // Written out longhand so this module needs no schema library.
       const parameters = {
         type: 'object',
         required: tool.parameters.map((parameter) => parameter.name),
@@ -325,9 +324,8 @@ export function createSdkAdapter({
     emit({ type: 'queue_flushed', sessionId, messages })
   }
 
-  // One turn, whatever put it there: a typed prompt and a shared bash run
-  // differ only in what `deliver` sends, never in how the turn is watched,
-  // stopped or ended.
+  // A typed prompt and a shared bash run differ only in what `deliver` sends,
+  // never in how the turn is watched, stopped or ended.
   async function runTurn(
     sessionId: SessionId,
     turnId: TurnId,
@@ -390,9 +388,8 @@ export function createSdkAdapter({
 
     if (abandoned) return
 
-    // A message still queued when a run is over was never delivered, so it
-    // goes back to the composer rather than into the next run; a run that was
-    // never delivered stays local.
+    // Anything still queued when a run is over was never delivered, so it goes
+    // back to the composer rather than into the next run.
     flushQueue(bound, sessionId)
     dropShares(bound)
 
@@ -651,9 +648,8 @@ export function createSdkAdapter({
     ): Promise<'delivered' | 'dropped' | 'idle'> {
       const bound = requireBound(sessionId)
       const { session } = bound
-      // Outside π's own streaming window a custom message would land outside
-      // every boundary, with no turn left to answer it, so the run is better
-      // off as a turn of its own.
+      // Outside π's streaming window a custom message would land outside every
+      // boundary, with no turn left to answer it.
       if (bound.running === undefined || !session.isStreaming) return Promise.resolve('idle')
       const message = bashRunMessage(run)
 
@@ -665,9 +661,8 @@ export function createSdkAdapter({
             resolve(outcome)
           }
         }
-        // π announces the steered message at the boundary that takes it, and
-        // persists it from that same announcement: that is the moment the run
-        // genuinely enters the conversation, and the only honest delivery point.
+        // π announces the steered message at the boundary that takes it, which
+        // is the only observable moment the run enters the conversation.
         const stop = session.subscribe((event) => {
           if (deliveredBashRunId(event) !== message.details.id) return
           const at = bound.shares.indexOf(share)
@@ -744,8 +739,8 @@ export function createSdkAdapter({
   }
 }
 
-// π's tool result shape: one text part, which is the panel model's own answer,
-// and no structured details beside it.
+// The panel model's own answer is the whole result; nothing structured rides
+// beside it.
 function said(text: string): { content: { type: 'text'; text: string }[]; details: unknown } {
   return { content: [{ type: 'text', text }], details: {} }
 }

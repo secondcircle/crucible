@@ -107,9 +107,8 @@ export function Composer({
     setSelection({ of: files, at })
   }
 
-  // While the session works the same draft queues instead of sending, so what
-  // makes a draft usable is the same question in both states. Steering and
-  // follow-up carry text only in this cut, so chips hold them back.
+  // Sending and queueing ask the same question of a draft, except that
+  // steering and follow-up carry text only, so chips are held back.
   const heldBack = working && attachments.length > 0
   const sendable = !disabled && draft.trim() !== '' && !heldBack
   const runnable = !disabled && command !== undefined && command !== ''
@@ -230,9 +229,8 @@ export function Composer({
           }}
           ref={boxRef}
           onKeyDown={(pressed) => {
-            // While the popover is open Enter belongs to it, the empty state
-            // included: with nothing to insert it closes the popover rather
-            // than sending a draft nobody can unsend.
+            // While the popover is open Enter belongs to it, so nothing here
+            // can send a draft nobody can unsend.
             if (filesOpen) {
               if (shown.length === 0) {
                 if (pressed.key === 'Enter' && !pressed.shiftKey) {

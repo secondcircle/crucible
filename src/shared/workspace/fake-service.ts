@@ -7,9 +7,8 @@ import type {
   WorkspaceService
 } from './service'
 
-// The workspace service's fake flavor: no folder is read and no process is
-// started, so an agent-driven check costs nothing. Imports neither Electron
-// nor Node, exactly as the fake adapter does.
+// No folder is read and no process is started, so an agent-driven check costs
+// nothing. Imports neither Electron nor Node, exactly as the fake adapter does.
 
 // Enough real-looking depth that the popover's filename-bright,
 // directory-dim grammar is exercisable.

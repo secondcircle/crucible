@@ -12,11 +12,8 @@ export function withLogging(shell: Shell, log: LogSink, adapter: string): Shell 
     log.append({ source: 'main', event: type, adapter, ...detail })
   })
 
-  // Arguments are logged verbatim, prompt text included: a local run log that
-  // cannot be read back against what was asked tells a reader nothing. The one
-  // exception is `describe`, for arguments no reader wants in full.
-  // `answer` is the same exception for a result nobody wants in full: an
-  // exhibit's body is a whole file, and the log records how big it was.
+  // Logged verbatim unless `describe` or `answer` cuts it down: a log that
+  // cannot be read back against what was asked tells a reader nothing.
   function op<A extends unknown[], R>(
     name: string,
     run: (...args: A) => Promise<R>,

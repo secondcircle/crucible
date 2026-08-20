@@ -1,8 +1,7 @@
 // @vitest-environment node
 //
-// The fake models the conversation as a tree of entries, not as a canned
-// picture: a jump really moves the position, and what it leaves stays
-// reachable.
+// The fake models the conversation as a tree of entries rather than a canned
+// picture, so a jump really moves the position and what it leaves stays reachable.
 import { describe, expect, it } from 'vitest'
 import type { ConversationAdapter } from './adapter'
 import { createFakeAdapter, FAKE_BRANCH_SUMMARY } from './fake-adapter'

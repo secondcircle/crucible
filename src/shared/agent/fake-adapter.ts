@@ -95,9 +95,8 @@ const LONE_CALL: ScriptedCall = {
   chunks: ['m1-parity-core.md\nmock-a-ember.html\n']
 }
 
-// What the fake needs to drive the context panel: the three tool behaviors,
-// which are the shared panel model's, and the two fixture exhibits it shows.
-// Absent, every prompt runs the standard script and no panel exists.
+// Absent, every prompt runs the standard script and no panel exists, which is
+// what a test that is not about the panel wants.
 export interface FakePanel {
   readonly tools: PanelTools
   /** Absolute paths; the fixtures ship in the repository. */
@@ -113,8 +112,7 @@ interface PanelCall {
 }
 
 // Said after a panel turn, so the reply names where the work went rather than
-// leaving the chat silent. A closing turn gets its own line, because "that is
-// in the panel now" would be untrue of a tab that was just closed.
+// leaving the chat silent. A closing turn gets its own line below.
 const PANEL_SHOWN_DELTAS: readonly string[] = [
   'That is in the context panel now. Nothing was sent anywhere and nothing was paid for it.'
 ]
@@ -189,9 +187,8 @@ const CANNED_HISTORY: readonly { readonly preview: string; readonly items: Trans
   }
 ]
 
-// The conversation is a tree, not a list: every item is an entry with a parent,
-// the leaf is where the conversation stands, and a jump moves the leaf without
-// removing anything. That is what makes the tree real rather than a picture.
+// A tree rather than a list, so a jump genuinely moves where the conversation
+// stands and abandons nothing.
 interface Entry {
   readonly id: string
   readonly parentId: string | null
@@ -355,9 +352,8 @@ export function createFakeAdapter({
     return bound
   }
 
-  // Panel turns are chosen by what the prompt says, checked in this order so
-  // that `close the panel` is never taken for the plain `panel` trigger. What
-  // each call answers is the shared model's, never a text written here.
+  // Checked in this order so that `close the panel` is never taken for the
+  // plain `panel` trigger.
   function panelScript(
     bound: Bound,
     sessionId: SessionId,
@@ -434,9 +430,8 @@ export function createFakeAdapter({
     return 'an empty conversation'
   }
 
-  // A search reads the whole conversation, every branch of it, not just the
-  // preview beside it: a person looking for a sentence they typed expects to
-  // find it wherever they left it.
+  // Every branch, not just the preview beside it: a person looking for a
+  // sentence they typed expects to find it wherever they left it.
   function searchableText(conversation: Conversation): string {
     return conversation.entries
       .map(({ item }) => {

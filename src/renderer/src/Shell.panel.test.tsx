@@ -1,8 +1,7 @@
 // @vitest-environment jsdom
 //
-// The context panel as a person meets it: what the snapshot puts on screen,
-// what a click sends back through the port, and what the panel does when the
-// agent shows a tab. Nothing here reads a file or knows a path.
+// The panel as a person meets it, driven entirely through the port: nothing
+// here reads a file or knows a path.
 import { act, fireEvent, render, screen } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 import type { PanelTab, ShellSnapshot } from '../../shared/agent/port'

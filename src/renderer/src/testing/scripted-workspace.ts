@@ -7,9 +7,8 @@ import type {
 } from '../../../shared/workspace/service'
 import { rankFiles } from '../../../shared/workspace/match'
 
-// Answers the workspace service's operations the way main does but streams
-// nothing by itself, so a component test is about rendering rather than about
-// timing.
+// Answers the way main does but streams nothing by itself, so a component
+// test is about rendering rather than about timing.
 export interface ScriptedWorkspace extends WorkspaceService {
   readonly calls: ReadonlyArray<{ readonly op: string; readonly args: readonly unknown[] }>
   /** What `searchFiles` ranks and answers from. */

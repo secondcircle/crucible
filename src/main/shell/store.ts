@@ -219,9 +219,8 @@ function load(path: string): ShellStoreState {
         typeof session?.createdAt === 'string' &&
         workspaces.some((workspace) => workspace.id === session.workspaceId)
     )
-    // Panel data that does not read as panel data loads as absent, exactly as
-    // an unreadable file does: a lost tab is recoverable, a launch that will
-    // not start is not.
+    // Unreadable panel data loads as absent: a lost tab is recoverable, a
+    // launch that will not start is not.
     .map((session) => {
       const panel = readPanel((session as { panel?: unknown }).panel)
       const rest = { ...session }

@@ -27,9 +27,8 @@ import { readAttachment, refuse } from './images'
 import { knownEmpty, NOTHING_YET, reduce } from './state/shell-state'
 import './shell.css'
 
-// The port arrives as a prop, which is the seam a component test drives, and
-// why no component reaches for `window.crucible` itself. The workspace service
-// arrives the same way, beside it and never behind it.
+// The port and the workspace service arrive as props, which is the seam a
+// component test drives and why no component names `window.crucible` itself.
 
 /** At most one is open at a time. */
 type Popover = 'none' | 'model' | 'thinking' | 'sessionMenu' | 'resume'
@@ -184,8 +183,7 @@ export function Shell({
     })
   }, [service])
 
-  // The `@` popover's results: the workspace service answers, never the port.
-  // What is shown belongs to the token it was asked for, so a stale answer can
+  // What is shown belongs to the token it was asked for, so a slow answer can
   // never be taken for the current one.
   useEffect(() => {
     if (fileToken === undefined || active === undefined) return

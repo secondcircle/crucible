@@ -8,9 +8,8 @@ import { renderToolOutput, summarizeToolArgs } from './sdk-events.ts'
 // renders through the code a stream renders through.
 export type StoredMessage = AgentSession['messages'][number]
 
-// The wire format this adapter owns for a bash run the user added to the
-// conversation. It is written by `shareBashRun` and read back here, so a
-// restored transcript shows the run as a run rather than as prose.
+// Written by `shareBashRun` and read back here, so a restored transcript
+// shows a shared run as a run rather than as prose.
 export const BASH_RUN_TYPE = 'crucible.bashRun'
 
 export function toTranscript(messages: readonly StoredMessage[]): TranscriptItem[] {

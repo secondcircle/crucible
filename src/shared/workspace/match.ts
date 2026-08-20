@@ -1,8 +1,7 @@
 import { FILE_RESULT_LIMIT } from './service'
 
-// One matcher for both workspace-service implementations, so the fake ranks a
-// list exactly as the real one ranks a folder and a test can pin the order
-// once.
+// One matcher for both implementations, so the fake ranks a list exactly as
+// the real one ranks a folder and a test can pin the order once.
 
 /** Case-insensitive: every character of the query, in order, somewhere in the path. */
 export function subsequence(path: string, query: string): boolean {
