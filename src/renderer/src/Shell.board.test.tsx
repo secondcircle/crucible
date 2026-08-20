@@ -207,6 +207,27 @@ describe('opening and closing the board', () => {
     expect(workspace.calls).toContainEqual({ op: 'branchBoard', args: ['/repos/resume-site'] })
   })
 
+  it('stays closed when the workspace it was opened for becomes active again', async () => {
+    await shell((scripted) => {
+      scripted.boards.set('/repos/crucible', { kind: 'board', board: hostedBoard() })
+      scripted.boards.set('/repos/resume-site', { kind: 'board', board: gitOnlyBoard() })
+    }, TWO_WORKSPACES)
+    await open()
+
+    // Switching away closes the board; switching back must not reopen it —
+    // only the chip and ⌘B open the board.
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'resume-site' }))
+    })
+    expect(board()).toBeNull()
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'crucible' }))
+    })
+
+    expect(board()).toBeNull()
+  })
+
   it('closes before the session tree, and never cancels a running turn', async () => {
     const port = createScriptedPort(oneSession())
     const workspace = createScriptedWorkspace()
