@@ -3,7 +3,15 @@
 // No SDK adapter is ever constructed under test, so pinning these texts word
 // for word is what keeps the registration from drifting.
 import { describe, expect, it } from 'vitest'
-import { PANEL_SHOW_GUIDELINES, PANEL_TOOLS, panelTool } from './panel-tools'
+import { PANEL_TOOLS, panelTool } from './panel-tools'
+
+// Pinned word for word, because a drift here changes what every session is
+// told about the panel.
+const CURATION = [
+  "The context panel is the user's primary display; they may not notice messages in the chat. Content shown there is what the user relies on to follow the work.",
+  "The panel's value comes from curation, not accumulation: it should reflect only what is relevant to the current conversation. Stale tabs actively obscure what matters now \u2014 close them once they have served their purpose (e.g. a plan that has been accepted).",
+  'Ephemeral artifacts (plans, diagrams, reports) belong in a temp directory, not the project tree.'
+]
 
 describe('the three context panel tools', () => {
   it('are named and described exactly as the legacy system named them', () => {
@@ -16,13 +24,14 @@ describe('the three context panel tools', () => {
     expect(panelTool('panel_show')).toEqual({
       name: 'panel_show',
       label: 'Show in Context Panel',
-      description:
+      description: [
         "Show an HTML or markdown file as a tab in the user's context panel. Re-showing the same file replaces its tab and refreshes the view.",
+        ...CURATION
+      ].join('\n\n'),
       parameters: [
         { name: 'path', description: 'Path to an .html or .md file to display' },
         { name: 'title', description: 'Short human-readable tab title' }
-      ],
-      guidelines: PANEL_SHOW_GUIDELINES
+      ]
     })
 
     expect(panelTool('panel_list')).toEqual({
@@ -41,13 +50,17 @@ describe('the three context panel tools', () => {
   })
 
   it('teach the curation the panel lives by, in the three sentences that do it', () => {
-    expect(PANEL_SHOW_GUIDELINES).toEqual([
-      "The context panel is the user's primary display; they may not notice messages in the chat. Content shown there is what the user relies on to follow the work.",
-      "The panel's value comes from curation, not accumulation: it should reflect only what is relevant to the current conversation. Stale tabs actively obscure what matters now — close them once they have served their purpose (e.g. a plan that has been accepted).",
-      'Ephemeral artifacts (plans, diagrams, reports) belong in a temp directory, not the project tree.'
-    ])
+    const { description } = panelTool('panel_show')
+
+    for (const sentence of CURATION) expect(description).toContain(sentence)
     // Crucible is not a TUI, and that is the only word this differs by.
-    expect(PANEL_SHOW_GUIDELINES[0]).not.toContain('TUI')
+    expect(description).not.toContain('TUI')
+  })
+
+  it('carry that curation nowhere but the description', () => {
+    for (const tool of PANEL_TOOLS) {
+      expect(Object.keys(tool)).not.toContain('guidelines')
+    }
   })
 
   it('refuses a name that is not one of the three', () => {

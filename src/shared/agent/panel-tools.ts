@@ -16,31 +16,25 @@ export interface PanelToolDefinition {
   readonly name: PanelToolName
   /** Human-readable, for a tool row. */
   readonly label: string
+  // Carries the curation too: a description rides the request's tools
+  // parameter, the one channel Crucible's system prompt does not replace.
   readonly description: string
   readonly parameters: readonly PanelToolParameter[]
-  /** Appended to the system prompt while the tool is active. */
-  readonly guidelines?: readonly string[]
 }
-
-// This text reaches every session as system prompt, so it stays current with
-// the behavior below it.
-export const PANEL_SHOW_GUIDELINES: readonly string[] = [
-  "The context panel is the user's primary display; they may not notice messages in the chat. Content shown there is what the user relies on to follow the work.",
-  "The panel's value comes from curation, not accumulation: it should reflect only what is relevant to the current conversation. Stale tabs actively obscure what matters now — close them once they have served their purpose (e.g. a plan that has been accepted).",
-  'Ephemeral artifacts (plans, diagrams, reports) belong in a temp directory, not the project tree.'
-]
 
 export const PANEL_TOOLS: readonly PanelToolDefinition[] = [
   {
     name: 'panel_show',
     label: 'Show in Context Panel',
     description:
-      "Show an HTML or markdown file as a tab in the user's context panel. Re-showing the same file replaces its tab and refreshes the view.",
+      "Show an HTML or markdown file as a tab in the user's context panel. Re-showing the same file replaces its tab and refreshes the view.\n\n" +
+      "The context panel is the user's primary display; they may not notice messages in the chat. Content shown there is what the user relies on to follow the work.\n\n" +
+      "The panel's value comes from curation, not accumulation: it should reflect only what is relevant to the current conversation. Stale tabs actively obscure what matters now — close them once they have served their purpose (e.g. a plan that has been accepted).\n\n" +
+      'Ephemeral artifacts (plans, diagrams, reports) belong in a temp directory, not the project tree.',
     parameters: [
       { name: 'path', description: 'Path to an .html or .md file to display' },
       { name: 'title', description: 'Short human-readable tab title' }
-    ],
-    guidelines: PANEL_SHOW_GUIDELINES
+    ]
   },
   {
     name: 'panel_list',

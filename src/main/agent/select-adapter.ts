@@ -12,9 +12,9 @@ export interface SelectedAdapter {
 }
 
 export interface SdkOptions {
-  // Read by the caller: the SDK adapter puts it into every session's system
-  // context.
-  readonly agentDoc?: string
+  // Called only for the sdk flavor, so a launch on the fake still starts when
+  // no prompt can be read.
+  readonly systemPrompt: () => string
   /** Opening the OS browser during a login; only main can do it. */
   readonly openExternal?: (url: string) => void
 }
@@ -61,7 +61,7 @@ export function decideFlavor(requested: string | undefined, packaged: boolean): 
 export function selectAdapter(
   log: LogSink,
   panel: FakePanel,
-  sdk: SdkOptions = {},
+  sdk: SdkOptions,
   packaged = false
 ): SelectedAdapter {
   const { flavor, requested, reason } = decideFlavor(process.env.CRUCIBLE_AGENT, packaged)
@@ -74,7 +74,7 @@ export function selectAdapter(
       flavor === 'sdk'
         ? createSdkAdapter({
             panel: panel.tools,
-            ...(sdk.agentDoc === undefined ? {} : { agentDoc: sdk.agentDoc }),
+            systemPrompt: sdk.systemPrompt(),
             ...(sdk.openExternal === undefined ? {} : { openExternal: sdk.openExternal })
           })
         : createFakeAdapter({ panel })

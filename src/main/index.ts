@@ -7,7 +7,7 @@ import { selectAdapter } from './agent/select-adapter'
 import { withLogging } from './agent/with-logging'
 import { type CommandChannel, serveCommandChannel } from './commands/channel'
 import { selectCommandService } from './commands/select-service'
-import { readShippedAgentDoc } from './shipped'
+import { shippedSystemPrompt } from './shipped'
 import { forwardRendererOutput } from './log/renderer-output'
 import { createFileSink } from './log/sink'
 import { registerExhibitScheme, serveExhibitScheme } from './panel/exhibit-scheme'
@@ -75,8 +75,9 @@ const { adapter, flavor } = selectAdapter(
   log,
   { tools: panel, exhibits: panelFixtures(app.getAppPath()) },
   {
-    // Shipped with the app and read once per launch.
-    agentDoc: readShippedAgentDoc(app.getAppPath()),
+    // A thunk, so a fake-flavor launch starts even when a shipped prompt file
+    // cannot be read; for the sdk flavor an unreadable file throws the launch.
+    systemPrompt: () => shippedSystemPrompt(app.getAppPath()),
     // A login's browser is opened here; the renderer gets no such capability.
     openExternal: (url: string) => {
       void electronShell.openExternal(url)

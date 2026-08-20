@@ -2,7 +2,7 @@
 //
 // A composition root's interface is what it does when Electron loads it, so
 // Electron is what stands in here.
-import { mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -146,6 +146,12 @@ describe('what a launch does', () => {
     ])
     expect(records()[1]).toMatchObject({ adapter: 'fake' })
     expect(harness.windowsCreated).toBe(0)
+  })
+
+  it('starts though it can read no shipped prompt file, because the fake needs none', () => {
+    // Nothing is shipped under this launch's app directory, prompts included.
+    expect(existsSync(join(harness.appPath, 'resources'))).toBe(false)
+    expect(records()[1]).toMatchObject({ event: 'adapter_selected', adapter: 'fake' })
   })
 
   it('opens one window when Electron is ready and serves the port over it', async () => {

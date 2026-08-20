@@ -1,3 +1,4 @@
+import { homedir } from 'node:os'
 import type { AuthEvent, AuthInteraction, AuthPrompt, Provider } from '@earendil-works/pi-ai'
 import type {
   AgentSession,
@@ -45,8 +46,8 @@ import { summarizeActivity } from '../../shared/agent/activity.ts'
 import { PANEL_TOOLS, type PanelTools } from '../../shared/agent/panel-tools.ts'
 import { displaySafeMessage } from './adapter-error.ts'
 import { toProviderState, type AuthFacts, type ProviderFacts } from './providers.ts'
+import { crucibleAgentDir, workspaceSessionDir } from './paths.ts'
 import { createEventMapper } from './sdk-events.ts'
-import { withAgentContext } from './system-context.ts'
 import {
   BASH_RUN_TYPE,
   deliveredBashRunId,
@@ -93,18 +94,20 @@ const PREVIEW_LIMIT = 140
 
 export function createSdkAdapter({
   panel,
-  agentDoc,
+  systemPrompt,
   openExternal
 }: {
   // The same model the fake's scripts call and the same model the shell reads:
   // the tools registered below are its three behaviors and nothing more.
   readonly panel: PanelTools
-  // Joins the system context of every session this adapter opens.
-  readonly agentDoc?: string
+  // Passed as a full override: every session this adapter opens is told this
+  // and nothing π wrote.
+  readonly systemPrompt: string
   // Opening the OS browser is main's to do, and it is injected rather than
   // imported so this module still loads under plain Node for `prove:sdk`.
   readonly openExternal?: (url: string) => void
 }): ConversationAdapter {
+  const agentDir = crucibleAgentDir(homedir())
   const listeners = new Set<AdapterEventListener>()
   const sessions = new Map<SessionId, Bound>()
   const resources = new Map<string, Promise<WorkspaceResources>>()
@@ -133,15 +136,19 @@ export function createSdkAdapter({
     return modelRuntime
   }
 
+  function sessionDir(workspacePath: string): string {
+    return workspaceSessionDir(agentDir, workspacePath)
+  }
+
   // Stock π except for the emptied resources below, which keep the user's
-  // globally configured extensions out of a Crucible session.
+  // globally configured extensions out of a Crucible session, and the system
+  // prompt, which is Crucible's outright.
   function workspaceResources(workspacePath: string): Promise<WorkspaceResources> {
     const existing = resources.get(workspacePath)
     if (existing !== undefined) return existing
 
     const built = (async (): Promise<WorkspaceResources> => {
       const pi = await sdk()
-      const agentDir = pi.getAgentDir()
       const settingsManager = pi.SettingsManager.create(workspacePath, agentDir)
       // In memory only, never written back to the user's settings files. The
       // queue modes are fixed here: a kind is delivered as one group.
@@ -159,9 +166,15 @@ export function createSdkAdapter({
         // π's own prompt folders are not read at all: commands are Crucible's,
         // and two command systems in one composer would be two grammars.
         noPromptTemplates: true,
-        // Appended rather than overriding: π's own system prompt stands, and
-        // Crucible's shipped doc joins it in every session of this workspace.
-        appendSystemPromptOverride: (base) => [...withAgentContext(base, agentDoc)]
+        // A skill is one of the few things that would still reach a session
+        // past a full prompt override.
+        noSkills: true,
+        // The base is ignored, so π's own prompt never reaches a session and a
+        // system-prompt file discovered in any folder is dead.
+        systemPromptOverride: () => systemPrompt,
+        // A Crucible-owned custom-instructions mechanism is deferred, so a file
+        // dropped into the agent dir must not become one by accident.
+        appendSystemPromptOverride: () => []
       })
       await resourceLoader.reload()
       return { resourceLoader, settingsManager }
@@ -203,8 +216,9 @@ export function createSdkAdapter({
       return {
         name: tool.name,
         label: tool.label,
+        // A description survives the prompt override: it rides the request's
+        // tools parameter.
         description: tool.description,
-        ...(tool.guidelines === undefined ? {} : { promptGuidelines: [...tool.guidelines] }),
         parameters,
         // A model error propagates: π then reports a failed call carrying the
         // exact text the panel model built.
@@ -231,7 +245,7 @@ export function createSdkAdapter({
 
     const options: CreateAgentSessionOptions = {
       cwd: workspacePath,
-      agentDir: pi.getAgentDir(),
+      agentDir,
       sessionManager,
       settingsManager,
       resourceLoader,
@@ -558,7 +572,11 @@ export function createSdkAdapter({
           session = await open(
             request.sessionId,
             request.workspacePath,
-            pi.SessionManager.open(request.token, undefined, request.workspacePath)
+            pi.SessionManager.open(
+              request.token,
+              sessionDir(request.workspacePath),
+              request.workspacePath
+            )
           )
           restored = true
         } catch {
@@ -571,7 +589,7 @@ export function createSdkAdapter({
       session ??= await open(
         request.sessionId,
         request.workspacePath,
-        pi.SessionManager.create(request.workspacePath),
+        pi.SessionManager.create(request.workspacePath, sessionDir(request.workspacePath)),
         {
           model: request.preferredModel,
           thinkingLevel: request.preferredThinkingLevel
@@ -601,7 +619,7 @@ export function createSdkAdapter({
       const session = await open(
         sessionId,
         bound.workspacePath,
-        pi.SessionManager.create(bound.workspacePath),
+        pi.SessionManager.create(bound.workspacePath, sessionDir(bound.workspacePath)),
         {
           model: previous.model === undefined ? undefined : modelIdOf(previous.model),
           thinkingLevel: previous.thinkingLevel
@@ -623,7 +641,7 @@ export function createSdkAdapter({
       const session = await open(
         request.sessionId,
         request.workspacePath,
-        pi.SessionManager.open(request.ref, undefined, request.workspacePath)
+        pi.SessionManager.open(request.ref, sessionDir(request.workspacePath), request.workspacePath)
       )
       const bound: Bound = {
         session,
@@ -653,7 +671,9 @@ export function createSdkAdapter({
     async searchHistory(workspacePath: string, query: string): Promise<readonly HistoryMatch[]> {
       const pi = await sdk()
       const wanted = query.trim().toLowerCase()
-      const found = await pi.SessionManager.list(workspacePath)
+      // Only Crucible's own folder: a conversation from before the move keeps
+      // opening by path and stops appearing in this search.
+      const found = await pi.SessionManager.list(workspacePath, sessionDir(workspacePath))
 
       return found
         .filter((info) => info.messageCount > 0)
@@ -805,7 +825,13 @@ export function createSdkAdapter({
       if (request.token === undefined) return undefined
       const pi = await sdk()
       try {
-        return usageOf(pi.SessionManager.open(request.token, undefined, request.workspacePath))
+        return usageOf(
+          pi.SessionManager.open(
+            request.token,
+            sessionDir(request.workspacePath),
+            request.workspacePath
+          )
+        )
       } catch {
         // The conversation is gone; a session with no numbers shows dashes.
         return undefined

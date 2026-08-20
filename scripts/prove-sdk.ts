@@ -1,8 +1,10 @@
 // A script rather than a skipped test, which invites someone to un-skip it and
 // spend money. Nothing it prints could carry a credential.
+import { join } from 'node:path'
 import type { AdapterEvent } from '../src/shared/agent/adapter'
 import { createSdkAdapter } from '../src/main/agent/sdk-adapter.ts'
 import { createPanelModel, memoryPanelPersistence } from '../src/main/panel/model.ts'
+import { shippedSystemPrompt } from '../src/main/shipped.ts'
 
 const PROMPT = 'Say hello in five words. Do not use any tools.'
 const DEADLINE_MS = 60_000
@@ -13,16 +15,23 @@ function print(line: string): void {
   process.stdout.write(`${line}\n`)
 }
 
+// The repository is the app's own directory here, the same value
+// `app.getAppPath()` hands the composition root in dev.
+const APP = join(import.meta.dirname, '..')
+const systemPrompt = shippedSystemPrompt(APP)
+
 // A panel of its own, kept in memory: this proof asks for one short turn and
 // has no store to write tabs into.
 const adapter = createSdkAdapter({
-  panel: createPanelModel({ persistence: memoryPanelPersistence() })
+  panel: createPanelModel({ persistence: memoryPanelPersistence() }),
+  systemPrompt
 })
 
 print('prove:sdk — Crucible SDK adapter against the real π SDK')
 print(`date:   ${new Date().toISOString()}`)
 print(`node:   ${process.version}`)
 print(`cwd:    ${process.cwd()}`)
+print(`system: ${systemPrompt.length} characters, composed from the shipped prompt files`)
 print(`prompt: ${JSON.stringify(PROMPT)}`)
 
 const binding = await adapter.bind({ sessionId: SESSION, workspacePath: process.cwd() })
