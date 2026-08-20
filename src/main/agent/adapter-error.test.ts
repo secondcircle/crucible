@@ -1,28 +1,15 @@
 // @vitest-environment node
 //
-// `adapterError` is where a failure becomes something the pane can print, for
-// both of the directions an SDK turn fails from — a failed event, and a
-// `prompt()` that throws. Nothing here loads the SDK: the rule is about text,
-// so the causes below are the shapes the SDK hands over, not the SDK itself.
+// The causes below are the shapes the SDK hands over rather than the SDK
+// itself: the rule under test is about text.
 import { describe, expect, it } from 'vitest'
-import { adapterError } from './adapter-error'
+import { displaySafeMessage } from './adapter-error'
 
-/** Every answer is a whole port event, so this is what the assertions read. */
 function messageFor(cause: unknown, fallback?: string): string {
-  const event = adapterError('t-1', cause, fallback) as { message: string }
-  return event.message
+  return fallback === undefined ? displaySafeMessage(cause) : displaySafeMessage(cause, fallback)
 }
 
-describe('the error event an SDK failure becomes', () => {
-  it('is a terminal error for the turn it was asked about, coded adapter', () => {
-    expect(adapterError('t-9', 'Model not found: gpt-9.')).toEqual({
-      type: 'error',
-      turnId: 't-9',
-      code: 'adapter',
-      message: 'Model not found: gpt-9.'
-    })
-  })
-
+describe('the message a failure becomes', () => {
   it('carries a plain sentence through, from a string or from an Error', () => {
     expect(messageFor('The session was disposed before it finished opening.')).toBe(
       'The session was disposed before it finished opening.'

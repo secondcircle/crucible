@@ -1,39 +1,35 @@
+import type { ConversationAdapter } from '../../shared/agent/adapter'
 import { createFakeAdapter } from '../../shared/agent/fake-adapter'
-import type { AgentAdapter } from '../../shared/agent/port'
 import type { LogSink } from '../log/sink'
 import { createSdkAdapter } from './sdk-adapter'
-import { withLogging } from './with-logging'
 
-/**
- * Which adapter a launch puts behind the agent port — the launch flavor (D5).
- *
- * This is the only reader of `CRUCIBLE_AGENT` — the environment variable is
- * read here and nowhere else, not even by the composition root that calls this,
- * so "which flavor is this launch?" is one module's question and no caller has
- * to know the variable exists. `npm run dev` leaves it unset and gets the fake
- * adapter. Unset, empty or unrecognized is the fake, so a misspelt `sdk` costs
- * nothing and pays for nothing — and because that is silent by construction,
- * every launch writes one record saying what was asked for, what answered, and
- * why they differ when they do.
- *
- * The sink is passed in (D9: one sink, built at startup, handed to everything);
- * the flavor is not, because it is not the caller's to choose. Whatever this
- * returns is wrapped in `withLogging` before it leaves — every port a launch
- * gets is a logged one, and this is the only place that can promise that (D8).
- */
-export function selectAdapter(log: LogSink): AgentAdapter {
+/** The launch flavor, in one word. */
+export type Flavor = 'fake' | 'sdk'
+
+export interface SelectedAdapter {
+  readonly adapter: ConversationAdapter
+  readonly flavor: Flavor
+}
+
+// The only reader of `CRUCIBLE_AGENT`, so no caller has to know the variable
+// exists. Falling back to the fake is silent by construction, which is why
+// every launch records what was asked for and what answered.
+export function selectAdapter(log: LogSink): SelectedAdapter {
   const requested = process.env.CRUCIBLE_AGENT
   const asked = requested === undefined || requested === '' ? null : requested
 
-  // `sdk` is the only value that buys anything, and it buys paid calls — so it
-  // has to be spelled exactly. Everything else is the fake.
-  const adapter = asked === 'sdk' ? 'sdk' : 'fake'
+  // `sdk` buys paid calls, so it has to be spelled exactly; everything else is
+  // the fake.
+  const flavor: Flavor = asked === 'sdk' ? 'sdk' : 'fake'
   const reason =
-    adapter === 'sdk' || asked === null || asked === 'fake'
+    flavor === 'sdk' || asked === null || asked === 'fake'
       ? null
       : `CRUCIBLE_AGENT=${asked} is not a launch flavor, so the fake adapter answers`
 
-  log.append({ source: 'main', event: 'adapter_selected', adapter, requested: asked, reason })
+  log.append({ source: 'main', event: 'adapter_selected', adapter: flavor, requested: asked, reason })
 
-  return withLogging(adapter === 'sdk' ? createSdkAdapter() : createFakeAdapter(), log, adapter)
+  return {
+    flavor,
+    adapter: flavor === 'sdk' ? createSdkAdapter() : createFakeAdapter()
+  }
 }

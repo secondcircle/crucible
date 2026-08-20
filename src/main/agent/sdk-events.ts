@@ -1,0 +1,216 @@
+import type { AgentSessionEvent } from '@earendil-works/pi-coding-agent'
+import type { AdapterEvent } from '../../shared/agent/adapter'
+import type { SessionId, TurnId } from '../../shared/agent/port'
+// Spelled with its extension so plain Node can load this module: its ESM
+// resolver does no extension guessing.
+import { displaySafeMessage } from './adapter-error.ts'
+
+// Where no π SDK type is allowed past. The SDK is imported for its types only,
+// so nothing here holds a session, a credential or a socket. Anything not
+// named below is dropped rather than guessed at.
+
+export interface TurnTarget {
+  readonly sessionId: SessionId
+  readonly turnId: TurnId
+}
+
+export interface EventMapper {
+  map(event: AgentSessionEvent, target: TurnTarget): AdapterEvent | undefined
+}
+
+const OUTPUT_LIMIT = 20_000
+
+const SUMMARY_LIMIT = 160
+
+export function createEventMapper(): EventMapper {
+  // Tool output arrives as a growing snapshot rather than as chunks, so only
+  // the part past this count is forwarded.
+  const forwarded = new Map<string, number>()
+  /** The queue as the last `queue_update` reported it, oldest first. */
+  let queued: readonly string[] = []
+  // π takes a message out of its queue and says so immediately before that
+  // message starts, so what left the queue is exactly what is being delivered.
+  // The prompt's own user message leaves no such trace, which is what keeps it
+  // from being shown a second time.
+  const delivering: string[] = []
+
+  return {
+    map(event: AgentSessionEvent, { sessionId, turnId }: TurnTarget): AdapterEvent | undefined {
+      switch (event.type) {
+        case 'queue_update': {
+          const now = [...event.steering, ...event.followUp]
+          const left = [...queued]
+          for (const text of now) {
+            const at = left.indexOf(text)
+            if (at !== -1) left.splice(at, 1)
+          }
+          delivering.push(...left)
+          queued = now
+          return {
+            type: 'queue_changed',
+            sessionId,
+            steering: [...event.steering],
+            followUp: [...event.followUp]
+          }
+        }
+
+        case 'message_start': {
+          if (event.message.role !== 'user') return undefined
+          const text = userText(event.message.content)
+          const at = delivering.indexOf(text)
+          // A user message nobody queued is the prompt's own, and its caller
+          // already echoed it.
+          if (text === '' || at === -1) return undefined
+          delivering.splice(at, 1)
+          return { type: 'user_message', sessionId, turnId, text }
+        }
+
+        case 'message_update':
+          switch (event.assistantMessageEvent.type) {
+            case 'text_delta':
+              return {
+                type: 'text_delta',
+                sessionId,
+                turnId,
+                delta: event.assistantMessageEvent.delta
+              }
+            case 'thinking_delta':
+              return {
+                type: 'thinking_delta',
+                sessionId,
+                turnId,
+                delta: event.assistantMessageEvent.delta
+              }
+            case 'error':
+              // An abort is not a failure: the adapter that asked for it says
+              // so itself, and says it once.
+              return event.assistantMessageEvent.reason === 'aborted'
+                ? undefined
+                : {
+                    type: 'turn_error',
+                    sessionId,
+                    turnId,
+                    message: displaySafeMessage(
+                      event.assistantMessageEvent.error.errorMessage
+                    )
+                  }
+            default:
+              return undefined
+          }
+
+        // A failed request is folded into the final message instead of
+        // arriving as an error event, and `prompt()` still resolves normally,
+        // so without this a paid failure would read as a clean, empty turn.
+        case 'message_end':
+          return event.message.role === 'assistant' && event.message.stopReason === 'error'
+            ? {
+                type: 'turn_error',
+                sessionId,
+                turnId,
+                message: displaySafeMessage(event.message.errorMessage)
+              }
+            : undefined
+
+        case 'tool_execution_start':
+          forwarded.set(event.toolCallId, 0)
+          return {
+            type: 'tool_started',
+            sessionId,
+            turnId,
+            callId: event.toolCallId,
+            name: event.toolName,
+            summary: summarizeToolArgs(event.args)
+          }
+
+        case 'tool_execution_update': {
+          const whole = renderToolOutput(event.partialResult)
+          const already = forwarded.get(event.toolCallId) ?? 0
+          if (whole.length <= already) return undefined
+          forwarded.set(event.toolCallId, whole.length)
+          return {
+            type: 'tool_output',
+            sessionId,
+            turnId,
+            callId: event.toolCallId,
+            chunk: whole.slice(already)
+          }
+        }
+
+        case 'tool_execution_end':
+          forwarded.delete(event.toolCallId)
+          return {
+            type: 'tool_ended',
+            sessionId,
+            turnId,
+            callId: event.toolCallId,
+            ok: !event.isError,
+            output: renderToolOutput(event.result)
+          }
+
+        // The SDK's own turn boundaries are dropped: one `prompt()` call can
+        // span several of them when the SDK retries or compacts, and the
+        // adapter's turn is bounded by the call.
+        default:
+          return undefined
+      }
+    }
+  }
+}
+
+// The argument a person recognizes the call by, never the whole argument
+// object: this becomes a one-line label.
+export function summarizeToolArgs(args: unknown): string {
+  if (typeof args === 'string') return clip(args, SUMMARY_LIMIT)
+  if (typeof args !== 'object' || args === null) return ''
+
+  const fields = args as Record<string, unknown>
+  for (const key of ['command', 'path', 'file_path', 'filePath', 'pattern', 'query', 'url']) {
+    const value = fields[key]
+    if (typeof value === 'string' && value.trim() !== '') return clip(value.trim(), SUMMARY_LIMIT)
+  }
+  const first = Object.values(fields).find((value) => typeof value === 'string' && value !== '')
+  return typeof first === 'string' ? clip(first, SUMMARY_LIMIT) : ''
+}
+
+/** A user message's text, whichever of the two shapes its content came in. */
+function userText(content: unknown): string {
+  if (typeof content === 'string') return content
+  if (!Array.isArray(content)) return ''
+  return content
+    .map((block) =>
+      typeof block === 'object' &&
+      block !== null &&
+      (block as { type?: unknown }).type === 'text' &&
+      typeof (block as { text?: unknown }).text === 'string'
+        ? (block as { text: string }).text
+        : ''
+    )
+    .join('')
+}
+
+// Only text blocks cross: an image or a structured payload is the SDK's own
+// shape, and a transcript item is a string.
+export function renderToolOutput(result: unknown): string {
+  if (typeof result === 'string') return clip(result, OUTPUT_LIMIT)
+  if (typeof result !== 'object' || result === null) return ''
+
+  const content = (result as { content?: unknown }).content
+  if (typeof content === 'string') return clip(content, OUTPUT_LIMIT)
+  if (!Array.isArray(content)) return ''
+
+  const text = content
+    .map((block) =>
+      typeof block === 'object' &&
+      block !== null &&
+      (block as { type?: unknown }).type === 'text' &&
+      typeof (block as { text?: unknown }).text === 'string'
+        ? (block as { text: string }).text
+        : ''
+    )
+    .join('')
+  return clip(text, OUTPUT_LIMIT)
+}
+
+function clip(text: string, limit: number): string {
+  return text.length <= limit ? text : `${text.slice(0, limit)}\n… (truncated)`
+}

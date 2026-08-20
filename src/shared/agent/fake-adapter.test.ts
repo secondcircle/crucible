@@ -1,271 +1,487 @@
 // @vitest-environment node
 //
-// The fake adapter is tested through the agent port, which is the only thing a
-// caller — the chat pane, main's handler, another test — ever sees of it.
-//
-// What a caller may expect of the canned reply is stated here, not imported
-// from the module under test: a test that read the script out of the
-// implementation would move with it and could never fail when it changed.
+// Every zero-cost check in this repository runs against this adapter, so what
+// those checks rely on is pinned here. Nothing waits on a clock: the adapter is
+// built with no pause, so a turn is over in microtasks.
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { createFakeAdapter } from './fake-adapter'
-import type { PortEvent } from './port'
+import type { AdapterEvent } from './adapter'
+import { createFakeAdapter, FAKE_MODEL } from './fake-adapter'
 
-/**
- * The reply the fake is scripted with today, written out independently of the
- * module that produces it. It arrives in more than one piece — that it streams
- * at all is the point of the fake — but where the pieces are cut is the
- * adapter's business and nothing here asserts it.
- */
-const CANNED_REPLY =
-  'Hello from the fake adapter.' +
-  ' Nothing was sent anywhere and nothing was paid for this reply.'
+const WORKSPACE = '/workspaces/crucible'
 
-/** Collects everything a port says, in the order it says it. */
-function record(port: ReturnType<typeof createFakeAdapter>): {
-  events: PortEvent[]
-  stop: () => void
-} {
-  const events: PortEvent[] = []
-  const stop = port.onEvent((event) => events.push(event))
-  return { events, stop }
+async function withSession(sessionId = 's1'): Promise<{
+  adapter: ReturnType<typeof createFakeAdapter>
+  events: AdapterEvent[]
+}> {
+  const adapter = createFakeAdapter({ pauseMs: 0 })
+  await adapter.bind({ sessionId, workspacePath: WORKSPACE })
+  const events: AdapterEvent[] = []
+  adapter.onEvent((event) => events.push(event))
+  return { adapter, events }
 }
 
-function isTerminal(event: PortEvent | undefined, turnId: string): boolean {
-  return (
-    event !== undefined &&
-    event.turnId === turnId &&
-    (event.type === 'turn_ended' || event.type === 'error')
-  )
-}
+const types = (events: readonly AdapterEvent[]): string[] => events.map((event) => event.type)
 
-/**
- * Lets a zero-pause turn run to completion on microtasks alone: the turn is
- * over when its terminal event has arrived, and the loop is bounded so a fake
- * that never terminated fails here rather than hanging.
- */
-async function untilTurnEnds(events: readonly PortEvent[], turnId: string): Promise<void> {
-  for (let step = 0; step < 1000; step += 1) {
-    if (events.some((event) => isTerminal(event, turnId))) return
-    await Promise.resolve()
-  }
-  throw new Error(`the turn ${turnId} never ended`)
-}
-
-function deltasOf(events: readonly PortEvent[], turnId: string): string {
-  return events
-    .filter((event) => event.type === 'text_delta' && event.turnId === turnId)
-    .map((event) => (event.type === 'text_delta' ? event.delta : ''))
-    .join('')
-}
-
+// One reproduction below drives the paced script under fake timers; every
+// other test builds the adapter with no pause and waits on no clock.
 afterEach(() => {
   vi.useRealTimers()
 })
 
-describe('the fake adapter', () => {
-  it('answers a prompt with the scripted turn, in order', async () => {
-    const port = createFakeAdapter({ deltaPauseMs: 0 })
-    const { events } = record(port)
+/** One call: its start, a chunk of output for each chunk it streams, its end. */
+const call = (chunks: number): string[] => [
+  'tool_started',
+  ...Array.from({ length: chunks }, () => 'tool_output'),
+  'tool_ended'
+]
 
-    const turnId = await port.prompt('Hello agent')
-    await untilTurnEnds(events, turnId)
+describe('the scripted turn', () => {
+  it('runs thinking, a chain of calls, a lone call, a reply, usage, then the end', async () => {
+    const { adapter, events } = await withSession()
 
-    const types = events.map((event) => event.type)
-    expect(types[0]).toBe('turn_started')
-    expect(types.at(-1)).toBe('turn_ended')
-    // Streaming is the point: the reply arrives in pieces, not in one delta.
-    expect(types.slice(1, -1).length).toBeGreaterThan(1)
-    expect(types.slice(1, -1).every((type) => type === 'text_delta')).toBe(true)
-    expect(events.every((event) => event.turnId === turnId)).toBe(true)
-    expect(deltasOf(events, turnId)).toBe(CANNED_REPLY)
+    await adapter.prompt('s1', 't-1', 'hello')
+
+    expect(types(events)).toEqual([
+      'turn_started',
+      'thinking_delta',
+      'thinking_delta',
+      'thinking_delta',
+      // Three consecutive calls, which is one tool chain.
+      ...call(3),
+      ...call(1),
+      ...call(1),
+      // Text ends that chain, so what follows is a chain of one.
+      'text_delta',
+      ...call(1),
+      ...Array.from({ length: 13 }, () => 'text_delta'),
+      'turn_ended',
+      'usage'
+    ])
   })
 
-  it('emits turn_started before the prompt promise resolves', async () => {
-    const port = createFakeAdapter({ deltaPauseMs: 0 })
-    const { events } = record(port)
+  it('replies in markdown with a list, inline code and a fenced block', async () => {
+    const { adapter, events } = await withSession()
 
-    const accepted = port.prompt('Hello agent')
+    await adapter.prompt('s1', 't-1', 'hello')
+    const reply = events
+      .filter((event) => event.type === 'text_delta')
+      .map((event) => event.delta)
+      .join('')
 
-    expect(events).toEqual([{ type: 'turn_started', turnId: 't-1' }])
-    await accepted
+    expect(reply).toContain('\n- ')
+    expect(reply).toContain('`inline code`')
+    expect(reply).toContain('```ts')
   })
 
-  it('mints one id per turn and serves whatever it is asked (D6 is main’s rule)', async () => {
-    const port = createFakeAdapter({ deltaPauseMs: 0 })
-    const { events } = record(port)
+  it('opens and closes every call it starts, with its output', async () => {
+    const { adapter, events } = await withSession()
 
-    const first = await port.prompt('one')
-    const second = await port.prompt('two')
-    await untilTurnEnds(events, first)
-    await untilTurnEnds(events, second)
+    await adapter.prompt('s1', 't-1', 'hello')
+    const started = events.filter((event) => event.type === 'tool_started')
+    const ended = events.filter((event) => event.type === 'tool_ended')
 
-    expect([first, second]).toEqual(['t-1', 't-2'])
-    for (const turnId of [first, second]) {
-      const turn = events.filter((event) => event.turnId === turnId)
-      expect(turn[0]?.type).toBe('turn_started')
-      expect(turn.at(-1)?.type).toBe('turn_ended')
-      // The same script whatever was asked, so the text does not depend on it.
-      expect(deltasOf(events, turnId)).toBe(CANNED_REPLY)
-    }
+    expect(started[0]).toMatchObject({ name: 'bash', summary: 'npm test' })
+    expect(ended.map((event) => event.callId)).toEqual(started.map((event) => event.callId))
+    expect(ended[0].type === 'tool_ended' ? ended[0].output : '').toContain('42 passed')
   })
 
-  it('gives every listener every event, and stops at unsubscribe', async () => {
-    const port = createFakeAdapter({ deltaPauseMs: 0 })
-    const first = record(port)
-    const second = record(port)
+  it('spans two tool names in one chain and fails exactly one of the calls', async () => {
+    const { adapter, events } = await withSession()
 
-    const one = await port.prompt('Hello agent')
-    await untilTurnEnds(first.events, one)
-    expect(second.events).toEqual(first.events)
+    await adapter.prompt('s1', 't-1', 'hello')
+    const started = events.filter((event) => event.type === 'tool_started')
+    const ended = events.filter((event) => event.type === 'tool_ended')
 
-    const seen = first.events.length
-    second.stop()
-    second.stop() // unsubscribe is idempotent
-    const two = await port.prompt('again')
-    await untilTurnEnds(first.events, two)
-
-    expect(second.events).toHaveLength(seen)
-    expect(first.events.length).toBeGreaterThan(seen)
+    // Three in the chain and one on its own, under two names, so a single
+    // scripted turn shows the counts, the failure marker and a chain of one.
+    expect(started).toHaveLength(4)
+    expect(new Set(started.map((event) => event.name))).toEqual(new Set(['bash', 'read']))
+    expect(ended.filter((event) => !event.ok)).toHaveLength(1)
   })
 
-  it('replays nothing to a listener that arrives mid-turn', async () => {
-    const port = createFakeAdapter({ deltaPauseMs: 0 })
-    const early = record(port)
+  it('reports usage that is inside the window and grows with the conversation', async () => {
+    const { adapter, events } = await withSession()
 
-    const turnId = await port.prompt('Hello agent')
-    await Promise.resolve()
-    await Promise.resolve()
-    const late = record(port)
-    expect(early.events.length).toBeGreaterThan(0)
-    expect(late.events).toEqual([])
+    await adapter.prompt('s1', 't-1', 'hello')
+    await adapter.prompt('s1', 't-2', 'again')
+    const usage = events.filter((event) => event.type === 'usage')
 
-    await untilTurnEnds(early.events, turnId)
-
-    // Subscription is live-only: the latecomer holds a suffix of the turn, and
-    // never the events that had already gone out.
-    expect(late.events.length).toBeLessThan(early.events.length)
-    expect(early.events.slice(early.events.length - late.events.length)).toEqual(late.events)
-    expect(late.events.at(-1)).toEqual({ type: 'turn_ended', turnId })
+    expect(usage).toHaveLength(2)
+    expect(usage[0].usedTokens).toBeGreaterThan(0)
+    expect(usage[1].usedTokens).toBeGreaterThan(usage[0].usedTokens)
+    expect(usage[1].usedTokens).toBeLessThan(usage[1].contextWindow)
   })
+})
 
-  it('delivers an in-flight event to a listener another listener just dropped', async () => {
-    const port = createFakeAdapter({ deltaPauseMs: 0 })
-    const seenBySecond: PortEvent[] = []
-
-    let dropSecond = (): void => {}
-    const stopFirst = port.onEvent(() => {
-      dropSecond()
+// π's own queueing semantics, implemented here so both features are
+// exercisable without a paid call.
+describe('queued messages', () => {
+  /** Queues through `at`, once, the first time that event type arrives. */
+  function once(
+    adapter: ReturnType<typeof createFakeAdapter>,
+    type: AdapterEvent['type'],
+    act: () => void
+  ): void {
+    let done = false
+    adapter.onEvent((event) => {
+      if (event.type !== type || done) return
+      done = true
+      act()
     })
-    dropSecond = port.onEvent((event) => {
-      seenBySecond.push(event)
+  }
+
+  it('delivers every queued steering message at the next boundary between calls', async () => {
+    const { adapter, events } = await withSession()
+    once(adapter, 'tool_started', () => {
+      void adapter.steer('s1', 'check the adapter too')
+      void adapter.steer('s1', 'and the tests')
     })
 
-    const turnId = await port.prompt('Hello agent')
-    const later = record(port)
-    await untilTurnEnds(later.events, turnId)
+    await adapter.prompt('s1', 't-1', 'hello')
 
-    // The listeners are snapshotted per event, so the second one still received
-    // the event that was being delivered when the first dropped it — and
-    // nothing after that.
-    expect(seenBySecond).toEqual([{ type: 'turn_started', turnId }])
-    stopFirst()
+    const at = types(events).indexOf('user_message')
+    // The whole queue lands as a group, between the call that was running and
+    // the next one.
+    expect(types(events).slice(at - 1, at + 5)).toEqual([
+      'tool_ended',
+      'user_message',
+      'queue_changed',
+      'user_message',
+      'queue_changed',
+      'tool_started'
+    ])
+    expect(events.slice(at).filter((event) => event.type === 'user_message')).toMatchObject([
+      { text: 'check the adapter too' },
+      { text: 'and the tests' }
+    ])
+    expect(events[at + 1]).toMatchObject({ steering: ['and the tests'] })
+    expect(events[at + 3]).toMatchObject({ steering: [], followUp: [] })
   })
 
-  it('paces the deltas at the cadence it is given', async () => {
-    vi.useFakeTimers()
-    const port = createFakeAdapter({ deltaPauseMs: 5 })
-    const { events } = record(port)
+  it('holds a follow-up until the reply is done, answers it, and only then ends', async () => {
+    const { adapter, events } = await withSession()
+    once(adapter, 'tool_started', () => {
+      void adapter.followUp('s1', 'summarize what you would refactor first')
+    })
 
-    await port.prompt('Hello agent')
+    await adapter.prompt('s1', 't-1', 'hello')
 
-    // A pause is a timer, so nothing but the start has arrived yet.
-    expect(events).toEqual([{ type: 'turn_started', turnId: 't-1' }])
-    await vi.advanceTimersByTimeAsync(4)
-    expect(events).toHaveLength(1)
-
-    await vi.advanceTimersByTimeAsync(1)
-    expect(events).toHaveLength(2)
-    expect(events.at(-1)?.type).toBe('text_delta')
+    const at = types(events).indexOf('user_message')
+    // Nothing of it before the reply was streamed in full.
+    expect(types(events).slice(0, at).filter((type) => type === 'text_delta').length).toBe(14)
+    expect(types(events).slice(at)).toEqual([
+      'user_message',
+      'queue_changed',
+      'text_delta',
+      'turn_ended',
+      'usage'
+    ])
   })
 
-  it('paces the deltas by default too, one event per beat, the end on its own beat', async () => {
-    vi.useFakeTimers()
-    // No cadence given: the default is a positive pause, whatever its length —
-    // driving the next timer never names it.
-    const port = createFakeAdapter()
-    const { events } = record(port)
+  it('hands both queues back before it says the turn was cancelled', async () => {
+    const { adapter, events } = await withSession()
+    once(adapter, 'tool_started', () => {
+      void adapter.steer('s1', 'stop reading and write it')
+      void adapter.followUp('s1', 'then summarize')
+      void adapter.cancel('s1')
+    })
 
-    const turnId = await port.prompt('Hello agent')
-    expect(events).toEqual([{ type: 'turn_started', turnId }])
+    await adapter.prompt('s1', 't-1', 'hello')
 
-    let beats = 0
-    while (!events.some((event) => isTerminal(event, turnId))) {
-      const before = events.length
-      beats += 1
-      expect(beats).toBeLessThan(1000)
-      await vi.advanceTimersToNextTimerAsync()
-      // One beat of the script, one event.
-      expect(events.length).toBe(before + 1)
-    }
-
-    // The terminal event had a beat of its own, after the last delta.
-    expect(events.at(-1)).toEqual({ type: 'turn_ended', turnId })
-    expect(events.at(-2)?.type).toBe('text_delta')
-    expect(beats).toBeGreaterThan(2)
-    expect(deltasOf(events, turnId)).toBe(CANNED_REPLY)
-  })
-
-  it('stops a turn in flight when disposed, and serves the next prompt', async () => {
-    vi.useFakeTimers()
-    const port = createFakeAdapter({ deltaPauseMs: 5 })
-    const { events } = record(port)
-
-    const abandoned = await port.prompt('Hello agent')
-    await vi.advanceTimersByTimeAsync(10)
-    expect(deltasOf(events, abandoned)).not.toBe('')
-
-    port.dispose()
-    const atDispose = [...events]
-    // Nothing is left scheduled: the turn is not running quietly, it is over.
-    expect(vi.getTimerCount()).toBe(0)
-    await vi.advanceTimersByTimeAsync(60_000)
-
-    // The script stopped where it stood — no more deltas, and no terminal event
-    // either, because the turn was abandoned rather than finished.
-    expect(events).toEqual(atDispose)
-    expect(events.some((event) => isTerminal(event, abandoned))).toBe(false)
-
-    // Disposing is not the end of the adapter: the next prompt runs in full,
-    // for the listener that was there all along.
-    const next = await port.prompt('again')
-    await vi.advanceTimersByTimeAsync(60_000)
-    expect(deltasOf(events, next)).toBe(CANNED_REPLY)
-    expect(events.at(-1)).toEqual({ type: 'turn_ended', turnId: next })
-
-    // Disposing with nothing in flight is allowed and does nothing.
-    expect(() => {
-      port.dispose()
-      port.dispose()
-    }).not.toThrow()
-    expect(events.at(-1)).toEqual({ type: 'turn_ended', turnId: next })
-  })
-
-  it('emits events that survive structured clone', async () => {
-    const port = createFakeAdapter({ deltaPauseMs: 0 })
-    const { events } = record(port)
-
-    const turnId = await port.prompt('Hello agent')
-    await untilTurnEnds(events, turnId)
-
-    for (const event of events) {
-      const cloned = structuredClone(event)
-      expect(cloned).not.toBe(event)
-      expect(cloned).toEqual(event)
-      expect(Object.getPrototypeOf(cloned)).toBe(Object.prototype)
-    }
-    // All three variants the fake produces were exercised, not just one.
-    expect(new Set(events.map((event) => event.type))).toEqual(
-      new Set(['turn_started', 'text_delta', 'turn_ended'])
+    const flushed = events.find((event) => event.type === 'queue_flushed')
+    expect(flushed).toMatchObject({
+      messages: [
+        { kind: 'steering', text: 'stop reading and write it' },
+        { kind: 'followUp', text: 'then summarize' }
+      ]
+    })
+    expect(types(events).indexOf('queue_flushed')).toBeLessThan(
+      types(events).indexOf('turn_cancelled')
     )
+    // Nothing the user got back is delivered after they killed the turn.
+    expect(types(events)).not.toContain('user_message')
+  })
+
+  it('queues nothing into a session with no live run, and says so', async () => {
+    const { adapter, events } = await withSession()
+
+    expect(await adapter.steer('s1', 'hello')).toBe('idle')
+    expect(await adapter.followUp('s1', 'hello')).toBe('idle')
+
+    expect(events).toEqual([])
+  })
+
+  it('dequeues exactly the named entry, and answers false for a delivered one', async () => {
+    const { adapter, events } = await withSession()
+    const removed: boolean[] = []
+    once(adapter, 'tool_started', () => {
+      void adapter.steer('s1', 'one')
+      void adapter.steer('s1', 'two')
+      void adapter.dequeue('s1', 'steering', 'one').then((answer) => removed.push(answer))
+    })
+
+    await adapter.prompt('s1', 't-1', 'hello')
+
+    expect(removed).toEqual([true])
+    expect(events.filter((event) => event.type === 'user_message')).toMatchObject([{ text: 'two' }])
+    // Already delivered: there is nothing left to take back.
+    expect(await adapter.dequeue('s1', 'steering', 'two')).toBe(false)
+  })
+
+  it('settles a delivered message into the conversation where it was delivered', async () => {
+    const { adapter } = await withSession()
+    once(adapter, 'tool_started', () => {
+      void adapter.steer('s1', 'check the tests too')
+    })
+
+    await adapter.prompt('s1', 't-1', 'hello')
+    const transcript = await adapter.transcript('s1')
+
+    const at = transcript.findIndex(
+      (item) => item.kind === 'user' && item.text === 'check the tests too'
+    )
+    // A restored transcript reads as the live one did: between the call that
+    // was running and the one that followed it.
+    expect(transcript[at - 1].kind).toBe('tool')
+    expect(transcript[at + 1].kind).toBe('tool')
+  })
+
+  // Reproduction for review finding 1: the script's final pause sits after
+  // the last queue check, so a message queued during it ends the turn still
+  // queued — neither delivered (`user_message`) nor handed back
+  // (`queue_flushed`) — breaking the invariant that a turn never ends with a
+  // non-empty queue.
+  it('delivers or flushes a message queued during the turn’s final pause', async () => {
+    vi.useFakeTimers()
+    const adapter = createFakeAdapter({ pauseMs: 10 })
+    await adapter.bind({ sessionId: 's1', workspacePath: WORKSPACE })
+    const events: AdapterEvent[] = []
+    adapter.onEvent((event) => events.push(event))
+    const lastDelta = 'Stop or Escape ends this turn wherever it stands.'
+
+    const turn = adapter.prompt('s1', 't-1', 'hello')
+    // Advance beat by beat until the reply has fully streamed; the script now
+    // stands in the pause between its last queue check and its end.
+    for (let beats = 0; beats < 200; beats += 1) {
+      if (events.some((event) => event.type === 'text_delta' && event.delta === lastDelta)) break
+      await vi.advanceTimersByTimeAsync(10)
+    }
+    expect(await adapter.steer('s1', 'one more thing')).toBe('queued')
+
+    await vi.advanceTimersByTimeAsync(1_000)
+    await turn
+
+    expect(types(events)).toContain('turn_ended')
+    const delivered = events.some(
+      (event) => event.type === 'user_message' && event.text === 'one more thing'
+    )
+    const flushed = events.some(
+      (event) =>
+        event.type === 'queue_flushed' &&
+        event.messages.some((message) => message.text === 'one more thing')
+    )
+    expect(delivered || flushed).toBe(true)
+  })
+
+  it('discards a released session’s queue rather than restoring it to nowhere', async () => {
+    const { adapter, events } = await withSession()
+    once(adapter, 'tool_started', () => {
+      void adapter.steer('s1', 'never delivered')
+      adapter.release('s1')
+    })
+
+    await adapter.prompt('s1', 't-1', 'hello')
+
+    expect(types(events)).not.toContain('queue_flushed')
+    expect(types(events)).not.toContain('user_message')
+  })
+})
+
+describe('cancellation', () => {
+  it('ends the turn as cancelled where the script stood, and says no more', async () => {
+    const { adapter, events } = await withSession()
+
+    // Stop the moment the reply starts streaming: the partial text stands and
+    // the turn ends as cancelled rather than as an error or a normal end.
+    adapter.onEvent((event) => {
+      if (event.type === 'text_delta') void adapter.cancel('s1')
+    })
+    await adapter.prompt('s1', 't-1', 'hello')
+
+    expect(types(events)).toContain('text_delta')
+    expect(types(events)).not.toContain('turn_ended')
+    const terminal = events.findIndex((event) => event.type === 'turn_cancelled')
+    expect(terminal).toBeGreaterThan(0)
+    // Only usage follows a terminal event, and nothing of the turn does.
+    expect(types(events).slice(terminal + 1)).toEqual(['usage'])
+  })
+
+  it('leaves the partial reply and a stopped marker in the conversation', async () => {
+    const { adapter } = await withSession()
+
+    adapter.onEvent((event) => {
+      if (event.type === 'text_delta') void adapter.cancel('s1')
+    })
+    await adapter.prompt('s1', 't-1', 'hello')
+    const transcript = await adapter.transcript('s1')
+
+    expect(transcript.at(-1)).toEqual({ kind: 'stopped' })
+    expect(transcript.some((item) => item.kind === 'assistant')).toBe(true)
+  })
+
+  it('does nothing at all when the session has no live turn', async () => {
+    const { adapter, events } = await withSession()
+
+    await adapter.cancel('s1')
+    await adapter.cancel('nobody')
+
+    expect(events).toEqual([])
+  })
+
+  it('accepts the next prompt as a redirect', async () => {
+    const { adapter, events } = await withSession()
+
+    const stopEarly = adapter.onEvent((event) => {
+      if (event.type === 'text_delta') void adapter.cancel('s1')
+    })
+    await adapter.prompt('s1', 't-1', 'hello')
+    stopEarly()
+    await adapter.prompt('s1', 't-2', 'do this instead')
+
+    expect(types(events)).toContain('turn_cancelled')
+    expect(events.filter((event) => event.type === 'turn_ended')).toHaveLength(1)
+  })
+})
+
+describe('concurrent sessions', () => {
+  it('runs independent scripts, and cancelling one leaves the other alone', async () => {
+    const adapter = createFakeAdapter({ pauseMs: 0 })
+    await adapter.bind({ sessionId: 'a', workspacePath: WORKSPACE })
+    await adapter.bind({ sessionId: 'b', workspacePath: WORKSPACE })
+    const events: AdapterEvent[] = []
+    adapter.onEvent((event) => events.push(event))
+    adapter.onEvent((event) => {
+      if (event.sessionId === 'a' && event.type === 'text_delta') void adapter.cancel('a')
+    })
+
+    await Promise.all([adapter.prompt('a', 't-a', 'one'), adapter.prompt('b', 't-b', 'two')])
+
+    const forA = events.filter((event) => event.sessionId === 'a')
+    const forB = events.filter((event) => event.sessionId === 'b')
+    expect(types(forA)).toContain('turn_cancelled')
+    expect(types(forA)).not.toContain('turn_ended')
+    expect(types(forB)).toContain('turn_ended')
+    expect(types(forB)).not.toContain('turn_cancelled')
+  })
+})
+
+describe('history, reset and resume', () => {
+  it('serves canned entries for a workspace nobody has worked in yet', async () => {
+    const adapter = createFakeAdapter({ pauseMs: 0 })
+
+    const found = await adapter.searchHistory(WORKSPACE, '')
+
+    expect(found.length).toBeGreaterThanOrEqual(2)
+    expect(found.every((match) => match.preview !== '')).toBe(true)
+  })
+
+  it('filters what it serves by the query', async () => {
+    const adapter = createFakeAdapter({ pauseMs: 0 })
+
+    const found = await adapter.searchHistory(WORKSPACE, 'ember palette')
+
+    expect(found).toHaveLength(1)
+    // The preview is the conversation's last words; the query reads all of it.
+    expect(found[0].preview).toContain('token source')
+  })
+
+  it('detaches a conversation on reset and keeps it findable', async () => {
+    const { adapter } = await withSession()
+    await adapter.prompt('s1', 't-1', 'the sentence that identifies this conversation')
+    const before = await adapter.bind({ sessionId: 's1', workspacePath: WORKSPACE })
+
+    const after = await adapter.reset('s1')
+
+    expect(after.token).not.toBe(before.token)
+    expect(await adapter.transcript('s1')).toEqual([])
+    const found = await adapter.searchHistory(WORKSPACE, 'identifies this conversation')
+    expect(found).toHaveLength(1)
+    expect(adapter.sameConversation(before.token, found[0].ref)).toBe(true)
+  })
+
+  it('restores a detached conversation, transcript and all, on resume', async () => {
+    const { adapter } = await withSession()
+    await adapter.prompt('s1', 't-1', 'a sentence to find again')
+    await adapter.reset('s1')
+    const [match] = await adapter.searchHistory(WORKSPACE, 'a sentence to find again')
+
+    const resumed = await adapter.resume({
+      sessionId: 's2',
+      workspacePath: WORKSPACE,
+      ref: match.ref
+    })
+    const transcript = await adapter.transcript('s2')
+
+    expect(resumed.restored).toBe(true)
+    expect(transcript[0]).toEqual({ kind: 'user', text: 'a sentence to find again' })
+  })
+
+  it('gives a conversation this launch created a token no later launch can hit', async () => {
+    const { adapter } = await withSession()
+    await adapter.prompt('s1', 't-1', 'said this launch')
+    const live = await adapter.bind({ sessionId: 's1', workspacePath: WORKSPACE })
+
+    // A second adapter is a second launch: its history holds the canned
+    // entries and nothing else, so the old token binds a fresh conversation
+    // and says so rather than landing on some other conversation.
+    const relaunched = createFakeAdapter({ pauseMs: 0 })
+    const rebound = await relaunched.bind({
+      sessionId: 's1',
+      workspacePath: WORKSPACE,
+      token: live.token
+    })
+
+    expect(rebound.restored).toBe(false)
+    expect(await relaunched.transcript('s1')).toEqual([])
+  })
+
+  it('keeps a removed session\u2019s conversation in history', async () => {
+    const { adapter } = await withSession()
+    await adapter.prompt('s1', 't-1', 'a removed conversation')
+
+    adapter.release('s1')
+
+    const found = await adapter.searchHistory(WORKSPACE, 'a removed conversation')
+    expect(found).toHaveLength(1)
+  })
+})
+
+describe('what it says about itself', () => {
+  it('exposes one model that says it is fake, with more than one level', async () => {
+    const adapter = createFakeAdapter({ pauseMs: 0 })
+
+    const models = await adapter.listModels()
+
+    expect(models).toEqual([FAKE_MODEL])
+    expect(models[0].id).toBe('fake/deterministic')
+    expect(models[0].label.toLowerCase()).toContain('fake')
+    expect(models[0].thinkingLevels.length).toBeGreaterThanOrEqual(2)
+  })
+
+  it('refuses a model or a level it cannot honestly serve', async () => {
+    const { adapter } = await withSession()
+
+    await expect(adapter.setModel('s1', 'anthropic/claude-opus-4-5')).rejects.toThrow()
+    await expect(adapter.setThinkingLevel('s1', 'xhigh')).rejects.toThrow()
+    await expect(adapter.setThinkingLevel('s1', 'high')).resolves.toBeUndefined()
+  })
+
+  it('skips the thinking block when the level is off', async () => {
+    const { adapter, events } = await withSession()
+    await adapter.setThinkingLevel('s1', 'off')
+
+    await adapter.prompt('s1', 't-1', 'hello')
+
+    expect(types(events)).not.toContain('thinking_delta')
   })
 })

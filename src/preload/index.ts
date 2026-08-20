@@ -1,28 +1,21 @@
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron'
-import { EVENT_CHANNEL, PROMPT_CHANNEL } from '../shared/agent/channels'
-import type { PortEvent, TurnId } from '../shared/agent/port'
+import {
+  EVENT_CHANNEL,
+  REQUEST_CHANNEL,
+  type PortRequest,
+  type PortResult
+} from '../shared/agent/channels'
+import type { PortEvent } from '../shared/agent/port'
 
-/**
- * The preload surface: one object, `window.crucible`, with one member (D7).
- *
- * This is the whole of what the sandboxed renderer can reach of Electron —
- * deliberately not the `window.electron.ipcRenderer` passthrough the scaffolds
- * ship, which Electron's own context-isolation documentation calls the unsafe
- * pattern. Two operations, shaped like the agent port they serve, are all the
- * IPC client needs; nothing else is exposed and nothing here is a general
- * channel.
- *
- * `onEvent` forwards the payload only. The Electron event object is named here
- * and dropped here, so nothing carrying a `sender` — a handle onto the whole of
- * `webContents` — ever crosses into the renderer's world.
- *
- * The file is bundled to one file so it loads under `sandbox: true` (D2, A5):
- * its two imports are Crucible's own, one of them types alone, so nothing but
- * `electron` is required at runtime.
- */
+// The whole of what the sandboxed renderer can reach of Electron. Two members,
+// no general `ipcRenderer` passthrough, and payloads only: nothing carrying a
+// `sender` may cross into the renderer's world.
+//
+// Bundled to a single file so it loads under `sandbox: true`.
 contextBridge.exposeInMainWorld('crucible', {
   agent: {
-    prompt: (text: string): Promise<TurnId> => ipcRenderer.invoke(PROMPT_CHANNEL, text),
+    request: (request: PortRequest): Promise<PortResult> =>
+      ipcRenderer.invoke(REQUEST_CHANNEL, request),
 
     onEvent: (listener: (event: PortEvent) => void): (() => void) => {
       // Never `ipcRenderer.on(EVENT_CHANNEL, listener)`: that hands the caller
@@ -38,6 +31,6 @@ contextBridge.exposeInMainWorld('crucible', {
   }
 })
 
-// How a running app shows the bundled preload was loaded: it appears in the
-// renderer's console, before anything the renderer itself says.
+// The one signal that the bundled preload loaded at all, which is otherwise
+// invisible in a running app.
 console.info('[crucible] preload loaded')

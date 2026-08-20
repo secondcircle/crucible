@@ -1,0 +1,183 @@
+.side {
+  width: 248px;
+  flex: none;
+  background: var(--bg2);
+  border-right: 1px solid var(--line);
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+}
+
+.side .brand {
+  padding: 16px 16px 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  font-size: 15px;
+}
+
+.side .brand .mark {
+  color: var(--accent);
+}
+
+.newsession {
+  margin: 6px 12px 14px;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+  color: var(--ink);
+  text-align: center;
+  font-size: 13px;
+}
+
+.newsession:disabled {
+  color: var(--faint);
+  cursor: default;
+}
+
+.wslabel {
+  padding: 4px 16px;
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--faint);
+}
+
+.wslist {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.ws {
+  display: flex;
+  align-items: center;
+}
+
+.ws .wsname {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 8px 7px 16px;
+  font-size: 13px;
+  color: var(--dim);
+  background: none;
+  border: none;
+  text-align: left;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ws.active {
+  background: var(--panel);
+}
+
+.ws.active .wsname {
+  color: var(--ink);
+}
+
+.dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--faint);
+  flex: none;
+}
+
+.ws.active .dot {
+  background: var(--accent);
+  box-shadow: 0 0 6px var(--accent);
+}
+
+.ws.working .dot,
+.dot.working {
+  background: var(--ok);
+  animation: breathe 2.4s infinite;
+}
+
+@keyframes breathe {
+  50% {
+    opacity: 0.35;
+  }
+}
+
+.rowaction {
+  border: none;
+  background: none;
+  color: transparent;
+  padding: 4px 10px;
+  font-size: 13px;
+}
+
+.ws:hover .rowaction,
+.sessrow:hover .rowaction,
+.rowaction:focus-visible {
+  color: var(--faint);
+}
+
+.rowaction:hover {
+  color: var(--error);
+}
+
+.sessions {
+  list-style: none;
+  margin: 2px 0 10px 22px;
+  padding: 0;
+  border-left: 1px solid var(--line);
+}
+
+.sessrow {
+  display: flex;
+  align-items: center;
+}
+
+.sess {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 8px 5px 12px;
+  font-size: 12.5px;
+  color: var(--dim);
+  background: none;
+  border: none;
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sess.active {
+  color: var(--accent2);
+}
+
+.more {
+  padding: 4px 12px;
+  font-size: 11.5px;
+  color: var(--faint);
+  background: none;
+  border: none;
+}
+
+.more:hover {
+  color: var(--accent2);
+}
+
+.addws {
+  margin: auto 12px 14px;
+  padding: 7px;
+  border: 1px dashed var(--line);
+  border-radius: var(--radius);
+  background: none;
+  color: var(--faint);
+  text-align: center;
+  font-size: 12px;
+}
+
+.addws:hover {
+  color: var(--accent2);
+  border-color: var(--accent2);
+}

@@ -4,7 +4,7 @@ import globals from 'globals'
 import tseslint from 'typescript-eslint'
 
 export default tseslint.config(
-  // .crucible holds workflow records (run artifacts, repro scripts) — not app code.
+  // .crucible holds workflow records, not app code.
   { ignores: ['out/**', 'dist/**', 'logs/**', 'node_modules/**', '.crucible/**'] },
   js.configs.recommended,
   tseslint.configs.recommended,
@@ -18,27 +18,13 @@ export default tseslint.config(
     languageOptions: { globals: globals.browser }
   },
   {
-    // Everything under src/renderer, whatever a module's extension: the
-    // universal `src/renderer/**` covers every file ESLint already scans
-    // (.js/.mjs/.cjs/.ts/.tsx/.mts/.cts) without dragging index.html into the
-    // lint, and the explicit `.jsx` pattern is what adds JSX files to the scan
-    // at all — ESLint's default file set leaves them out. A renderer module
-    // that is fenced or not depending on how it is spelled is not a fence.
-    // This block carries the fence and nothing else: no plugin, no globals, so
-    // it changes what is forbidden under src/renderer and never what is
-    // otherwise linted there.
+    // The bare pattern covers every extension ESLint already scans; the
+    // explicit `.jsx` one is what adds JSX files to the scan at all. A fence
+    // that depends on how a module is spelled is not a fence.
     files: ['src/renderer/**', 'src/renderer/**/*.jsx'],
-    // The renderer import fence (D1, D4): the renderer reaches agents only
-    // through the agent port, so nothing under src/renderer may import the π
-    // SDK, Electron, or main/preload modules, and nothing but the IPC client
-    // may touch the preload surface. Two builtin rules are the whole of it.
-    //
-    // It is a direct-import check. Transitivity is covered by the shape of the
-    // tree — the only module the renderer shares with main is the port's type
-    // module, which imports nothing — and evasion (aliases, `any` casts,
-    // type-level derivations) is review's business, not lint's. What this
-    // catches is the honest mistake: someone reaching for the SDK or for
-    // `window.crucible` where the port was the thing to use.
+    // A direct-import check only. Transitivity is covered by the shape of the
+    // tree, and evasion is review's business; what this catches is the honest
+    // reach for the SDK where the port was the thing to use.
     rules: {
       'no-restricted-imports': [
         'error',
@@ -52,15 +38,15 @@ export default tseslint.config(
           selector:
             "MemberExpression[object.name=/^(window|globalThis|self)$/][property.name='crucible']",
           message:
-            'The renderer reaches agents only through the agent port (D1). Take a port as a prop; only src/renderer/src/agent/ipc-client.ts may touch window.crucible.'
+            'The renderer reaches agents only through the agent port (ADR 0001). Take a port as a prop; only src/renderer/src/agent/ipc-client.ts may touch window.crucible.'
         }
       ]
     }
   },
   {
-    // The single exception: the IPC client is the renderer's one adapter over
-    // the preload surface, so it is the one file allowed to name it.
-    files: ['src/renderer/src/agent/ipc-client.ts'],
+    // The IPC client is the renderer's one adapter over the preload surface,
+    // and its test stands in for that surface, so both sit inside the fence.
+    files: ['src/renderer/src/agent/ipc-client.ts', 'src/renderer/src/agent/ipc-client.test.ts'],
     rules: { 'no-restricted-syntax': 'off' }
   },
   {
