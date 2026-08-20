@@ -107,6 +107,8 @@ export function Shell({
   }>({ open: false, tab: 'providers' })
   /** Sessions whose settled history this document has already asked for. */
   const fetched = useRef<Set<SessionId>>(new Set())
+  /** Sessions with a send under way, still waiting on its expansion. */
+  const sending = useRef<Set<SessionId>>(new Set())
   // Restoring a queued message puts the caret back where the words are.
   const box = useRef<HTMLTextAreaElement>(null)
   // Output can arrive before the id of the run it belongs to does.
@@ -472,6 +474,14 @@ export function Shell({
       deliver(text)
       return
     }
+    // Plain text spends its draft in the handler that read it, so a repeated
+    // Enter finds nothing left to send. An expansion only clears the draft a
+    // round trip later, and every Enter, Send or Steer that lands meanwhile
+    // would read the same draft and send it again; keyboard auto-repeat lands
+    // several. So the send is claimed here instead, before the wait, in a ref
+    // because the next keydown can run before React re-renders.
+    if (sending.current.has(id)) return
+    sending.current.add(id)
     void commands
       .expand(active.path, text)
       .then((expansion) => {
@@ -490,6 +500,10 @@ export function Shell({
       })
       // Nothing sends, and the draft stays exactly where it is.
       .catch(report)
+      // Delivered or refused, the draft may be sent again.
+      .finally(() => {
+        sending.current.delete(id)
+      })
   }
 
   /** Enter: a prompt while idle, a steering message while the session works. */

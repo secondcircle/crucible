@@ -10,6 +10,7 @@ import { Shell } from './Shell'
 import {
   createScriptedCommands,
   SCRIPTED_COMMANDS,
+  type ScriptedCommand,
   type ScriptedCommands
 } from './testing/scripted-commands'
 import { createScriptedPort, oneSession, type ScriptedPort } from './testing/scripted-port'
@@ -291,6 +292,46 @@ describe('sending a command', () => {
     await settled()
 
     expect(port.calls.filter((call) => call.op === 'prompt')).toHaveLength(1)
+  })
+
+  it('queues one steering message when Enter repeats before the expansion resolves', async () => {
+    const { port } = await shell()
+    await type('first')
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Send' }))
+    })
+    await settled()
+
+    await type('/review https://example.invalid/pr/7')
+    await act(async () => {
+      fireEvent.keyDown(box(), { key: 'Enter' })
+      fireEvent.keyDown(box(), { key: 'Enter' })
+    })
+    await settled()
+
+    expect(port.calls.filter((call) => call.op === 'steer')).toHaveLength(1)
+    expect(port.queueOf('s1')?.steering).toEqual([
+      'Review the pull request at https://example.invalid/pr/7.'
+    ])
+  })
+
+  it('sends the draft on the next Enter after an expansion was refused', async () => {
+    const gone: ScriptedCommand = {
+      name: 'gone',
+      description: 'A file that will not be there',
+      origin: 'user'
+    }
+    const { port, commands } = await shell(createScriptedCommands([gone]))
+
+    await type('/gone now')
+    await press('Enter')
+    expect(screen.getByRole('alert')).toBeInTheDocument()
+
+    // Whoever removed the file put it back; the draft never left the composer.
+    commands.commands = [{ ...gone, body: 'Here after all: $@' }]
+    await press('Enter')
+
+    expect(sent(port, 'prompt')).toEqual(['s1', 'Here after all: now'])
   })
 
   it('keeps the draft and says why when the file has gone', async () => {
