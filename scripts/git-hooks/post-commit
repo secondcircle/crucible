@@ -1,15 +1,5 @@
 #!/bin/bash
-# The gap post-merge leaves: a merge that stops on conflicts is concluded by
-# `git commit`, and git then fires this hook instead of post-merge. Same
-# guard, plus one more — only a merge commit (a second parent exists) counts,
-# so ordinary commits on main install nothing.
-#
-# Wired by: git config core.hooksPath scripts/git-hooks
-branch="$(git rev-parse --abbrev-ref HEAD 2>/dev/null)"
-[ "$branch" = "main" ] || exit 0
-git rev-parse -q --verify HEAD^2 >/dev/null || exit 0
-
-root="$(git rev-parse --show-toplevel)"
-mkdir -p "$root/logs"
-echo "post-commit: merge landed on main — installing the stable app in the background → logs/install-stable.log"
-(cd "$root" && nohup npm run install:stable > logs/install-stable.log 2>&1 &)
+# A commit landing on main: an ordinary fix committed straight onto it, a
+# cherry-pick, a revert, or a merge that stopped on conflicts and was
+# concluded by `git commit` (git fires this hook, not post-merge).
+exec "$(dirname "$0")/install-if-main.sh"

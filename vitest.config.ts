@@ -8,6 +8,8 @@ export default defineConfig({
     // with `// @vitest-environment node`.
     environment: 'jsdom',
     setupFiles: ['./vitest.setup.ts'],
-    include: ['src/**/*.test.{ts,tsx}']
+    // scripts/ is in because the git hooks decide when the human's installed
+    // app is rebuilt, and nothing else would catch them breaking.
+    include: ['src/**/*.test.{ts,tsx}', 'scripts/**/*.test.ts']
   }
 })
