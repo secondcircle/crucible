@@ -5,7 +5,7 @@
 import { act, fireEvent, render, screen, within } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 import { Shell } from './Shell'
-import { createScriptedPort, oneSession, type ScriptedPort } from './testing/scripted-port'
+import { createScriptedPort, oneSession, SESSION_TITLE, type ScriptedPort } from './testing/scripted-port'
 import { createScriptedWorkspace } from './testing/scripted-workspace'
 import { createScriptedCommands } from './testing/scripted-commands'
 import { sessionRows, sessionsShown } from './testing/sidebar'
@@ -108,7 +108,13 @@ describe('workspaces', () => {
       activeWorkspaceId: 'w1',
       sessions: [
         { id: 's1', workspaceId: 'w1', createdAt: '2024-05-01T10:00:00.000Z', working: false },
-        { id: 's2', workspaceId: 'w2', createdAt: '2024-05-01T11:00:00.000Z', working: true }
+        {
+          id: 's2',
+          workspaceId: 'w2',
+          createdAt: '2024-05-01T11:00:00.000Z',
+          working: true,
+          title: SESSION_TITLE
+        }
       ],
       activeSessionId: 's1'
     })
@@ -129,7 +135,7 @@ describe('workspaces', () => {
     })
 
     expect(sessionRows()).toHaveLength(2)
-    const working = screen.getByRole('button', { name: /^Session · .*\(working\)$/ })
+    const working = screen.getByRole('button', { name: `${SESSION_TITLE} (working)` })
     await act(async () => {
       fireEvent.click(working)
     })
