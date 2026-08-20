@@ -35,12 +35,19 @@ use` and is not debuggable, and `agent-browser connect 9222` silently attaches
 to the *first* app. Quit the stale one before connecting.
 
 `npm run dev` is the **fake** launch flavor: canned replies, no paid call, and
-what every agent-driven check should use.
+what every agent-driven check should use. That is the fake flavor's *only*
+purpose — UI checks and anything else that doesn't need a real model. The
+human never uses it.
 
 ## The paid flavor, and the two scripts that use it
 
 `npm run dev:sdk` is the same app and the same window on the real π SDK
-(`CRUCIBLE_AGENT=sdk`), so a turn there costs money. `npm run prove:sdk` is the
+(`CRUCIBLE_AGENT=sdk`), so a turn there costs money. When the human wants to
+try out code that isn't installed yet — a worktree, a branch, uncommitted
+changes — this is the flavor to launch for them, by default and without
+asking. They will actually be using the app, so canned replies are useless to
+them; a human test means a real environment. The human launching (or asking
+for) `dev:sdk` *is* the spending authorization for that session. `npm run prove:sdk` is the
 one-shot proof that the SDK adapter still works: one short turn, headless,
 printing the model id and the date, exiting non-zero unless it saw
 `turn_started`, a `text_delta` and `turn_ended` within 60 seconds. Run it only
