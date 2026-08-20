@@ -110,3 +110,16 @@ _Avoid_: pane, exhibit slot, window.
 **Session reset**:
 Replacement of a session's conversation with a fresh stock π session while keeping the same sidebar identity.
 _Avoid_: new session, clear chat.
+
+**Role prompt**:
+The replaceable identity of an agent Crucible starts — what kind of agent it
+is and the generic guidelines of that job. Authored by Crucible and passed as
+a full override; π's stock prompt is never used. One role exists today: the
+interactive coding agent.
+_Avoid_: system prompt (the composed whole), base prompt.
+
+**Standing prompt**:
+The text appended to every agent Crucible starts, whatever its role prompt
+says — things true of every agent regardless of its job. Day one it is the
+communication style block, nothing else.
+_Avoid_: global prompt, append slot, junk drawer.

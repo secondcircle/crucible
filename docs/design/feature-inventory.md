@@ -91,10 +91,11 @@ names the milestone from `m1-parity-core.md`. **never** means ruled out.
 
 - Everything visible is backed by real state or a port event; the fake
   adapter labels itself `fake/deterministic` (A27).
-- Every capability has a GUI affordance that works with mouse or dictation;
-  typed shortcuts (slash commands, composer prefixes) may exist as
-  accelerators but are never the only path (re-ruled 2026-08-19 — the earlier
-  "no slash commands, ever" was an over-interpretation).
+- Typed prefixes (slash commands, `@`, `!`) are legitimate paths on their
+  own. A GUI control for a capability exists only where an align ruling and a
+  mock say so, case by case — never by blanket principle (re-ruled
+  2026-08-20; the earlier "every capability gets a mouse/dictation
+  affordance" rule was taken literally and bred unasked-for UI).
 - The sidebar is curated, never a projection of adapter history (A20).
 - π storage never crosses the agent port (A28, ADR 0004).
 - The shell ships no workflow-system features (Q6b firewall).
