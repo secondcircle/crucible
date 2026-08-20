@@ -45,6 +45,25 @@ export interface QueueState {
   readonly followUp: readonly string[]
 }
 
+/** One entry in the context panel. */
+export type TabId = string
+
+export type ExhibitKind = 'html' | 'markdown'
+
+export interface PanelTab {
+  readonly id: TabId
+  readonly title: string
+  readonly kind: ExhibitKind
+  /** ISO of the latest show; a change means the body should be re-fetched. */
+  readonly shownAt: string
+}
+
+export interface PanelState {
+  /** Show order, oldest first. Never empty: an empty panel is an absent one. */
+  readonly tabs: readonly PanelTab[]
+  readonly activeTabId: TabId
+}
+
 export interface SessionState {
   readonly id: SessionId
   readonly workspaceId: WorkspaceId
@@ -58,6 +77,9 @@ export interface SessionState {
   readonly usage?: { readonly usedTokens: number; readonly contextWindow: number }
   /** Absent when nothing is queued. */
   readonly queue?: QueueState
+  // The context panel's tabs, folded in exactly as the queue is. Absent when
+  // the session has no tabs, which is what makes the region vanish.
+  readonly panel?: PanelState
 }
 
 export interface ShellSnapshot {
@@ -210,6 +232,10 @@ export type PortEvent =
       readonly sessionId: SessionId
       readonly messages: readonly QueuedMessage[]
     }
+  // A tab was shown, new or refreshed, in any session. It follows the `state`
+  // event carrying that show, so a listener already holds the snapshot this
+  // names. Nothing is said when the user switches or closes a tab.
+  | { readonly type: 'panel_shown'; readonly sessionId: SessionId; readonly tabId: TabId }
   | { readonly type: 'turn_ended'; readonly sessionId: SessionId; readonly turnId: TurnId }
   | { readonly type: 'turn_cancelled'; readonly sessionId: SessionId; readonly turnId: TurnId }
   | {
@@ -281,6 +307,14 @@ export interface AgentPort {
   followUp(sessionId: SessionId, text: string): Promise<void>
   /** By content, because delivery may have shifted any index. */
   dequeue(sessionId: SessionId, kind: QueuedKind, text: string): Promise<boolean>
+
+  /** User clicked a tab. Unknown ids are a harmless no-op. */
+  activateTab(sessionId: SessionId, tabId: TabId): Promise<void>
+  /** User closed a tab. Unknown ids are a harmless no-op. */
+  closeTab(sessionId: SessionId, tabId: TabId): Promise<void>
+  // The exhibit's body, read at call time. The tab's path never crosses: the
+  // renderer knows a tab by its id and by nothing else.
+  exhibit(sessionId: SessionId, tabId: TabId): Promise<{ readonly body: string }>
 
   /** Harmless when there is nothing to stop. */
   cancel(sessionId: SessionId): Promise<void>

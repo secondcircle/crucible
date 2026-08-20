@@ -7,6 +7,7 @@ import type {
   ConversationAdapter,
   ResumeRequest
 } from './adapter'
+import type { PanelToolName, PanelTools } from './panel-tools'
 import type {
   BashRunShare,
   HistoryMatch,
@@ -93,6 +94,34 @@ const LONE_CALL: ScriptedCall = {
   ok: true,
   chunks: ['m1-parity-core.md\nmock-a-ember.html\n']
 }
+
+// What the fake needs to drive the context panel: the three tool behaviors,
+// which are the shared panel model's, and the two fixture exhibits it shows.
+// Absent, every prompt runs the standard script and no panel exists.
+export interface FakePanel {
+  readonly tools: PanelTools
+  /** Absolute paths; the fixtures ship in the repository. */
+  readonly exhibits: { readonly buildPlan: string; readonly benchmark: string }
+}
+
+// One call the panel script makes. `answer` is the model's, so the fake never
+// writes a result text of its own.
+interface PanelCall {
+  readonly name: PanelToolName
+  readonly summary: string
+  readonly answer: () => string
+}
+
+// Said after a panel turn, so the reply names where the work went rather than
+// leaving the chat silent. A closing turn gets its own line, because "that is
+// in the panel now" would be untrue of a tab that was just closed.
+const PANEL_SHOWN_DELTAS: readonly string[] = [
+  'That is in the context panel now. Nothing was sent anywhere and nothing was paid for it.'
+]
+
+const PANEL_CLOSED_DELTAS: readonly string[] = [
+  'That is what the context panel says now. Nothing was sent anywhere and nothing was paid for it.'
+]
 
 const REPLY_DELTAS: readonly string[] = [
   'The fake adapter answers every prompt with this same scripted turn.',
@@ -220,15 +249,24 @@ function clip(text: string): string {
   return line.length <= PREVIEW_LIMIT ? line : `${line.slice(0, PREVIEW_LIMIT)}…`
 }
 
+// Spelled out rather than imported: this module loads in the renderer's test
+// build too, where `node:path` does not exist.
+function fileName(path: string): string {
+  return path.split(/[\\/]/).pop() ?? path
+}
+
 function preferredLevel(preferred: ThinkingLevel | undefined): ThinkingLevel {
   return preferred !== undefined && FAKE_MODEL.thinkingLevels.includes(preferred) ? preferred : 'low'
 }
 
 export function createFakeAdapter({
-  pauseMs = DEFAULT_PAUSE_MS
+  pauseMs = DEFAULT_PAUSE_MS,
+  panel
 }: {
   /** Zero runs the script on microtasks. */
   readonly pauseMs?: number
+  /** Absent leaves the standard script the answer to every prompt. */
+  readonly panel?: FakePanel
 } = {}): ConversationAdapter {
   const listeners = new Set<AdapterEventListener>()
   const conversations = new Map<string, Conversation>()
@@ -315,6 +353,44 @@ export function createFakeAdapter({
     const bound = sessions.get(sessionId)
     if (bound === undefined) throw new Error('That session is not bound to a conversation.')
     return bound
+  }
+
+  // Panel turns are chosen by what the prompt says, checked in this order so
+  // that `close the panel` is never taken for the plain `panel` trigger. What
+  // each call answers is the shared model's, never a text written here.
+  function panelScript(
+    bound: Bound,
+    sessionId: SessionId,
+    text: string
+  ): readonly PanelCall[] | undefined {
+    if (panel === undefined) return undefined
+    const { tools, exhibits } = panel
+    const asked = text.toLowerCase()
+    const { workspacePath } = bound.conversation
+
+    const show = (path: string, title: string): PanelCall => ({
+      name: 'panel_show',
+      summary: `${fileName(path)} · "${title}"`,
+      answer: () => tools.show(sessionId, workspacePath, path, title)
+    })
+    const close = (id: string): PanelCall => ({
+      name: 'panel_close',
+      summary: id,
+      answer: () => tools.close(sessionId, id)
+    })
+
+    if (asked.includes('close the panel')) return [close('all')]
+    // Fails with the model's unknown-id text when that tab is not open, which
+    // is the scripted failure path.
+    if (asked.includes('tidy the panel')) return [close('benchmark')]
+    if (asked.includes('panel')) {
+      return [
+        show(exhibits.buildPlan, 'Build plan'),
+        show(exhibits.benchmark, 'Benchmark'),
+        { name: 'panel_list', summary: 'open tabs', answer: () => tools.list(sessionId) }
+      ]
+    }
+    return undefined
   }
 
   function emitQueue(bound: Bound, sessionId: SessionId): void {
@@ -428,7 +504,9 @@ export function createFakeAdapter({
     bound: Bound,
     sessionId: SessionId,
     turnId: TurnId,
-    opening: TranscriptItem
+    opening: TranscriptItem,
+    /** A panel turn instead of the standard script, when one was matched. */
+    panelCalls?: readonly PanelCall[]
   ): Promise<void> {
     let stopped: 'cancelled' | 'disposed' | undefined
     let timer: ReturnType<typeof setTimeout> | undefined
@@ -524,6 +602,40 @@ export function createFakeAdapter({
         text: thinking,
         seconds: Math.max(1, Math.round((Date.now() - startedAt) / 1000))
       })
+      return true
+    }
+
+    // The panel's tools answer at once and stream nothing, so a call is its
+    // start and its end, carrying the model's own text as the output.
+    async function panelCall(scripted: PanelCall, number: number): Promise<boolean> {
+      settleSpoken()
+      const callId = `${turnId}-call-${number}`
+      await beat()
+      if (stopped !== undefined) return false
+      emit({
+        type: 'tool_started',
+        sessionId,
+        turnId,
+        callId,
+        name: scripted.name,
+        summary: scripted.summary
+      })
+
+      await beat()
+      if (stopped !== undefined) return false
+      let ok = true
+      let output: string
+      try {
+        output = scripted.answer()
+      } catch (cause) {
+        // The failure path is the model's own text, which is what a real
+        // failed call would carry.
+        ok = false
+        output = cause instanceof Error ? cause.message : String(cause)
+      }
+      emit({ type: 'tool_ended', sessionId, turnId, callId, ok, output })
+      counted += output
+      pending.push({ kind: 'tool', name: scripted.name, summary: scripted.summary, ok, output })
       return true
     }
 
@@ -632,8 +744,33 @@ export function createFakeAdapter({
       }
     }
 
+    // Every beat is a cancellation point here too, and each call is followed
+    // by the same boundary a steering message lands at.
+    async function panelTurn(calls: readonly PanelCall[]): Promise<void> {
+      let number = 0
+      for (const scripted of calls) {
+        number += 1
+        if (!(await panelCall(scripted, number))) return finish()
+        if (!(await boundary())) return finish()
+      }
+      const closing = calls.at(-1)?.name === 'panel_close' ? PANEL_CLOSED_DELTAS : PANEL_SHOWN_DELTAS
+      if (!(await say(closing))) return finish()
+
+      // The same ending the standard script has: no turn is over while a
+      // message is still queued behind it.
+      for (;;) {
+        if (!(await drain())) return finish()
+        await beat()
+        if (stopped !== undefined) return finish()
+        if (bound.steering.length + bound.followUp.length + bound.shares.length === 0) break
+      }
+      finish()
+    }
+
     async function script(): Promise<void> {
       emit({ type: 'turn_started', sessionId, turnId })
+
+      if (panelCalls !== undefined) return panelTurn(panelCalls)
 
       if (!(await think())) return finish()
 
@@ -854,13 +991,19 @@ export function createFakeAdapter({
       images?: readonly ImageAttachment[]
     ): Promise<void> {
       const bound = requireBound(sessionId)
-      return run(bound, sessionId, turnId, {
-        kind: 'user',
-        text,
-        // Only what was genuinely sent is kept, so a restored transcript shows
-        // the thumbnails the live one did and no others.
-        ...(images === undefined || images.length === 0 ? {} : { images: [...images] })
-      })
+      return run(
+        bound,
+        sessionId,
+        turnId,
+        {
+          kind: 'user',
+          text,
+          // Only what was genuinely sent is kept, so a restored transcript shows
+          // the thumbnails the live one did and no others.
+          ...(images === undefined || images.length === 0 ? {} : { images: [...images] })
+        },
+        panelScript(bound, sessionId, text)
+      )
     },
 
     // Nothing is queued into a session with no live run, so the caller is told

@@ -1,5 +1,5 @@
 import type { ConversationAdapter } from '../../shared/agent/adapter'
-import { createFakeAdapter } from '../../shared/agent/fake-adapter'
+import { createFakeAdapter, type FakePanel } from '../../shared/agent/fake-adapter'
 import type { LogSink } from '../log/sink'
 import { createSdkAdapter } from './sdk-adapter'
 
@@ -13,7 +13,9 @@ export interface SelectedAdapter {
 
 // The only reader of `CRUCIBLE_AGENT`, so no caller has to know the variable
 // exists. The fallback to the fake is silent, so every launch records it.
-export function selectAdapter(log: LogSink): SelectedAdapter {
+// `panel` is the one context panel of the launch: whichever flavor answers,
+// its three tools are that same model's (ADR 0008).
+export function selectAdapter(log: LogSink, panel: FakePanel): SelectedAdapter {
   const requested = process.env.CRUCIBLE_AGENT
   const asked = requested === undefined || requested === '' ? null : requested
 
@@ -29,6 +31,9 @@ export function selectAdapter(log: LogSink): SelectedAdapter {
 
   return {
     flavor,
-    adapter: flavor === 'sdk' ? createSdkAdapter() : createFakeAdapter()
+    adapter:
+      flavor === 'sdk'
+        ? createSdkAdapter({ panel: panel.tools })
+        : createFakeAdapter({ panel })
   }
 }

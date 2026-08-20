@@ -59,6 +59,25 @@ describe('an operation', () => {
     expect(surface.requests).toEqual([{ op: 'addWorkspace', args: [] }])
   })
 
+  it('sends the panel operations by their port names, and brings the body back', async () => {
+    const surface = install((request) =>
+      request.op === 'exhibit'
+        ? { ok: true, value: { body: '# the plan' } }
+        : { ok: true, value: undefined }
+    )
+    const port = createIpcClient()
+
+    await port.activateTab('session-1', 'plan')
+    await port.closeTab('session-1', 'report')
+    await expect(port.exhibit('session-1', 'plan')).resolves.toEqual({ body: '# the plan' })
+
+    expect(surface.requests).toEqual([
+      { op: 'activateTab', args: ['session-1', 'plan'] },
+      { op: 'closeTab', args: ['session-1', 'report'] },
+      { op: 'exhibit', args: ['session-1', 'plan'] }
+    ])
+  })
+
   it('becomes a rejection carrying main\u2019s own sentence when it is refused', async () => {
     install(() => ({ ok: false, message: 'That session is already working.' }))
     const port = createIpcClient()

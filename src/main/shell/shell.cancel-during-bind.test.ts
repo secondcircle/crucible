@@ -9,8 +9,17 @@ import { afterEach, beforeEach, expect, it } from 'vitest'
 import type { BindRequest, Binding, ConversationAdapter } from '../../shared/agent/adapter'
 import { createFakeAdapter } from '../../shared/agent/fake-adapter'
 import type { PortEvent } from '../../shared/agent/port'
+import { createPanelModel, type PanelModel } from '../panel/model'
+import { storePanelPersistence } from '../panel/store-persistence'
 import { createShell, type Shell } from './shell'
-import { createShellStore } from './store'
+import { createShellStore, type ShellStore } from './store'
+
+// The shell's panel is the app's: one model over the same store file, so what
+// a panel test asserts here is what a launch does.
+function over(path: string): { store: ShellStore; panel: PanelModel } {
+  const store = createShellStore(path)
+  return { store, panel: createPanelModel({ persistence: storePanelPersistence(store) }) }
+}
 
 let directory: string
 let shell: Shell | undefined
@@ -31,7 +40,7 @@ it('a cancel handled while the turn is still binding ends the turn as cancelled'
 
   // First launch: one workspace, one session, persisted with its token.
   const first = createShell({
-    store: createShellStore(file),
+    ...over(file),
     adapter: createFakeAdapter({ pauseMs: 0 }),
     pickFolder: async () => '/repos/crucible'
   })
@@ -55,7 +64,7 @@ it('a cancel handled while the turn is still binding ends the turn as cancelled'
     }
   }
   shell = createShell({
-    store: createShellStore(file),
+    ...over(file),
     adapter: slowToBind,
     pickFolder: async () => null
   })

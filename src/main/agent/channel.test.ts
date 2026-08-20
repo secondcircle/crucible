@@ -121,6 +121,9 @@ function stubShell(answers: Partial<Record<string, unknown>> = {}): {
     steer: op('steer'),
     followUp: op('followUp'),
     dequeue: op('dequeue'),
+    activateTab: op('activateTab'),
+    closeTab: op('closeTab'),
+    exhibit: op('exhibit'),
     cancel: op('cancel'),
     dispose: () => {
       record.disposals += 1
@@ -183,6 +186,38 @@ describe('what crosses the request channel', () => {
     })
     expect(await request('activateSession', 42)).toMatchObject({ ok: false })
     expect(stub.asked).toEqual([])
+  })
+
+  it('serves the panel operations, and refuses arguments that are not text', async () => {
+    const stub = stubShell({ exhibit: { body: '# the plan' } })
+    serveAgentChannel(stub.shell, stubWindow().window)
+
+    expect(await request('activateTab', 's', 'plan')).toEqual({ ok: true, value: undefined })
+    expect(await request('closeTab', 's', 'plan')).toEqual({ ok: true, value: undefined })
+    expect(await request('exhibit', 's', 'plan')).toEqual({
+      ok: true,
+      value: { body: '# the plan' }
+    })
+    expect(await request('exhibit', 's')).toMatchObject({ ok: false })
+    expect(await request('closeTab', 's', 7)).toMatchObject({ ok: false })
+
+    expect(stub.asked).toEqual([
+      { op: 'activateTab', args: ['s', 'plan'] },
+      { op: 'closeTab', args: ['s', 'plan'] },
+      { op: 'exhibit', args: ['s', 'plan'] }
+    ])
+  })
+
+  it('carries a failed exhibit read back as the sentence main wrote', async () => {
+    const stub = stubShell({
+      exhibit: new Error('That exhibit could not be read: plan.md')
+    })
+    serveAgentChannel(stub.shell, stubWindow().window)
+
+    expect(await request('exhibit', 's', 'plan')).toEqual({
+      ok: false,
+      message: 'That exhibit could not be read: plan.md'
+    })
   })
 
   it('serves the queue operations, and refuses a queue it cannot name', async () => {

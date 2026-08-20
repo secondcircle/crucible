@@ -5,7 +5,8 @@ import type {
   ModelRuntime,
   SessionManager,
   SessionTreeNode,
-  SettingsManager
+  SettingsManager,
+  ToolDefinition
 } from '@earendil-works/pi-coding-agent'
 import type {
   AdapterEvent,
@@ -34,6 +35,7 @@ import type {
 // Spelled with their extensions so plain Node can load this module too: its
 // ESM resolver does no extension guessing.
 import { summarizeActivity } from '../../shared/agent/activity.ts'
+import { PANEL_TOOLS, type PanelTools } from '../../shared/agent/panel-tools.ts'
 import { displaySafeMessage } from './adapter-error.ts'
 import { createEventMapper } from './sdk-events.ts'
 import {
@@ -72,7 +74,13 @@ const HISTORY_LIMIT = 50
 
 const PREVIEW_LIMIT = 140
 
-export function createSdkAdapter(): ConversationAdapter {
+export function createSdkAdapter({
+  panel
+}: {
+  // The same model the fake's scripts call and the same model the shell reads:
+  // the tools registered below are its three behaviors and nothing more.
+  readonly panel: PanelTools
+}): ConversationAdapter {
   const listeners = new Set<AdapterEventListener>()
   const sessions = new Map<SessionId, Bound>()
   const resources = new Map<string, Promise<WorkspaceResources>>()
@@ -143,7 +151,45 @@ export function createSdkAdapter(): ConversationAdapter {
     return found
   }
 
+  // π's own tool registration, one set per session, each `execute` delegating
+  // to the shared panel model with this session's identity and folder.
+  function panelCustomTools(sessionId: SessionId, workspacePath: string): ToolDefinition[] {
+    return PANEL_TOOLS.map((tool): ToolDefinition => {
+      // The JSON Schema a required-string object compiles to, written out so
+      // this module needs no schema library beside the SDK's.
+      const parameters = {
+        type: 'object',
+        required: tool.parameters.map((parameter) => parameter.name),
+        properties: Object.fromEntries(
+          tool.parameters.map((parameter) => [
+            parameter.name,
+            { type: 'string', description: parameter.description }
+          ])
+        )
+      } as unknown as ToolDefinition['parameters']
+
+      return {
+        name: tool.name,
+        label: tool.label,
+        description: tool.description,
+        ...(tool.guidelines === undefined ? {} : { promptGuidelines: [...tool.guidelines] }),
+        parameters,
+        // A model error propagates: π then reports a failed call carrying the
+        // exact text the panel model built.
+        async execute(_callId: string, params: unknown) {
+          const given = (params ?? {}) as { path?: string; title?: string; id?: string }
+          if (tool.name === 'panel_show') {
+            return said(panel.show(sessionId, workspacePath, given.path ?? '', given.title ?? ''))
+          }
+          if (tool.name === 'panel_close') return said(panel.close(sessionId, given.id ?? ''))
+          return said(panel.list(sessionId))
+        }
+      }
+    })
+  }
+
   async function open(
+    sessionId: SessionId,
     workspacePath: string,
     sessionManager: SessionManager,
     preferred?: { model?: ModelId; thinkingLevel?: ThinkingLevel }
@@ -157,7 +203,8 @@ export function createSdkAdapter(): ConversationAdapter {
       sessionManager,
       settingsManager,
       resourceLoader,
-      modelRuntime: await runtime()
+      modelRuntime: await runtime(),
+      customTools: panelCustomTools(sessionId, workspacePath)
     }
 
     if (preferred?.model !== undefined) {
@@ -398,6 +445,7 @@ export function createSdkAdapter(): ConversationAdapter {
           // No preference is passed: the session's own file already carries
           // the model and thinking level it was left on.
           session = await open(
+            request.sessionId,
             request.workspacePath,
             pi.SessionManager.open(request.token, undefined, request.workspacePath)
           )
@@ -409,10 +457,15 @@ export function createSdkAdapter(): ConversationAdapter {
         }
       }
 
-      session ??= await open(request.workspacePath, pi.SessionManager.create(request.workspacePath), {
-        model: request.preferredModel,
-        thinkingLevel: request.preferredThinkingLevel
-      })
+      session ??= await open(
+        request.sessionId,
+        request.workspacePath,
+        pi.SessionManager.create(request.workspacePath),
+        {
+          model: request.preferredModel,
+          thinkingLevel: request.preferredThinkingLevel
+        }
+      )
 
       const bound: Bound = {
         session,
@@ -435,6 +488,7 @@ export function createSdkAdapter(): ConversationAdapter {
       close(previous)
 
       const session = await open(
+        sessionId,
         bound.workspacePath,
         pi.SessionManager.create(bound.workspacePath),
         {
@@ -456,6 +510,7 @@ export function createSdkAdapter(): ConversationAdapter {
       }
 
       const session = await open(
+        request.sessionId,
         request.workspacePath,
         pi.SessionManager.open(request.ref, undefined, request.workspacePath)
       )
@@ -687,6 +742,12 @@ export function createSdkAdapter(): ConversationAdapter {
       }
     }
   }
+}
+
+// π's tool result shape: one text part, which is the panel model's own answer,
+// and no structured details beside it.
+function said(text: string): { content: { type: 'text'; text: string }[]; details: unknown } {
+  return { content: [{ type: 'text', text }], details: {} }
 }
 
 // The wire format, minted once per share: the id is what tells this run's

@@ -1,7 +1,8 @@
 import { randomUUID } from 'node:crypto'
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname } from 'node:path'
-import type { ModelId, SessionId, ThinkingLevel, WorkspaceId } from '../../shared/agent/port'
+import type { ExhibitKind, ModelId, SessionId, ThinkingLevel, WorkspaceId } from '../../shared/agent/port'
+import type { StoredPanel, StoredPanelTab } from '../panel/model'
 
 // One store above both adapters, so the launch flavors can never disagree
 // about what the sidebar holds. Its file location is an argument for tests.
@@ -25,6 +26,9 @@ export interface StoredSession {
   /** The last model and level the adapter reported for this session. */
   readonly model?: ModelId
   readonly thinkingLevel?: ThinkingLevel
+  // The session's context panel. It lives inside the session record, so
+  // removing the session forgets its tabs with it.
+  readonly panel?: StoredPanel
 }
 
 export interface ShellStoreState {
@@ -207,13 +211,23 @@ function load(path: string): ShellStoreState {
   const workspaces = asArray<StoredWorkspace>(file.workspaces).filter(
     (workspace) => typeof workspace?.id === 'string' && typeof workspace?.path === 'string'
   )
-  const sessions = asArray<StoredSession>(file.sessions).filter(
-    (session) =>
-      typeof session?.id === 'string' &&
-      typeof session?.workspaceId === 'string' &&
-      typeof session?.createdAt === 'string' &&
-      workspaces.some((workspace) => workspace.id === session.workspaceId)
-  )
+  const sessions = asArray<StoredSession>(file.sessions)
+    .filter(
+      (session) =>
+        typeof session?.id === 'string' &&
+        typeof session?.workspaceId === 'string' &&
+        typeof session?.createdAt === 'string' &&
+        workspaces.some((workspace) => workspace.id === session.workspaceId)
+    )
+    // Panel data that does not read as panel data loads as absent, exactly as
+    // an unreadable file does: a lost tab is recoverable, a launch that will
+    // not start is not.
+    .map((session) => {
+      const panel = readPanel((session as { panel?: unknown }).panel)
+      const rest = { ...session }
+      delete rest.panel
+      return panel === undefined ? rest : { ...rest, panel }
+    })
   const activeSessionByWorkspace =
     typeof file.activeSessionByWorkspace === 'object' && file.activeSessionByWorkspace !== null
       ? (file.activeSessionByWorkspace as Record<WorkspaceId, SessionId>)
@@ -232,4 +246,32 @@ function load(path: string): ShellStoreState {
 
 function asArray<T>(value: unknown): T[] {
   return Array.isArray(value) ? (value as T[]) : []
+}
+
+const KINDS: readonly ExhibitKind[] = ['html', 'markdown']
+
+function readPanel(value: unknown): StoredPanel | undefined {
+  if (typeof value !== 'object' || value === null) return undefined
+  const { tabs, activeTabId, turn } = value as {
+    tabs?: unknown
+    activeTabId?: unknown
+    turn?: unknown
+  }
+  if (!Array.isArray(tabs) || typeof turn !== 'number') return undefined
+  if (activeTabId !== null && typeof activeTabId !== 'string') return undefined
+  if (!tabs.every(isPanelTab)) return undefined
+  return { tabs: tabs as StoredPanelTab[], activeTabId, turn }
+}
+
+function isPanelTab(value: unknown): boolean {
+  if (typeof value !== 'object' || value === null) return false
+  const tab = value as Record<string, unknown>
+  return (
+    typeof tab.id === 'string' &&
+    typeof tab.title === 'string' &&
+    typeof tab.path === 'string' &&
+    typeof tab.shownAt === 'string' &&
+    typeof tab.shownTurn === 'number' &&
+    KINDS.includes(tab.kind as ExhibitKind)
+  )
 }

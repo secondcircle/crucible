@@ -2,6 +2,7 @@
 // spend money. Nothing it prints could carry a credential.
 import type { AdapterEvent } from '../src/shared/agent/adapter'
 import { createSdkAdapter } from '../src/main/agent/sdk-adapter.ts'
+import { createPanelModel, memoryPanelPersistence } from '../src/main/panel/model.ts'
 
 const PROMPT = 'Say hello in five words. Do not use any tools.'
 const DEADLINE_MS = 60_000
@@ -12,7 +13,11 @@ function print(line: string): void {
   process.stdout.write(`${line}\n`)
 }
 
-const adapter = createSdkAdapter()
+// A panel of its own, kept in memory: this proof asks for one short turn and
+// has no store to write tabs into.
+const adapter = createSdkAdapter({
+  panel: createPanelModel({ persistence: memoryPanelPersistence() })
+})
 
 print('prove:sdk — Crucible SDK adapter against the real π SDK')
 print(`date:   ${new Date().toISOString()}`)

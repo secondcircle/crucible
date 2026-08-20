@@ -5,6 +5,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { LogRecord } from '../log/sink'
 import { createMemorySink } from '../log/sink'
+import { panelFixtures } from '../panel/fixtures'
+import { createPanelModel, memoryPanelPersistence } from '../panel/model'
 import { selectAdapter } from './select-adapter'
 
 function chooseWith(requested: string | undefined): {
@@ -14,7 +16,10 @@ function chooseWith(requested: string | undefined): {
 } {
   vi.stubEnv('CRUCIBLE_AGENT', requested)
   const sink = createMemorySink()
-  const { adapter, flavor } = selectAdapter(sink)
+  const { adapter, flavor } = selectAdapter(sink, {
+    tools: createPanelModel({ persistence: memoryPanelPersistence() }),
+    exhibits: panelFixtures(process.cwd())
+  })
   expect(sink.lines).toHaveLength(1)
 
   return {

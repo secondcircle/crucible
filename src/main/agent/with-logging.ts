@@ -15,10 +15,13 @@ export function withLogging(shell: Shell, log: LogSink, adapter: string): Shell 
   // Arguments are logged verbatim, prompt text included: a local run log that
   // cannot be read back against what was asked tells a reader nothing. The one
   // exception is `describe`, for arguments no reader wants in full.
+  // `answer` is the same exception for a result nobody wants in full: an
+  // exhibit's body is a whole file, and the log records how big it was.
   function op<A extends unknown[], R>(
     name: string,
     run: (...args: A) => Promise<R>,
-    describe?: (...args: A) => unknown[]
+    describe?: (...args: A) => unknown[],
+    answer?: (result: R) => unknown
   ): (...args: A) => Promise<R> {
     return async (...args: A): Promise<R> => {
       log.append({
@@ -30,7 +33,12 @@ export function withLogging(shell: Shell, log: LogSink, adapter: string): Shell 
       try {
         const result = await run(...args)
         if (result !== undefined) {
-          log.append({ source: 'main', event: `${name}_answered`, adapter, result })
+          log.append({
+            source: 'main',
+            event: `${name}_answered`,
+            adapter,
+            result: answer === undefined ? result : answer(result)
+          })
         }
         return result
       } catch (cause) {
@@ -92,6 +100,16 @@ export function withLogging(shell: Shell, log: LogSink, adapter: string): Shell 
     steer: op('steer', (sessionId, text) => shell.steer(sessionId, text)),
     followUp: op('followUp', (sessionId, text) => shell.followUp(sessionId, text)),
     dequeue: op('dequeue', (sessionId, kind, text) => shell.dequeue(sessionId, kind, text)),
+
+    activateTab: op('activateTab', (sessionId, tabId) => shell.activateTab(sessionId, tabId)),
+    closeTab: op('closeTab', (sessionId, tabId) => shell.closeTab(sessionId, tabId)),
+    exhibit: op(
+      'exhibit',
+      (sessionId, tabId) => shell.exhibit(sessionId, tabId),
+      undefined,
+      ({ body }) => ({ characters: body.length })
+    ),
+
     cancel: op('cancel', (sessionId) => shell.cancel(sessionId)),
 
     dispose: () => {

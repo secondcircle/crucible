@@ -10,6 +10,7 @@ import type {
   SessionId,
   SessionTree,
   ShellSnapshot,
+  TabId,
   ThinkingLevel,
   TranscriptItem,
   TurnId,
@@ -85,6 +86,15 @@ export function createIpcClient(): AgentPort {
     followUp: (sessionId: SessionId, text: string) => call<void>('followUp', sessionId, text),
     dequeue: (sessionId: SessionId, kind: QueuedKind, text: string) =>
       call<boolean>('dequeue', sessionId, kind, text),
+
+    activateTab: (sessionId: SessionId, tabId: TabId) =>
+      call<void>('activateTab', sessionId, tabId),
+    closeTab: (sessionId: SessionId, tabId: TabId) => call<void>('closeTab', sessionId, tabId),
+    // The body is read in main at call time; nothing about where the file sits
+    // crosses back.
+    exhibit: (sessionId: SessionId, tabId: TabId) =>
+      call<{ readonly body: string }>('exhibit', sessionId, tabId),
+
     cancel: (sessionId: SessionId) => call<void>('cancel', sessionId)
   }
 }

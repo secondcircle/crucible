@@ -174,6 +174,12 @@ async function invoke(shell: Shell, request: unknown): Promise<unknown> {
       return shell.followUp(text(0), text(1))
     case 'dequeue':
       return shell.dequeue(text(0), kind(1), text(2))
+    case 'activateTab':
+      return shell.activateTab(text(0), text(1))
+    case 'closeTab':
+      return shell.closeTab(text(0), text(1))
+    case 'exhibit':
+      return shell.exhibit(text(0), text(1))
     case 'cancel':
       return shell.cancel(text(0))
     default:

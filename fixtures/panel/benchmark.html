@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Benchmark</title>
+    <style>
+      body {
+        margin: 0;
+        height: 100vh;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 18px;
+        background: #191419;
+        color: #e8dfe2;
+        font: 14px/1.5 -apple-system, 'Segoe UI', system-ui, sans-serif;
+      }
+      .card {
+        background: #241c23;
+        border: 1px solid #3a2e38;
+        border-radius: 12px;
+        padding: 20px 26px;
+        text-align: center;
+      }
+      .big {
+        font-size: 34px;
+        font-weight: 700;
+        color: #f0a37c;
+      }
+      .lbl {
+        font-size: 11px;
+        text-transform: uppercase;
+        letter-spacing: 0.12em;
+        color: #6b5d66;
+        margin-top: 4px;
+      }
+      .bars {
+        display: flex;
+        gap: 10px;
+        align-items: flex-end;
+        height: 90px;
+      }
+      .bars i {
+        width: 26px;
+        background: linear-gradient(180deg, #f0a37c, #e07a4f);
+        border-radius: 4px 4px 0 0;
+        display: block;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="card">
+      <div class="big" id="score">…</div>
+      <div class="lbl">restore, p95</div>
+    </div>
+    <div class="bars" id="bars"></div>
+    <div class="lbl" id="proof">…</div>
+
+    <script>
+      // Computed here, in the sandboxed frame: if these numbers appear, the
+      // exhibit's own script ran. It has no Node, no IPC and no way to reach
+      // the app around it.
+      const samples = [3.1, 4.4, 3.9, 6.7, 9.2, 7.4]
+      const sorted = [...samples].sort((left, right) => left - right)
+      const p95 = sorted[Math.ceil(sorted.length * 0.95) - 1]
+      document.getElementById('score').textContent = `${p95.toFixed(1)} ms`
+
+      const bars = document.getElementById('bars')
+      const tallest = Math.max(...samples)
+      for (const sample of samples) {
+        const bar = document.createElement('i')
+        bar.style.height = `${Math.round((sample / tallest) * 100)}%`
+        bars.append(bar)
+      }
+
+      document.getElementById('proof').textContent =
+        `${samples.length} samples measured by this page's own script`
+    </script>
+  </body>
+</html>

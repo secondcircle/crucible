@@ -15,6 +15,7 @@ import type {
   SessionState,
   SessionTree,
   ShellSnapshot,
+  TabId,
   ThinkingLevel,
   TranscriptItem,
   TurnId,
@@ -22,6 +23,7 @@ import type {
   WorkspaceId
 } from '../../shared/agent/port'
 import { displaySafeMessage } from '../agent/adapter-error'
+import type { PanelModel } from '../panel/model'
 import type { ShellStore } from './store'
 
 // Turn guards and ordering live here rather than in the UI or an adapter, so
@@ -35,6 +37,9 @@ export interface Shell extends AgentPort {
 export interface ShellOptions {
   readonly store: ShellStore
   readonly adapter: ConversationAdapter
+  // The same model the adapter's panel tools call: panel state crosses the
+  // port from here and from nowhere else (ADR 0008).
+  readonly panel: PanelModel
   /** `null` means the user cancelled the picker. */
   readonly pickFolder: () => Promise<string | null>
   // Lets an agent-driven check reach a chattable state without an OS dialog.
@@ -76,6 +81,7 @@ function queued(queue: QueueState | undefined): boolean {
 export function createShell({
   store,
   adapter,
+  panel,
   pickFolder,
   seedWorkspacePath
 }: ShellOptions): Shell {
@@ -101,6 +107,9 @@ export function createShell({
     const sessions: SessionState[] = store.state.sessions.map((session) => {
       const reported = usage.get(session.id)
       const queue = queues.get(session.id)
+      // Folded exactly as the queue is, and absent when the session has no
+      // tabs, which is what makes the region vanish rather than stand empty.
+      const tabs = panel.state(session.id)
       return {
         id: session.id,
         workspaceId: session.workspaceId,
@@ -109,7 +118,8 @@ export function createShell({
         thinkingLevel: session.thinkingLevel,
         working: live.has(session.id),
         ...(reported === undefined ? {} : { usage: reported }),
-        ...(queued(queue) ? { queue } : {})
+        ...(queued(queue) ? { queue } : {}),
+        ...(tabs === undefined ? {} : { panel: tabs })
       }
     })
 
@@ -347,6 +357,9 @@ export function createShell({
       kind: 'text',
       text
     })
+    // A queued message with no turn left to take it becomes the next prompt,
+    // and a prompt is a user instruction whatever key sent it.
+    panel.bumpTurn(sessionId)
   }
 
   // A run is never lost and never queued: either a live turn takes it at its
@@ -471,6 +484,16 @@ export function createShell({
     emit(event)
   })
 
+  // Panel changes are announced as a fresh snapshot, and a show says so after
+  // it, so a listener already holds the state the event names. Shows in a
+  // background session are announced too: nothing about the panel assumes the
+  // session is the active one.
+  panel.onChange(({ sessionId, shownTabId }) => {
+    if (store.session(sessionId) === undefined) return
+    emitState()
+    if (shownTabId !== undefined) emit({ type: 'panel_shown', sessionId, tabId: shownTabId })
+  })
+
   // Seeded exactly as a picked folder would be, so it also becomes active.
   if (seedWorkspacePath !== undefined) store.addWorkspace(seedWorkspacePath)
 
@@ -516,6 +539,9 @@ export function createShell({
         bindings.delete(session.id)
         usage.delete(session.id)
         queues.delete(session.id)
+        // The panel record leaves with the session record below; this is the
+        // memory of it.
+        panel.forget(session.id)
       }
       store.removeWorkspace(id)
       emitState()
@@ -577,6 +603,9 @@ export function createShell({
       // A queue has nowhere to be restored to once the entry holding it is
       // gone.
       queues.delete(id)
+      // Removing a session forgets its tabs with it: the persisted copy went
+      // out with the session record.
+      panel.forget(id)
       emitState()
     },
 
@@ -595,6 +624,9 @@ export function createShell({
       // to saying nothing rather than keeping the old session's numbers.
       usage.delete(id)
       queues.delete(id)
+      // A fresh conversation never inherits a ghost panel, so the tabs and the
+      // turn counter go with the old one.
+      panel.reset(id)
       emitState()
     },
 
@@ -718,7 +750,13 @@ export function createShell({
       text: string,
       images?: readonly ImageAttachment[]
     ): Promise<TurnId> {
-      return beginTurn(sessionId, (turnId) => adapter.prompt(sessionId, turnId, text, images))
+      const started = beginTurn(sessionId, (turnId) =>
+        adapter.prompt(sessionId, turnId, text, images)
+      )
+      // One user instruction, one turn on the panel's counter: it is what
+      // "shown N turns ago" counts.
+      panel.bumpTurn(sessionId)
+      return started
     },
 
     async shareBashRun(
@@ -743,6 +781,28 @@ export function createShell({
       if (bindings.get(sessionId) === undefined) return false
       await ensureBound(sessionId)
       return adapter.dequeue(sessionId, kind, text)
+    },
+
+    // The user's own panel actions, which reach the shared model and nothing
+    // else: the agent is told nothing and learns the state at its next
+    // panel_list or panel_show.
+    async activateTab(sessionId: SessionId, tabId: TabId): Promise<void> {
+      if (store.session(sessionId) === undefined) return
+      panel.activate(sessionId, tabId)
+    },
+
+    async closeTab(sessionId: SessionId, tabId: TabId): Promise<void> {
+      if (store.session(sessionId) === undefined) return
+      panel.closeTab(sessionId, tabId)
+    },
+
+    async exhibit(sessionId: SessionId, tabId: TabId): Promise<{ body: string }> {
+      requireSession(sessionId)
+      try {
+        return { body: panel.exhibit(sessionId, tabId) }
+      } catch (cause) {
+        refuse(displaySafeMessage(cause, 'That exhibit could not be read.'))
+      }
     },
 
     async cancel(sessionId: SessionId): Promise<void> {

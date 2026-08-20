@@ -1,0 +1,203 @@
+/* Mock L, on the Ember tokens: a draggable divider, a tab strip over one
+   exhibit, and the 28px edge strip the collapsed panel leaves behind. */
+.divider {
+  width: 5px;
+  flex: none;
+  cursor: col-resize;
+  background: transparent;
+  position: relative;
+}
+
+.divider::after {
+  content: '';
+  position: absolute;
+  inset: 0 2px;
+  background: var(--line);
+}
+
+.divider:hover::after {
+  background: var(--accent);
+  inset: 0 1px;
+}
+
+.ctx {
+  min-width: 280px;
+  flex: none;
+  background: var(--bg2);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.tabstrip {
+  display: flex;
+  align-items: stretch;
+  border-bottom: 1px solid var(--line);
+  background: var(--bg2);
+  overflow-x: auto;
+  scrollbar-width: none;
+  flex: none;
+}
+
+.tabstrip::-webkit-scrollbar {
+  display: none;
+}
+
+.tab {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 9px 10px 9px 14px;
+  font-size: 12.5px;
+  color: var(--dim);
+  cursor: pointer;
+  border-right: 1px solid var(--line);
+  white-space: nowrap;
+  position: relative;
+}
+
+/* The active tab sits on the chat's own background, under an accent line. */
+.tab.active {
+  color: var(--ink);
+  background: var(--bg);
+}
+
+.tab.active::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: var(--accent);
+}
+
+.tab .kind {
+  font: 10px var(--mono);
+  color: var(--faint);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 0 4px;
+}
+
+.tab.active .kind {
+  color: var(--accent2);
+  border-color: var(--accent);
+}
+
+.tab .x {
+  color: var(--faint);
+  background: none;
+  border: none;
+  border-radius: 4px;
+  padding: 0 4px;
+  font-size: 13px;
+  line-height: 1.2;
+  visibility: hidden;
+  cursor: pointer;
+}
+
+.tab:hover .x,
+.tab:focus-within .x {
+  visibility: visible;
+}
+
+.tab .x:hover {
+  color: var(--ink);
+  background: var(--panel);
+}
+
+.strip-tools {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+}
+
+.stool {
+  padding: 0 10px;
+  color: var(--faint);
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 13px;
+  display: flex;
+  align-items: center;
+  height: 100%;
+}
+
+.stool:hover {
+  color: var(--ink);
+}
+
+.exhibit {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  background: var(--bg);
+}
+
+/* Full-bleed: an HTML exhibit gets the whole area and draws its own page. */
+.exhibit .frame {
+  width: 100%;
+  height: 100%;
+  border: none;
+  background: #fff;
+}
+
+.exhibit .mdview {
+  padding: 24px 28px;
+  max-width: 720px;
+}
+
+/* A reading container rather than a chat reply: Mock L's larger headings and a
+   table that fills the measure. */
+.exhibit .mdview .markdown h1 {
+  font-size: 19px;
+  margin-top: 0;
+}
+
+.exhibit .mdview .markdown h2 {
+  font-size: 15px;
+  color: var(--accent2);
+  margin-top: 18px;
+}
+
+.exhibit .mdview .markdown table {
+  width: 100%;
+}
+
+.exhibit-failure {
+  padding: 24px 28px;
+  color: var(--dim);
+  font-size: 12.5px;
+}
+
+.edge {
+  width: 28px;
+  flex: none;
+  border: none;
+  border-left: 1px solid var(--line);
+  background: var(--bg2);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding-top: 10px;
+  gap: 10px;
+  cursor: pointer;
+}
+
+.edge .elabel {
+  writing-mode: vertical-rl;
+  font-size: 10.5px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--faint);
+}
+
+.edge .ecount {
+  font: 11px var(--mono);
+  color: var(--accent2);
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  padding: 0 6px;
+}

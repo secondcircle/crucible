@@ -82,6 +82,18 @@ grammar. Local by default; it touches the conversation only when explicitly
 added to it.
 _Avoid_: terminal, shell session, bang command.
 
+**Context panel**:
+The agent-curated display split to the right of the chat area, where a
+session's agent shows rendered exhibits — HTML or markdown files — in tabs.
+Adopted verbatim from the legacy system, tools and all.
+_Avoid_: preview pane, artifact viewer, right sidebar.
+
+**Tab**:
+One entry in the context panel: a title over one exhibit file, keyed by path
+so re-showing the same file refreshes it in place. Per-session, like the
+panel itself.
+_Avoid_: pane, exhibit slot, window.
+
 **Session reset**:
 Replacement of a session's conversation with a fresh stock π session while keeping the same sidebar identity.
 _Avoid_: new session, clear chat.

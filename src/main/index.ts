@@ -5,6 +5,9 @@ import { selectAdapter } from './agent/select-adapter'
 import { withLogging } from './agent/with-logging'
 import { forwardRendererOutput } from './log/renderer-output'
 import { createFileSink } from './log/sink'
+import { panelFixtures } from './panel/fixtures'
+import { createPanelModel } from './panel/model'
+import { storePanelPersistence } from './panel/store-persistence'
 import { seedWorkspacePath } from './shell/seed-workspace'
 import { createShell } from './shell/shell'
 import { createShellStore } from './shell/store'
@@ -24,14 +27,6 @@ log.append({
   dev: Boolean(process.env.ELECTRON_RENDERER_URL)
 })
 
-// Decided once, before any window exists: one adapter for the launch, whichever
-// window is holding it at the time.
-const { adapter, flavor } = selectAdapter(log)
-
-// One flavor decision governs both seams, so a fake-flavor launch reads no
-// folder and starts no process either.
-const workspace = selectWorkspaceService(flavor, log)
-
 // Crucible's own state file in Crucible's own directory: nothing of π's is read
 // or written here.
 const store = createShellStore(join(app.getPath('userData'), 'shell-state.json'), (cause) => {
@@ -41,6 +36,21 @@ const store = createShellStore(join(app.getPath('userData'), 'shell-state.json')
     message: cause instanceof Error ? cause.message : String(cause)
   })
 })
+
+// One context panel for the launch, persisting inside the same store: the
+// adapter's three tools and the shell's snapshots read the same tabs.
+const panel = createPanelModel({ persistence: storePanelPersistence(store) })
+
+// Decided once, before any window exists: one adapter for the launch, whichever
+// window is holding it at the time.
+const { adapter, flavor } = selectAdapter(log, {
+  tools: panel,
+  exhibits: panelFixtures(app.getAppPath())
+})
+
+// One flavor decision governs both seams, so a fake-flavor launch reads no
+// folder and starts no process either.
+const workspace = selectWorkspaceService(flavor, log)
 
 // The dialog is the main process's to open, which is why adding a workspace is
 // an operation on the port rather than an argument to one.
@@ -64,6 +74,7 @@ const shell = withLogging(
   createShell({
     store,
     adapter,
+    panel,
     pickFolder,
     seedWorkspacePath: seedWorkspacePath()
   }),

@@ -5,6 +5,8 @@ import type {
   ImageAttachment,
   ModelId,
   ModelInfo,
+  PanelState,
+  PanelTab,
   PortEvent,
   PortEventListener,
   QueuedKind,
@@ -14,6 +16,7 @@ import type {
   SessionState,
   SessionTree,
   ShellSnapshot,
+  TabId,
   ThinkingLevel,
   TranscriptItem,
   TreeNode,
@@ -48,6 +51,14 @@ export interface ScriptedPort extends AgentPort {
   // Set only where a test needs the race: otherwise `dequeue` answers by
   // whether the entry was really there, the way main does.
   dequeueAnswer?: boolean
+  /** What `exhibit` answers with, per tab id. */
+  readonly exhibits: Map<TabId, string>
+  /** Set where a test wants a read main could not carry out. */
+  exhibitRefusal?: string
+  // A show the way main announces one: the tab lands in the snapshot, the
+  // `state` event goes out, and `panel_shown` follows it.
+  showTab(sessionId: SessionId, tab: PanelTab): void
+  panelOf(sessionId: SessionId): PanelState | undefined
 
   update(change: (snapshot: ShellSnapshot) => ShellSnapshot): void
   emit(event: PortEvent): void
@@ -119,6 +130,20 @@ export function createScriptedPort(initial: Partial<ShellSnapshot> = {}): Script
     return session?.queue ?? { steering: [], followUp: [] }
   }
 
+  function panelOf(sessionId: SessionId): PanelState | undefined {
+    return snapshot.sessions.find((candidate) => candidate.id === sessionId)?.panel
+  }
+
+  // Absent rather than empty, exactly as main folds it: an empty panel is no
+  // panel at all.
+  function setPanel(sessionId: SessionId, tabs: readonly PanelTab[], activeTabId: TabId): void {
+    changeSession(sessionId, (session) => {
+      const rest: SessionState = { ...session }
+      delete (rest as { panel?: PanelState }).panel
+      return tabs.length === 0 ? rest : { ...rest, panel: { tabs, activeTabId } }
+    })
+  }
+
   function setQueue(sessionId: SessionId, state: QueueState): void {
     // Absent rather than empty, exactly as main reports it.
     const empty = state.steering.length + state.followUp.length === 0
@@ -160,6 +185,7 @@ export function createScriptedPort(initial: Partial<ShellSnapshot> = {}): Script
     history: [],
     transcripts: new Map(),
     trees: new Map(),
+    exhibits: new Map(),
     folder: null,
     shareOutcome: 'delivered',
 
@@ -384,6 +410,60 @@ export function createScriptedPort(initial: Partial<ShellSnapshot> = {}): Script
       emitState()
       return Promise.resolve(true)
     },
+
+    activateTab(sessionId: SessionId, tabId: TabId): Promise<void> {
+      calls.push({ op: 'activateTab', args: [sessionId, tabId] })
+      const panel = panelOf(sessionId)
+      // An unknown id is a no-op above the port too: the agent may have closed
+      // that tab while the click was in flight.
+      if (panel === undefined || !panel.tabs.some((tab) => tab.id === tabId)) {
+        return Promise.resolve()
+      }
+      setPanel(sessionId, panel.tabs, tabId)
+      emitState()
+      return Promise.resolve()
+    },
+
+    closeTab(sessionId: SessionId, tabId: TabId): Promise<void> {
+      calls.push({ op: 'closeTab', args: [sessionId, tabId] })
+      const panel = panelOf(sessionId)
+      if (panel === undefined || !panel.tabs.some((tab) => tab.id === tabId)) {
+        return Promise.resolve()
+      }
+      const tabs = panel.tabs.filter((tab) => tab.id !== tabId)
+      // The last remaining tab takes over, which is where the model puts it.
+      const active = tabs.some((tab) => tab.id === panel.activeTabId)
+        ? panel.activeTabId
+        : (tabs.at(-1)?.id ?? '')
+      setPanel(sessionId, tabs, active)
+      emitState()
+      return Promise.resolve()
+    },
+
+    exhibit(sessionId: SessionId, tabId: TabId): Promise<{ readonly body: string }> {
+      calls.push({ op: 'exhibit', args: [sessionId, tabId] })
+      if (port.exhibitRefusal !== undefined) {
+        return Promise.reject(new Error(port.exhibitRefusal))
+      }
+      return Promise.resolve({ body: port.exhibits.get(tabId) ?? '' })
+    },
+
+    showTab(sessionId: SessionId, tab: PanelTab): void {
+      const panel = panelOf(sessionId)
+      const tabs = panel?.tabs ?? []
+      // Keyed by id: a re-show refreshes the tab in place and mints no second
+      // one, which is what the model does with a path it has seen.
+      const already = tabs.some((open) => open.id === tab.id)
+      setPanel(
+        sessionId,
+        already ? tabs.map((open) => (open.id === tab.id ? tab : open)) : [...tabs, tab],
+        tab.id
+      )
+      emitState()
+      emit({ type: 'panel_shown', sessionId, tabId: tab.id })
+    },
+
+    panelOf,
 
     cancel(sessionId: SessionId): Promise<void> {
       calls.push({ op: 'cancel', args: [sessionId] })

@@ -9,8 +9,17 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { AdapterEventListener, ConversationAdapter } from '../../shared/agent/adapter'
 import { createFakeAdapter } from '../../shared/agent/fake-adapter'
 import type { PortEvent, SessionId, ShellSnapshot } from '../../shared/agent/port'
+import { createPanelModel, type PanelModel } from '../panel/model'
+import { storePanelPersistence } from '../panel/store-persistence'
 import { createShell, type Shell } from './shell'
-import { createShellStore } from './store'
+import { createShellStore, type ShellStore } from './store'
+
+// The shell's panel is the app's: one model over the same store file, so what
+// a panel test asserts here is what a launch does.
+function over(path: string): { store: ShellStore; panel: PanelModel } {
+  const store = createShellStore(path)
+  return { store, panel: createPanelModel({ persistence: storePanelPersistence(store) }) }
+}
 
 const WORKSPACE = '/repos/crucible'
 
@@ -24,7 +33,7 @@ let events: PortEvent[]
 function build(options: { seedWorkspacePath?: string } = {}): void {
   adapter = createFakeAdapter({ pauseMs: 0 })
   shell = createShell({
-    store: createShellStore(file),
+    ...over(file),
     adapter,
     pickFolder: async () => picked,
     ...options
@@ -428,7 +437,7 @@ describe('queued messages', () => {
     }
     shell.dispose()
     shell = createShell({
-      store: createShellStore(file),
+      ...over(file),
       adapter: flushing,
       pickFolder: async () => picked
     })
@@ -456,7 +465,7 @@ describe('queued messages', () => {
     }
     shell.dispose()
     shell = createShell({
-      store: createShellStore(file),
+      ...over(file),
       adapter: refusing,
       pickFolder: async () => picked
     })
@@ -599,7 +608,7 @@ describe('a turn accepted while its session is still binding', () => {
       }
     }
     shell = createShell({
-      store: createShellStore(file),
+      ...over(file),
       adapter: gated,
       pickFolder: async () => picked
     })
@@ -662,7 +671,7 @@ describe('a turn accepted while its session is still binding', () => {
       }
     }
     shell = createShell({
-      store: createShellStore(file),
+      ...over(file),
       adapter: failing,
       pickFolder: async () => picked
     })

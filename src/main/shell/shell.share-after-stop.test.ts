@@ -9,8 +9,17 @@ import { afterEach, beforeEach, expect, it } from 'vitest'
 import type { ConversationAdapter } from '../../shared/agent/adapter'
 import { createFakeAdapter } from '../../shared/agent/fake-adapter'
 import type { BashRunShare, PortEvent } from '../../shared/agent/port'
+import { createPanelModel, type PanelModel } from '../panel/model'
+import { storePanelPersistence } from '../panel/store-persistence'
 import { createShell, type Shell } from './shell'
-import { createShellStore } from './store'
+import { createShellStore, type ShellStore } from './store'
+
+// The shell's panel is the app's: one model over the same store file, so what
+// a panel test asserts here is what a launch does.
+function over(path: string): { store: ShellStore; panel: PanelModel } {
+  const store = createShellStore(path)
+  return { store, panel: createPanelModel({ persistence: storePanelPersistence(store) }) }
+}
 
 let directory: string
 let shell: Shell | undefined
@@ -55,7 +64,7 @@ it('a run waiting out a turn the user stopped stays local and answers dropped', 
   }
 
   shell = createShell({
-    store: createShellStore(join(directory, 'shell-state.json')),
+    ...over(join(directory, 'shell-state.json')),
     adapter,
     pickFolder: async () => '/repos/crucible'
   })

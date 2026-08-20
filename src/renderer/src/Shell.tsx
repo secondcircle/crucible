@@ -16,6 +16,7 @@ import type {
 import { BashDrawer, type RunView } from './components/BashDrawer'
 import { type Attachment, Composer, useElapsedSeconds } from './components/Composer'
 import { ConfirmDialog } from './components/ConfirmDialog'
+import { ContextPanel, PanelEdge } from './components/ContextPanel'
 import { entriesOf, QueuedStrip } from './components/QueuedStrip'
 import { ResumeOverlay } from './components/ResumeOverlay'
 import { SessionTree } from './components/SessionTree'
@@ -76,6 +77,10 @@ export function Shell({
   >(undefined)
   // A run belongs to the workspace it was started in, not to a session.
   const [runs, setRuns] = useState<Readonly<Record<WorkspaceId, RunView>>>({})
+  // The context panel's collapse is per session and its width is one value for
+  // the window. Both are this document's memory and neither outlives it.
+  const [collapsed, setCollapsed] = useState<Readonly<Record<SessionId, boolean>>>({})
+  const [panelWidth, setPanelWidth] = useState<number | undefined>(undefined)
   /** Sessions whose settled history this document has already asked for. */
   const fetched = useRef<Set<SessionId>>(new Set())
   // Restoring a queued message puts the caret back where the words are.
@@ -99,6 +104,10 @@ export function Shell({
   const model = models.find((candidate) => candidate.id === session?.model)
   const elapsedSeconds = useElapsedSeconds(working ? view?.turn?.startedAt : undefined)
   const chips = activeSessionId === undefined ? [] : (attachments[activeSessionId] ?? [])
+  // The visible panel is the active session's and no other's: a background
+  // session's tabs wait in that session until the user switches to it.
+  const panel = session?.panel
+  const panelCollapsed = activeSessionId !== undefined && collapsed[activeSessionId] === true
   // Closed unless the caret is in a token the service has already answered for.
   const shownFiles = fileToken !== undefined && files?.of === fileToken ? files.paths : undefined
   const run = activeWorkspaceId === undefined ? undefined : runs[activeWorkspaceId]
@@ -129,6 +138,11 @@ export function Shell({
       // composer of the session they were queued in, active or not.
       if (event.type === 'queue_flushed') {
         restore(event.sessionId, ...event.messages.map((message) => message.text))
+      }
+      // A show opens the panel of whichever session it happened in: the active
+      // one at once, a background one by the time the user switches to it.
+      if (event.type === 'panel_shown') {
+        setCollapsed((current) => ({ ...current, [event.sessionId]: false }))
       }
     })
     void port
@@ -773,6 +787,24 @@ export function Shell({
           onRunBash={runBash}
         />
       </main>
+
+      {/* Nothing at all when the session has no tabs: the chat is full-width,
+          and there is no empty panel and no edge strip to explain. */}
+      {panel === undefined || activeSessionId === undefined ? null : panelCollapsed ? (
+        <PanelEdge
+          count={panel.tabs.length}
+          onOpen={() => setCollapsed((current) => ({ ...current, [activeSessionId]: false }))}
+        />
+      ) : (
+        <ContextPanel
+          panel={panel}
+          sessionId={activeSessionId}
+          width={panelWidth}
+          port={port}
+          onResize={setPanelWidth}
+          onCollapse={() => setCollapsed((current) => ({ ...current, [activeSessionId]: true }))}
+        />
+      )}
 
       {veil ? (
         <div className="veil" role="status">

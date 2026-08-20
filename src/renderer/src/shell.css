@@ -1,4 +1,5 @@
-/* Three regions; the right-hand context edge is deliberately absent. */
+/* Sidebar, chat, and the context panel the agent curates on the right. The
+   panel region is there only while the active session has tabs. */
 .shell {
   display: flex;
   height: 100%;
@@ -9,7 +10,8 @@
   flex: 1;
   display: flex;
   flex-direction: column;
-  min-width: 0;
+  /* What the chat column keeps whatever the divider is dragged to. */
+  min-width: 320px;
 }
 
 /* Empty states: one sentence and the one thing to do. */

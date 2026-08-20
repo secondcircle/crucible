@@ -185,6 +185,9 @@ function heard(state: ShellState, event: PortEvent, at: number): ShellState {
   // What a flush does is hand text back to the composer, which is the
   // document's business and not the transcript's.
   if (event.type === 'queue_flushed') return state
+  // A shown tab is in the snapshot the `state` event before it carried; the
+  // transcript has nothing to say about it.
+  if (event.type === 'panel_shown') return state
 
   const { sessionId } = event
   const view = state.views[sessionId] ?? EMPTY_VIEW

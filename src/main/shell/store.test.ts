@@ -68,6 +68,65 @@ describe('what survives a relaunch', () => {
     expect(JSON.stringify(written)).not.toContain('sessions/')
   })
 
+  it('carries a session’s panel through, tabs and turn counter alike', () => {
+    const first = createShellStore(file)
+    const workspace = first.addWorkspace('/repos/crucible')
+    const session = first.addSession({ workspaceId: workspace.id, createdAt: 'now' })
+    first.updateSession(session.id, {
+      panel: {
+        tabs: [
+          {
+            id: 'plan',
+            title: 'the plan',
+            path: '/tmp/plan.md',
+            kind: 'markdown',
+            shownAt: '2026-08-19T14:14:00.000Z',
+            shownTurn: 2
+          }
+        ],
+        activeTabId: 'plan',
+        turn: 3
+      }
+    })
+
+    expect(createShellStore(file).session(session.id)?.panel).toEqual({
+      tabs: [
+        {
+          id: 'plan',
+          title: 'the plan',
+          path: '/tmp/plan.md',
+          kind: 'markdown',
+          shownAt: '2026-08-19T14:14:00.000Z',
+          shownTurn: 2
+        }
+      ],
+      activeTabId: 'plan',
+      turn: 3
+    })
+  })
+
+  it('loads panel data that does not read as panel data as absent', () => {
+    // The rest of the record is intact, so only the panel is lost: a version
+    // bump would have thrown the whole sidebar away instead.
+    const written = join(directory, 'shell-state.json')
+    writeFileSync(
+      written,
+      JSON.stringify({
+        version: 1,
+        workspaces: [{ id: 'w', path: '/repos/crucible' }],
+        sessions: [
+          { id: 's', workspaceId: 'w', createdAt: 'now', panel: { tabs: 'not a list' } }
+        ],
+        activeSessionByWorkspace: {}
+      })
+    )
+
+    const store = createShellStore(written)
+
+    expect(store.session('s')?.panel).toBeUndefined()
+    expect(store.session('s')?.createdAt).toBe('now')
+  })
+
   it('opens empty rather than refusing to launch on a file it cannot read', () => {
     const broken = join(directory, 'shell-state.json')
     writeFileSync(broken, 'not json at all')
