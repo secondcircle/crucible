@@ -1,0 +1,408 @@
+<!doctype html>
+<!-- Mock K — slash commands, settings (providers + usage), top-bar cost.
+     Interactive:
+       · type "/" in the composer → command mode (purple) + fuzzy popover;
+         keep typing to filter; ⏎ or click inserts the command
+       · click the ⌘ button beside the composer → same popover (mouse path)
+       · click the ⚙ gear in the top bar → settings overlay (Providers / Usage)
+       · click "Log in" on OpenRouter → the OAuth interaction π hands us
+     Legend: every data element carries a π or C badge —
+       π = the SDK hands us this value/behavior for free
+       C = Crucible builds/computes/persists this itself -->
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Mock K — commands &amp; settings</title>
+<style>
+  /* tokens, verbatim from src/renderer/src/styles/tokens.css */
+  :root {
+    --bg: #191419; --bg2: #211a20; --panel: #241c23; --panel2: #2e242d;
+    --line: #3a2e38; --code: #120e12; --code-deep: #0d0a0d; --user: #2c2230;
+    --think-bg: #161018; --error-bg: #1d1113;
+    --ink: #e8dfe2; --dim: #9b8a94; --faint: #6b5d66;
+    --code-ink: #d7c9b8; --output-ink: #cbbfa4; --on-accent: #1c120c;
+    --accent: #e07a4f; --accent2: #f0a37c; --ok: #7fb069; --error: #d96a5a;
+    --thinking: #b08cc9;
+    --font: -apple-system, 'Segoe UI', system-ui, sans-serif;
+    --mono: ui-monospace, 'SF Mono', Menlo, monospace;
+    --radius: 8px; --radius-lg: 12px; --column: 680px;
+  }
+  * { box-sizing: border-box; margin: 0; }
+  html, body { height: 100%; }
+  body {
+    background: var(--bg); color: var(--ink);
+    font: 14px/1.55 var(--font); overflow: hidden;
+    display: flex; flex-direction: column;
+  }
+  button, textarea, input { font: inherit; color: inherit; }
+  button { cursor: pointer; }
+  ::-webkit-scrollbar { width: 10px; }
+  ::-webkit-scrollbar-thumb { background: var(--line); border-radius: 6px; }
+
+  /* freebie badges */
+  .b { display: inline-block; vertical-align: 2px; margin-left: 5px;
+       font: 600 9px/1 var(--mono); padding: 2px 4px; border-radius: 4px; }
+  .b.pi { color: var(--ok); border: 1px solid color-mix(in srgb, var(--ok) 45%, transparent); }
+  .b.cr { color: var(--thinking); border: 1px solid color-mix(in srgb, var(--thinking) 45%, transparent); }
+
+  .mockbar {
+    flex: none; display: flex; align-items: center; gap: 14px;
+    padding: 8px 16px; border-bottom: 1px solid var(--line);
+    font-size: 11.5px; color: var(--faint);
+  }
+  .mockbar b { color: var(--dim); font-weight: 600; }
+
+  /* ---- top bar, mimicking the real TopBar ---- */
+  .top {
+    flex: none; display: flex; align-items: center; gap: 14px;
+    padding: 10px 18px; background: var(--bg2); border-bottom: 1px solid var(--line);
+    font-size: 12.5px;
+  }
+  .top .title { color: var(--ink); font-weight: 600; }
+  .top .where, .top .model { color: var(--faint); }
+  .top .spacer { flex: 1; }
+  .cost {
+    color: var(--dim); font: 12px var(--mono);
+    border: 1px solid var(--line); border-radius: 6px; padding: 2px 8px;
+    background: none; 
+  }
+  .cost:hover { color: var(--ink); border-color: var(--dim); }
+  .meter { display: flex; align-items: center; gap: 7px; color: var(--dim); font-size: 11.5px; }
+  .meter .bar { width: 64px; height: 4px; background: var(--panel2); border-radius: 2px; overflow: hidden; }
+  .meter .bar i { display: block; height: 100%; width: 31%; background: var(--accent); }
+  .iconbtn {
+    background: none; border: 1px solid var(--line); border-radius: 6px;
+    color: var(--dim); padding: 2px 9px; font-size: 13px;
+  }
+  .iconbtn:hover { color: var(--ink); border-color: var(--dim); }
+
+  /* ---- transcript ---- */
+  .chat { flex: 1; overflow-y: auto; padding: 26px 0; min-height: 0; }
+  .msg { max-width: var(--column); margin: 0 auto 20px; padding: 0 24px; }
+  .msg .who { font-size: 11px; text-transform: uppercase; letter-spacing: .1em; color: var(--faint); margin-bottom: 6px; }
+  .msg.agent .who { color: var(--accent); }
+  .msg.user .bubble {
+    background: var(--user); border: 1px solid var(--line);
+    border-radius: var(--radius-lg); padding: 10px 14px;
+  }
+
+  /* ---- composer ---- */
+  .compwrap { flex: none; padding: 0 24px 18px; }
+  .compinner { max-width: var(--column); margin: 0 auto; position: relative; }
+  .box {
+    display: flex; align-items: flex-end; gap: 8px;
+    background: var(--panel); border: 1px solid var(--line);
+    border-radius: var(--radius-lg); padding: 10px 12px;
+    transition: border-color .12s, background .12s;
+  }
+  .box textarea {
+    flex: 1; background: none; border: 0; outline: none; resize: none;
+    color: var(--ink); min-height: 22px; max-height: 140px;
+  }
+  .modebadge {
+    display: none; position: absolute; top: -9px; left: 14px;
+    font: 600 10px/1 var(--mono); letter-spacing: .08em; text-transform: uppercase;
+    background: var(--bg); padding: 2px 7px; border-radius: 5px;
+  }
+  .box.cmd { border-color: var(--thinking); background: var(--think-bg); }
+  .box.cmd ~ .modebadge.cmdb { display: block; color: var(--thinking); border: 1px solid var(--thinking); }
+  .slashbtn {
+    background: none; border: 1px solid var(--line); border-radius: 7px;
+    color: var(--dim); padding: 3px 10px; font: 13px var(--mono);
+  }
+  .slashbtn:hover { color: var(--thinking); border-color: var(--thinking); }
+  .send {
+    background: var(--accent); color: var(--on-accent); border: 0;
+    border-radius: 7px; padding: 4px 14px; font-weight: 600;
+  }
+
+  /* ---- command popover ---- */
+  .cmdpop {
+    display: none; position: absolute; bottom: calc(100% + 8px); left: 0; right: 0;
+    background: var(--panel); border: 1px solid var(--line);
+    border-radius: var(--radius-lg); overflow: hidden;
+    box-shadow: 0 -8px 30px rgba(0,0,0,.45);
+  }
+  .cmdpop.open { display: block; }
+  .cmdpop .hint {
+    padding: 7px 14px; font-size: 11px; color: var(--faint);
+    border-bottom: 1px solid var(--line);
+  }
+  .cmdrow { display: flex; align-items: baseline; gap: 10px; padding: 8px 14px; cursor: pointer; }
+  .cmdrow:hover, .cmdrow.sel { background: var(--panel2); }
+  .cmdrow .name { font: 600 13px var(--mono); color: var(--thinking); white-space: nowrap; }
+  .cmdrow .args { font: 12px var(--mono); color: var(--faint); white-space: nowrap; }
+  .cmdrow .desc { font-size: 12px; color: var(--dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
+  .scope {
+    flex: none; font: 600 9.5px/1 var(--mono); letter-spacing: .05em;
+    padding: 2.5px 6px; border-radius: 4px; text-transform: uppercase;
+  }
+  .scope.user { color: var(--accent2); border: 1px solid color-mix(in srgb, var(--accent2) 40%, transparent); }
+  .scope.ws { color: var(--ok); border: 1px solid color-mix(in srgb, var(--ok) 40%, transparent); }
+  .cmdpop .empty { padding: 12px 14px; color: var(--faint); font-size: 12.5px; }
+
+  /* ---- settings overlay ---- */
+  .veil {
+    display: none; position: fixed; inset: 0; background: rgba(10,7,10,.62);
+    align-items: center; justify-content: center; z-index: 40;
+  }
+  .veil.open { display: flex; }
+  .sheet {
+    width: min(720px, 92vw); max-height: 84vh; overflow: hidden;
+    background: var(--bg2); border: 1px solid var(--line);
+    border-radius: var(--radius-lg); display: flex; flex-direction: column;
+  }
+  .sheethead {
+    display: flex; align-items: center; gap: 4px; padding: 12px 16px 0;
+    border-bottom: 1px solid var(--line);
+  }
+  .sheethead .t { font-weight: 600; margin-right: 14px; }
+  .tab {
+    background: none; border: 0; color: var(--dim); padding: 8px 12px 10px;
+    border-bottom: 2px solid transparent; font-size: 13px;
+  }
+  .tab.on { color: var(--ink); border-bottom-color: var(--accent); }
+  .sheethead .x { margin-left: auto; background: none; border: 0; color: var(--faint); font-size: 16px; }
+  .sheethead .x:hover { color: var(--ink); }
+  .sheetbody { overflow-y: auto; padding: 18px 20px 22px; }
+  .pane { display: none; }
+  .pane.on { display: block; }
+
+  /* providers */
+  .prov {
+    display: flex; align-items: center; gap: 12px;
+    padding: 12px 14px; border: 1px solid var(--line); border-radius: var(--radius);
+    margin-bottom: 10px; background: var(--panel);
+  }
+  .prov .pname { font-weight: 600; min-width: 110px; }
+  .prov .pmeta { color: var(--dim); font-size: 12.5px; flex: 1; }
+  .dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 6px; }
+  .dot.in { background: var(--ok); } .dot.out { background: var(--faint); }
+  .pbtn {
+    background: none; border: 1px solid var(--line); border-radius: 7px;
+    color: var(--dim); padding: 4px 12px; font-size: 12.5px;
+  }
+  .pbtn:hover { color: var(--ink); border-color: var(--dim); }
+  .pbtn.primary { color: var(--accent2); border-color: color-mix(in srgb, var(--accent) 55%, transparent); }
+  .note { color: var(--faint); font-size: 11.5px; margin: 14px 2px 0; }
+
+  /* usage */
+  h4 { font-size: 12px; text-transform: uppercase; letter-spacing: .08em; color: var(--faint); margin: 18px 0 8px; }
+  h4:first-child { margin-top: 0; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th { text-align: left; font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--faint); font-weight: 600; padding: 5px 10px; }
+  td { padding: 6px 10px; border-top: 1px solid var(--line); color: var(--dim); }
+  td.n, th.n { text-align: right; font-family: var(--mono); font-size: 12.5px; }
+  td:first-child { color: var(--ink); }
+  tr.total td { color: var(--ink); font-weight: 600; border-top: 1px solid var(--dim); }
+  .cards { display: flex; gap: 10px; margin-bottom: 4px; }
+  .card {
+    flex: 1; background: var(--panel); border: 1px solid var(--line);
+    border-radius: var(--radius); padding: 10px 12px;
+  }
+  .card .k { font-size: 11px; color: var(--faint); text-transform: uppercase; letter-spacing: .06em; }
+  .card .v { font: 600 17px var(--mono); margin-top: 3px; }
+
+  /* login modal */
+  .login { width: min(440px, 90vw); background: var(--bg2); border: 1px solid var(--line); border-radius: var(--radius-lg); padding: 20px; }
+  .login h3 { font-size: 15px; margin-bottom: 4px; }
+  .login p { color: var(--dim); font-size: 13px; margin: 10px 0; }
+  .login input {
+    width: 100%; background: var(--code); border: 1px solid var(--line);
+    border-radius: 7px; padding: 8px 10px; color: var(--ink); font: 12.5px var(--mono);
+  }
+  .login .row { display: flex; gap: 8px; justify-content: flex-end; margin-top: 14px; }
+</style>
+</head>
+<body>
+
+<div class="mockbar">
+  Mock K — commands &amp; settings ·
+  type <b>/</b> in the composer · click <b>⌘</b> for the mouse path · click <b>⚙</b> for settings ·
+  <span><span class="b pi">π</span> straight from the π SDK</span>
+  <span><span class="b cr">C</span> Crucible builds it</span>
+</div>
+
+<!-- top bar -->
+<header class="top">
+  <span class="title">auth refactor</span>
+  <span class="where">crucible</span>
+  <span class="model">claude-sonnet-4-5<span class="b pi">π</span></span>
+  <span class="spacer"></span>
+  <button class="cost" id="costbtn" title="Session cost — sum of π's per-message usage. Click for details.">$0.84<span class="b pi">π</span></button>
+  <span class="meter"><span>31% ctx<span class="b pi">π</span></span><span class="bar"><i></i></span><span>62k / 200k</span></span>
+  <button class="iconbtn" id="gear" title="Settings">⚙<span class="b cr">C</span></button>
+  <button class="iconbtn">⋯</button>
+</header>
+
+<!-- transcript -->
+<div class="chat">
+  <div class="msg user"><div class="who">You</div><div class="bubble">Take what we discussed and align on the command mechanism.</div></div>
+  <div class="msg agent"><div class="who">Agent</div><div>Ready when you are — type <code>/align</code> below, or press ⌘ to browse commands.</div></div>
+</div>
+
+<!-- composer -->
+<div class="compwrap"><div class="compinner">
+  <div class="cmdpop" id="pop">
+    <div class="hint">Commands — user level (~/.pi/agent/prompts) and workspace level (.pi/prompts)<span class="b pi">π</span> · argument hints from frontmatter<span class="b pi">π</span> · this popover<span class="b cr">C</span></div>
+    <div id="rows"></div>
+  </div>
+  <div class="box" id="box">
+    <textarea id="ta" rows="1" placeholder="Message the agent — / for commands, @ for files, ! for bash"></textarea>
+    <button class="slashbtn" id="slash" title="Browse commands">/</button>
+    <button class="send">Send ⏎</button>
+  </div>
+  <span class="modebadge cmdb">command</span>
+</div></div>
+
+<!-- settings overlay -->
+<div class="veil" id="settings">
+  <div class="sheet">
+    <div class="sheethead">
+      <span class="t">Settings</span>
+      <button class="tab on" data-pane="prov">Providers</button>
+      <button class="tab" data-pane="usage">Usage</button>
+      <button class="x" id="closeset">✕</button>
+    </div>
+    <div class="sheetbody">
+
+      <div class="pane on" id="prov">
+        <div class="prov">
+          <span class="pname">Anthropic</span>
+          <span class="pmeta"><span class="dot in"></span>Signed in — Claude subscription (OAuth)<span class="b pi">π</span></span>
+          <button class="pbtn">Log out</button>
+        </div>
+        <div class="prov">
+          <span class="pname">OpenAI</span>
+          <span class="pmeta"><span class="dot in"></span>API key stored<span class="b pi">π</span></span>
+          <button class="pbtn">Log out</button>
+        </div>
+        <div class="prov">
+          <span class="pname">OpenRouter</span>
+          <span class="pmeta"><span class="dot out"></span>Not signed in<span class="b pi">π</span></span>
+          <button class="pbtn primary" id="orlogin">Log in</button>
+        </div>
+        <div class="prov">
+          <span class="pname">Google</span>
+          <span class="pmeta"><span class="dot in"></span>API key from environment (GEMINI_API_KEY)<span class="b pi">π</span></span>
+          <button class="pbtn" disabled title="Environment keys are managed outside Crucible">—</button>
+        </div>
+        <div class="note">
+          Provider list, auth method, and status come from π's ModelRuntime
+          (getProviders / checkAuth); login and logout call π directly and store
+          credentials in ~/.pi/agent/auth.json with automatic token refresh.
+          Crucible only renders the flow.
+        </div>
+      </div>
+
+      <div class="pane" id="usage">
+        <h4>This session<span class="b pi">π</span></h4>
+        <div class="cards">
+          <div class="card"><div class="k">Cost</div><div class="v">$0.84</div></div>
+          <div class="card"><div class="k">Tokens</div><div class="v">61,982</div></div>
+          <div class="card"><div class="k">Messages</div><div class="v">34</div></div>
+          <div class="card"><div class="k">Context</div><div class="v">31%</div></div>
+        </div>
+        <table>
+          <tr><th></th><th class="n">Tokens</th><th class="n">Cost</th></tr>
+          <tr><td>Input</td><td class="n">4,210</td><td class="n">$0.06</td></tr>
+          <tr><td>Output</td><td class="n">18,772</td><td class="n">$0.56</td></tr>
+          <tr><td>Cache read</td><td class="n">36,900</td><td class="n">$0.11</td></tr>
+          <tr><td>Cache write</td><td class="n">2,100</td><td class="n">$0.11</td></tr>
+          <tr class="total"><td>Total</td><td class="n">61,982</td><td class="n">$0.84</td></tr>
+        </table>
+
+        <h4>Sessions in this workspace<span class="b cr">C</span></h4>
+        <table>
+          <tr><th>Session</th><th class="n">Messages</th><th class="n">Tokens</th><th class="n">Cost</th></tr>
+          <tr><td>auth refactor</td><td class="n">34</td><td class="n">62k</td><td class="n">$0.84</td></tr>
+          <tr><td>tree overlay bug</td><td class="n">12</td><td class="n">18k</td><td class="n">$0.22</td></tr>
+          <tr><td>scratch</td><td class="n">5</td><td class="n">3k</td><td class="n">$0.04</td></tr>
+          <tr class="total"><td>Workspace total</td><td class="n">51</td><td class="n">83k</td><td class="n">$1.10</td></tr>
+        </table>
+        <div class="note">
+          π reports usage per assistant message (input / output / cache-read /
+          cache-write tokens, with dollar cost per category). Everything above is
+          Crucible summing those numbers — π keeps no ledger of its own.
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<!-- OAuth login modal -->
+<div class="veil" id="oauth">
+  <div class="login">
+    <h3>Log in to OpenRouter</h3>
+    <p>Your browser opened for authorization.<span class="b pi">π</span> If it doesn't come back, paste the redirect URL or code here:<span class="b pi">π</span></p>
+    <input placeholder="https://…/callback?code=…" />
+    <p style="font-size:11.5px; color:var(--faint)">This dialog renders π's AuthInteraction — π owns the flow, the token exchange, and storage; Crucible owns only these pixels.<span class="b cr">C</span></p>
+    <div class="row">
+      <button class="pbtn" id="ocancel">Cancel</button>
+      <button class="pbtn primary" id="odone">Continue</button>
+    </div>
+  </div>
+</div>
+
+<script>
+  const CMDS = [
+    { name: 'align',     args: '[subject]',          desc: 'Interview me until we reach shared understanding', scope: 'user' },
+    { name: 'review',    args: '<PR-URL>',           desc: 'Review a PR with structured issue and code analysis', scope: 'user' },
+    { name: 'component', args: '<name> [features…]', desc: 'Create a React component', scope: 'ws' },
+    { name: 'standup',   args: '',                   desc: 'Summarize yesterday, today, blockers from git', scope: 'ws' },
+  ];
+  const ta = document.getElementById('ta'), box = document.getElementById('box'),
+        pop = document.getElementById('pop'), rows = document.getElementById('rows');
+
+  function render(filter) {
+    const hits = CMDS.filter(c => c.name.includes(filter));
+    rows.innerHTML = hits.length ? hits.map(c => `
+      <div class="cmdrow" data-name="${c.name}">
+        <span class="name">/${c.name}</span>
+        ${c.args ? `<span class="args">${c.args}</span>` : ''}
+        <span class="desc">${c.desc}</span>
+        <span class="scope ${c.scope}">${c.scope === 'ws' ? 'workspace' : 'user'}</span>
+      </div>`).join('')
+      : `<div class="empty">No command matches "${filter}"</div>`;
+    rows.querySelectorAll('.cmdrow').forEach(r =>
+      r.addEventListener('mousedown', e => { e.preventDefault(); pick(r.dataset.name); }));
+  }
+  function pick(name) { ta.value = '/' + name + ' '; ta.focus(); sync(); }
+  function sync() {
+    const v = ta.value;
+    const isCmd = v.startsWith('/');
+    box.classList.toggle('cmd', isCmd);
+    const typing = isCmd && !v.includes(' ');
+    pop.classList.toggle('open', typing);
+    if (typing) render(v.slice(1));
+  }
+  ta.addEventListener('input', sync);
+  document.getElementById('slash').addEventListener('click', () => {
+    if (!ta.value.startsWith('/')) ta.value = '/';
+    ta.focus(); sync();
+  });
+
+  const settings = document.getElementById('settings');
+  document.getElementById('gear').onclick = () => settings.classList.add('open');
+  document.getElementById('costbtn').onclick = () => {
+    settings.classList.add('open');
+    activate('usage');
+  };
+  document.getElementById('closeset').onclick = () => settings.classList.remove('open');
+  function activate(id) {
+    document.querySelectorAll('.tab').forEach(t => t.classList.toggle('on', t.dataset.pane === id));
+    document.querySelectorAll('.pane').forEach(p => p.classList.toggle('on', p.id === id));
+  }
+  document.querySelectorAll('.tab').forEach(t => t.onclick = () => activate(t.dataset.pane));
+
+  const oauth = document.getElementById('oauth');
+  document.getElementById('orlogin').onclick = () => oauth.classList.add('open');
+  document.getElementById('ocancel').onclick = () => oauth.classList.remove('open');
+  document.getElementById('odone').onclick = () => oauth.classList.remove('open');
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape') { oauth.classList.remove('open'); settings.classList.remove('open'); pop.classList.remove('open'); }
+  });
+</script>
+</body>
+</html>

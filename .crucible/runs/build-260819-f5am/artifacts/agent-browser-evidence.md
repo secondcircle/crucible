@@ -160,3 +160,62 @@ above (every port operation and event is logged main-side, LF-2):
 make validate      → typecheck, lint, 199 tests, build — all green, twice in a row
 npm test           → 21 files, 199 tests, no paid call, no SDK adapter constructed
 ```
+
+## Re-check after the review fix (cancel during the bind window)
+
+Added by the fixer after review-1's finding was fixed in `src/main/shell/shell.ts`.
+Same fake flavor, zero cost: `CRUCIBLE_WORKSPACE=/tmp/crucible-fix-ws npm run dev`,
+`agent-browser connect 9222`.
+
+The launch still comes up on the seeded workspace with no session (WS-6, WS-7,
+SE-9), New Session creates and activates one, and a prompt renders the scripted
+turn: thinking block, tool chip, markdown reply with a table and a fenced block.
+
+Stop mid-stream still lands, which is the path the fix touches from the other
+side. Driven in one page-side step so the click happens while the turn is live:
+
+```
+agent-browser eval '(async () => { ...type, Enter, wait 500ms,
+  click button.send.working, wait 1200ms... })()'
+→ {"stopShown":true,
+   "tail":"YOU\nstop me mid stream\n▸ thought for 1s\n▸ bash npm test done\n
+           AGENT\nThe fake adapter answers every prompt with this same scripted
+           turn. Nothing was sent anywhere and nothing was paid for it.\n
+           STOPPED\n…"}
+```
+
+The Stop control was showing while the turn ran, the reply is cut where the stop
+landed, and the quiet stopped marker closes it (CAN-1, CAN-2). Screenshot:
+`stopped-after-fix.png`.
+
+```
+npm run lint / npm run typecheck / npm test → green, 22 files, 203 tests
+```
+
+## Re-check after the review-2 fix (the two conversation guards)
+
+Fake flavor again, fresh store, `CRUCIBLE_WORKSPACE=/tmp/crucible-fix2-ws npm run
+dev`, `agent-browser connect 9222`. The fix reads `SessionView.loaded` before a
+guard is allowed to skip its question, so what had to be seen is both sides of
+that: a conversation known to be empty still skips, and everything else asks.
+
+- New session, session menu, **Reset session**: applied with no dialog. Its
+  history had landed and held nothing, which is the one case that may skip.
+- Prompted once (the scripted turn rendered: thinking block, tool chip, list,
+  table, fenced block, `0% ctx · 199 / 200k`). Then **think: low → high** raised
+  "Invalidate this session's cache?" and only after "Change anyway" did the chip
+  read `think: high` (MO-7). **Reset session** on the same conversation raised
+  "Reset this session?"; "Keep the conversation" left the transcript intact
+  (SE-7). Screenshot: `guards-after-fix.png`.
+- Reloaded the renderer so the session came back through `transcript()`, the
+  path the finding was about. Reset asked, "Reset anyway" emptied the
+  conversation under the same sidebar entry, and a second Reset on the now-empty
+  session asked nothing.
+
+The loading window itself is seconds long only on the SDK flavor, so it is
+pinned by `src/renderer/src/Shell.guards-before-history.test.tsx` (review 2's
+two tests, with `transcript()` gated open) rather than by hand here.
+
+```
+npm run lint / npm run typecheck / npm test → green, 23 files, 205 tests
+```

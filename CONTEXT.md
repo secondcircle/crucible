@@ -82,6 +82,19 @@ grammar. Local by default; it touches the conversation only when explicitly
 added to it.
 _Avoid_: terminal, shell session, bang command.
 
+**Command**:
+A markdown prompt template invoked from the composer as `/name args`,
+expanded by Crucible itself before the result crosses the agent port. Three
+origins: built-in (ships with the app), user, and workspace; workspace
+overrides user overrides built-in.
+_Avoid_: prompt template (π's mechanism), slash command.
+
+**Intent brief**:
+The durable artifact an `/align` interview writes on agreement — the settled
+scope and rulings — at `.crucible/align/` in the workspace. The interview
+says nothing about what happens to it next.
+_Avoid_: alignment doc, spec, plan.
+
 **Context panel**:
 The agent-curated display split to the right of the chat area, where a
 session's agent shows rendered exhibits — HTML or markdown files — in tabs.

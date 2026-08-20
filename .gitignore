@@ -6,3 +6,4 @@ logs/
 .firecrawl/
 *.tsbuildinfo
 .crucible/worktrees/
+.crucible/align/

@@ -17,7 +17,7 @@ names the milestone from `m1-parity-core.md`. **never** means ruled out.
 | Follow-up queue | Alt+Enter → delivered after all work | later (M1 block 5) — merged with steering into one queue ruling |
 | Abort | Esc aborts, restores queue to editor | **built** — Stop button + Esc, immediate, session-local, partial output kept with a quiet stopped marker (A4, A18) |
 | Tool-call display | collapsible tool output (Ctrl+O) | **built** — collapsed chips, click to expand, real running/completed state from port events (A7, A15) |
-| Thinking blocks | collapsible (Ctrl+T) | **built, diverged from A7** — one dim non-collapsible element; no header, no toggle, no duration. A7 said "dim and collapsible"; amend it in a future /align |
+| Thinking blocks | collapsible (Ctrl+T) | **built** — one dim non-collapsible element; no header, no toggle, no duration. A7 originally said "dim and collapsible"; amended 2026-08-19 by the user in /align: non-collapsible is the ruling, not a divergence |
 | Markdown render | terminal markdown | **built** — in-house renderer: lists, tables, inline + fenced code; raw HTML inert, links never navigate the window; no syntax highlighting (A6 said not required) |
 | Elapsed working time | footer timer | **built** — composer ticks seconds while a turn runs (A10) |
 | Auto-scroll | follows output | **built** — pins to bottom via ResizeObserver, never yanks the reader back up (A10) |
