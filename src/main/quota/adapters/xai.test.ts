@@ -1,26 +1,18 @@
 // @vitest-environment node
 //
-// The xAI quota adapter, driven through its own seam: captured payloads in,
-// normalized records out. No socket is opened here, and no authenticated call
-// is made at all.
-//
-// Both fixtures are the live captures the legacy system's tests carry, embedded
-// byte-for-byte (these bodies hold no identity field at all): the weekly pool,
-// and the monthly dollar envelope the same URL returns without the `format`
-// parameter. The second fixture is the whole point — one query parameter
-// separates them, so the adapter refuses a period that does not call itself
-// weekly.
+// The transport is injected, so no socket is opened and no authenticated call
+// is made. Both fixtures are live captures of the same URL one query parameter
+// apart, which is the whole reason the adapter refuses a non-weekly period.
 import { beforeEach, describe, expect, it } from 'vitest'
 import { forgetOnceIn } from '../log'
 import type { FetchLike } from './types'
 import { parseXaiQuota, XAI_QUOTA_URL, xaiAdapter } from './xai'
 
-/** `?format=credits`, 200: the weekly usage pool. */
 const CREDITS: unknown = JSON.parse(
   String.raw`{"config":{"currentPeriod":{"type":"USAGE_PERIOD_TYPE_WEEKLY","start":"2026-08-14T15:39:31.212318+00:00","end":"2026-08-21T15:39:31.212318+00:00"},"creditUsagePercent":20.0,"onDemandCap":{"val":0},"onDemandUsed":{"val":0},"productUsage":[{"product":"GrokBuild","usagePercent":20.0}],"isUnifiedBillingUser":true,"prepaidBalance":{"val":0},"topUpMethod":"TOP_UP_METHOD_SAVED_PAYMENT_METHOD","billingPeriodStart":"2026-08-14T15:39:31.212318+00:00","billingPeriodEnd":"2026-08-21T15:39:31.212318+00:00"}}`
 )
 
-/** The same URL with no `format`, 200: dollars, monthly. */
+// The same URL with no `format`: dollars, monthly.
 const MONTHLY: unknown = JSON.parse(
   String.raw`{"config":{"monthlyLimit":{"val":0},"used":{"val":0},"onDemandCap":{"val":0},"billingPeriodStart":"2026-08-01T00:00:00+00:00","billingPeriodEnd":"2026-09-01T00:00:00+00:00","history":[{"billingCycle":{"year":2026,"month":7},"includedUsed":{"val":0},"onDemandUsed":{"val":0},"totalUsed":{"val":0}}]}}`
 )
@@ -30,7 +22,6 @@ function quiet(): { log: (message: string) => void; messages: string[] } {
   return { log: (message) => messages.push(message), messages }
 }
 
-/** A payload built on the credits capture, with `config` fields overridden. */
 function withConfig(overrides: Record<string, unknown>): unknown {
   const base = (CREDITS as { config: Record<string, unknown> }).config
   return { config: { ...base, ...overrides } }
@@ -63,9 +54,8 @@ describe('the xAI quota adapter', () => {
   })
 
   it('calls the monthly dollar envelope unparsed, never a meter', () => {
-    // Same host, same path, one query parameter apart — and the reason two
-    // third parties disagreed about this endpoint. Reading it as a quota window
-    // would print a dollar percentage as a weekly meter.
+    // Same host, same path, one query parameter apart: reading this as a quota
+    // window would print a dollar percentage as a weekly meter.
     const sink = quiet()
     expect(parseXaiQuota(MONTHLY, { log: sink.log })).toBeNull()
     // Reported to the caller and logged by the store once, on the transition.
@@ -105,8 +95,8 @@ describe('the xAI quota adapter', () => {
       }),
       { log: quiet().log }
     )
-    // One meter, from creditUsagePercent alone: the per-product breakdown is
-    // not a second meter, and overage is out of scope entirely.
+    // The per-product breakdown is not a second meter, and dollar overage is
+    // not a meter at all.
     expect(meters).toHaveLength(1)
     expect(meters?.[0].usedPercent).toBe(20)
   })

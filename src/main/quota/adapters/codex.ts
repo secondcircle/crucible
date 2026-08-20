@@ -3,40 +3,16 @@ import { onceIn } from '../log'
 import { getJson } from './http'
 import type { AdapterRequest, AdapterResult, ProviderAdapter } from './types'
 
-/**
- * OpenAI Codex quota adapter: `GET /backend-api/wham/usage` → normalized meters.
- *
- * The parser reads the payload's self-description, never its slot names. A
- * meter is classified by `limit_window_seconds` alone: this account's single
- * *weekly* meter sits in the slot called `primary_window`, with
- * `secondary_window: null`. Reading "primary" as "the 5-hour one" would print a
- * weekly number under an hourly label — the failure that looks exactly like a
- * correct reading.
- *
- * `additional_rate_limits[]` carries per-model scoped meters, with the window
- * struct nested one level deeper than the top-level `rate_limit`. Its label is
- * the last dash-segment of `limit_name` (`GPT-5.3-Codex-Spark` → `SPARK`) — the
- * provider's own name for the meter, never a guess.
- *
- * Identity stays here: the body carries `account_id`, `user_id` and `email`,
- * and none of it reaches a `QuotaMeter`. `chatgpt-account-id` is not sent
- * either — it is optional, and deriving it would mean decoding the token's
- * identity claims for no gain.
- */
+// Meters are classified by `limit_window_seconds`, never by slot name: a live
+// account keeps its weekly meter in `primary_window`, so reading "primary" as
+// "the 5-hour one" would print a weekly number under an hourly label.
 
 export const CODEX_PROVIDER_ID = 'openai-codex'
 export const CODEX_QUOTA_URL = 'https://chatgpt.com/backend-api/wham/usage'
 
-/** π's own originator, accepted by the endpoint. */
 const ORIGINATOR = 'pi'
 
-/**
- * Window durations this parser recognizes, ±60 s. An unfamiliar duration drops
- * its meter and is logged once per process: a missing meter, never a guessed
- * label. The five-hour row is the one unverified line in the contract — no
- * capture has shown it — and it exists only because the classifier must decide
- * something if such a window appears.
- */
+// An unfamiliar duration drops its meter: a missing meter beats a guessed one.
 const DURATIONS: { seconds: number; kind: QuotaMeter['kind']; label: string }[] = [
   { seconds: 604_800, kind: 'weekly', label: '7D' },
   { seconds: 18_000, kind: 'session', label: '5H' }
@@ -47,17 +23,16 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
-/** Percent is USED on 0–100; absent, `NaN`, negative or >100 drops the meter. */
+// An out-of-range percent drops the meter rather than clamping: a fabricated
+// zero is indistinguishable from a fresh window.
 function readPercent(value: unknown): number | null {
   if (typeof value !== 'number' || !Number.isFinite(value)) return null
   if (value < 0 || value > 100) return null
   return value
 }
 
-/**
- * `reset_at` is unix **seconds** → epoch ms. A value already large enough to be
- * milliseconds is left alone rather than multiplied into the year 58000.
- */
+// `reset_at` is unix seconds, but a value already big enough to be
+// milliseconds is left alone rather than multiplied into the year 58000.
 function readResetsAt(value: unknown): number | null {
   if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) return null
   return value > 10_000_000_000 ? value : value * 1000
@@ -79,7 +54,6 @@ function classify(
   return match
 }
 
-/** One `{used_percent, limit_window_seconds, reset_at}` struct → one meter. */
 function parseMeter(
   raw: unknown,
   scope: { label: string; scopeName: string } | undefined,
@@ -104,18 +78,14 @@ function parseMeter(
   }
 }
 
-/** `GPT-5.3-Codex-Spark` → `SPARK`. The provider's own name, shortened. */
+// `GPT-5.3-Codex-Spark` → `SPARK`: the provider's own name, shortened, never a
+// label of Crucible's invention.
 function scopeLabel(limitName: string): string {
   const segments = limitName.split('-').filter((segment) => segment.length > 0)
   return (segments[segments.length - 1] ?? limitName).toUpperCase()
 }
 
-/**
- * Pure payload → meters. Never throws, never fetches.
- *
- * `null` = not a recognizable quota document (contract drift). `[]` = it parses
- * but names no meter this parser recognizes.
- */
+/** `null` is contract drift; `[]` is a document that legitimately meters nothing. */
 export function parseCodexQuota(
   payload: unknown,
   opts: { log?: (message: string) => void } = {}
@@ -124,8 +94,8 @@ export function parseCodexQuota(
   if (!isRecord(payload)) return null
   const rateLimit = payload['rate_limit']
   const additional = payload['additional_rate_limits']
-  // The plan's own meter block is the document's signature. Without it this is
-  // not a quota payload — an error page, a redirect body, a changed route.
+  // The plan's own meter block is the document's signature: without it this is
+  // an error page, a redirect body or a changed route, not a quota payload.
   if (!isRecord(rateLimit)) return null
 
   const meters: QuotaMeter[] = []
@@ -143,7 +113,6 @@ export function parseCodexQuota(
     meters.push(meter)
   }
 
-  // Both slots, classified by declared length. Neither slot name means anything.
   for (const slot of ['primary_window', 'secondary_window']) {
     if (rateLimit[slot] === null || rateLimit[slot] === undefined) continue
     push(parseMeter(rateLimit[slot], undefined, log))
@@ -185,8 +154,7 @@ async function fetchQuota(bearer: string, req: AdapterRequest): Promise<AdapterR
   })
   if (!res.ok) return res
 
-  // No `rate_limit` block is drift, reported as `unparsed`; the store logs that
-  // transition once, so the adapter does not log it at all.
+  // Not logged here: the store already speaks once per state transition.
   const meters = parseCodexQuota(res.payload, { log: req.log })
   if (meters === null) return { ok: false, error: 'unparsed' }
   return { ok: true, meters }

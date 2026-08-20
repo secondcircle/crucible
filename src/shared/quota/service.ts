@@ -1,10 +1,7 @@
 import type { QuotaSnapshot } from './types'
 
-// Quota rides its own Crucible-owned service beside the agent port: the strip
-// is global, session-free provider data, and the read seam has to be reachable
-// by main-side code that has no port. The renderer never imports the plumbing
-// behind this interface — it takes the service as a prop, exactly as it takes
-// the workspace and update seams.
+// Beside the agent port, not behind it: quota is global, session-free provider
+// data, and main-side code with no port still has to read it.
 
 export type Unsubscribe = () => void
 
@@ -16,13 +13,9 @@ export interface QuotaRefreshOptions {
 }
 
 export interface QuotaService {
-  /** The cache, right now. Never triggers a fetch. */
+  /** Never triggers a fetch. */
   read(): Promise<QuotaSnapshot>
-  /**
-   * TTL-gated refresh, scoped when `providers` is given. Never rejects for a
-   * fetch failure: trouble reaches the user as staleness in the data.
-   */
+  /** Never rejects for a fetch failure: trouble reaches the user as staleness. */
   refresh(opts?: QuotaRefreshOptions): Promise<QuotaSnapshot>
-  /** Fired with the resulting snapshot after every completed refresh pass. */
   onChange(listener: QuotaListener): Unsubscribe
 }

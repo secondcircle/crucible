@@ -58,7 +58,7 @@ describe('the canned quota service', () => {
           .map((meter) => meter.resetsAt ?? 0)
       )
 
-    // The countdowns the mock draws: 4d11, 3d04, 5d02.
+    // The countdowns these anchors print: 4d11, 3d04, 5d02.
     expect(weekly('anthropic') - LAUNCH).toBe(107 * HOUR)
     expect(weekly('openai-codex') - LAUNCH).toBe(76 * HOUR)
     expect(weekly('xai') - LAUNCH).toBe(122 * HOUR)

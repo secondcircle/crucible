@@ -1,12 +1,8 @@
-/* The quota strip, drawn from the approved mock's measurements. Every color is
-   a token: a literal hex here would be a bug you can grep for. Nothing
-   animates and nothing transitions — whatever the numbers say, this is never
-   an alarm surface.
+/* Every color is a token: a literal hex here would be a bug you can grep for.
+   Nothing animates, because whatever the numbers say this is never an alarm.
 
-   Every class here carries the strip's own `q` prefix. The mock's names are
-   short and general (`prov`, `bar`, `num`), and the Settings sheet already
-   owns a global `.prov`: one shared name is enough for another component's
-   rules to reach in and lay this block out sideways. */
+   The `q` prefix on every class is deliberate: short general names like `bar`
+   and `num` collide with rules other components already own. */
 
 .quota {
   border-top: 1px solid var(--line);
@@ -29,8 +25,7 @@
   margin-bottom: 2px;
 }
 
-/* A reading the strip has stopped trusting: dimmed as one block, so no meter
-   of it can be read as current. */
+/* Dimmed as one block, so no meter of a distrusted reading reads as current. */
 .qrow.qstale {
   opacity: 0.5;
 }
@@ -91,8 +86,7 @@
   background: var(--error);
 }
 
-/* The pace tick: where an even burn would have you right now. Fill past it
-   means spending faster than the window elapses. */
+/* The pace tick: fill past it means spending faster than the window elapses. */
 .qmeter .qbar u {
   position: absolute;
   top: -1px;
@@ -116,7 +110,7 @@
   font-weight: 600;
 }
 
-/* Past an hour a reading stops being evidence: the name, and a dash. */
+/* Past an hour a reading stops being evidence, so the row shows a dash. */
 .qdash {
   color: var(--faint);
   font: 11px var(--mono);

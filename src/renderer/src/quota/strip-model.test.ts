@@ -1,8 +1,7 @@
 // @vitest-environment node
 //
-// The arithmetic behind the strip: the countdown, the age, the thresholds, the
-// pace tick and the out-word. All of it is one pure function over a snapshot
-// and a clock, so it is read and tested without a document.
+// The arithmetic behind the strip is pure, so none of it needs a document to
+// be tested.
 import { describe, expect, it } from 'vitest'
 import type { QuotaMeter, QuotaSnapshot } from '../../../shared/quota/types'
 import {

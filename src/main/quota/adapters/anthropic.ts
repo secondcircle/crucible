@@ -3,26 +3,13 @@ import { onceIn } from '../log'
 import { getJson } from './http'
 import type { AdapterRequest, AdapterResult, ProviderAdapter } from './types'
 
-/**
- * Anthropic quota adapter: `GET /api/oauth/usage` → normalized meters.
- *
- * The parser reads the payload's self-description, never its slot names. ONLY
- * `limits[]` is read. The top-level keys carry rotating codenames
- * (`nimbus_quill`, `cinder_cove`, `tangelo`, …) and omit the scoped Fable meter
- * entirely, so enumerating them would couple this client to experiments and
- * still miss the account's highest meter. Anthropic's own client stamps this
- * response "Experimental — the response shape may change": drift is expected,
- * and the adapter fails closed to absence rather than guessing a label or a
- * number.
- *
- * Everything above this file speaks `QuotaMeter` only — no caller knows the
- * URL, the header set, the unit of `resets_at`, or which slot held which meter.
- */
+// Only `limits[]` is read, never the top-level slots: those carry rotating
+// codenames and omit the scoped meter, so enumerating them would couple this
+// client to experiments and still miss the account's highest meter.
 
 export const ANTHROPIC_PROVIDER_ID = 'anthropic'
 export const ANTHROPIC_QUOTA_URL = 'https://api.anthropic.com/api/oauth/usage'
 
-/** Where a `limits[]` entry's `kind` lands, and the label that goes with it. */
 const KINDS: Record<string, { kind: QuotaMeter['kind']; label?: string }> = {
   session: { kind: 'session', label: '5H' },
   weekly_all: { kind: 'weekly', label: '7D' },
@@ -33,32 +20,21 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
-/**
- * Percent is USED on 0–100. Absent, non-numeric, `NaN`, negative or above 100
- * drops the meter — never `0`, never silently clamped: a fabricated zero is
- * indistinguishable from a fresh window, which is the one failure that looks
- * exactly like a correct reading.
- */
+// An out-of-range percent drops the meter rather than clamping: a fabricated
+// zero is indistinguishable from a fresh window.
 function readPercent(value: unknown): number | null {
   if (typeof value !== 'number' || !Number.isFinite(value)) return null
   if (value < 0 || value > 100) return null
   return value
 }
 
-/** ISO-8601 UTC → epoch ms. Anything that does not parse becomes `null`. */
 function readResetsAt(value: unknown): number | null {
   if (typeof value !== 'string') return null
   const ms = Date.parse(value)
   return Number.isNaN(ms) ? null : ms
 }
 
-/**
- * Pure payload → meters. Never throws, never fetches.
- *
- * `null` when the payload is not a recognizable quota document (the
- * contract-drift signal, reported as `unparsed` above), and `[]` when it parses
- * but names no meter this parser recognizes (legitimately empty).
- */
+/** `null` is contract drift; `[]` is a document that legitimately meters nothing. */
 export function parseAnthropicQuota(
   payload: unknown,
   opts: { log?: (message: string) => void } = {}
@@ -126,25 +102,19 @@ export function parseAnthropicQuota(
   return meters
 }
 
-/**
- * Given a bearer and a deadline, return this account's meters, or why not.
- * Never throws for "no data": an expired token, a 429, a timeout, a body that
- * is not JSON and a body of an unexpected shape all come back as an `error`.
- */
 async function fetchQuota(bearer: string, req: AdapterRequest): Promise<AdapterResult> {
   // The sink is passed on raw: the parser gates it once per process, and gating
-  // it twice would mean the second gate never sees a first delivery.
+  // it twice would leave the second gate never seeing a first delivery.
   const res = await getJson({
     ...req,
     url: ANTHROPIC_QUOTA_URL,
     bearer
-    // Verified live: no `anthropic-beta` and no Claude User-Agent needed.
+    // The endpoint accepts a bare bearer: no `anthropic-beta`, no User-Agent.
   })
   if (!res.ok) return res
 
-  // A payload with no `limits[]` is drift, reported as `unparsed`. The store
-  // says so once, when the provider's state changes; saying it here as well
-  // would be two diagnostics for one transition.
+  // Not logged here: the store already speaks once per state transition, and
+  // saying it twice would be two diagnostics for one.
   const meters = parseAnthropicQuota(res.payload, { log: req.log })
   if (meters === null) return { ok: false, error: 'unparsed' }
   return { ok: true, meters }

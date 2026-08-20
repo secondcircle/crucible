@@ -1,9 +1,7 @@
 // @vitest-environment node
 //
-// The store through its own seams: a fixture cache directory, an injected
-// clock, fake adapters and an injected credential lookup. Nothing here opens a
-// socket, reads a credential, or goes near the machine's own cache — the
-// directory override is what makes that true, and every test passes one.
+// Every test passes a fixture directory, an injected clock and stand-in
+// adapters, so nothing here opens a socket or goes near the machine's cache.
 import { mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -146,7 +144,7 @@ describe('the quota store', () => {
 
     const raw = readFileSync(join(dir, 'anthropic.json'), 'utf8')
     expect(raw).not.toContain('token')
-    // The disk keeps the legacy field name, because the cache is an interop
+    // The disk keeps the field name `windows`, because the file is an interop
     // contract with apps this one does not control.
     const written = JSON.parse(raw) as { v: number; windows: unknown[] }
     expect(written.v).toBe(1)
@@ -365,8 +363,8 @@ describe('the quota store', () => {
 
     await harnessed.store.refresh()
 
-    // The same directory, read by the pure half with no store in sight: this is
-    // the shared-cache contract the on-disk layout exists for.
+    // Read by the pure half with no store in sight, which is the shared-cache
+    // contract the on-disk layout exists for.
     expect(readQuota({ dir, now: harnessed.now }).providers.xai.meters).toEqual([
       meter({ usedPercent: 61 })
     ])

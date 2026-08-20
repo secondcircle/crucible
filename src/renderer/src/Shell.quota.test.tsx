@@ -1,8 +1,7 @@
 // @vitest-environment jsdom
 //
-// The quota strip, driven through the seam it lives on: a scripted quota
-// service whose snapshots this test authors and whose calls it records. No
-// network, no cache, no adapter — the strip's whole world is that interface.
+// Driven through a scripted service whose snapshots these tests author and
+// whose calls they record, so no network, cache or adapter is involved.
 import { act, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createFakeQuotaService } from '../../shared/quota/fake-service'
@@ -78,7 +77,6 @@ const rows = (container: HTMLElement): HTMLElement[] => [
   ...container.querySelectorAll<HTMLElement>('.quota .qrow')
 ]
 
-/** One row, as a reader sees it: the name, the right-hand text, the meter lines. */
 function readRow(row: HTMLElement): {
   name: string
   right: string
@@ -124,8 +122,7 @@ describe('the quota strip', () => {
   it('renders no block at all when no provider is present', async () => {
     const container = await shellWith(createScriptedQuota(snapshotOf({})))
 
-    // Heading, border and everything: signed out of everything looks like
-    // nothing at all.
+    // Heading and border included: signed out of everything looks like nothing.
     expect(strip(container)).toBeNull()
   })
 
@@ -147,7 +144,7 @@ describe('the quota strip', () => {
     expect(quota.calls[0]).toEqual({ op: 'read' })
     expect(refreshes(quota)).toEqual([{ op: 'refresh' }])
 
-    // And nothing shows that a refresh is under way, by ruling.
+    // And nothing announces that a refresh is under way.
     expect(strip(container)?.textContent).not.toMatch(/loading|refreshing/i)
 
     await act(async () => {

@@ -9,20 +9,11 @@ import {
   quotaCacheDir
 } from './paths'
 
-/**
- * The pure half of the quota plumbing: it reads cache files, never fetches,
- * never locks, never watches, and imports neither the store, the adapters, nor
- * π. This is the seam a future model switcher crosses — the whole reason the
- * halves are split — so asking it a question can never cost a request.
- *
- * Hidden behind it: the file layout, lapsed suppression, schema versioning. A
- * caller need not know a store exists; a machine where nothing has ever fetched
- * reads an empty snapshot, which is `null` at every consumer API, never a zero.
- */
+// Split from the store so that asking about quota can never cost a request:
+// nothing here fetches, locks or imports π.
 
-// The freshness vocabulary is one module's, shared with the strip. Re-exported
-// here so a consumer of the read seam has one import and no way to reach for a
-// second definition of "stale".
+// Re-exported so a consumer of this seam has one import and no way to reach
+// for a second definition of "stale".
 export {
   isStale,
   worstUsedPercent,
@@ -30,37 +21,22 @@ export {
   MAX_USABLE_AGE_MS
 } from '../../shared/quota/freshness'
 
-/**
- * One cache file. The published record calls the list `meters`; the disk keeps
- * the legacy system's field name `windows` verbatim, because the file is an
- * interop contract with apps this one does not control. The mapping happens
- * here, at the read/write boundary, and nowhere else.
- *
- * `attemptedAt` is when the last *attempt* happened; `fetchedAt` is how old the
- * *data* is. Keeping them apart is what lets a failure age a reading visibly
- * (`·12m`) while the TTL still suppresses a retry storm against a provider that
- * is down.
- */
+// The disk keeps the field name `windows` verbatim, because the file is an
+// interop contract with apps this one does not control. The published record's
+// `meters` is mapped here and nowhere else.
 export interface CacheEntry {
   readonly v: number
   readonly providerId: string
   readonly windows: readonly QuotaMeter[]
+  /** How old the data is, as against when it was last attempted: a failure
+   * ages a reading visibly while the TTL still suppresses a retry storm. */
   readonly fetchedAt: number
   readonly attemptedAt: number
   readonly error?: QuotaError
   /**
-   * A nonce stamped by whoever published this file, new on every write.
-   *
-   * It answers one question no timestamp can answer reliably: did somebody
-   * write this file while I was away? Two passes may carry the same injected
-   * clock (the store's documented test seam) or simply land in the same
-   * millisecond, and then equal `attemptedAt` values say nothing about whether
-   * a write happened. A fresh random token per write says it exactly, without a
-   * clock and across processes.
-   *
-   * It carries no identity — it is random, and it is about the *file*. Absent
-   * in files written before this field existed, which reads as "unknown writer"
-   * and falls back to the `attemptedAt` comparison.
+   * Random, new on every write: two passes can share a clock or a millisecond,
+   * so equal timestamps cannot say whether somebody wrote while we were away.
+   * Absent in older files, which falls back to comparing `attemptedAt`.
    */
   readonly writeId?: string
 }
@@ -72,10 +48,8 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
-/**
- * A meter is only as trustworthy as its own fields: a cache file is data from
- * outside this process, so it is validated exactly as a payload is.
- */
+// A cache file is data from outside this process, so it is validated exactly
+// as a payload is.
 function validMeter(raw: unknown): QuotaMeter | null {
   if (!isRecord(raw)) return null
   const kind = raw['kind']
@@ -100,8 +74,7 @@ function validMeter(raw: unknown): QuotaMeter | null {
 
 function validEntry(raw: unknown, providerId: string): CacheEntry | null {
   if (!isRecord(raw)) return null
-  // A schema change bumps `v`; readers discard on mismatch and refetch. No
-  // in-place migration, ever — the data is a cache and refetching costs one GET.
+  // Never migrated in place: the data is a cache, and refetching costs one GET.
   if (raw['v'] !== CACHE_SCHEMA_VERSION) return null
   if (raw['providerId'] !== providerId) return null
   if (typeof raw['fetchedAt'] !== 'number' || !Number.isFinite(raw['fetchedAt'])) return null
@@ -122,17 +95,13 @@ function validEntry(raw: unknown, providerId: string): CacheEntry | null {
     fetchedAt: raw['fetchedAt'],
     attemptedAt: typeof raw['attemptedAt'] === 'number' ? raw['attemptedAt'] : raw['fetchedAt'],
     ...(typeof error === 'string' ? { error: error as QuotaError } : {}),
-    // Bookkeeping, never published: `readQuota()` below builds its records
-    // field by field, so this reaches the store and nothing else.
+    // Never published: the snapshot below is built field by field, so this
+    // reaches the store and nothing else.
     ...(typeof raw['writeId'] === 'string' ? { writeId: raw['writeId'] } : {})
   }
 }
 
-/**
- * One provider's cache file, or `null`. Missing, truncated, unparseable, or a
- * schema mismatch all read as absent and never throw — a half-written file
- * cannot be observed (atomic rename), so this means external damage.
- */
+/** Damage reads as absence and never throws; writes are atomic, so it is damage. */
 export function readEntry(providerId: string, dir?: string): CacheEntry | null {
   if (!isSafeProviderId(providerId)) return null
   try {
@@ -142,11 +111,7 @@ export function readEntry(providerId: string, dir?: string): CacheEntry | null {
   }
 }
 
-/**
- * Every provider id with a cache file present, in directory order — including
- * ids no adapter owns. Exported for the store, which prunes exactly those; the
- * snapshot below is narrower.
- */
+/** Includes ids no adapter owns, because the store prunes exactly those. */
 export function cachedProviderIds(dir?: string): string[] {
   try {
     return readdirSync(quotaCacheDir(dir))
@@ -158,23 +123,14 @@ export function cachedProviderIds(dir?: string): string[] {
   }
 }
 
-/**
- * The latest snapshot off disk. Never fetches, never locks, never throws.
- *
- * Lapsed meters — those whose reset instant has already passed — are dropped
- * here rather than dimmed: the quota has rolled over, so the cached percentage
- * is wrong rather than merely old, and a lapsed percent is the one failure that
- * looks exactly like a correct reading. A provider whose every meter has lapsed
- * stays present with an empty list, which renders as its name and `—`.
- */
+// Lapsed meters are dropped rather than dimmed: the quota has rolled over, so
+// the cached percentage is wrong rather than merely old.
 export function readQuota(opts: { dir?: string; now?: () => number } = {}): QuotaSnapshot {
   const now = opts.now ?? Date.now
   const at = now()
   const providers: Record<string, ProviderQuota> = {}
-  // A provider with no adapter is absent, and that has to hold for THIS read:
-  // the strip paints its first snapshot from the cache before any refresh has
-  // had the chance to prune residue. Filtering here is what makes absence a
-  // property of the reader rather than of timing.
+  // Filtered here as well as pruned by the store: the strip paints its first
+  // snapshot before any refresh has had the chance to remove residue.
   for (const providerId of cachedProviderIds(opts.dir).filter((id) =>
     KNOWN_PROVIDER_IDS.includes(id)
   )) {
@@ -190,7 +146,6 @@ export function readQuota(opts: { dir?: string; now?: () => number } = {}): Quot
   return { providers, fetchedAt: at }
 }
 
-/** The directory the reader reads. Exported for diagnostics. */
 export function quotaCacheDirectory(dir?: string): string {
   return quotaCacheDir(dir)
 }

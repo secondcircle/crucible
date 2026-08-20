@@ -7,9 +7,8 @@ import type {
 import type { QuotaSnapshot } from '../../../shared/quota/types'
 import { quotaBridge } from '../bridge'
 
-// The renderer's side of the quota channel. It holds no state and knows no
-// plumbing: the cache, the locks and the TTL are main's, and this document only
-// asks and listens.
+// Holds no state: the cache, the locks and the TTL are main's, and this
+// document only asks and listens.
 
 export function createQuotaClient(): QuotaService {
   const quota = quotaBridge()

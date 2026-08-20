@@ -77,8 +77,6 @@ export function Shell({
   readonly quota?: QuotaService
 }): React.JSX.Element {
   const [state, dispatch] = useReducer(reduce, NOTHING_YET)
-  // The strip's own state: the cached paint, the four triggers, and a timer
-  // that only repaints.
   const quotaHold = useQuota(quota)
   const refreshQuota = quotaHold.refresh
   // The waiting build's commit, once main has announced one.
@@ -230,8 +228,8 @@ export function Shell({
       if (event.type === 'panel_shown') {
         setCollapsed((current) => ({ ...current, [event.sessionId]: false }))
       }
-      // A turn that ended spent quota, and so did one that was cancelled or
-      // failed. The TTL decides whether the ask becomes a fetch.
+      // A cancelled or failed turn spent quota too. The TTL decides whether
+      // the ask becomes a fetch.
       if (
         event.type === 'turn_ended' ||
         event.type === 'turn_cancelled' ||

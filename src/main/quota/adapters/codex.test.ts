@@ -1,25 +1,16 @@
 // @vitest-environment node
 //
-// The Codex quota adapter, driven through its own seam: the captured payload
-// in, normalized records out. No socket is opened here, and no authenticated
-// call is made at all.
-//
-// The fixture is the live capture the legacy system's tests carry, with the
-// identity fields it also carried left as the redacted placeholder they were
-// printed as: this body has `account_id`, `user_id` and `email`, and none of
-// that is anything Crucible needs to keep.
+// The transport is injected, so no socket is opened and no authenticated call
+// is made. The fixture is a live capture whose identity fields are left as the
+// redacted placeholders they were: none of that is anything Crucible keeps.
 import { beforeEach, describe, expect, it } from 'vitest'
 import type { QuotaMeter } from '../../../shared/quota/types'
 import { forgetOnceIn } from '../log'
 import { CODEX_QUOTA_URL, codexAdapter, parseCodexQuota } from './codex'
 import type { FetchLike } from './types'
 
-/**
- * `GET /backend-api/wham/usage`, 200, plan `prolite`: exactly one window,
- * 604800 s, in the **primary** slot, with `secondary_window: null`, plus one
- * scoped meter in `additional_rate_limits[]` whose window struct nests one
- * level deeper.
- */
+// A live account: its one weekly window sits in the slot called primary, and
+// its scoped meter nests one level deeper.
 const CAPTURE: Record<string, unknown> = JSON.parse(String.raw`{
   "account_id": "f659692f-8e71-4fa8-8909-ca04367fc8eb",
   "plan_type": "prolite",
@@ -55,7 +46,6 @@ function parsed(payload: unknown): QuotaMeter[] {
   return meters as QuotaMeter[]
 }
 
-/** A payload built on the capture, with the meter blocks replaced. */
 function withRateLimit(rateLimit: unknown, additional: unknown = []): unknown {
   return { ...CAPTURE, rate_limit: rateLimit, additional_rate_limits: additional }
 }
@@ -217,9 +207,8 @@ describe('the Codex quota adapter', () => {
   })
 
   it('logs an unrecognized duration once per process, sink or no sink', () => {
-    // The suppression belongs to the process, not to the sink: a store that
-    // supplies a diagnostics sink must not thereby turn one diagnostic into one
-    // per parse, forever, on a payload whose shape never changes.
+    // The suppression belongs to the process rather than to the sink, or a
+    // store that injects one would get a diagnostic per parse forever.
     const first = quiet()
     const second = quiet()
     const payload = withRateLimit({

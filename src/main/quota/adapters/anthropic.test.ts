@@ -1,13 +1,8 @@
 // @vitest-environment node
 //
-// The Anthropic quota adapter, driven through its own seam: captured payloads
-// in, normalized records out. No socket is opened here — the adapter's
-// transport is injected — and no authenticated call is made at all.
-//
-// The two fixtures are the live captures the legacy system's tests carry,
-// embedded byte-for-byte from the capture files themselves rather than from
-// anybody's abridged printing of them: floats (`8.0`) and all, since the
-// float-versus-integer distinction is itself a fact under test.
+// The transport is injected, so no socket is opened and no authenticated call
+// is made. The fixtures are live captures kept byte-for-byte, floats (`8.0`)
+// and all, because the float-versus-integer distinction is a fact under test.
 import { beforeEach, describe, expect, it } from 'vitest'
 import type { QuotaMeter } from '../../../shared/quota/types'
 import { forgetOnceIn } from '../log'
@@ -18,23 +13,21 @@ import {
 } from './anthropic'
 import type { FetchLike } from './types'
 
-/** `GET /api/oauth/usage`, 200, captured with π's own bearer. */
 const A2_CAPTURE: unknown = JSON.parse(
   String.raw`{"five_hour":{"utilization":8.0,"resets_at":"2026-08-14T22:29:59.777251+00:00","limit_dollars":null,"used_dollars":null,"remaining_dollars":null},"seven_day":{"utilization":56.0,"resets_at":"2026-08-19T05:59:59.777293+00:00","limit_dollars":null,"used_dollars":null,"remaining_dollars":null},"seven_day_oauth_apps":null,"seven_day_opus":null,"seven_day_sonnet":null,"seven_day_cowork":null,"seven_day_omelette":null,"tangelo":null,"iguana_necktie":null,"omelette_promotional":null,"nimbus_quill":{"utilization":0.0,"resets_at":null,"limit_dollars":null,"used_dollars":null,"remaining_dollars":null},"cinder_cove":null,"amber_ladder":null,"extra_usage":{"is_enabled":false,"monthly_limit":25000,"used_credits":8.0,"utilization":0.032,"currency":"USD","decimal_places":2,"disabled_reason":"out_of_credits","user_disabled":false,"spend_limit_reached":false,"credits_ever_enabled":true,"daily":null,"weekly":null},"limits":[{"kind":"session","group":"session","percent":8,"severity":"normal","resets_at":"2026-08-14T22:29:59.777251+00:00","scope":null,"is_active":false},{"kind":"weekly_all","group":"weekly","percent":56,"severity":"normal","resets_at":"2026-08-19T05:59:59.777293+00:00","scope":null,"is_active":false},{"kind":"weekly_scoped","group":"weekly","percent":74,"severity":"normal","resets_at":"2026-08-19T05:59:59.777478+00:00","scope":{"model":{"id":null,"display_name":"Fable"},"surface":null},"is_active":true}],"spend":{"used":{"amount_minor":8,"currency":"USD","exponent":2},"limit":{"amount_minor":25000,"currency":"USD","exponent":2},"percent":0,"severity":"normal","enabled":false,"disabled_reason":"out_of_credits","cap":{"money":null,"credits":{"amount_minor":25000,"exponent":2}},"balance":null,"auto_reload":null,"disclaimer":"Usage credits cover you when you hit your plan limits.","can_purchase_credits":false,"can_toggle":false},"member_dashboard_available":false}`
 )
 
-/** The same endpoint a day earlier, with its own numbers. */
+// The same endpoint a day earlier, so the parser is never tuned to one body.
 const EARLIER_CAPTURE: unknown = JSON.parse(
   String.raw`{"five_hour":{"utilization":7,"resets_at":"2026-08-14T04:29:59.999655+00:00"},"seven_day":{"utilization":46,"resets_at":"2026-08-19T05:59:59.999676+00:00"},"nimbus_quill":{"utilization":0,"resets_at":null},"limits":[{"kind":"session","group":"session","percent":7,"severity":"normal","resets_at":"2026-08-14T04:29:59.999655+00:00","scope":null,"is_active":false},{"kind":"weekly_all","group":"weekly","percent":46,"severity":"normal","resets_at":"2026-08-19T05:59:59.999676+00:00","scope":null,"is_active":false},{"kind":"weekly_scoped","group":"weekly","percent":58,"severity":"normal","resets_at":"2026-08-19T05:59:59.999857+00:00","scope":{"model":{"id":null,"display_name":"Fable"},"surface":null},"is_active":true}]}`
 )
 
-/** Collects the adapter's diagnostics instead of printing them. */
 function quiet(): { log: (message: string) => void; messages: string[] } {
   const messages: string[] = []
   return { log: (message) => messages.push(message), messages }
 }
 
-/** Every fixture-derived payload is a fresh copy, so one test cannot poison another. */
+// A fresh copy per payload, so one test cannot poison another.
 function withLimits(limits: unknown[]): unknown {
   return { ...(A2_CAPTURE as Record<string, unknown>), limits }
 }
@@ -300,9 +293,8 @@ describe('the Anthropic quota adapter', () => {
       anthropicAdapter.fetchQuota('t', { deadline: deadline(), fetchImpl: boom, log: sink.log })
     ).resolves.toEqual({ ok: false, error: 'unavailable' })
 
-    // A failed request is a provider state, and state reporting belongs to the
-    // store: one provider entering one state produces exactly one message, and
-    // that one is not the adapter's.
+    // A failed request is a provider state, and the store reports those: one
+    // transition must not produce two messages.
     expect(sink.messages).toEqual([])
   })
 

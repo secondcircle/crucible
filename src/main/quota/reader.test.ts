@@ -1,9 +1,7 @@
 // @vitest-environment node
 //
-// The read seam: cache files in, a snapshot out, and never a fetch. This is
-// what a future model switcher will import, so the tests are written as that
-// consumer — asking questions and never paying for one. Every test passes the
-// fixture directory; nothing here can reach the machine's own cache.
+// Written as a consumer that asks questions and never pays for one. Every
+// test passes a fixture directory, so none can reach the machine's own cache.
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -72,8 +70,8 @@ describe('the quota reader', () => {
       ])
     )
 
-    // The rolled-over window's percent is wrong rather than merely old, and a
-    // lapsed percent is the one failure that looks exactly like a reading.
+    // A rolled-over percent is wrong rather than merely old, and it is the one
+    // failure that looks exactly like a reading.
     expect(snapshotOf(dir).providers.anthropic.meters.map((shown) => shown.label)).toEqual([
       '7D',
       'FABLE'
@@ -121,8 +119,8 @@ describe('the quota reader', () => {
     writeCache(dir, 'anthropic', goodEntry('anthropic', [meter()]))
     writeCache(dir, 'some-future-provider', goodEntry('some-future-provider', [meter()]))
 
-    // Absence is a property of the reader rather than of timing: no store has
-    // run here to prune the residue, and the snapshot is right anyway.
+    // No store has run here to prune the residue, and the snapshot is right
+    // anyway: absence is the reader's property, not timing's.
     expect(Object.keys(snapshotOf(dir).providers)).toEqual(['anthropic'])
   })
 

@@ -8,10 +8,8 @@ import type { QuotaService } from '../../shared/quota/service'
 import type { QuotaSnapshot } from '../../shared/quota/types'
 import { displaySafeMessage } from '../agent/adapter-error'
 
-// Plumbing only, exactly as the workspace and update channels are: what a
-// refresh means lives in the service. Main hosts one service and every window
-// is served over it, so the result of a refresh any window triggered reaches
-// each of them and the TTL makes the duplicate triggers free.
+// Plumbing only: what a refresh means lives in the service. Every window is
+// served over the one service, so a refresh any of them triggered reaches all.
 export interface QuotaChannel {
   dispose(): void
 }
@@ -70,7 +68,7 @@ export async function invoke(service: QuotaService, request: unknown): Promise<u
   }
 }
 
-/** A scope is a list of provider ids or nothing at all; anything else is nothing. */
+// A scope is provider ids or nothing at all; anything else is nothing.
 function refreshOptions(given: unknown): { providers?: readonly string[] } {
   if (typeof given !== 'object' || given === null) return {}
   const { providers } = given as { providers?: unknown }

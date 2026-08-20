@@ -3,20 +3,14 @@ import type { QuotaService } from '../../../shared/quota/service'
 import type { QuotaSnapshot } from '../../../shared/quota/types'
 
 // The strip owns the triggers; the store owns the rate limit. Every trigger
-// here is a `refresh()` the 60 s TTL and main's per-provider in-flight dedupe
-// may turn into a no-op, which is what makes duplicate triggers — two windows,
-// two events in one second — free. Nothing in this module fetches on its own,
-// and the display timer below never performs IO.
+// here is a `refresh()` the TTL may turn into a no-op, which is what makes
+// duplicate triggers free.
 
-/** Two reset instants this close are one reset: Anthropic's weekly pair differs by microseconds. */
+/** Reset instants this close are one reset: a provider's weekly pair can differ by microseconds. */
 export const SAME_RESET_MS = 1000
 
-/**
- * How often the strip re-derives its display from data already in hand, so
- * countdowns tick down, ages tick up and rows cross the stale and unknown
- * boundaries on time. It repaints; the only network consequence it can have is
- * a reset instant passing, which asks once for that provider alone.
- */
+// Repaints from data in hand. The only network consequence it can have is a
+// reset instant passing, which asks once for that provider alone.
 export const DISPLAY_TICK_MS = 60_000
 
 export interface QuotaView {
@@ -27,21 +21,16 @@ export interface QuotaView {
 }
 
 export interface QuotaHold extends QuotaView {
-  /** Ask for a refresh. Unscoped unless a provider is named. */
+  /** Unscoped unless a provider is named. */
   readonly refresh: (providers?: readonly string[]) => void
 }
 
-/**
- * The strip's whole relationship with the quota service: the cached paint on
- * launch, the four refresh triggers, and a minute timer that only repaints.
- *
- * Without a service there is no strip: nothing is read, nothing is asked, and
- * the snapshot stays undefined.
- */
+// Without a service there is no strip: nothing is read, nothing is asked, and
+// the snapshot stays undefined.
 export function useQuota(service?: QuotaService): QuotaHold {
   const [snapshot, setSnapshot] = useState<QuotaSnapshot | undefined>(undefined)
   const [now, setNow] = useState<number>(() => Date.now())
-  /** Reset instants already asked about, so one reset asks once for the run. */
+  // Reset instants already asked about, so one reset asks once for the run.
   const asked = useRef<Array<{ readonly providerId: string; readonly at: number }>>([])
 
   const apply = useCallback((taken: QuotaSnapshot): void => {
@@ -64,9 +53,8 @@ export function useQuota(service?: QuotaService): QuotaHold {
     [service, apply]
   )
 
-  // Launch: the last cached reading paints immediately, dimmed with its age if
-  // that is what it is, instead of an empty block or a spinner. The refresh
-  // that follows repaints through the ordinary change event.
+  // The cached reading paints before the refresh lands, so launch shows a
+  // dimmed number rather than an empty block or a spinner.
   useEffect(() => {
     if (service === undefined) return
     let alive = true
@@ -86,8 +74,8 @@ export function useQuota(service?: QuotaService): QuotaHold {
     }
   }, [service, refresh, apply])
 
-  // Window focus: the app was away, and whatever was spent elsewhere shows on
-  // the way back.
+  // On focus, because whatever was spent while the app was away shows on the
+  // way back.
   useEffect(() => {
     if (service === undefined) return
     const onFocus = (): void => refresh()
@@ -95,7 +83,7 @@ export function useQuota(service?: QuotaService): QuotaHold {
     return () => window.removeEventListener('focus', onFocus)
   }, [service, refresh])
 
-  // The display timer. It repaints from data in hand and performs no IO.
+  // Repaints only: this timer performs no IO.
   useEffect(() => {
     if (service === undefined) return
     const tick = setInterval(() => setNow(Date.now()), DISPLAY_TICK_MS)
@@ -103,10 +91,9 @@ export function useQuota(service?: QuotaService): QuotaHold {
   }, [service])
 
   // A countdown reaching zero is the one moment an idle number is certainly
-  // wrong, so ask for one refresh of THAT provider — once per reset instant,
-  // never a poll, and never on anyone else's behalf. Detection works from the
-  // snapshot in hand precisely because a fresh read would have dropped the
-  // lapsed meter.
+  // wrong, so that provider alone is asked, once per reset instant. Detection
+  // works from the snapshot in hand because a fresh read would have dropped
+  // the lapsed meter.
   useEffect(() => {
     if (service === undefined || snapshot === undefined) return
     for (const quota of Object.values(snapshot.providers)) {

@@ -2,8 +2,7 @@ import type { QuotaListener, QuotaService, Unsubscribe } from '../../../shared/q
 import type { QuotaSnapshot } from '../../../shared/quota/types'
 
 // Answers the way main does but fetches nothing and announces nothing by
-// itself, so a component test is about what the strip draws and what it asks
-// for, never about timing a real refresh.
+// itself, so a component test never times a real refresh.
 
 export interface ScriptedQuota extends QuotaService {
   /** Every call the strip made, oldest first. */
@@ -11,20 +10,17 @@ export interface ScriptedQuota extends QuotaService {
     readonly op: 'read' | 'refresh'
     readonly providers?: readonly string[]
   }>
-  /** What `read` and `refresh` answer with. A test may change it between calls. */
+  /** May be changed between calls. */
   snapshot: QuotaSnapshot
-  /** Set where a test wants the refusal a rejected IPC call is. */
+  /** The refusal a rejected IPC call is. */
   refusal?: string
-  // Hold every refresh's answer, so a test can see what the strip paints while
-  // the first one is still running.
+  // Holding a refresh is how a test sees what the strip paints while one is
+  // still running.
   holdRefresh?: boolean
-  /** Answers every held refresh. */
   releaseRefresh(): void
-  /** A refresh result the way main broadcasts one to every window. */
   announce(snapshot: QuotaSnapshot): void
 }
 
-/** The refreshes a test asked about, scope and all. */
 export function refreshes(
   quota: ScriptedQuota
 ): ReadonlyArray<{ readonly op: 'read' | 'refresh'; readonly providers?: readonly string[] }> {

@@ -34,7 +34,6 @@ export interface CrucibleAppUpdate {
   onEvent(listener: (event: UpdateReady) => void): () => void
 }
 
-/** The quota half: ask for the cache or a refresh, hear every refresh's result. */
 export interface CrucibleQuota {
   request(request: QuotaRequest): Promise<QuotaResult>
   onEvent(listener: (snapshot: QuotaSnapshot) => void): () => void

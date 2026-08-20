@@ -1,9 +1,7 @@
 // @vitest-environment node
 //
-// The flavor decision is a pure function, like the adapter's, so the rule can
-// be read without constructing anything. Nothing here builds the SDK-wired
-// service: the real store's behavior is proven through its injected seams, and
-// constructing it would mean loading π.
+// Nothing here builds the SDK-wired service: that would mean loading π, and
+// the store's behavior is proven through its injected seams instead.
 import { existsSync, mkdtempSync, readdirSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -39,8 +37,8 @@ describe('choosing a quota service', () => {
 
   it('serves canned meters under the fake flavor, and performs no IO doing it', async () => {
     const log = memorySink()
-    // The cache the canned service must not touch, pointed somewhere this test
-    // can inspect. An agent-driven check never goes near the human's quota.
+    // Pointed somewhere inspectable, because an agent-driven check must never
+    // go near the human's quota.
     const home = mkdtempSync(join(tmpdir(), 'crucible-quota-flavor-'))
     vi.stubEnv('PI_CODING_AGENT_DIR', home)
     const fetching = vi.spyOn(globalThis, 'fetch')

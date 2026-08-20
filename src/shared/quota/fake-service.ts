@@ -1,26 +1,21 @@
 import type { QuotaListener, QuotaService, Unsubscribe } from './service'
 import type { QuotaSnapshot } from './types'
 
-// The canned quota service: no network, no credential read, no disk. It is
-// what the fake launch flavor serves, so an agent-driven check never touches
-// the human's quota or the cache the machine's apps share.
-//
-// The numbers are chosen so the arithmetic is coherent and every visual state
-// stands on screen at once: an amber meter, a red one with its `!`, a provider
-// whose weekly burn projects past 100% (the out-word), and two that are
-// comfortably behind their pace ticks.
+// No network, no credential read, no disk, so an agent-driven check never
+// touches the human's quota or the cache the machine's apps share. The numbers
+// are picked to put every visual state on screen at once.
 
 const HOUR = 60 * 60 * 1000
 
-/** Everything is anchored to launch, so nothing has lapsed by the time it paints. */
+// Anchored to launch, so nothing has lapsed by the time it paints.
+
 export function cannedQuotaSnapshot(launchedAt: number): QuotaSnapshot {
   const at = (hours: number): number => launchedAt + hours * HOUR
 
   return {
     fetchedAt: launchedAt,
     providers: {
-      // 61 h into its week: the tick sits near 36% and both weekly fills are
-      // behind it, so Anthropic says nothing beyond its numbers.
+      // 61 h into the week: both weekly fills sit behind the pace tick.
       anthropic: {
         providerId: 'anthropic',
         fetchedAt: launchedAt,
@@ -37,8 +32,8 @@ export function cannedQuotaSnapshot(launchedAt: number): QuotaSnapshot {
           }
         ]
       },
-      // 92 h in with 78% spent: the projection lands past 100% before the
-      // reset, which is the whole of what the out-word says.
+      // 92 h in at 78%: the projection lands past 100% before the reset, which
+      // is what earns the out-word.
       'openai-codex': {
         providerId: 'openai-codex',
         fetchedAt: launchedAt,
@@ -47,7 +42,7 @@ export function cannedQuotaSnapshot(launchedAt: number): QuotaSnapshot {
           { kind: 'weekly', label: '7D', usedPercent: 78, resetsAt: at(76) }
         ]
       },
-      // 46 h in at 19%: behind its tick, and the only meter this plan reports.
+      // 46 h in at 19%: behind its tick.
       xai: {
         providerId: 'xai',
         fetchedAt: launchedAt,
@@ -57,19 +52,15 @@ export function cannedQuotaSnapshot(launchedAt: number): QuotaSnapshot {
   }
 }
 
-/**
- * One snapshot for the launch. `read` and `refresh` answer with the same
- * object, and `onChange` never has anything new to say: nothing behind this
- * service can change, which is what makes a check deterministic.
- */
+// One snapshot for the launch, so a check is deterministic: nothing behind
+// this service can change, and `onChange` never has anything new to say.
 export function createFakeQuotaService(launchedAt: number = Date.now()): QuotaService {
   const snapshot = cannedQuotaSnapshot(launchedAt)
   const listeners = new Set<QuotaListener>()
 
   return {
     read: () => Promise.resolve(snapshot),
-    // A scope changes nothing: there is nothing to fetch, so a scoped ask and
-    // a whole one are the same silence.
+    // A scope changes nothing: there is nothing here to fetch.
     refresh: () => Promise.resolve(snapshot),
     onChange(listener: QuotaListener): Unsubscribe {
       listeners.add(listener)
