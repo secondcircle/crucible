@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { exhibitUrl } from '../../../shared/agent/exhibit-url'
 import type { AgentPort, PanelState, SessionId, TabId } from '../../../shared/agent/port'
 import { Markdown } from './Markdown'
 import './context-panel.css'
@@ -133,8 +134,10 @@ export function PanelEdge({
   )
 }
 
-// What is on display, fetched through the port and never off the disk: the
-// renderer knows a tab by its id and by nothing else.
+// What is on display. Either way the renderer knows a tab by its id and by
+// nothing else: a markdown body comes back through the port, and an HTML
+// exhibit is loaded by the frame itself from the exhibit scheme, which resolves
+// that same id against the panel model.
 function Exhibit({
   sessionId,
   tab,
@@ -144,18 +147,49 @@ function Exhibit({
   readonly tab: PanelState['tabs'][number] | undefined
   readonly port: AgentPort
 }): React.JSX.Element {
+  return (
+    <div className="exhibit">
+      {tab === undefined ? null : tab.kind === 'html' ? (
+        // Browser-page rules: the exhibit's own scripts run, under the policy
+        // its own response header carries, and nothing else is granted. No
+        // same-origin, no preload, no Node, no IPC, no reach into the app.
+        // The key is the tab's identity including its latest show, so a re-show
+        // remounts the frame and `no-store` makes the reload fetch the bytes
+        // that are on disk now.
+        <iframe
+          key={`${sessionId}:${tab.id}:${tab.shownAt}`}
+          className="frame"
+          sandbox="allow-scripts"
+          title={tab.title}
+          src={exhibitUrl(sessionId, tab.id)}
+        />
+      ) : (
+        <MarkdownExhibit sessionId={sessionId} tab={tab} port={port} />
+      )}
+    </div>
+  )
+}
+
+// A markdown exhibit's body is fetched through the port and never off the disk.
+function MarkdownExhibit({
+  sessionId,
+  tab,
+  port
+}: {
+  readonly sessionId: SessionId
+  readonly tab: PanelState['tabs'][number]
+  readonly port: AgentPort
+}): React.JSX.Element | null {
   const [shown, setShown] = useState<
     { readonly of: string; readonly body?: string; readonly failure?: string } | undefined
   >(undefined)
 
-  const tabId: TabId | undefined = tab?.id
-  const shownAt = tab?.shownAt
+  const tabId: TabId = tab.id
   // A re-show refreshes the tab in place, and that is what a changed `shownAt`
   // means for the view: the same tab, fetched again.
-  const of = tabId === undefined ? undefined : `${sessionId}:${tabId}:${shownAt}`
+  const of = `${sessionId}:${tabId}:${tab.shownAt}`
 
   useEffect(() => {
-    if (tabId === undefined || of === undefined) return
     let current = true
     void port
       .exhibit(sessionId, tabId)
@@ -174,21 +208,12 @@ function Exhibit({
 
   // Nothing of another tab is ever shown under this one's title.
   const answer = shown?.of === of ? shown : undefined
-
+  if (answer === undefined) return null
+  // The tab stays open whatever a failure says: curation is the agent's.
+  if (answer.failure !== undefined) return <p className="exhibit-failure">{answer.failure}</p>
   return (
-    <div className="exhibit">
-      {tab === undefined || answer === undefined ? null : answer.failure !== undefined ? (
-        // The tab stays open whatever this says: curation is the agent's.
-        <p className="exhibit-failure">{answer.failure}</p>
-      ) : tab.kind === 'markdown' ? (
-        <div className="mdview">
-          <Markdown markdown={answer.body ?? ''} />
-        </div>
-      ) : (
-        // Browser-page rules: scripts run, and nothing else is granted. No
-        // same-origin, no preload, no Node, no IPC, no reach into the app.
-        <iframe className="frame" sandbox="allow-scripts" title={tab.title} srcDoc={answer.body} />
-      )}
+    <div className="mdview">
+      <Markdown markdown={answer.body ?? ''} />
     </div>
   )
 }

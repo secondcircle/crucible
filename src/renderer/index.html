@@ -4,16 +4,13 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <!--
-      A sandboxed `srcdoc` frame inherits this document's policy, and a context
-      panel exhibit has to run its own inline script (ruling Q6). So inline
-      script is allowed and every other source stays 'self': an exhibit runs
-      the bytes it was shown as, and can still load nothing from anywhere.
-      Nothing in this app writes HTML from text, so the document itself gains
-      no new way in.
+      `frame-src exhibit:` is what admits the context panel's frame: an HTML
+      exhibit loads from its own origin under its own policy, served by main,
+      so this document's script-src is 'self' and nothing else.
     -->
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:"
+      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; frame-src exhibit:"
     />
     <title>Crucible</title>
     <!--

@@ -52,6 +52,13 @@ export function memoryPanelPersistence(): PanelPersistence {
   }
 }
 
+/** A tab's file, as the exhibit scheme's handler needs it. */
+export interface ExhibitFile {
+  /** Absolute, as the tab holds it. */
+  readonly path: string
+  readonly kind: ExhibitKind
+}
+
 export interface PanelChange {
   readonly sessionId: SessionId
   /** Present when the change was a show: the tab shown or refreshed. */
@@ -69,6 +76,10 @@ export interface PanelModel extends PanelTools {
   closeTab(sessionId: SessionId, tabId: TabId): void
   /** The exhibit's body, read at call time. Throws when it cannot be read. */
   exhibit(sessionId: SessionId, tabId: TabId): string
+  // What the exhibit scheme resolves a request against: a file is servable
+  // because some session's tab shows it, and for no other reason. Reads
+  // nothing off disk and changes nothing.
+  exhibitFile(sessionId: SessionId, tabId: TabId): ExhibitFile | undefined
   /** Once per user instruction; drives "shown N turns ago" ages. */
   bumpTurn(sessionId: SessionId): void
   /** A session reset: a fresh conversation never inherits a ghost panel. */
@@ -291,6 +302,11 @@ export function createPanelModel({
         // The tab stays open whatever this says: curation is the agent's.
         throw new Error(`That exhibit could not be read: ${basename(tab.path)}`)
       }
+    },
+
+    exhibitFile(sessionId: SessionId, tabId: TabId): ExhibitFile | undefined {
+      const tab = findTab(sessionId, tabId)
+      return tab === undefined ? undefined : { path: tab.path, kind: tab.kind }
     },
 
     bumpTurn(sessionId: SessionId): void {

@@ -7,6 +7,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { REQUEST_CHANNEL } from '../shared/agent/channels'
+import { EXHIBIT_SCHEME } from '../shared/agent/exhibit-url'
 import { COMMAND_REQUEST_CHANNEL } from '../shared/commands/channels'
 import { WORKSPACE_REQUEST_CHANNEL } from '../shared/workspace/channels'
 import type { LogRecord } from './log/sink'
@@ -20,7 +21,9 @@ const harness = vi.hoisted(() => ({
   windowsCreated: 0,
   releaseReady: () => {},
   ipcHandlers: new Set<string>(),
-  webContentsListeners: new Map<string, (...args: unknown[]) => void>()
+  webContentsListeners: new Map<string, (...args: unknown[]) => void>(),
+  privileged: [] as Array<{ scheme: string; privileges: Record<string, unknown> }>,
+  schemeHandlers: new Set<string>()
 }))
 
 vi.mock('electron', () => ({
@@ -53,6 +56,22 @@ vi.mock('electron', () => ({
     },
     removeHandler: (channel: string) => {
       harness.ipcHandlers.delete(channel)
+    }
+  },
+  protocol: {
+    registerSchemesAsPrivileged: (
+      schemes: Array<{ scheme: string; privileges: Record<string, unknown> }>
+    ) => {
+      harness.privileged.push(...schemes)
+    }
+  },
+  session: {
+    defaultSession: {
+      protocol: {
+        handle: (scheme: string) => {
+          harness.schemeHandlers.add(scheme)
+        }
+      }
     }
   }
 }))
@@ -99,6 +118,8 @@ beforeEach(async () => {
   harness.windowsCreated = 0
   harness.ipcHandlers.clear()
   harness.webContentsListeners.clear()
+  harness.privileged.length = 0
+  harness.schemeHandlers.clear()
   vi.resetModules()
   vi.stubEnv('CRUCIBLE_AGENT', undefined)
   vi.stubEnv('CRUCIBLE_WORKSPACE', undefined)
@@ -141,6 +162,20 @@ describe('what a launch does', () => {
       'app_ready',
       'window_created'
     ])
+  })
+
+  it('claims the exhibit scheme before ready, and serves it on the window\u2019s session', async () => {
+    // Privileges are only settable while the app is still starting, and a
+    // sandboxed frame will not load the scheme without them.
+    expect(harness.privileged).toEqual([
+      { scheme: EXHIBIT_SCHEME, privileges: { standard: true, secure: true } }
+    ])
+    expect(harness.schemeHandlers.size).toBe(0)
+
+    harness.releaseReady()
+    await Promise.resolve()
+
+    expect([...harness.schemeHandlers]).toEqual([EXHIBIT_SCHEME])
   })
 
   it('forwards what the renderer says into the same log', async () => {

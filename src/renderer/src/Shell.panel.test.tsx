@@ -4,6 +4,7 @@
 // here reads a file or knows a path.
 import { act, fireEvent, render, screen } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
+import { exhibitUrl } from '../../shared/agent/exhibit-url'
 import type { PanelTab, ShellSnapshot } from '../../shared/agent/port'
 import { Shell } from './Shell'
 import { createScriptedPort, oneSession, type ScriptedPort } from './testing/scripted-port'
@@ -28,8 +29,9 @@ function withTabs(tabs: readonly PanelTab[], activeTabId: string): Partial<Shell
 async function shellWith(snapshot: Partial<ShellSnapshot>): Promise<ScriptedPort> {
   const port = createScriptedPort(snapshot)
   port.models = [{ id: 'fake/deterministic', label: 'Fake', thinkingLevels: ['off', 'low'] }]
+  // Only markdown bodies ride the port: an HTML exhibit is loaded by the frame
+  // itself, from the exhibit scheme.
   port.exhibits.set('plan', '# The plan\n\nOne paragraph of it.')
-  port.exhibits.set('benchmark', '<p id="out">measured</p><script>void 0</script>')
   render(<Shell
       port={port}
       workspace={createScriptedWorkspace()}
@@ -173,16 +175,33 @@ describe('the exhibit', () => {
     expect(frame()).toBeNull()
   })
 
-  it('renders an HTML body in a frame that may run scripts and nothing else', async () => {
-    await shellWith(withTabs([BENCHMARK], 'benchmark'))
+  it('loads an HTML exhibit from its own origin, in a frame that may run scripts and nothing else', async () => {
+    const port = await shellWith(withTabs([BENCHMARK], 'benchmark'))
 
     const shown = frame()
     expect(shown).not.toBeNull()
     expect(shown?.getAttribute('sandbox')).toBe('allow-scripts')
-    expect(shown?.getAttribute('srcdoc')).toBe(
-      '<p id="out">measured</p><script>void 0</script>'
-    )
-    expect(shown?.getAttribute('src')).toBeNull()
+    expect(shown?.getAttribute('src')).toBe(exhibitUrl('s1', 'benchmark'))
+    expect(shown?.getAttribute('srcdoc')).toBeNull()
+    // Nothing of an HTML exhibit crosses the port: the frame fetches it.
+    expect(ops(port)).not.toContain('exhibit')
+  })
+
+  it('replaces the frame when a re-show refreshes an HTML tab', async () => {
+    const port = await shellWith(withTabs([BENCHMARK], 'benchmark'))
+    const first = frame()
+
+    await act(async () => {
+      port.showTab('s1', { ...BENCHMARK, shownAt: '2026-08-19T15:00:00.000Z' })
+    })
+    await settled()
+
+    // A new element, which is what "the frame reloads" looks like from here:
+    // the load itself is the browser's, and `no-store` makes it fetch again.
+    expect(frame()).not.toBeNull()
+    expect(frame()).not.toBe(first)
+    expect(frame()?.getAttribute('src')).toBe(exhibitUrl('s1', 'benchmark'))
+    expect(ops(port)).not.toContain('exhibit')
   })
 
   it('fetches the body again when a re-show refreshes the tab', async () => {
