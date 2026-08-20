@@ -1,6 +1,13 @@
-import type { ShellSnapshot, SessionId, WorkspaceId } from '../../../shared/agent/port'
-import { sessionLabel } from '../labels'
+import { useEffect, useState } from 'react'
+import type { SessionId, ShellSnapshot, WorkspaceId } from '../../../shared/agent/port'
+import { relativeTime } from '../labels'
 import './sidebar.css'
+
+const UNTITLED = 'New session'
+
+// Relative times go stale on their own, so the rows are re-rendered on a slow
+// tick and "just now" cannot fossilize.
+const TICK_MS = 30_000
 
 // A row's working state is in its accessible name and not the colored dot
 // alone: the dot is the eye's version, the name is everybody else's.
@@ -28,6 +35,7 @@ export function Sidebar({
   readonly onResume: () => void
 }): React.JSX.Element {
   const { workspaces, activeWorkspaceId, sessions, activeSessionId } = snapshot
+  const now = useClock()
 
   return (
     <nav className="side" aria-label="Workspaces and sessions">
@@ -75,24 +83,32 @@ export function Sidebar({
               {own.length > 0 || active ? (
                 <ul className="sessions">
                   {own.map((session) => {
-                    const label = sessionLabel(session)
+                    const title = session.title ?? UNTITLED
                     return (
                       <li key={session.id} className="sessrow">
                         <button
-                          className={`sess${session.id === activeSessionId ? ' active' : ''}`}
+                          className={rowClass(session.id === activeSessionId, session.title)}
                           aria-current={session.id === activeSessionId ? 'true' : undefined}
-                          aria-label={session.working ? `${label} (working)` : label}
+                          aria-label={session.working ? `${title} (working)` : title}
+                          // Always set, so a title the two-line clamp cut off
+                          // is readable in full without leaving the sidebar.
+                          title={title}
                           onClick={() => onActivateSession(session.id)}
                         >
                           <span
                             className={`dot${session.working ? ' working' : ''}`}
                             aria-hidden="true"
                           />
-                          {label}
+                          {title}
+                          {/* Inside the clamped block, trailing the text: it
+                              never gets a row of its own. */}
+                          <small>
+                            {relativeTime(session.lastActivityAt ?? session.createdAt, now)}
+                          </small>
                         </button>
                         <button
                           className="rowaction"
-                          aria-label={`Remove ${label}`}
+                          aria-label={`Remove ${title}`}
                           title="Forget this session — the conversation can be resumed later"
                           onClick={() => onRemoveSession(session.id)}
                         >
@@ -120,4 +136,19 @@ export function Sidebar({
       </button>
     </nav>
   )
+}
+
+function rowClass(active: boolean, title?: string): string {
+  return `sess${active ? ' active' : ''}${title === undefined ? ' untitled' : ''}`
+}
+
+// The clock the relative times are read against, so they age on their own
+// rather than only when something else re-renders the sidebar.
+function useClock(): number {
+  const [now, setNow] = useState(() => Date.now())
+  useEffect(() => {
+    const tick = setInterval(() => setNow(Date.now()), TICK_MS)
+    return () => clearInterval(tick)
+  }, [])
+  return now
 }

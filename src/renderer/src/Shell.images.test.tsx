@@ -9,6 +9,7 @@ import { Shell } from './Shell'
 import { createScriptedPort, oneSession, type ScriptedPort } from './testing/scripted-port'
 import { createScriptedWorkspace } from './testing/scripted-workspace'
 import { createScriptedCommands } from './testing/scripted-commands'
+import { sessionsShown } from './testing/sidebar'
 import { settled } from './testing/settled'
 
 const TWO_SESSIONS: ShellSnapshot = {
@@ -35,7 +36,7 @@ async function shell(snapshot: Partial<ShellSnapshot> = oneSession()): Promise<S
       commands={createScriptedCommands()}
     />)
   if ((snapshot.sessions ?? []).length > 0) {
-    await screen.findAllByRole('button', { name: /^Session · / })
+    await sessionsShown()
   } else {
     await screen.findByText('No workspace yet.')
   }

@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { ViewItem } from '../state/shell-state'
 import {
+  callSummary,
   countsText,
   groupIntoChains,
   type LoneItem,
@@ -263,7 +264,7 @@ function Chain({ chain }: { readonly chain: ToolChain }): React.JSX.Element {
         </span>
         {/* Whatever is running right now, and nothing once the chain settles. */}
         <span className="live">
-          {chain.live === undefined ? '' : `${chain.live.name} ${chain.live.summary}`}
+          {chain.live === undefined ? '' : `${chain.live.name} ${callSummary(chain.live)}`}
         </span>
         <span className="chainstate">{chain.label}</span>
       </button>
@@ -281,7 +282,9 @@ function Chain({ chain }: { readonly chain: ToolChain }): React.JSX.Element {
 function Call({ call }: { readonly call: ToolItem }): React.JSX.Element {
   const [open, setOpen] = useState(false)
   const tail = useRef<HTMLPreElement>(null)
-  const { name, summary, output, ok, running } = call
+  const { name, output, ok, running } = call
+  // One slot for both phases, so a call does not jump as it starts running.
+  const summary = callSummary(call)
 
   useEffect(() => {
     // While a tool runs its output tails rather than grows, so a long-running

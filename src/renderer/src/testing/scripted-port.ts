@@ -98,6 +98,9 @@ export interface ScriptedPort extends AgentPort {
   queueOf(sessionId: SessionId): QueueState | undefined
   text(sessionId: SessionId, delta: string): void
   thinking(sessionId: SessionId, delta: string): void
+  toolCallStarted(sessionId: SessionId, callId: string, name: string): void
+  /** Argument characters streamed so far, cumulative. */
+  toolCallArgs(sessionId: SessionId, callId: string, chars: number): void
   toolStarted(sessionId: SessionId, callId: string, name: string, summary: string): void
   toolOutput(sessionId: SessionId, callId: string, chunk: string): void
   toolEnded(sessionId: SessionId, callId: string, ok: boolean, output: string): void
@@ -106,6 +109,10 @@ export interface ScriptedPort extends AgentPort {
 }
 
 const NOW = '2026-08-19T14:14:00.000Z'
+
+// A session in the sidebar is named by the titler, so the one a test drives
+// carries a title too. A test about the untitled state passes `undefined`.
+export const SESSION_TITLE = 'Wiring the composer to the agent port'
 
 export function createScriptedPort(initial: Partial<ShellSnapshot> = {}): ScriptedPort {
   const listeners = new Set<PortEventListener>()
@@ -602,6 +609,14 @@ export function createScriptedPort(initial: Partial<ShellSnapshot> = {}): Script
       emit({ type: 'thinking_delta', sessionId, turnId: turn(sessionId), delta })
     },
 
+    toolCallStarted(sessionId, callId, name) {
+      emit({ type: 'tool_call_started', sessionId, turnId: turn(sessionId), callId, name })
+    },
+
+    toolCallArgs(sessionId, callId, chars) {
+      emit({ type: 'tool_call_args', sessionId, turnId: turn(sessionId), callId, chars })
+    },
+
     toolStarted(sessionId, callId, name, summary) {
       emit({ type: 'tool_started', sessionId, turnId: turn(sessionId), callId, name, summary })
     },
@@ -632,7 +647,16 @@ export function oneSession(
   return {
     workspaces: [{ id: 'w1', name: 'crucible', path: '/repos/crucible' }],
     activeWorkspaceId: 'w1',
-    sessions: [{ id: 's1', workspaceId: 'w1', createdAt: NOW, working: false, ...overrides }],
+    sessions: [
+      {
+        id: 's1',
+        workspaceId: 'w1',
+        createdAt: NOW,
+        title: SESSION_TITLE,
+        working: false,
+        ...overrides
+      }
+    ],
     activeSessionId: 's1'
   }
 }

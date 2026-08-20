@@ -8,6 +8,7 @@ import { Shell } from './Shell'
 import { createScriptedPort, oneSession, type ScriptedPort } from './testing/scripted-port'
 import { createScriptedWorkspace } from './testing/scripted-workspace'
 import { createScriptedCommands } from './testing/scripted-commands'
+import { sessionsShown } from './testing/sidebar'
 import { settled } from './testing/settled'
 
 async function streaming(): Promise<ScriptedPort> {
@@ -17,7 +18,7 @@ async function streaming(): Promise<ScriptedPort> {
       workspace={createScriptedWorkspace()}
       commands={createScriptedCommands()}
     />)
-  await screen.findByRole('button', { name: /^Session · / })
+  await sessionsShown()
   await settled()
   await act(async () => {
     await port.prompt('s1', 'run the tests')
@@ -124,6 +125,75 @@ describe('tool chains', () => {
   })
 })
 
+// The window between the model committing to a call and the call beginning to
+// run is where a long Write used to look like a crash.
+describe('a call whose arguments are still streaming', () => {
+  it('appears at once, with a count that grows and no argument text', async () => {
+    const port = await streaming()
+
+    act(() => port.toolCallStarted('s1', 'c1', 'write'))
+
+    expect(chainRow()).toHaveTextContent('write arguments · 0')
+    expect(chainRow()).toHaveTextContent('running')
+
+    act(() => {
+      port.toolCallArgs('s1', 'c1', 640)
+      port.toolCallArgs('s1', 'c1', 4_200)
+    })
+
+    expect(chainRow()).toHaveTextContent('write arguments · 4.2k')
+    expect(chainRow().textContent).not.toContain('{')
+  })
+
+  it('upgrades the same element when the call starts running', async () => {
+    const port = await streaming()
+
+    act(() => {
+      port.toolCallStarted('s1', 'c1', 'write')
+      port.toolCallArgs('s1', 'c1', 4_200)
+      port.toolStarted('s1', 'c1', 'write', 'src/main/index.ts')
+    })
+
+    // One element, not two: the pending call and the running call are the
+    // same call.
+    expect(chainRows()).toHaveLength(1)
+    expect(chainRow()).toHaveTextContent('write src/main/index.ts')
+    expect(chainRow().textContent).not.toContain('arguments ·')
+
+    act(() => port.toolEnded('s1', 'c1', true, 'wrote 412 lines'))
+
+    expect(chainRow()).toHaveTextContent('1 write')
+    expect(chainRow()).toHaveTextContent('done')
+  })
+
+  it('settles by call id even when execution never started', async () => {
+    const port = await streaming()
+
+    act(() => {
+      port.toolCallStarted('s1', 'c1', 'write')
+      port.toolEnded('s1', 'c1', false, 'the model gave up on that call')
+    })
+
+    expect(chainRows()).toHaveLength(1)
+    expect(chainRow()).toHaveTextContent('1 error')
+  })
+
+  it('is left stopped, with no outcome invented, when the turn is cancelled', async () => {
+    const port = await streaming()
+    act(() => {
+      port.toolCallStarted('s1', 'c1', 'write')
+      port.toolCallArgs('s1', 'c1', 900)
+    })
+
+    await act(async () => {
+      await port.cancel('s1')
+    })
+
+    expect(chainRow()).toHaveTextContent('stopped')
+    expect(chainRow()).not.toHaveTextContent('done')
+  })
+})
+
 describe('drilling into a chain', () => {
   async function twoCalls(): Promise<ScriptedPort> {
     const port = await streaming()
@@ -199,7 +269,7 @@ describe('drilling into a chain', () => {
       workspace={createScriptedWorkspace()}
       commands={createScriptedCommands()}
     />)
-    await screen.findAllByRole('button', { name: /^Session · / })
+    await sessionsShown()
 
     await act(async () => {
       await port.prompt('s1', 'one')

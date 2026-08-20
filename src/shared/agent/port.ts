@@ -66,8 +66,13 @@ export interface PanelState {
 export interface SessionState {
   readonly id: SessionId
   readonly workspaceId: WorkspaceId
-  /** ISO; the neutral placeholder label derives from it. */
+  /** ISO; what the sidebar's relative time falls back to. */
   readonly createdAt: string
+  // Absent until the first title lands, which is what the sidebar's untitled
+  // state means.
+  readonly title?: string
+  /** ISO of the session's last activity; absent means `createdAt` stands in. */
+  readonly lastActivityAt?: string
   // Absent until genuinely known, so nothing downstream shows a guess.
   readonly model?: ModelId
   readonly thinkingLevel?: ThinkingLevel
@@ -243,6 +248,24 @@ export type PortEvent =
       readonly sessionId: SessionId
       readonly turnId: TurnId
       readonly delta: string
+    }
+  // The model committed to a call and is streaming its arguments: the element
+  // exists from this moment, seconds before the call begins running.
+  | {
+      readonly type: 'tool_call_started'
+      readonly sessionId: SessionId
+      readonly turnId: TurnId
+      readonly callId: string
+      readonly name: string
+    }
+  // How many argument characters have streamed so far, cumulative and
+  // monotonic, so a dropped frame self-heals on the next one.
+  | {
+      readonly type: 'tool_call_args'
+      readonly sessionId: SessionId
+      readonly turnId: TurnId
+      readonly callId: string
+      readonly chars: number
     }
   | {
       readonly type: 'tool_started'

@@ -13,6 +13,7 @@ import {
 } from './testing/scripted-commands'
 import { createScriptedPort, oneSession, type ScriptedPort } from './testing/scripted-port'
 import { createScriptedWorkspace } from './testing/scripted-workspace'
+import { sessionsShown } from './testing/sidebar'
 import { settled } from './testing/settled'
 
 async function shell(
@@ -23,7 +24,7 @@ async function shell(
   render(
     <Shell port={port} workspace={createScriptedWorkspace()} commands={commands} />
   )
-  await screen.findAllByRole('button', { name: /^Session · / })
+  await sessionsShown()
   await settled()
   return { port, commands }
 }

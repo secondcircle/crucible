@@ -107,6 +107,9 @@ interface ScriptedCall {
   readonly summary: string
   readonly ok: boolean
   readonly chunks: readonly string[]
+  // Absent means the call starts running the moment it appears, so the other
+  // entry path stays covered too.
+  readonly argBeats?: readonly number[]
 }
 
 // Two names and one failure, so a single scripted turn exercises a tool
@@ -116,6 +119,8 @@ const CHAIN: readonly ScriptedCall[] = [
     name: 'bash',
     summary: 'npm test',
     ok: true,
+    // The pending phase, visible under `npm run dev` and assertable in a test.
+    argBeats: [24, 310, 1_480],
     chunks: [
       ' Test Files  8 passed (8)\n',
       '      Tests  42 passed (42)\n',
@@ -315,6 +320,10 @@ export function scaleUsage(messages: number): SessionUsage {
     totalTokens: TURN_TOKENS * messages,
     totalCost: dollars(TURN_COST * messages * 100)
   }
+}
+
+export function fakeTitle(text: string): string {
+  return text.replace(/\s+/g, ' ').trim().split(' ').filter(Boolean).slice(0, 8).join(' ')
 }
 
 // Deliberately approximate: the number only has to be coherent and monotonic.
@@ -732,6 +741,18 @@ export function createFakeAdapter({
     async function call(scripted: ScriptedCall, number: number): Promise<boolean> {
       settleSpoken()
       const callId = `${turnId}-call-${number}`
+      // The model committing to the call, before any of it runs: the element
+      // is in the transcript from here, with a growing argument count.
+      if (scripted.argBeats !== undefined) {
+        await beat()
+        if (stopped !== undefined) return false
+        emit({ type: 'tool_call_started', sessionId, turnId, callId, name: scripted.name })
+        for (const chars of scripted.argBeats) {
+          await beat()
+          if (stopped !== undefined) return false
+          emit({ type: 'tool_call_args', sessionId, turnId, callId, chars })
+        }
+      }
       await beat()
       if (stopped !== undefined) return false
       emit({
@@ -1062,9 +1083,31 @@ export function createFakeAdapter({
       return [FAKE_MODEL]
     },
 
-    async setModel(sessionId: SessionId, model: ModelId): Promise<void> {
+    async setModel(
+      sessionId: SessionId,
+      model: ModelId
+    ): Promise<{ thinkingLevel?: ThinkingLevel }> {
       if (model !== FAKE_MODEL.id) throw new Error('The fake adapter has only one model.')
-      requireBound(sessionId).model = model
+      const bound = requireBound(sessionId)
+      bound.model = model
+      // The level in effect after the switch, which this adapter keeps as it
+      // was because its one model supports every level it reports.
+      return { thinkingLevel: bound.thinkingLevel }
+    },
+
+    // Deterministic from the conversation, so the title visibly changes as
+    // turns land: no network, no cost, nothing canned that ignores content.
+    async titleConversation(
+      sessionId: SessionId
+    ): Promise<{ title: string } | undefined> {
+      const bound = sessions.get(sessionId)
+      if (bound === undefined) return undefined
+      const said = [...pathEntries(bound.conversation)]
+        .reverse()
+        .find((entry) => entry.item.kind === 'user')
+      if (said === undefined || said.item.kind !== 'user') return undefined
+      const title = fakeTitle(said.item.text)
+      return title === '' ? undefined : { title }
     },
 
     async setThinkingLevel(sessionId: SessionId, level: ThinkingLevel): Promise<void> {

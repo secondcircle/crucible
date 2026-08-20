@@ -10,6 +10,7 @@ import { Shell } from './Shell'
 import { createScriptedPort, oneSession, type ScriptedPort } from './testing/scripted-port'
 import { createScriptedWorkspace } from './testing/scripted-workspace'
 import { createScriptedCommands } from './testing/scripted-commands'
+import { sessionRows, sessionsShown } from './testing/sidebar'
 import { settled } from './testing/settled'
 
 const SHOWN = '2026-08-19T14:14:00.000Z'
@@ -37,7 +38,7 @@ async function shellWith(snapshot: Partial<ShellSnapshot>): Promise<ScriptedPort
       workspace={createScriptedWorkspace()}
       commands={createScriptedCommands()}
     />)
-  await screen.findAllByRole('button', { name: /^Session · / })
+  await sessionsShown()
   await settled()
   return port
 }
@@ -164,6 +165,92 @@ describe('collapsing', () => {
   })
 })
 
+// A clamp that forgets the sidebar lets the panel claim width the layout
+// cannot give it, pinning the divider with the surplus clipped off screen.
+describe('dragging the divider', () => {
+  /** A 1600px window whose row holds a 248px sidebar and a 5px divider. */
+  function layOut(): void {
+    const line = divider() as HTMLElement
+    const row = line.parentElement as HTMLElement
+    const chat = line.previousElementSibling as HTMLElement
+    row.getBoundingClientRect = () => rect(0, 1600)
+    chat.getBoundingClientRect = () => rect(248, 1027)
+    line.getBoundingClientRect = () => rect(1275, 5)
+  }
+
+  function rect(left: number, width: number): DOMRect {
+    return { left, width, right: left + width, top: 0, bottom: 0, height: 0, x: left, y: 0,
+      toJSON: () => ({}) } as DOMRect
+  }
+
+  function widthOf(): number {
+    const panel = screen.getByLabelText('Context panel')
+    return Number.parseInt(panel.style.width, 10)
+  }
+
+  async function drag(to: number): Promise<void> {
+    await act(async () => {
+      fireEvent.mouseMove(window, { clientX: to })
+    })
+  }
+
+  it('stops where the chat column hits its minimum, and answers at once on the way back', async () => {
+    await shellWith(withTabs([PLAN], 'plan'))
+    layOut()
+
+    fireEvent.mouseDown(divider() as HTMLElement)
+    // Dragged far past what the row can give: 1600 - 248 - 5 - 320 = 1027.
+    await drag(100)
+    expect(widthOf()).toBe(1027)
+
+    // The very first pixel back is answered, because nothing was hidden.
+    await drag(700)
+    expect(widthOf()).toBe(900)
+  })
+
+  it('never lets the panel go below its own minimum', async () => {
+    await shellWith(withTabs([PLAN], 'plan'))
+    layOut()
+
+    fireEvent.mouseDown(divider() as HTMLElement)
+    await drag(1590)
+
+    expect(widthOf()).toBe(280)
+  })
+
+  it('takes the press, so the drag never becomes a text selection', async () => {
+    await shellWith(withTabs([PLAN], 'plan'))
+
+    const press = new MouseEvent('mousedown', { bubbles: true, cancelable: true })
+    ;(divider() as HTMLElement).dispatchEvent(press)
+
+    expect(press.defaultPrevented).toBe(true)
+    expect(document.body.style.userSelect).toBe('none')
+
+    await act(async () => {
+      fireEvent.mouseUp(window)
+    })
+
+    expect(document.body.style.userSelect).toBe('')
+  })
+
+  // An exhibit frame is a window of its own: left alive it would take the
+  // pointer as soon as the drag passed over it.
+  it('keeps the panel out of the pointer\u2019s way until the drag is over', async () => {
+    await shellWith(withTabs([BENCHMARK], 'benchmark'))
+    const panel = screen.getByLabelText('Context panel')
+
+    fireEvent.mouseDown(divider() as HTMLElement)
+    expect(panel.style.pointerEvents).toBe('none')
+
+    await act(async () => {
+      fireEvent.mouseUp(window)
+    })
+
+    expect(panel.style.pointerEvents).toBe('')
+  })
+})
+
 describe('the exhibit', () => {
   it('renders a markdown body through the app\u2019s markdown component', async () => {
     await shellWith(withTabs([PLAN], 'plan'))
@@ -227,7 +314,7 @@ describe('the exhibit', () => {
       workspace={createScriptedWorkspace()}
       commands={createScriptedCommands()}
     />)
-    await screen.findAllByRole('button', { name: /^Session · / })
+    await sessionsShown()
     await settled()
 
     expect(screen.getByText('That exhibit could not be read: plan.md')).toBeInTheDocument()
@@ -258,7 +345,7 @@ describe('switching sessions', () => {
     activeSessionId: 's1'
   }
 
-  const rows = (): HTMLElement[] => screen.getAllByRole('button', { name: /^Session · / })
+  const rows = (): HTMLElement[] => sessionRows()
 
   it('swaps the panel to the session the user switched to', async () => {
     await shellWith(TWO)

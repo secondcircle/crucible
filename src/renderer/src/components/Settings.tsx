@@ -8,7 +8,7 @@ import type {
   SessionUsage,
   WorkspaceState
 } from '../../../shared/agent/port'
-import { sessionLabel, tokens } from '../labels'
+import { tokens } from '../labels'
 import type { AskedPrompt, Auth } from '../settings/use-auth'
 import './settings.css'
 
@@ -525,7 +525,7 @@ function UsagePane({
           <tbody>
             {rows.map(({ session, summed }) => (
               <tr key={session.id}>
-                <td>{sessionLabel(session)}</td>
+                <td>{session.title ?? 'New session'}</td>
                 <td className="n">{count(summed?.messages)}</td>
                 <td className="n">{summed === undefined ? '—' : tokens(summed.totalTokens)}</td>
                 <td className="n">{money(summed?.totalCost)}</td>

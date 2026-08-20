@@ -8,6 +8,7 @@ import { Shell } from './Shell'
 import { createScriptedPort, oneSession, type ScriptedPort } from './testing/scripted-port'
 import { createScriptedWorkspace, type ScriptedWorkspace } from './testing/scripted-workspace'
 import { createScriptedCommands } from './testing/scripted-commands'
+import { sessionsShown } from './testing/sidebar'
 import { settled } from './testing/settled'
 
 const FILES: readonly string[] = [
@@ -23,7 +24,7 @@ async function shell(): Promise<{ port: ScriptedPort; workspace: ScriptedWorkspa
   port.models = [{ id: 'fake/deterministic', label: 'Fake', thinkingLevels: ['off'] }]
   const workspace = createScriptedWorkspace(FILES)
   render(<Shell port={port} workspace={workspace} commands={createScriptedCommands()} />)
-  await screen.findAllByRole('button', { name: /^Session · / })
+  await sessionsShown()
   await settled()
   return { port, workspace }
 }

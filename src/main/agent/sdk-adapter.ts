@@ -1,5 +1,11 @@
 import { homedir } from 'node:os'
-import type { AuthEvent, AuthInteraction, AuthPrompt, Provider } from '@earendil-works/pi-ai'
+import type {
+  AuthEvent,
+  AuthInteraction,
+  AuthPrompt,
+  Provider,
+  ThinkingLevel as SdkThinkingLevel
+} from '@earendil-works/pi-ai'
 import type {
   AgentSession,
   CreateAgentSessionOptions,
@@ -43,11 +49,13 @@ import type {
 // Spelled with their extensions so plain Node can load this module too: its
 // ESM resolver does no extension guessing.
 import { summarizeActivity } from '../../shared/agent/activity.ts'
+import { TITLE_MODEL } from '../../shared/agent/known-models.ts'
 import { PANEL_TOOLS, type PanelTools } from '../../shared/agent/panel-tools.ts'
 import { displaySafeMessage } from './adapter-error.ts'
 import { toProviderState, type AuthFacts, type ProviderFacts } from './providers.ts'
 import { crucibleAgentDir, workspaceSessionDir } from './paths.ts'
 import { createEventMapper } from './sdk-events.ts'
+import { sanitizeTitle, TITLE_INSTRUCTION, titleInput } from './sdk-titler.ts'
 import {
   BASH_RUN_TYPE,
   deliveredBashRunId,
@@ -741,8 +749,59 @@ export function createSdkAdapter({
         .sort((left, right) => left.label.localeCompare(right.label))
     },
 
-    async setModel(sessionId: SessionId, model: ModelId): Promise<void> {
-      await requireBound(sessionId).session.setModel(await resolveModel(model))
+    // The level the session is on afterwards is π's answer, not Crucible's:
+    // the new model may not support the level the old one was on.
+    async setModel(
+      sessionId: SessionId,
+      model: ModelId
+    ): Promise<{ thinkingLevel?: ThinkingLevel }> {
+      const { session } = requireBound(sessionId)
+      await session.setModel(await resolveModel(model))
+      return { thinkingLevel: session.thinkingLevel }
+    },
+
+    // One non-streaming completion, and a model call rather than an agent
+    // Crucible starts: no role prompt, no standing prompt, no tools.
+    async titleConversation(sessionId: SessionId): Promise<
+      | { title: string; spend?: { tokens: number; cost: number } }
+      | undefined
+    > {
+      const { session } = requireBound(sessionId)
+      const input = titleInput(toTranscript(session.messages))
+      if (input === undefined) return undefined
+
+      const [pi, models, model] = await Promise.all([
+        import('@earendil-works/pi-ai'),
+        runtime(),
+        resolveModel(TITLE_MODEL)
+      ])
+      // π's own name for "no thinking" is read back from π, so no level name
+      // is written here.
+      const levels = pi.getSupportedThinkingLevels(model)
+      const noThinking = pi.getSupportedThinkingLevels({ ...model, reasoning: false })[0]
+      const lowest = levels[0]
+      // π asks for no thinking by carrying no level at all, which is exactly
+      // what the first position means when it is that marker.
+      const reasoning =
+        lowest === undefined || lowest === noThinking
+          ? undefined
+          : (lowest as SdkThinkingLevel)
+
+      const answer = await models.completeSimple(
+        model,
+        {
+          systemPrompt: TITLE_INSTRUCTION,
+          messages: [{ role: 'user', content: input, timestamp: Date.now() }]
+        },
+        reasoning === undefined ? undefined : { reasoning }
+      )
+      const title = sanitizeTitle(pi.contentText(answer.content))
+      // An empty answer is a failed pass: the last good title stays.
+      if (title === undefined) throw new Error('The titler answered with nothing.')
+      const usage = answer.usage
+      return usage === undefined
+        ? { title }
+        : { title, spend: { tokens: usage.totalTokens, cost: usage.cost.total } }
     },
 
     async setThinkingLevel(sessionId: SessionId, level: ThinkingLevel): Promise<void> {

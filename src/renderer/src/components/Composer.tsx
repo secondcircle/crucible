@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { MODEL_ALIASES } from '../../../shared/agent/known-models'
 import type { ModelInfo, ThinkingLevel } from '../../../shared/agent/port'
 import type { CommandInfo } from '../../../shared/commands/service'
 import { commandFragment, filterCommands } from '../../../shared/commands/template'
@@ -147,6 +148,11 @@ export function Composer({
     onDraft(`/${name} `)
     boxRef?.current?.focus()
   }
+
+  // The alias when Crucible knows this id by heart, and the port's own label
+  // otherwise. Display only: the picker below lists what the port reported.
+  const chipName =
+    modelId === undefined ? undefined : (MODEL_ALIASES[modelId] ?? model?.label ?? modelId)
 
   // Sending and queueing ask the same question of a draft, except that
   // steering and follow-up carry text only, so chips are held back.
@@ -304,7 +310,9 @@ export function Composer({
                   selectCommand((commandSelected + by) % matches.length)
                   return
                 }
-                if (pressed.key === 'Enter' || pressed.key === 'Tab') {
+                // Plain Tab keeps its popover meaning; Shift-Tab belongs to
+                // the document above and never inserts anything here.
+                if (pressed.key === 'Enter' || (pressed.key === 'Tab' && !pressed.shiftKey)) {
                   pressed.preventDefault()
                   const found = matches[commandSelected]
                   if (found !== undefined) insertCommand(found.name)
@@ -328,7 +336,7 @@ export function Composer({
                   select((selected + by) % shown.length)
                   return
                 }
-                if (pressed.key === 'Enter' || pressed.key === 'Tab') {
+                if (pressed.key === 'Enter' || (pressed.key === 'Tab' && !pressed.shiftKey)) {
                   pressed.preventDefault()
                   const path = shown[selected]
                   if (path !== undefined) insertPath(path)
@@ -357,14 +365,14 @@ export function Composer({
           <div className="chipwrap">
             <button
               className="chip"
-              aria-label={`Model: ${model?.label ?? modelId ?? 'none'}`}
+              aria-label={`Model: ${chipName ?? 'none'}`}
               aria-expanded={modelPickerOpen}
-              // Model and thinking level change between turns, never during
-              // one.
+              // Between turns only. The model ring bypasses this button, so a
+              // keystroke may still switch mid-turn.
               disabled={disabled || working}
               onClick={onToggleModelPicker}
             >
-              <span aria-hidden="true">⌾</span> <b>{model?.label ?? modelId ?? 'no model'}</b>
+              <span aria-hidden="true">⌾</span> <b>{chipName ?? 'no model'}</b>
             </button>
             {modelPickerOpen ? (
               <ModelPicker models={models} current={modelId} onSelect={onSelectModel} />
@@ -417,6 +425,8 @@ export function Composer({
         </div>
       </div>
 
+      {/* Height is reserved in every state, idle included, so nothing above
+          or below moves when live state lands here. */}
       <div className="esc">
         {bash ? (
           <span className="bashnote">
@@ -431,25 +441,16 @@ export function Composer({
             <span className="workingnote">
               agent working{elapsedSeconds === undefined ? '' : ` · ${elapsedSeconds}s`}
             </span>{' '}
-            — <kbd>⏎</kbd> steer · <kbd>⌥⏎</kbd> follow-up · <kbd>esc</kbd> stop ·{' '}
+            — <kbd>⏎</kbd> steer · <kbd>⌥⏎</kbd> follow-up · <kbd>esc</kbd> stop
           </>
-        ) : null}
-        {bash ? null : (
-          <>
-            {' '}
-            <kbd>⇧⏎</kbd> newline
-          </>
-        )}
-        {commandMode && !working ? (
-          <span className="cmdnote"> — a command expands before it is sent</span>
         ) : null}
       </div>
     </div>
   )
 }
 
-// Lists what the port reported and nothing else: no model is named in
-// Crucible's own source. Its query state is its own, so reopening starts clean.
+// The port's own labels and order, never an alias, so an unfamiliar model
+// stays identifiable. Its query state is its own, so reopening starts clean.
 function ModelPicker({
   models,
   current,

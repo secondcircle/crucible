@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react'
+import { MODEL_RING } from '../../shared/agent/known-models'
 import type {
   AgentPort,
   HistoryMatch,
+  ModelId,
   QueuedKind,
   SessionId,
   SessionTree as Tree,
@@ -93,6 +95,11 @@ export function Shell({
   }, [appUpdate])
   const [popover, setPopover] = useState<Popover>('none')
   const [question, setQuestion] = useState<Question | undefined>(undefined)
+  // What the model ring just switched to, shown before the port has confirmed
+  // it. Dropped when the snapshot agrees, and dropped again if the call fails.
+  const [ringed, setRinged] = useState<
+    { readonly sessionId: SessionId; readonly model: ModelId } | undefined
+  >(undefined)
   const [drafts, setDrafts] = useState<Readonly<Record<SessionId, string>>>({})
   const [failure, setFailure] = useState<string | undefined>(undefined)
   // Chips belong to the session's draft and last as long as the draft does.
@@ -152,7 +159,11 @@ export function Shell({
   const emptyConversation = knownEmpty(view)
   const working = session?.working ?? false
   const queue = session?.queue
-  const model = models.find((candidate) => candidate.id === session?.model)
+  // The ring's choice stands in for the snapshot's until the port confirms it,
+  // so the chip changes in the same frame the key lands.
+  const shownModel =
+    ringed !== undefined && ringed.sessionId === activeSessionId ? ringed.model : session?.model
+  const model = models.find((candidate) => candidate.id === shownModel)
   const elapsedSeconds = useElapsedSeconds(working ? view?.turn?.startedAt : undefined)
   const chips = activeSessionId === undefined ? [] : (attachments[activeSessionId] ?? [])
   const draft = activeSessionId === undefined ? '' : (drafts[activeSessionId] ?? '')
@@ -399,6 +410,57 @@ export function Shell({
     closeLogin,
     settings.open,
     browsingCommands
+  ])
+
+  // The model ring. Nothing on screen names the key, and it works mid-turn
+  // because the switch only reaches the next turn.
+  useEffect(() => {
+    function onKeyDown(pressed: KeyboardEvent): void {
+      if (pressed.key !== 'Tab' || !pressed.shiftKey) return
+      const sessionId = activeSessionId
+      if (sessionId === undefined) return
+      // A modal surface owns the keyboard while it is up.
+      if (liveLogin !== undefined || settings.open || question !== undefined) return
+      if (popover === 'resume') return
+      // A ring model the adapter did not list is skipped; with none listed the
+      // key is left exactly as it was, no toast and no error.
+      const candidates = MODEL_RING.filter((id) =>
+        models.some((candidate) => candidate.id === id)
+      )
+      if (candidates.length === 0) return
+      // Counted from what the chip shows, so pressing twice in a row cycles
+      // twice rather than asking for the same model again.
+      const at = candidates.findIndex((id) => id === shownModel)
+      const target = at === -1 ? candidates[0] : candidates[(at + 1) % candidates.length]
+      if (target === undefined || target === shownModel) return
+      // Taken here, so focus never traverses backwards behind the switch.
+      pressed.preventDefault()
+      setRinged({ sessionId, model: target })
+      void port
+        .setModel(sessionId, target)
+        // A refusal is reported where every other refusal is, and the chip
+        // falls back to whatever the snapshot says.
+        .catch(report)
+        // Settled either way: the snapshot has the last word from here, and it
+        // already carries the switch when the call succeeded.
+        .finally(() => {
+          setRinged((current) =>
+            current?.sessionId === sessionId && current.model === target ? undefined : current
+          )
+        })
+    }
+    document.addEventListener('keydown', onKeyDown)
+    return () => document.removeEventListener('keydown', onKeyDown)
+  }, [
+    activeSessionId,
+    shownModel,
+    models,
+    port,
+    report,
+    liveLogin,
+    settings.open,
+    question,
+    popover
   ])
 
   // Paste and drag are the only ways in, and they do nothing with no session
@@ -862,8 +924,6 @@ export function Shell({
       <main className="main">
         <TopBar
           session={session}
-          workspace={active}
-          model={model}
           menuOpen={popover === 'sessionMenu'}
           treeOpen={treeOpen}
           onToggleMenu={() => setPopover(popover === 'sessionMenu' ? 'none' : 'sessionMenu')}
@@ -954,7 +1014,7 @@ export function Shell({
           boxRef={box}
           elapsedSeconds={elapsedSeconds}
           model={model}
-          modelId={session?.model}
+          modelId={shownModel}
           models={models}
           modelPickerOpen={popover === 'model'}
           thinkingLevel={session?.thinkingLevel}

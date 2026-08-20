@@ -34,6 +34,14 @@ const call = (chunks: number): string[] => [
   'tool_ended'
 ]
 
+// The other entry path, and the window a long call would otherwise spend
+// looking frozen.
+const pendingCall = (beats: number, chunks: number): string[] => [
+  'tool_call_started',
+  ...Array.from({ length: beats }, () => 'tool_call_args'),
+  ...call(chunks)
+]
+
 describe('the scripted turn', () => {
   it('runs thinking, a chain of calls, a lone call, a reply, usage, then the end', async () => {
     const { adapter, events } = await withSession()
@@ -45,8 +53,9 @@ describe('the scripted turn', () => {
       'thinking_delta',
       'thinking_delta',
       'thinking_delta',
-      // Three consecutive calls, which is one tool chain.
-      ...call(3),
+      // Three consecutive calls, which is one tool chain. The first announces
+      // itself while its arguments stream.
+      ...pendingCall(3, 3),
       ...call(1),
       ...call(1),
       // Text ends that chain, so what follows is a chain of one.
@@ -455,6 +464,51 @@ describe('history, reset and resume', () => {
   })
 })
 
+// Deterministic from the conversation rather than canned, so a title visibly
+// changes as turns land and the refresh loop is drivable for free.
+describe('the fake titler', () => {
+  it('names a session from its most recent user message', async () => {
+    const { adapter } = await withSession()
+    await adapter.prompt('s1', 't-1', 'rebuild the composer footer from the mock')
+
+    expect(await adapter.titleConversation('s1')).toEqual({
+      title: 'rebuild the composer footer from the mock'
+    })
+  })
+
+  it('keeps a title to eight words, on one line, and charges nothing', async () => {
+    const { adapter } = await withSession()
+    await adapter.prompt(
+      's1',
+      't-1',
+      'one two three four five six seven eight nine\nten eleven'
+    )
+
+    const titled = await adapter.titleConversation('s1')
+
+    expect(titled?.title).toBe('one two three four five six seven eight')
+    expect(titled?.spend).toBeUndefined()
+  })
+
+  it('follows the conversation as later turns land', async () => {
+    const { adapter } = await withSession()
+    await adapter.prompt('s1', 't-1', 'first thing said')
+    const first = await adapter.titleConversation('s1')
+
+    await adapter.prompt('s1', 't-2', 'second thing said')
+
+    expect(first?.title).toBe('first thing said')
+    expect((await adapter.titleConversation('s1'))?.title).toBe('second thing said')
+  })
+
+  it('has nothing to say about a conversation nobody has spoken in', async () => {
+    const { adapter } = await withSession()
+
+    expect(await adapter.titleConversation('s1')).toBeUndefined()
+    expect(await adapter.titleConversation('never-bound')).toBeUndefined()
+  })
+})
+
 describe('what it says about itself', () => {
   it('exposes one model that says it is fake, with more than one level', async () => {
     const adapter = createFakeAdapter({ pauseMs: 0 })
@@ -470,7 +524,7 @@ describe('what it says about itself', () => {
   it('refuses a model or a level it cannot honestly serve', async () => {
     const { adapter } = await withSession()
 
-    await expect(adapter.setModel('s1', 'anthropic/claude-opus-4-5')).rejects.toThrow()
+    await expect(adapter.setModel('s1', 'anthropic/claude-opus-5')).rejects.toThrow()
     await expect(adapter.setThinkingLevel('s1', 'xhigh')).rejects.toThrow()
     await expect(adapter.setThinkingLevel('s1', 'high')).resolves.toBeUndefined()
   })

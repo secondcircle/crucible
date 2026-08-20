@@ -19,8 +19,16 @@ export interface StoredWorkspace {
 export interface StoredSession {
   readonly id: SessionId
   readonly workspaceId: WorkspaceId
-  /** ISO; the sidebar's neutral placeholder label derives from it. */
+  /** ISO; what the sidebar's relative time falls back to. */
   readonly createdAt: string
+  // The model-written session title, kept so a relaunch shows what the sidebar
+  // showed rather than titling everything again.
+  readonly title?: string
+  /** ISO of the last thing that happened in this session. */
+  readonly lastActivityAt?: string
+  // Dollars this session's titler has spent, cumulative. It rides with the
+  // title because it is the cost of having one.
+  readonly titlingSpend?: number
   // Lets a later launch rebind this same sidebar identity to the same
   // conversation. Nothing outside the adapter interprets it.
   readonly token?: string
@@ -227,13 +235,28 @@ function load(path: string): ShellStoreState {
     .map((session) => {
       const panel = readPanel((session as { panel?: unknown }).panel)
       const tokenFlavor = readTokenFlavor(session)
+      // All three title fields are optional, so a store written before titles
+      // existed loads unchanged and simply has none.
+      const title = typeof session.title === 'string' ? session.title : undefined
+      const lastActivityAt =
+        typeof session.lastActivityAt === 'string' ? session.lastActivityAt : undefined
+      const titlingSpend =
+        typeof session.titlingSpend === 'number' && Number.isFinite(session.titlingSpend)
+          ? session.titlingSpend
+          : undefined
       const rest = { ...session }
       delete rest.panel
       delete rest.tokenFlavor
+      delete rest.title
+      delete rest.lastActivityAt
+      delete rest.titlingSpend
       return {
         ...rest,
         ...(panel === undefined ? {} : { panel }),
-        ...(tokenFlavor === undefined ? {} : { tokenFlavor })
+        ...(tokenFlavor === undefined ? {} : { tokenFlavor }),
+        ...(title === undefined ? {} : { title }),
+        ...(lastActivityAt === undefined ? {} : { lastActivityAt }),
+        ...(titlingSpend === undefined ? {} : { titlingSpend })
       }
     })
   const activeSessionByWorkspace =
