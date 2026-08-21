@@ -207,6 +207,29 @@ separate thing, spoken of as the board's need-you count.
 _Avoid_: unread, alert, attention flag, notification (the OS banner is one
 way a needs-you state is announced, not the state itself).
 
+**Workflow**:
+A TypeScript definition of automated agent work — its nodes, inputs,
+outputs and verdicts. The template, never the execution: what executes is a
+run.
+_Avoid_: using "workflow" for a running instance, pipeline, automation.
+
+**Run**:
+One execution of a workflow, working in a worktree of its own branched from
+a commit named at kickoff. Observed in the UI, never conversed with: its
+questions and results are messages to its orchestrator.
+_Avoid_: job, build, using "workflow" for an execution.
+
+**Orchestrator**:
+The session agent a run reports to. Every check-in, blocker, error and
+completion arrives as a message to it, and any answer a run gets comes from
+it — the user talks to the orchestrator, not to a run's agents.
+_Avoid_: orchestration agent, initiator session, supervisor.
+
+**Run strip**:
+The bar above a session's chat pane where runs appear, one chip each —
+workflow, current node, age, spend.
+_Avoid_: run bar, pill row, status bar.
+
 **Standing prompt**:
 The text appended to every agent Crucible starts, whatever its role prompt
 says — things true of every agent regardless of its job. Day one it is the

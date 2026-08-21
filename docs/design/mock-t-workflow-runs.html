@@ -1,0 +1,297 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Mock T — Workflow runs</title>
+<style>
+  :root{
+    --bg:#191419; --bg2:#211a20; --panel:#241c23; --line:#3a2e38;
+    --ink:#e8dfe2; --dim:#9b8a94; --faint:#6b5d66;
+    --accent:#e07a4f; --accent2:#f0a37c; --ok:#7fb069; --warn:#d9a441; --bad:#c96f6f;
+    --user:#2c2230; --mono:ui-monospace,'SF Mono',Menlo,monospace;
+  }
+  *{box-sizing:border-box;margin:0}
+  body{background:#0f0c0f;color:var(--ink);font:14px/1.55 -apple-system,'Segoe UI',sans-serif;padding:32px 24px 64px}
+  h1{font-size:16px;letter-spacing:.04em;margin-bottom:4px;max-width:980px;margin-left:auto;margin-right:auto}
+  h1 em{color:var(--accent);font-style:normal}
+  .lede{color:var(--dim);font-size:13px;max-width:980px;margin:0 auto 36px}
+  section{max-width:980px;margin:0 auto 56px}
+  h2{font-size:13px;text-transform:uppercase;letter-spacing:.12em;color:var(--faint);margin-bottom:12px}
+  .cap{border-left:3px solid var(--accent);background:var(--bg2);padding:10px 14px;font-size:12.5px;color:var(--dim);border-radius:0 8px 8px 0;margin:14px 0 0}
+  .cap b{color:var(--ink)}
+  .frame{border:1px solid var(--line);border-radius:12px;overflow:hidden;background:var(--bg)}
+
+  /* ---------- shell (view 1) ---------- */
+  .shell{display:flex;height:520px}
+  .side{width:200px;background:var(--bg2);border-right:1px solid var(--line);padding:14px;font-size:12.5px;color:var(--dim);flex-shrink:0}
+  .side .brand{font-weight:700;letter-spacing:.06em;color:var(--ink);margin-bottom:14px}
+  .side .brand em{color:var(--accent);font-style:normal}
+  .side .sess{padding:4px 8px;border-radius:6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .side .sess.active{background:var(--panel);color:var(--accent2)}
+  .mainpane{flex:1;display:flex;flex-direction:column;min-width:0}
+  .top{display:flex;align-items:center;gap:12px;padding:9px 18px;border-bottom:1px solid var(--line);font-size:12.5px;color:var(--dim)}
+  .top .title{color:var(--ink);font-weight:600;font-size:13px}
+
+  /* ---------- the run strip ---------- */
+  .runstrip{display:flex;align-items:center;gap:8px;padding:6px 14px;border-bottom:1px solid var(--line);background:var(--bg2);font-size:12px}
+  .rslabel{font-size:10px;text-transform:uppercase;letter-spacing:.12em;color:var(--faint);margin-right:2px}
+  .runchip{display:flex;align-items:center;gap:8px;border:1px solid var(--line);border-radius:14px;padding:3px 11px;background:var(--panel);cursor:pointer;color:var(--dim)}
+  .runchip .dot{width:7px;height:7px;border-radius:50%;background:var(--ok);animation:breathe 2.2s infinite}
+  .runchip.parked .dot{background:var(--warn);animation:none}
+  .runchip b{color:var(--ink);font-weight:600}
+  .runchip .node{font:11px var(--mono);color:var(--accent2)}
+  .runchip .age{font:11px var(--mono);color:var(--faint)}
+  .runchip.parked{border-color:var(--warn)}
+  .runchip.parked .node{color:var(--warn)}
+  @keyframes breathe{50%{opacity:.35}}
+  .rshint{margin-left:auto;font-size:11px;color:var(--faint)}
+  .rshint kbd{font:10.5px var(--mono);border:1px solid var(--line);border-radius:4px;padding:0 4px}
+
+  .chat{flex:1;overflow:hidden;padding:20px 0 0}
+  .msg{max-width:640px;margin:0 auto 18px;padding:0 22px}
+  .msg .who{font-size:11px;text-transform:uppercase;letter-spacing:.1em;color:var(--faint);margin-bottom:5px}
+  .msg.user .bubble{background:var(--user);border:1px solid var(--line);border-radius:10px;padding:9px 13px}
+  .msg.agent .who{color:var(--accent)}
+  .msg p{margin-bottom:7px}
+  .tool{display:flex;gap:8px;align-items:center;font:11.5px var(--mono);color:var(--dim);background:#120e12;border:1px solid var(--line);border-left:3px solid var(--ok);border-radius:6px;padding:6px 11px;margin:8px 0}
+  code.inline{font:12px var(--mono);background:#120e12;padding:1px 5px;border-radius:4px;color:var(--accent2)}
+  .composer{max-width:640px;width:100%;margin:0 auto;padding:0 22px 14px}
+  .cbox{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:10px 13px;color:var(--faint);font-size:13px}
+
+  /* ---------- full screen run view (view 3) ---------- */
+  .runview{height:640px;display:flex;flex-direction:column;background:var(--bg)}
+  .rvtop{display:flex;align-items:center;gap:14px;padding:12px 20px;border-bottom:1px solid var(--line)}
+  .rvtop .wf{font-weight:700;font-size:15px}
+  .rvtop .id{font:12px var(--mono);color:var(--faint)}
+  .rvtop .stat{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--ok)}
+  .rvtop .where{font:11.5px var(--mono);color:var(--dim)}
+  .rvtop .where b{color:var(--accent2);font-weight:600}
+  .rvtop .spend{margin-left:auto;font:12px var(--mono);color:var(--dim)}
+  .btn{font-size:12px;border:1px solid var(--line);border-radius:8px;background:var(--bg2);color:var(--ink);padding:4px 11px;cursor:pointer}
+  .btn.primary{background:var(--accent);border-color:var(--accent);color:#1c120c;font-weight:700}
+  .rvtop .esc{font-size:11px;color:var(--faint)}
+  .rvtop .esc kbd{font:10.5px var(--mono);border:1px solid var(--line);border-radius:4px;padding:0 4px}
+  .rvbody{flex:1;display:flex;min-height:0}
+
+  /* graph rail */
+  .graph{width:280px;border-right:1px solid var(--line);background:var(--bg2);padding:16px;overflow-y:auto;flex-shrink:0}
+  .gnode{position:relative;border:1px solid var(--line);border-radius:10px;background:var(--panel);padding:9px 12px;margin-bottom:22px;cursor:pointer}
+  .gnode::after{content:"";position:absolute;left:50%;bottom:-23px;width:1px;height:22px;background:var(--line)}
+  .gnode:last-child::after{display:none}
+  .gnode .n{font-size:13px;font-weight:600;display:flex;align-items:center;gap:8px}
+  .gnode .n .s{width:8px;height:8px;border-radius:50%;background:var(--faint);flex-shrink:0}
+  .gnode.done .n .s{background:var(--ok)}
+  .gnode.live{border-color:var(--accent)}
+  .gnode.live .n .s{background:var(--accent);animation:breathe 2.2s infinite}
+  .gnode.wait{opacity:.55}
+  .gnode .meta{font:11px var(--mono);color:var(--faint);margin-top:4px}
+  .gnode .meta em{color:var(--dim);font-style:normal}
+  .gnode.sel{outline:2px solid var(--accent2);outline-offset:1px}
+
+  /* node detail — rendered like the chat pane */
+  .detail{flex:1;display:flex;flex-direction:column;min-width:0}
+  .dhead{padding:14px 20px;border-bottom:1px solid var(--line)}
+  .dhead .n{font-weight:700}
+  .dhead .facts{display:flex;gap:18px;font:11.5px var(--mono);color:var(--dim);margin-top:6px;flex-wrap:wrap}
+  .dhead .facts b{color:var(--ink);font-weight:600}
+  .dhead .now{margin-top:8px;font-size:12.5px;color:var(--accent2)}
+  .transcript{flex:1;overflow-y:auto;padding:18px 22px;font-size:13.5px}
+  .transcript .msg{max-width:none;padding:0;margin-bottom:18px}
+  .chainbox{display:flex;gap:9px;align-items:center;font:12px var(--mono);color:var(--dim);background:#120e12;border:1px solid var(--line);border-radius:8px;padding:8px 12px;margin:10px 0;cursor:pointer}
+  .chainbox .tw{color:var(--faint)}
+  .chainbox b{color:var(--ink);font-weight:600}
+  .think{color:var(--dim);font-style:italic;margin-bottom:8px}
+  .artifacts{border-top:1px solid var(--line);padding:10px 20px;display:flex;gap:10px;align-items:center;font-size:12px;color:var(--dim)}
+  .artifacts .a{border:1px solid var(--line);border-radius:8px;padding:3px 10px;font:11.5px var(--mono);color:var(--accent2);cursor:pointer}
+
+  /* routed check-in banner (no input — it went to the orchestrator) */
+  .routed{border-top:1px solid var(--warn);background:#2a2118;padding:11px 20px;display:flex;align-items:center;gap:12px;font-size:12.5px}
+  .routed b{color:var(--warn)}
+  .routed .to{color:var(--dim)}
+  .routed .btn{margin-left:auto}
+
+  /* ---------- wide graph (view 4) ---------- */
+  .widegraph{position:relative;height:420px;background:var(--bg)}
+  .widegraph svg{position:absolute;inset:0;width:100%;height:100%}
+  .wnode{position:absolute;width:172px;border:1px solid var(--line);border-radius:10px;background:var(--panel);padding:8px 11px}
+  .wnode .n{font-size:12.5px;font-weight:600;display:flex;align-items:center;gap:7px}
+  .wnode .n .s{width:7px;height:7px;border-radius:50%;background:var(--faint);flex-shrink:0}
+  .wnode.done .n .s{background:var(--ok)}
+  .wnode.live{border-color:var(--accent)}
+  .wnode.live .n .s{background:var(--accent);animation:breathe 2.2s infinite}
+  .wnode.wait{opacity:.55}
+  .wnode .meta{font:10.5px var(--mono);color:var(--faint);margin-top:3px}
+
+  /* ---------- global runs overlay (view 5) ---------- */
+  .globalview{height:520px;display:flex;flex-direction:column}
+  .gvtop{display:flex;align-items:center;gap:12px;padding:14px 22px;border-bottom:1px solid var(--line)}
+  .gvtop .t{font-weight:700;font-size:15px}
+  .gvtop .count{font-size:12px;color:var(--dim)}
+  .gvtop .esc{margin-left:auto;font-size:11px;color:var(--faint)}
+  .gvtop .esc kbd{font:10.5px var(--mono);border:1px solid var(--line);border-radius:4px;padding:0 4px}
+  .gvbody{flex:1;overflow-y:auto;padding:8px 22px 20px}
+  .wsgroup{margin-top:14px}
+  .wsname{font-size:11px;text-transform:uppercase;letter-spacing:.12em;color:var(--faint);padding-bottom:6px}
+  .runrow{display:flex;align-items:center;gap:14px;border:1px solid var(--line);border-radius:10px;background:var(--panel);padding:10px 14px;margin-bottom:8px}
+  .runrow .dot{width:8px;height:8px;border-radius:50%;background:var(--ok);animation:breathe 2.2s infinite;flex-shrink:0}
+  .runrow.parked .dot{background:var(--warn);animation:none}
+  .runrow.done .dot{background:var(--faint);animation:none}
+  .runrow .wf{font-weight:700;font-size:13px;width:70px}
+  .runrow .id{font:11.5px var(--mono);color:var(--faint);width:70px}
+  .runrow .st{font:11.5px var(--mono);width:190px}
+  .runrow .st .hot{color:var(--warn)}
+  .runrow .sess{font-size:12.5px;color:var(--dim);flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .runrow .sess em{font-style:normal;color:var(--accent2)}
+  .runrow .sess .un{color:var(--faint);font-style:italic}
+  .runrow .spend{font:11.5px var(--mono);color:var(--faint)}
+</style></head><body>
+
+<h1><em>◆</em> Mock T — workflow runs: strip · return · dig · graph · everywhere</h1>
+<p class="lede">Every run works in its own worktree, branched from a commit. All of a run's
+questions — check-ins, blockers, errors, completion — are messages to its orchestrating
+session's agent; you never answer a run directly. The UI observes; the agent converses.</p>
+
+<section>
+  <h2>1 · The run strip — above the chat, glanceable, session-scoped</h2>
+  <div class="frame"><div class="shell">
+    <nav class="side">
+      <div class="brand"><em>◆</em> CRUCIBLE</div>
+      <div class="sess active">panel handoff build</div>
+      <div class="sess">quota strip polish</div>
+      <div class="sess">issue board keys</div>
+    </nav>
+    <div class="mainpane">
+      <div class="top"><span class="title">panel handoff build</span><span>crucible · crucible/c05f76</span></div>
+      <div class="runstrip">
+        <span class="rslabel">Runs</span>
+        <div class="runchip"><span class="dot"></span><b>build</b><span class="node">▸ code review</span><span class="age">18m · $4.10</span></div>
+        <div class="runchip parked"><span class="dot"></span><b>adhoc</b><span class="node">⚑ asked the agent</span><span class="age">6m</span></div>
+        <span class="rshint">click a run to open · <kbd>⌘R</kbd> all runs</span>
+      </div>
+      <div class="chat">
+        <div class="msg user"><div class="who">You</div><div class="bubble">Spec looks right. Kick off the build workflow on it.</div></div>
+        <div class="msg agent"><div class="who">Agent · Opus 5</div>
+          <div class="tool">▸ crucible — run build · spec=docs/spec/panel-handoff.md · from 6c90bb0</div>
+          <p>Build is running in its own worktree, branched from our last commit. We can keep working here.</p>
+        </div>
+      </div>
+      <div class="composer"><div class="cbox">Message the agent…</div></div>
+    </div>
+  </div></div>
+  <div class="cap"><b>One chip per run</b>: workflow, current node, age, spend. Amber ⚑ means the run
+  raised something — and that something went to <i>this session's agent</i> as a message, so the
+  conversation to resolve it happens right below, in the chat you're already in.</div>
+</section>
+
+<section>
+  <h2>2 · The return — a message to the agent, not a button for you</h2>
+  <div class="frame" style="padding:20px 0">
+      <div class="msg agent" style="max-width:640px;margin:0 auto;padding:0 22px">
+        <div class="who">Agent · Opus 5</div>
+        <div class="tool" style="border-left-color:var(--accent)">⚑ run en42 (build) completed · branch crucible/en42 · worktree .crucible/worktrees/en42 · +412 −38 · review: approved</div>
+        <p>The build run finished and its review approved. I merged <code class="inline">crucible/en42</code> into our branch — fast-forward, we hadn't moved — and the suite passes here too. The run's report is in the context panel.</p>
+      </div>
+  </div>
+  <div class="cap"><b>Completion, like every run event, is a message to the orchestrating agent</b>:
+  "finished in worktree X, pull it in when ready." The agent judges when — mid-task it waits, idle
+  it merges — and resolves conflicts itself, with the session's full context. Same channel for
+  check-ins, blockers and errors: the run asks, the agent answers or brings it to you.</div>
+</section>
+
+<section>
+  <h2>3 · Click a run: full screen, read-only dig — the node's transcript is a chat pane</h2>
+  <div class="frame"><div class="runview">
+    <div class="rvtop">
+      <span class="wf">build</span><span class="id">run en42</span><span class="stat">running · 18m</span>
+      <span class="where">worktree · <b>crucible/en42</b> · from <b>6c90bb0</b></span>
+      <span class="spend">$4.10 · 3/4 nodes</span>
+      <button class="btn primary">Go to session</button>
+      <button class="btn">Pause</button><button class="btn">Cancel</button>
+      <span class="esc"><kbd>esc</kbd> back</span>
+    </div>
+    <div class="rvbody">
+      <div class="graph">
+        <div class="gnode done"><div class="n"><span class="s"></span>spec review</div><div class="meta">fable-5:high · $0.61 · 4m<br><em>verdict: approved</em></div></div>
+        <div class="gnode done"><div class="n"><span class="s"></span>build</div><div class="meta">opus-5:high · $2.87 · 11m · 41 tools</div></div>
+        <div class="gnode live sel"><div class="n"><span class="s"></span>code review</div><div class="meta">opus-5:high · $0.62 · 3m · ctx 22%</div></div>
+        <div class="gnode wait"><div class="n"><span class="s"></span>report</div><div class="meta">pending</div></div>
+      </div>
+      <div class="detail">
+        <div class="dhead">
+          <div class="n">code review</div>
+          <div class="facts"><span>model <b>opus-5:high</b></span><span>tools <b>17</b></span><span>ctx <b>22%</b></span><span>cost <b>$0.62</b></span><span>last activity <b>3s ago</b></span></div>
+          <div class="now">▸ running the suite before judging the diff…</div>
+        </div>
+        <div class="transcript">
+          <div class="msg agent"><div class="who">Agent · opus-5:high</div>
+            <div class="think">The spec pins the handoff to the agent port; checking the channel tests cover the reconnect path before anything else…</div>
+            <div class="chainbox"><span class="tw">▸</span><b>7 tool calls</b><span>bash ×2 · read ×4 · grep</span><span style="margin-left:auto" class="tw">click to expand</span></div>
+            <p>Reconnect is covered. The preload surface matches the spec's boundary list, with one exception I'm verifying now.</p>
+            <div class="chainbox"><span class="tw">▸</span><b>4 tool calls</b><span>read ×3 · bash</span><span style="margin-left:auto" class="tw">click to expand</span></div>
+          </div>
+        </div>
+        <div class="artifacts">Artifacts <span class="a">review.md</span><span class="a">report.html</span><span style="margin-left:auto;font:11px var(--mono);color:var(--faint)">run artifacts live in the run's dir, not the repo</span></div>
+        <div class="routed">
+          <b>⚑ Check-in</b><span>third review round on the same argument — where does the merge helper live?</span>
+          <span class="to">→ sent to <i>panel handoff build</i>'s agent · 2m ago</span>
+          <button class="btn">Go to session</button>
+        </div>
+      </div>
+    </div>
+  </div></div>
+  <div class="cap"><b>Same rendering as the chat pane</b>: agent messages, thinking, and tool chains
+  collapsed to one stacked element by default — the chain says how many calls and which tools;
+  expanding is a click. <b>No input anywhere</b>: the check-in banner shows what was asked and
+  where it went. Talking happens in the session; <b>Go to session</b> is the door.</div>
+</section>
+
+<section>
+  <h2>4 · The graph when it goes wide</h2>
+  <div class="frame"><div class="widegraph">
+    <svg viewBox="0 0 980 420" preserveAspectRatio="none">
+      <g stroke="#3a2e38" stroke-width="1.5" fill="none">
+        <path d="M490,74 L490,100"/>
+        <path d="M490,158 C490,180 250,175 250,196"/>
+        <path d="M490,158 L490,196"/>
+        <path d="M490,158 C490,180 730,175 730,196"/>
+        <path d="M250,254 C250,280 490,275 490,296"/>
+        <path d="M490,254 L490,296"/>
+        <path d="M730,254 C730,280 490,275 490,296"/>
+      </g>
+    </svg>
+    <div class="wnode done" style="left:404px;top:20px"><div class="n"><span class="s"></span>spec review</div><div class="meta">$0.61 · approved</div></div>
+    <div class="wnode done" style="left:404px;top:104px"><div class="n"><span class="s"></span>build</div><div class="meta">$2.87 · 11m · 41 tools</div></div>
+    <div class="wnode done" style="left:164px;top:200px"><div class="n"><span class="s"></span>code review</div><div class="meta">$0.58 · changes-required</div></div>
+    <div class="wnode live" style="left:404px;top:200px"><div class="n"><span class="s"></span>test audit</div><div class="meta">$0.31 · ctx 14%</div></div>
+    <div class="wnode done" style="left:644px;top:200px"><div class="n"><span class="s"></span>docs review</div><div class="meta">$0.12 · approved</div></div>
+    <div class="wnode wait" style="left:404px;top:300px"><div class="n"><span class="s"></span>build ·r1</div><div class="meta">pending · revises from reviews</div></div>
+  </div></div>
+  <div class="cap"><b>Layered, top-down, fit to width.</b> Parents above, children below, revise
+  nodes (<code class="inline">·r1</code>) appear as new layers chained after their reviewers. Real
+  runs are 2–4 wide, so the whole graph fits without zoom or pan; if a workflow ever fans wider,
+  the graph scrolls horizontally. Click any node → its detail (view 3). No minimap, no zoom in v1.</div>
+</section>
+
+<section>
+  <h2>5 · Everywhere: every run, every session, ⌘R</h2>
+  <div class="frame"><div class="globalview">
+    <div class="gvtop"><span class="t">Runs</span><span class="count">3 running · 1 waiting · 1 finished today</span><span class="esc"><kbd>esc</kbd> close</span></div>
+    <div class="gvbody">
+      <div class="wsgroup">
+        <div class="wsname">crucible</div>
+        <div class="runrow"><span class="dot"></span><span class="wf">build</span><span class="id">en42</span><span class="st">▸ code review · 18m</span><span class="sess">from <em>panel handoff build</em></span><span class="spend">$4.10</span><button class="btn">Open run</button><button class="btn">Go to session</button></div>
+        <div class="runrow parked"><span class="dot"></span><span class="wf">adhoc</span><span class="id">f7k1</span><span class="st"><span class="hot">⚑ waiting on its agent · 6m</span></span><span class="sess">from <em>quota strip polish</em></span><span class="spend">$0.44</span><button class="btn">Open run</button><button class="btn">Go to session</button></div>
+        <div class="runrow parked"><span class="dot"></span><span class="wf">build</span><span class="id">g8x2</span><span class="st"><span class="hot">⚑ check-in · no one to ask · 41m</span></span><span class="sess"><span class="un">unattended — picked up issue #14 · quota meter flicker</span></span><span class="spend">$2.05</span><button class="btn">Open run</button><button class="btn primary">Start session</button></div>
+      </div>
+      <div class="wsgroup">
+        <div class="wsname">resume-site</div>
+        <div class="runrow"><span class="dot"></span><span class="wf">adhoc</span><span class="id">k2m9</span><span class="st">▸ work · 3m</span><span class="sess">from <em>copy refresh</em></span><span class="spend">$0.12</span><button class="btn">Open run</button><button class="btn">Go to session</button></div>
+        <div class="runrow done"><span class="dot"></span><span class="wf">build</span><span class="id">d3p8</span><span class="st">complete · 2h ago</span><span class="sess">from <em>og image pipeline</em></span><span class="spend">$5.90</span><button class="btn">Open run</button><button class="btn">Go to session</button></div>
+      </div>
+    </div>
+  </div></div>
+  <div class="cap"><b>Every run across every workspace</b>, grouped by workspace, sessions named.
+  A run with a session gets <b>Go to session</b>; a session-less run (the future unattended kind)
+  gets <b>Start session</b> — a fresh chat in the run's workspace, its agent primed with the run,
+  ready to be interrogated or to unblock it. Works on finished runs too: the run record outlives
+  the run. Drawn on <b>⌘R</b> because ⌘W is macOS close-window and can't be taken.</div>
+</section>
+
+</body></html>
