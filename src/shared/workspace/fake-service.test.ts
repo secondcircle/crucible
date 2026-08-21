@@ -113,6 +113,45 @@ describe('the fake workspace service', () => {
     expect(groups(home.board)).toEqual(['landed', 'inFlight', 'localOnly', 'stale'])
   })
 
+  it('answers every issue-board state a check might want, by a word in the path', async () => {
+    const { service } = watched()
+    const github = await service.issueBoard('/repos/crucible')
+    const jira = await service.issueBoard('/repos/jira-ek-app')
+    const unset = await service.issueBoard('/repos/nojira-ek-app')
+    const none = await service.issueBoard('/repos/nohost-resume-site')
+
+    if (github.kind !== 'board' || jira.kind !== 'board') throw new Error('expected boards')
+    expect(github.board.host).toEqual({ kind: 'github' })
+    expect(github.board.rows[0]?.reference).toMatch(/^crucible#/)
+
+    // A Jira project: keys for references, the project key as the label, the
+    // display name as who you are, and no mentions group anywhere.
+    expect(jira.board.host).toEqual({ kind: 'jira' })
+    expect(jira.board.repoLabel).toBe('EK')
+    expect(jira.board.login).toBe('Ike Melancon')
+    expect(jira.board.rows.map((row) => row.reference)).toEqual([
+      'EK-341',
+      'EK-338',
+      'EK-352',
+      'EK-349',
+      'EK-344'
+    ])
+    expect(jira.board.rows.some((row) => row.group === 'mentionsYou')).toBe(false)
+    expect(jira.board.rows.some((row) => row.pr !== undefined)).toBe(false)
+    // Two teammates share a display name and are still two people.
+    expect(jira.board.rows.filter((row) => row.group === 'assignedToOthers')).toHaveLength(2)
+    // No account id crosses, and no label carries a colour Jira does not have.
+    expect(JSON.stringify(jira.board)).not.toContain('557058')
+    expect(jira.board.rows.every((row) => row.labels.every((label) => label.color === undefined))).toBe(true)
+
+    expect(unset.kind).toBe('notConfigured')
+    expect(unset.kind === 'notConfigured' && unset.missing.map((piece) => piece.name)).toEqual([
+      'JIRA_API_TOKEN',
+      '.crucible/jira.json'
+    ])
+    expect(none).toEqual({ kind: 'noIssueHost' })
+  })
+
   it('mints the collection time at call time, so the age reads fresh', async () => {
     const { service } = watched()
     const answer = await service.branchBoard('/repos/pi-extensions')

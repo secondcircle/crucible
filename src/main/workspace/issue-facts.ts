@@ -1,4 +1,4 @@
-import type { IssueFact } from '../../shared/workspace/classify-issues'
+import type { IssueFact, IssuePerson } from '../../shared/workspace/classify-issues'
 
 // Nothing here spawns `gh`: the parsing is where the mistakes live, so it stays
 // pure and drivable from captured output.
@@ -153,9 +153,11 @@ function openPullRequests(
   return [...byNumber.values()]
 }
 
-function logins(nodes: readonly ({ login?: string } | null)[]): readonly string[] {
+// A GitHub login is both the identity and the display name, so one string fills
+// both fields of a person here.
+function logins(nodes: readonly ({ login?: string } | null)[]): readonly IssuePerson[] {
   return nodes.flatMap((node) =>
-    typeof node?.login === 'string' && node.login !== '' ? [node.login] : []
+    typeof node?.login === 'string' && node.login !== '' ? [{ id: node.login, name: node.login }] : []
   )
 }
 

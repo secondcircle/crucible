@@ -1,4 +1,5 @@
 import { isLive, isStale, MAX_USABLE_AGE_MS } from '../../../shared/quota/freshness'
+import { monthWindowStart } from '../../../shared/quota/month'
 import type { QuotaMeter, QuotaSnapshot } from '../../../shared/quota/types'
 
 // Everything the strip draws is decided here, in pure functions, so the
@@ -7,16 +8,24 @@ import type { QuotaMeter, QuotaSnapshot } from '../../../shared/quota/types'
 /** Both weekly kinds run seven days; the pace tick means nothing without that. */
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000
 
+const DAY_MS = 24 * 60 * 60 * 1000
+
 // Pace stays quiet through the first day of a window: a tiny elapsed fraction
 // as a divisor swings wildly, and a projection believable but too early to be
 // true is worse than none.
-const FIRST_DAY_MS = 24 * 60 * 60 * 1000
+const FIRST_DAY_MS = DAY_MS
 
-// Display order within a row: 5H, then 7D, then a scoped meter.
+// Within a week the weekday names the day unambiguously; further out it does
+// not, and a monthly meter can project weeks away.
+const NEAR_MS = 7 * DAY_MS
+
+// Display order within a row: 5H, 7D, a scoped meter, then the monthly one.
+// Longest window last.
 const KIND_RANK: Record<QuotaMeter['kind'], number> = {
   session: 0,
   weekly: 1,
-  weekly_scoped: 2
+  weekly_scoped: 2,
+  monthly: 3
 }
 
 // An id with no entry displays as itself, so a provider gaining an adapter
@@ -82,18 +91,27 @@ export function levelOf(usedPercent: number): MeterLevel {
   return 'normal'
 }
 
-// Pace applies to weekly meters only: hitting the session one is rare enough
-// not to watch.
+// Pace applies to the windowed meters only: hitting the session one is rare
+// enough not to watch.
 function paced(meter: QuotaMeter): boolean {
-  return meter.kind === 'weekly' || meter.kind === 'weekly_scoped'
+  return meter.kind === 'weekly' || meter.kind === 'weekly_scoped' || meter.kind === 'monthly'
+}
+
+/**
+ * How long the window this meter's reset closes runs. A month is 28 to 31 days
+ * as the calendar falls, so it is measured rather than assumed.
+ */
+function windowMs(meter: QuotaMeter, resetsAt: number): number {
+  return meter.kind === 'monthly' ? resetsAt - monthWindowStart(resetsAt) : WEEK_MS
 }
 
 /** `null` when pace has nothing to say about this meter yet. */
 export function paceFraction(meter: QuotaMeter, now: number): number | null {
   if (!paced(meter) || meter.resetsAt === null) return null
-  const elapsed = now - (meter.resetsAt - WEEK_MS)
+  const length = windowMs(meter, meter.resetsAt)
+  const elapsed = now - (meter.resetsAt - length)
   if (elapsed < FIRST_DAY_MS) return null
-  return Math.min(1, Math.max(0, elapsed / WEEK_MS))
+  return Math.min(1, Math.max(0, elapsed / length))
 }
 
 // A straight line through the current spending, with no history and no stored
@@ -103,8 +121,9 @@ export function crossingAt(meter: QuotaMeter, now: number): number | null {
   if (fraction === null || fraction === 0) return null
   if (meter.usedPercent <= 0) return null
   if (meter.usedPercent / fraction <= 100) return null
-  const windowStart = (meter.resetsAt as number) - WEEK_MS
-  return windowStart + fraction * WEEK_MS * (100 / meter.usedPercent)
+  const resetsAt = meter.resetsAt as number
+  const length = windowMs(meter, resetsAt)
+  return resetsAt - length + fraction * length * (100 / meter.usedPercent)
 }
 
 // A provider on track says nothing at all, which is what makes the word a
@@ -117,7 +136,41 @@ export function outWord(meters: readonly QuotaMeter[], now: number): string | un
     if (earliest === undefined || crossing < earliest) earliest = crossing
   }
   if (earliest === undefined) return undefined
-  return `out ${new Date(earliest).toLocaleDateString(undefined, { weekday: 'short' })}`
+  return `out ${crossingDay(earliest, now)}`
+}
+
+/** A weekday inside the week, a month and day beyond it. */
+export function crossingDay(crossing: number, now: number): string {
+  const shape: Intl.DateTimeFormatOptions =
+    crossing - now < NEAR_MS ? { weekday: 'short' } : { month: 'short', day: 'numeric' }
+  return new Date(crossing).toLocaleDateString(undefined, shape)
+}
+
+/**
+ * The working precedent's dollar shape (`~/.claude/usage-filter.jq`): thousands
+ * above $1000, whole dollars above $100 or where the amount is whole, and cents
+ * below that.
+ */
+export function dollarText(amount: number): string {
+  if (amount >= 1000) {
+    const thousands = Math.round((amount / 1000) * 10) / 10
+    return `$${Number.isInteger(thousands) ? thousands : thousands.toFixed(1)}k`
+  }
+  if (amount >= 100 || Number.isInteger(amount)) return `$${Math.round(amount)}`
+  return `$${Math.round(amount * 100) / 100}`
+}
+
+// Dollars where the plan meters dollars, a percent where it meters a percent.
+// The printed percent is unclamped, so an overage says 104% while the fill pins
+// at 100 — the bar cannot draw past its end, but the number must not lie.
+function meterText(meter: QuotaMeter, level: MeterLevel): string {
+  const alarm = level === 'crit' ? '!' : ''
+  const used = meter.usedDollars
+  const limit = meter.limitDollars
+  if (meter.kind === 'monthly' && used !== undefined && limit !== undefined && limit > 0) {
+    return `${alarm}${dollarText(used)}/${dollarText(limit)} · ${Math.round((used / limit) * 100)}%`
+  }
+  return `${alarm}${Math.round(meter.usedPercent)}%`
 }
 
 function meterView(meter: QuotaMeter, index: number, now: number, stale: boolean): MeterView {
@@ -130,7 +183,7 @@ function meterView(meter: QuotaMeter, index: number, now: number, stale: boolean
     label: meter.label,
     kind: meter.kind,
     fillPercent: Math.min(100, Math.max(0, meter.usedPercent)),
-    text: `${level === 'crit' ? '!' : ''}${Math.round(meter.usedPercent)}%`,
+    text: meterText(meter, level),
     level,
     // The tick is a clock fact, so a stale row keeps it; only the projection,
     // which needs a number the strip trusts, goes quiet.

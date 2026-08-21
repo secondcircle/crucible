@@ -81,18 +81,31 @@ export type IssueBoardAnswer =
   // No repository, or one whose remote no issue host answers for. ⌘I is dead
   // here, exactly as ⌘B is in a plain folder.
   | { readonly kind: 'noIssueHost' }
-  // gh is missing, unauthenticated or could not answer. The board opens and
-  // says this sentence rather than showing half a list.
+  // The host is chosen but its configuration is incomplete. ⌘I opens and the
+  // board says which piece is missing and where it goes.
+  | { readonly kind: 'notConfigured'; readonly missing: readonly MissingPiece[] }
+  // The host is missing, unauthenticated or could not answer. The board opens
+  // and says this sentence rather than showing half a list.
   | { readonly kind: 'unreachable'; readonly reason: string }
   | { readonly kind: 'board'; readonly board: IssueBoardSnapshot }
+
+/** One piece of configuration that is not there, naming itself and its home. */
+export interface MissingPiece {
+  /** Exactly as it is written: "JIRA_API_TOKEN", ".crucible/jira.json". */
+  readonly name: string
+  /** One sentence: where it goes and what it holds. */
+  readonly where: string
+}
 
 export interface IssueBoardSnapshot {
   /** ISO time collection finished; "refreshed Ns ago" derives from it. */
   readonly collectedAt: string
-  /** "owner/name", which is what a reference is built from. */
+  // "owner/name" on GitHub, the project key on Jira: what a reference is built
+  // from, either way.
   readonly repoLabel: string
-  readonly host: { readonly kind: 'github' }
-  /** The authenticated host login, which is what "you" means on this board. */
+  readonly host: { readonly kind: 'github' } | { readonly kind: 'jira' }
+  // The host's display name for you. Never an account id and never an email:
+  // no identity beyond a name crosses this seam.
   readonly login: string
   readonly rows: readonly IssueRow[]
 }
@@ -118,14 +131,17 @@ export interface IssueComment {
 
 export interface IssueRow {
   readonly group: IssueGroupId
+  /** The host's own number: 128 on GitHub, the 341 of `EK-341` on Jira. */
   readonly number: number
-  /** `crucible#128` — what ⌘C copies and what the first message carries. */
+  // `crucible#128` or `EK-341` — what ⌘C copies, what the first message
+  // carries, and what the picked-up fold matches on.
   readonly reference: string
   readonly title: string
   readonly url: string
   readonly labels: readonly IssueLabel[]
-  /** Every assignee the host reports; empty means unclaimed. */
+  /** Every assignee the host reports, by display name; empty means unclaimed. */
   readonly assignees: readonly string[]
+  /** The author's display name: a GitHub login, a Jira reporter's name. */
   readonly authorLogin: string
   readonly createdAt: string
   readonly updatedAt: string

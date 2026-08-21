@@ -9,6 +9,8 @@ matches what you were asked about.
 - `worktrees.md` — read this when the user asks to make worktrees work with
   Crucible here, when a worktree is missing dependencies or setup, or when
   asked how a session's or a run's worktree is created or cleaned up.
+- `jira.md` — read this when the user asks to connect a repository to Jira, or
+  when the issue board says Jira is not set up here.
 - `workflows.md` — read this when you are orchestrating workflow runs: what
   the crucible_* tools do, what a run's messages mean, and how finished work
   comes back.

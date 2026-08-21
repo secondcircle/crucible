@@ -461,15 +461,22 @@ describe('the quota strip', () => {
 
     const [anthropic, codex, grok] = rows(container).map(readRow)
 
-    expect(anthropic.right).toBe('⟳4d11')
+    // The monthly reset outlasts the weekly one, so it is what counts down.
+    expect(anthropic.right).toBe('⟳12d00')
     expect(anthropic.meters.map((shown) => `${shown.label} ${shown.text}`)).toEqual([
       '5H 73%',
       '7D 29%',
-      'FABLE 22%'
+      'FABLE 22%',
+      'MO $2.1k/$5k · 42%'
     ])
-    // Amber on the session meter, both weekly fills behind their ticks.
+    // Amber on the session meter, every windowed fill behind its tick.
     expect(anthropic.meters[0].classes).toBe('warn qnum warn')
     expect(Number.parseFloat(anthropic.meters[1].tick as string)).toBeCloseTo(36.3, 1)
+    expect(Number.parseFloat(anthropic.meters[3].tick as string)).toBeCloseTo(61.3, 1)
+    expect(Number.parseFloat(anthropic.meters[3].fill)).toBeCloseTo(42.4, 1)
+    // Nothing is projected: two fifths of the budget with three fifths of the
+    // month gone is on pace.
+    expect(anthropic.right).not.toMatch(/out/)
 
     expect(codex.right).toMatch(/^⟳3d04 out \w{3}$/)
     expect(codex.meters[0].text).toBe('!91%')

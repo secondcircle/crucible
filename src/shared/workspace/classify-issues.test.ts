@@ -8,13 +8,17 @@ import {
   issueCounts,
   withSessions,
   type IssueFact,
-  type IssueFacts
+  type IssueFacts,
+  type IssuePerson
 } from './classify-issues'
 import type { IssueBoardSnapshot, IssueGroupId } from './service'
 
 const NOW = Date.parse('2026-08-20T15:00:00.000Z')
 
 const DAY_MS = 24 * 60 * 60 * 1000
+
+/** On GitHub the login is both the identity and the display name. */
+const who = (login: string): IssuePerson => ({ id: login, name: login })
 
 function issue(number: number, over: Partial<IssueFact> = {}): IssueFact {
   return {
@@ -36,11 +40,27 @@ function issue(number: number, over: Partial<IssueFact> = {}): IssueFact {
 function board(issues: readonly IssueFact[], mentioned: readonly number[] = []): IssueBoardSnapshot {
   const facts: IssueFacts = {
     repoLabel: 'secondcircle/crucible',
-    login: 'ike',
+    host: { kind: 'github' },
+    you: who('ike'),
     issues,
     mentioned
   }
   return classifyIssues(facts, NOW)
+}
+
+/** The same judgment over a Jira project, where names and ids come apart. */
+function jiraBoard(issues: readonly IssueFact[]): IssueBoardSnapshot {
+  return classifyIssues(
+    {
+      repoLabel: 'EK',
+      host: { kind: 'jira' },
+      you: { id: '557058:you', name: 'Ike Melancon' },
+      issues,
+      // Jira answers no mention question this round.
+      mentioned: []
+    },
+    NOW
+  )
 }
 
 const groupOf = (snapshot: IssueBoardSnapshot, number: number): IssueGroupId | undefined =>
@@ -48,7 +68,7 @@ const groupOf = (snapshot: IssueBoardSnapshot, number: number): IssueGroupId | u
 
 describe('which group an issue lands in', () => {
   it('is yours when the host says you are assigned', () => {
-    expect(groupOf(board([issue(1, { assignees: ['ike'] })]), 1)).toBe('assignedToYou')
+    expect(groupOf(board([issue(1, { assignees: [who('ike')] })]), 1)).toBe('assignedToYou')
   })
 
   it('mentions you when the host answered that question with it', () => {
@@ -60,19 +80,19 @@ describe('which group an issue lands in', () => {
   })
 
   it("is somebody else's when they are assigned and you are not named", () => {
-    expect(groupOf(board([issue(1, { assignees: ['maya'] })]), 1)).toBe('assignedToOthers')
+    expect(groupOf(board([issue(1, { assignees: [who('maya')] })]), 1)).toBe('assignedToOthers')
   })
 
   it('is picked up when an open pull request names it, whoever it belongs to', () => {
     const taken = issue(1, {
-      assignees: ['ike'],
+      assignees: [who('ike')],
       pullRequests: [{ number: 130, state: 'open', url: 'https://x/pull/130' }]
     })
     expect(groupOf(board([taken]), 1)).toBe('pickedUp')
   })
 
   it('being assigned to you outranks a mention of you', () => {
-    expect(groupOf(board([issue(1, { assignees: ['ike'] })], [1]), 1)).toBe('assignedToYou')
+    expect(groupOf(board([issue(1, { assignees: [who('ike')] })], [1]), 1)).toBe('assignedToYou')
   })
 })
 
@@ -111,10 +131,10 @@ describe('what a row carries', () => {
 describe('the order the board is in', () => {
   it('is group order first, then most recently updated inside each group', () => {
     const snapshot = board([
-      issue(4, { assignees: ['maya'] }),
+      issue(4, { assignees: [who('maya')] }),
       issue(3),
       issue(1),
-      issue(2, { assignees: ['ike'] })
+      issue(2, { assignees: [who('ike')] })
     ])
     expect(snapshot.rows.map((row) => row.number)).toEqual([2, 1, 3, 4])
   })
@@ -136,7 +156,7 @@ describe('the sessions this workspace holds', () => {
   })
 
   it('leave every other row exactly where it was', () => {
-    const before = board([issue(1), issue(2, { assignees: ['ike'] })])
+    const before = board([issue(1), issue(2, { assignees: [who('ike')] })])
     const folded = withSessions(before, new Set(['crucible#1']))
     expect(groupOf(folded, 2)).toBe('assignedToYou')
   })
@@ -148,7 +168,7 @@ describe('the sessions this workspace holds', () => {
 
   it('re-sort the board, so a picked-up row is under its own heading', () => {
     const folded = withSessions(
-      board([issue(1, { assignees: ['ike'] }), issue(2, { assignees: ['ike'] })]),
+      board([issue(1, { assignees: [who('ike')] }), issue(2, { assignees: [who('ike')] })]),
       new Set(['crucible#1'])
     )
     expect(folded.rows.map((row) => row.group)).toEqual(['assignedToYou', 'pickedUp'])
@@ -158,10 +178,10 @@ describe('the sessions this workspace holds', () => {
 describe('the chip above the board', () => {
   it('counts every open issue, and separately the ones assigned to you', () => {
     const snapshot = board([
-      issue(1, { assignees: ['ike'] }),
-      issue(2, { assignees: ['ike'] }),
+      issue(1, { assignees: [who('ike')] }),
+      issue(2, { assignees: [who('ike')] }),
       issue(3),
-      issue(4, { assignees: ['maya'] })
+      issue(4, { assignees: [who('maya')] })
     ])
     expect(issueCounts(snapshot)).toEqual({ open: 4, yours: 2 })
   })
@@ -171,7 +191,87 @@ describe('the chip above the board', () => {
   })
 
   it('stops counting an issue of yours once it is picked up', () => {
-    const folded = withSessions(board([issue(1, { assignees: ['ike'] })]), new Set(['crucible#1']))
+    const folded = withSessions(board([issue(1, { assignees: [who('ike')] })]), new Set(['crucible#1']))
     expect(issueCounts(folded).yours).toBe(0)
+  })
+})
+
+describe('the same judgment over a Jira project', () => {
+  const you = { id: '557058:you', name: 'Ike Melancon' }
+  const mate = { id: '557058:dev', name: 'Devi Raman' }
+  // A different account with the same display name, which is the case that
+  // makes comparing names wrong rather than merely sloppy.
+  const namesake = { id: '557058:dv2', name: 'Devi Raman' }
+
+  it('references an issue by its key, which is what ⌘C copies', () => {
+    expect(jiraBoard([issue(341)]).rows[0]?.reference).toBe('EK-341')
+    expect(jiraBoard([issue(341)]).rows[0]?.number).toBe(341)
+  })
+
+  it('carries the project key and your display name, and no account id', () => {
+    const snapshot = jiraBoard([issue(341, { assignees: [you] })])
+
+    expect(snapshot.repoLabel).toBe('EK')
+    expect(snapshot.host).toEqual({ kind: 'jira' })
+    expect(snapshot.login).toBe('Ike Melancon')
+    // Names cross the seam; the ids that decided the grouping stay behind it.
+    expect(snapshot.rows[0]?.assignees).toEqual(['Ike Melancon'])
+    expect(JSON.stringify(snapshot)).not.toContain('557058')
+  })
+
+  it('groups by account id, so a namesake is not mistaken for you', () => {
+    const snapshot = jiraBoard([
+      issue(1, { assignees: [you] }),
+      issue(2, { assignees: [{ id: '557058:other', name: 'Ike Melancon' }] })
+    ])
+
+    expect(groupOf(snapshot, 1)).toBe('assignedToYou')
+    expect(groupOf(snapshot, 2)).toBe('assignedToOthers')
+  })
+
+  it('keeps two teammates who share a name apart from each other', () => {
+    const snapshot = jiraBoard([
+      issue(1, { assignees: [mate] }),
+      issue(2, { assignees: [namesake] })
+    ])
+
+    expect(snapshot.rows.map((row) => row.group)).toEqual(['assignedToOthers', 'assignedToOthers'])
+    expect(snapshot.rows.map((row) => row.assignees)).toEqual([['Devi Raman'], ['Devi Raman']])
+  })
+
+  it('orders yours, then unclaimed, then picked up, then everyone else\u2019s', () => {
+    const folded = withSessions(
+      jiraBoard([
+        issue(4, { assignees: [mate] }),
+        issue(3),
+        issue(2, { assignees: [you] }),
+        issue(1, { assignees: [you] })
+      ]),
+      new Set(['EK-1'])
+    )
+
+    // The session fold keys on the reference, so `EK-1` works untouched.
+    expect(folded.rows.map((row) => [row.reference, row.group])).toEqual([
+      ['EK-2', 'assignedToYou'],
+      ['EK-3', 'unclaimed'],
+      ['EK-1', 'pickedUp'],
+      ['EK-4', 'assignedToOthers']
+    ])
+  })
+
+  it('never puts a row in the mentions group, there being no such question', () => {
+    const snapshot = jiraBoard([issue(1), issue(2, { assignees: [mate] }), issue(3, { assignees: [you] })])
+
+    expect(snapshot.rows.some((row) => row.group === 'mentionsYou')).toBe(false)
+  })
+
+  it('orders most recently updated first inside a group, as it does anywhere', () => {
+    const snapshot = jiraBoard([
+      issue(10, { assignees: [you], updatedAt: new Date(NOW - 3 * DAY_MS).toISOString() }),
+      issue(11, { assignees: [you], updatedAt: new Date(NOW - 1 * DAY_MS).toISOString() }),
+      issue(12, { assignees: [you], updatedAt: new Date(NOW - 2 * DAY_MS).toISOString() })
+    ])
+
+    expect(snapshot.rows.map((row) => row.number)).toEqual([11, 12, 10])
   })
 })

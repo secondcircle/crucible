@@ -5,8 +5,10 @@
 import { describe, expect, it, vi } from 'vitest'
 import { cannedQuotaSnapshot, createFakeQuotaService } from './fake-service'
 import { isStale, worstUsedPercent } from './freshness'
+import { monthWindowStart } from './month'
 
 const HOUR = 60 * 60 * 1000
+const DAY = 24 * HOUR
 const LAUNCH = Date.UTC(2026, 7, 15, 12, 0, 0)
 
 describe('the canned quota service', () => {
@@ -39,8 +41,12 @@ describe('the canned quota service', () => {
 
     expect(Object.keys(snapshot.providers).sort()).toEqual(['anthropic', 'openai-codex', 'xai'])
     expect(
-      snapshot.providers.anthropic.meters.map((meter) => `${meter.label} ${meter.usedPercent}`)
-    ).toEqual(['5H 73', '7D 29', 'FABLE 22'])
+      snapshot.providers.anthropic.meters.map(
+        // The monthly percent is division over two dollar amounts, so it is
+        // read to the cent rather than to the last float digit.
+        (meter) => `${meter.label} ${Math.round(meter.usedPercent * 100) / 100}`
+      )
+    ).toEqual(['5H 73', '7D 29', 'FABLE 22', 'MO 42.39'])
     expect(
       snapshot.providers['openai-codex'].meters.map((meter) => `${meter.label} ${meter.usedPercent}`)
     ).toEqual(['5H 91', '7D 78'])
@@ -49,12 +55,26 @@ describe('the canned quota service', () => {
     )
   })
 
+  it('meters the work account\u2019s dollar budget, which is what MO draws', () => {
+    const monthly = cannedQuotaSnapshot(LAUNCH).providers.anthropic.meters.find(
+      (meter) => meter.kind === 'monthly'
+    )
+
+    expect(monthly).toMatchObject({ label: 'MO', usedDollars: 2119.26, limitDollars: 5000 })
+    // Twelve days to the reset, so most of the month is already behind it and
+    // the tick sits ahead of the fill.
+    expect((monthly?.resetsAt as number) - LAUNCH).toBe(12 * DAY)
+    const window = (monthly?.resetsAt as number) - monthWindowStart(monthly?.resetsAt as number)
+    const elapsed = (LAUNCH - ((monthly?.resetsAt as number) - window)) / window
+    expect(elapsed * 100).toBeGreaterThan(monthly?.usedPercent as number)
+  })
+
   it('anchors every reset to launch, so nothing lapses or goes stale during a check', () => {
     const snapshot = cannedQuotaSnapshot(LAUNCH)
     const weekly = (providerId: string): number =>
       Math.max(
         ...snapshot.providers[providerId].meters
-          .filter((meter) => meter.kind !== 'session')
+          .filter((meter) => meter.kind === 'weekly' || meter.kind === 'weekly_scoped')
           .map((meter) => meter.resetsAt ?? 0)
       )
 
@@ -76,7 +96,7 @@ describe('the canned quota service', () => {
     // tick draws and the divisor the projection uses.
     const pace = (providerId: string): number[] =>
       snapshot.providers[providerId].meters
-        .filter((meter) => meter.kind !== 'session')
+        .filter((meter) => meter.kind === 'weekly' || meter.kind === 'weekly_scoped')
         .map((meter) => meter.usedPercent / ((LAUNCH - ((meter.resetsAt as number) - week)) / week))
 
     expect((LAUNCH - (LAUNCH + 107 * HOUR - week)) / week).toBeCloseTo(0.363, 3)

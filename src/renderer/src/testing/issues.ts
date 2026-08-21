@@ -1,3 +1,4 @@
+import { classifyIssues, type IssueFact } from '../../../shared/workspace/classify-issues'
 import type { IssueBoardSnapshot, IssueRow } from '../../../shared/workspace/service'
 
 // Issue board snapshots for component tests, minted against the clock so ages
@@ -117,4 +118,59 @@ export function hostedIssues(now = Date.now()): IssueBoardSnapshot {
     login: 'ike',
     rows
   }
+}
+
+const JIRA_URL = 'https://secondcircle.atlassian.net'
+
+/** You on the Jira instance: an account id to group by, a name to show. */
+export const JIRA_YOU = { id: '557058:you', name: 'Ike Melancon' }
+const JIRA_MATE = { id: '557058:dev', name: 'Devi Raman' }
+
+/**
+ * A Jira project judged by the real classifier, so the groups, the references
+ * and the order are the ones the board would actually get. No mentions group:
+ * Jira answers no such question.
+ */
+export function jiraIssues(now = Date.now()): IssueBoardSnapshot {
+  const at = (hours: number): string => new Date(now - hours * HOUR_MS).toISOString()
+  const fact = (number: number, over: Partial<IssueFact>): IssueFact => ({
+    number,
+    title: `issue ${number}`,
+    url: `${JIRA_URL}/browse/EK-${number}`,
+    body: '',
+    createdAt: at(200),
+    updatedAt: at(number),
+    authorLogin: JIRA_MATE.name,
+    assignees: [],
+    labels: [],
+    comments: 0,
+    pullRequests: [],
+    ...over
+  })
+
+  return classifyIssues(
+    {
+      repoLabel: 'EK',
+      host: { kind: 'jira' },
+      you: JIRA_YOU,
+      issues: [
+        fact(341, {
+          title: 'Enrolment import drops the second address line',
+          body: 'The importer reads both address lines and writes one.',
+          assignees: [JIRA_YOU],
+          labels: [{ name: 'defect' }, { name: 'sev-high' }],
+          comments: 2,
+          latestComment: { login: JIRA_MATE.name, at: at(4), body: 'Confirmed on staging.' }
+        }),
+        fact(352, { title: 'Nobody owns the onboarding checklist', labels: [{ name: 'onboarding' }] }),
+        fact(349, {
+          title: 'Master data sync retries forever on a 409',
+          assignees: [JIRA_MATE],
+          labels: [{ name: 'platform-gap' }]
+        })
+      ],
+      mentioned: []
+    },
+    now
+  )
 }

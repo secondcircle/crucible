@@ -4,9 +4,11 @@
 // the runner is the seam.
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
-import type { IssueBoardSnapshot } from '../../shared/workspace/service'
+import type { IssueBoardAnswer, IssueBoardSnapshot } from '../../shared/workspace/service'
 import type { CommandOutcome, CommandRunner } from './collect-board'
-import { collectIssues } from './collect-issues'
+import { collectIssues, type IssueSeams } from './collect-issues'
+import type { JiraFetch } from './jira-client'
+import type { WorkspaceFileReader } from './workspace-files'
 
 function fixture(name: string): string {
   return readFileSync(new URL(`./board-fixtures/${name}`, import.meta.url), 'utf8')
@@ -47,10 +49,11 @@ const HOSTED: ReadonlyArray<[RegExp, CommandOutcome]> = [
 
 async function collect(
   rules: ReadonlyArray<[RegExp, CommandOutcome]>,
-  workspacePath = '/repos/crucible'
+  workspacePath = '/repos/crucible',
+  seams: IssueSeams = { readFile: async () => undefined }
 ): Promise<{ answer: Awaited<ReturnType<typeof collectIssues>>; ran: Script['ran'] }> {
   const scripted = script(rules)
-  const answer = await collectIssues(scripted.runner, workspacePath, { now: () => NOW })
+  const answer = await collectIssues(scripted.runner, workspacePath, { now: () => NOW }, seams)
   return { answer, ran: scripted.ran }
 }
 
@@ -156,5 +159,140 @@ describe('what the collection never does', () => {
     }
     // The two gh writes it could plausibly make are the ones it never makes.
     expect(lines.every((line) => /^git |^gh (api|repo view|issue list)/.test(line))).toBe(true)
+  })
+})
+
+// A Bitbucket-remoted repository, which is what the work machine has.
+const BITBUCKET: ReadonlyArray<[RegExp, CommandOutcome]> = [
+  [/^git rev-parse --show-toplevel/, ok('/repos/ek-app\n')],
+  [/^git remote get-url origin/, ok('git@bitbucket.org:ifs-pd/ek-app.git\n')]
+]
+
+const ENV = [
+  'JIRA_EMAIL=ike@example.com',
+  'JIRA_API_TOKEN=ATATT-secret',
+  'JIRA_BASE_URL=https://secondcircle.atlassian.net'
+].join('\n')
+
+/** The two configuration files, answered from text rather than from a disk. */
+function files(held: Readonly<Record<string, string>>): WorkspaceFileReader {
+  return async (_workspacePath, relativePath) => held[relativePath]
+}
+
+/** A Jira that answers whatever it is asked, so routing is what is under test. */
+function jiraWire(): { impl: JiraFetch; urls: string[] } {
+  const urls: string[] = []
+  const impl: JiraFetch = async (url) => {
+    urls.push(url)
+    const body = url.includes('/myself')
+      ? '{"accountId":"557058:you","displayName":"Ike Melancon"}'
+      : '{"issues":[{"key":"EK-341","fields":{"summary":"Address line","updated":"2026-08-20T12:00:00.000+0000"}}]}'
+    return { ok: true, status: 200, text: async () => body }
+  }
+  return { impl, urls }
+}
+
+describe('which host the collector chooses', () => {
+  it('reads Jira where the pointer file is, even over a GitHub remote', async () => {
+    const wire = jiraWire()
+    const { answer, ran } = await collect(HOSTED, '/repos/crucible', {
+      readFile: files({ '.crucible/jira.json': '{"projectKey":"EK"}', '.env.local': ENV }),
+      fetchImpl: wire.impl
+    })
+
+    expect(answer.kind).toBe('board')
+    expect(answer.kind === 'board' && answer.board.host).toEqual({ kind: 'jira' })
+    // Explicit configuration beats remote inference, so gh is never asked.
+    expect(ran.some((call) => call.command === 'gh')).toBe(false)
+    expect(wire.urls).toHaveLength(2)
+  })
+
+  it('reads GitHub for a GitHub remote with no pointer file, keys or not', async () => {
+    const { answer } = await collect(HOSTED, '/repos/crucible', {
+      readFile: files({ '.env.local': ENV })
+    })
+
+    expect(answer.kind === 'board' && answer.board.host).toEqual({ kind: 'github' })
+  })
+
+  it('reads Jira in a Bitbucket repository the pointer file names', async () => {
+    const wire = jiraWire()
+    const { answer } = await collect(BITBUCKET, '/repos/ek-app', {
+      readFile: files({ '.crucible/jira.json': '{"projectKey":"EK"}', '.env.local': ENV }),
+      fetchImpl: wire.impl
+    })
+
+    expect(answer.kind === 'board' && answer.board.repoLabel).toBe('EK')
+    expect(new URL(wire.urls[1] ?? '').searchParams.get('jql')).toContain('project = "EK"')
+  })
+
+  it('has no issue host in a Bitbucket repository nothing configures', async () => {
+    const { answer, ran } = await collect(BITBUCKET, '/repos/ek-app')
+
+    expect(answer).toEqual({ kind: 'noIssueHost' })
+    expect(ran.some((call) => call.command === 'gh')).toBe(false)
+  })
+
+  it('has no issue host in a folder that is not a repository, pointer or not', async () => {
+    const { answer } = await collect([[/^git rev-parse/, no()]], '/notes', {
+      readFile: files({ '.crucible/jira.json': '{"projectKey":"EK"}' })
+    })
+
+    expect(answer).toEqual({ kind: 'noIssueHost' })
+  })
+})
+
+describe('a Jira that is intended here and not finished', () => {
+  const missing = (answer: IssueBoardAnswer): readonly string[] => {
+    if (answer.kind !== 'notConfigured') throw new Error(`expected notConfigured, got ${answer.kind}`)
+    return answer.missing.map((piece) => piece.name)
+  }
+
+  it('lists the pointer file where the keys are there and it is not', async () => {
+    const { answer } = await collect(BITBUCKET, '/repos/ek-app', {
+      readFile: files({ '.env.local': ENV })
+    })
+
+    expect(missing(answer)).toEqual(['.crucible/jira.json'])
+  })
+
+  it('lists the key where the pointer is there and the key is not', async () => {
+    const { answer } = await collect(BITBUCKET, '/repos/ek-app', {
+      readFile: files({
+        '.crucible/jira.json': '{"projectKey":"EK"}',
+        '.env.local': 'JIRA_EMAIL=ike@example.com\nJIRA_BASE_URL=https://x.atlassian.net'
+      })
+    })
+
+    expect(missing(answer)).toEqual(['JIRA_API_TOKEN'])
+    expect(
+      answer.kind === 'notConfigured' && answer.missing[0]?.where
+    ).toContain('.env.local')
+  })
+
+  it('lists everything at once where the pointer file is all there is', async () => {
+    const { answer } = await collect(BITBUCKET, '/repos/ek-app', {
+      readFile: files({ '.crucible/jira.json': '{"projectKey":"EK"}' })
+    })
+
+    expect(missing(answer)).toEqual(['JIRA_BASE_URL', 'JIRA_EMAIL', 'JIRA_API_TOKEN'])
+  })
+
+  it('lists the pointer file where it is there but names no project', async () => {
+    const { answer } = await collect(BITBUCKET, '/repos/ek-app', {
+      readFile: files({ '.crucible/jira.json': 'not json', '.env.local': ENV })
+    })
+
+    expect(missing(answer)).toEqual(['.crucible/jira.json'])
+  })
+
+  it('never reads the credentials as far as the network', async () => {
+    const wire = jiraWire()
+    await collect(BITBUCKET, '/repos/ek-app', {
+      readFile: files({ '.env.local': ENV }),
+      fetchImpl: wire.impl
+    })
+
+    expect(wire.urls).toEqual([])
   })
 })

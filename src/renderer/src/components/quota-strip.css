@@ -67,6 +67,8 @@
 
 .qmeter .qbar {
   flex: 1;
+  /* So the fill and its tick stay readable beside a long number. */
+  min-width: 48px;
   height: 5px;
   border-radius: 3px;
   background: var(--panel2);
@@ -105,6 +107,12 @@
 
 .qmeter .qnum.warn {
   color: var(--accent);
+}
+
+/* Dollars, not a percent: the text decides the width and never wraps. */
+.qmeter.qmonthly .qnum {
+  width: auto;
+  white-space: nowrap;
 }
 
 .qmeter .qnum.crit {

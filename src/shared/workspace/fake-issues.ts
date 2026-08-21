@@ -1,12 +1,27 @@
-import { classifyIssues, type IssueFact } from './classify-issues'
+import { classifyIssues, type IssueFact, type IssuePerson } from './classify-issues'
+import {
+  JIRA_API_TOKEN,
+  JIRA_POINTER_FILE,
+  missingPiece
+} from './jira-setup'
 import type { IssueBoardAnswer } from './service'
 
-// One canned repository of issues, judged by the real classifier so the fake
-// launch exercises the grouping rather than hard-coding its answer. No gh run,
-// no network, no cost.
+// Canned issue boards, judged by the real classifier so the fake launch
+// exercises the grouping rather than hard-coding its answer. No gh run, no Jira
+// call, no network, no cost.
+//
+// Three states, each reached by a word in the workspace path, because the fake
+// launch has no settings to flip: `nohost` for no issue host, `nojira` for Jira
+// configured badly, `jira` for a Jira board.
 
 /** A path holding this word has no issue host, as it has no branch host. */
 const NO_HOST = 'nohost'
+
+/** Jira is the host here and its configuration is not finished. */
+const JIRA_UNSET = 'nojira'
+
+/** Jira is the host here and answered. Checked after `nojira`, which contains it. */
+const JIRA = 'jira'
 
 const HOUR_MS = 60 * 60 * 1000
 const DAY_MS = 24 * HOUR_MS
@@ -14,14 +29,50 @@ const DAY_MS = 24 * HOUR_MS
 const REPO = 'secondcircle/crucible'
 const URL = 'https://github.com/secondcircle/crucible'
 
+// A GitHub login is both identity and display name; on Jira they differ, which
+// is the whole reason a person carries two fields.
+const IKE: IssuePerson = { id: 'ike', name: 'ike' }
+const MAYA: IssuePerson = { id: 'maya', name: 'maya' }
+const DEV: IssuePerson = { id: 'dev', name: 'dev' }
+
+const PROJECT = 'EK'
+const JIRA_URL = 'https://secondcircle.atlassian.net'
+
+const JIRA_YOU: IssuePerson = { id: '557058:1f0e-you', name: 'Ike Melancon' }
+const JIRA_MATE: IssuePerson = { id: '557058:9a2b-dev', name: 'Devi Raman' }
+// Same display name as the teammate above, a different account: the reason the
+// grouping compares ids and never names.
+const JIRA_NAMESAKE: IssuePerson = { id: '557058:44c1-dv2', name: 'Devi Raman' }
+
 export function cannedIssues(workspacePath: string, now: number): IssueBoardAnswer {
   if (workspacePath.includes(NO_HOST)) return { kind: 'noIssueHost' }
+  if (workspacePath.includes(JIRA_UNSET)) {
+    // Two pieces missing at once, which is what the board must list in full.
+    return { kind: 'notConfigured', missing: [missingPiece(JIRA_API_TOKEN), missingPiece(JIRA_POINTER_FILE)] }
+  }
+  if (workspacePath.includes(JIRA)) {
+    return {
+      kind: 'board',
+      board: classifyIssues(
+        {
+          repoLabel: PROJECT,
+          host: { kind: 'jira' },
+          you: JIRA_YOU,
+          issues: cannedJiraFacts(now),
+          // Jira answers no mention question, so that group never occurs.
+          mentioned: []
+        },
+        now
+      )
+    }
+  }
   return {
     kind: 'board',
     board: classifyIssues(
       {
         repoLabel: REPO,
-        login: 'ike',
+        host: { kind: 'github' },
+        you: IKE,
         issues: cannedFacts(now),
         mentioned: [124]
       },
@@ -56,7 +107,7 @@ function cannedFacts(now: number): readonly IssueFact[] {
       createdAt: days(2),
       updatedAt: hours(4),
       authorLogin: 'ike',
-      assignees: ['ike'],
+      assignees: [IKE],
       labels: [
         { name: 'bug', color: 'd73a4a' },
         { name: 'ui', color: '5319e7' }
@@ -77,7 +128,7 @@ function cannedFacts(now: number): readonly IssueFact[] {
       createdAt: days(5),
       updatedAt: days(5),
       authorLogin: 'ike',
-      assignees: ['ike'],
+      assignees: [IKE],
       labels: [{ name: 'bug', color: 'd73a4a' }],
       comments: 1,
       latestComment: {
@@ -95,7 +146,7 @@ function cannedFacts(now: number): readonly IssueFact[] {
       createdAt: days(3),
       updatedAt: days(1),
       authorLogin: 'maya',
-      assignees: ['maya'],
+      assignees: [MAYA],
       labels: [{ name: 'design', color: '0075ca' }],
       comments: 7,
       latestComment: {
@@ -160,7 +211,7 @@ function cannedFacts(now: number): readonly IssueFact[] {
       createdAt: days(12),
       updatedAt: days(8),
       authorLogin: 'ike',
-      assignees: ['ike'],
+      assignees: [IKE],
       labels: [{ name: 'bug', color: 'd73a4a' }],
       comments: 2,
       latestComment: {
@@ -178,7 +229,7 @@ function cannedFacts(now: number): readonly IssueFact[] {
       createdAt: hours(3),
       updatedAt: hours(3),
       authorLogin: 'maya',
-      assignees: ['maya'],
+      assignees: [MAYA],
       labels: [{ name: 'feature', color: 'a2eeef' }],
       comments: 4,
       latestComment: {
@@ -196,10 +247,113 @@ function cannedFacts(now: number): readonly IssueFact[] {
       createdAt: days(11),
       updatedAt: days(11),
       authorLogin: 'dev',
-      assignees: ['dev'],
+      assignees: [DEV],
       labels: [{ name: 'bug', color: 'd73a4a' }],
       comments: 0,
       pullRequests: []
     }
+  ]
+}
+
+/**
+ * One canned Jira project: keys rather than numbers, labels with no colour,
+ * one assignee at most, and no pull request anywhere — Bitbucket is not this
+ * round, so nothing here is picked up except through a session.
+ */
+function cannedJiraFacts(now: number): readonly IssueFact[] {
+  const hours = (count: number): string => new Date(now - count * HOUR_MS).toISOString()
+  const days = (count: number): string => new Date(now - count * DAY_MS).toISOString()
+  const issue = (number: number, over: Partial<IssueFact>): IssueFact => ({
+    number,
+    title: '',
+    url: `${JIRA_URL}/browse/${PROJECT}-${number}`,
+    body: '',
+    createdAt: days(20),
+    updatedAt: days(20),
+    authorLogin: JIRA_MATE.name,
+    assignees: [],
+    labels: [],
+    comments: 0,
+    pullRequests: [],
+    ...over
+  })
+
+  return [
+    issue(341, {
+      title: 'Enrolment import drops the second address line',
+      body: [
+        'The importer reads `address1` and `address2` but writes only the first, so every',
+        'imported enrolment loses its apartment number.',
+        '',
+        '## Reproduce',
+        '',
+        '1. Import the sample file from the ticket EK-330',
+        '2. Open any enrolment with two address lines',
+        '',
+        'Suspect the mapper, not the parser: the raw row still has both.'
+      ].join('\n'),
+      createdAt: days(6),
+      updatedAt: hours(3),
+      authorLogin: JIRA_MATE.name,
+      assignees: [JIRA_YOU],
+      labels: [{ name: 'defect' }, { name: 'sev-high' }],
+      comments: 4,
+      latestComment: {
+        login: JIRA_MATE.name,
+        at: hours(5),
+        body: 'Confirmed against staging. The parser keeps both lines, so it is the mapper.'
+      }
+    }),
+    issue(338, {
+      title: 'Accounting export needs the period close date',
+      body: 'The export carries the period id but not its close date, so the downstream ledger has to look it up.',
+      createdAt: days(9),
+      updatedAt: days(1),
+      assignees: [JIRA_YOU],
+      labels: [{ name: 'architecture' }],
+      comments: 1,
+      latestComment: {
+        login: JIRA_YOU.name,
+        at: days(1),
+        body: 'Adding the date to the export contract rather than a second lookup.'
+      }
+    }),
+    issue(352, {
+      title: 'Nobody owns the onboarding checklist for the new BC',
+      body: 'Free to pick up: the checklist exists, the owner does not.',
+      createdAt: hours(20),
+      updatedAt: hours(20),
+      labels: [{ name: 'onboarding' }],
+      comments: 0
+    }),
+    issue(349, {
+      title: 'Master data sync retries forever on a 409',
+      body: 'A conflict is retried with the same payload, so the queue never drains.',
+      createdAt: days(3),
+      updatedAt: days(2),
+      assignees: [JIRA_MATE],
+      labels: [{ name: 'platform-gap' }, { name: 'defect' }],
+      comments: 6,
+      latestComment: {
+        login: JIRA_MATE.name,
+        at: days(2),
+        body: 'Backing off and dropping the payload on the third conflict.'
+      }
+    }),
+    issue(344, {
+      title: 'Rate card upload rejects a valid CSV with a BOM',
+      body: 'A file saved from Excel starts with a byte-order mark and the header check fails on it.',
+      createdAt: days(12),
+      updatedAt: days(4),
+      // Same display name as EK-349's assignee, a different account.
+      assignees: [JIRA_NAMESAKE],
+      labels: [{ name: 'defect' }, { name: 'sev-low' }],
+      comments: 2,
+      latestComment: {
+        login: JIRA_NAMESAKE.name,
+        at: days(4),
+        body: 'Stripping the BOM before the header check, and a test with a BOM in it.'
+      }
+    })
   ]
 }

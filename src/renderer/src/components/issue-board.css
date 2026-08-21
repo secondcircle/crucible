@@ -44,7 +44,7 @@
 .issues .row {
   display: grid;
   grid-template-columns:
-    46px /* number */
+    var(--issue-key-track, 46px) /* number, or a Jira key */
     minmax(96px, 1fr) /* title */
     minmax(0, 132px) /* labels */
     minmax(0, 52px) /* who is on it */
@@ -55,6 +55,55 @@
   padding: 7px 10px;
   border-radius: var(--radius);
   border: 1px solid transparent;
+}
+
+/* A Jira row names its issue `EK-341` where a GitHub one says `#341`, so the
+   first track widens for this host alone and every other board is untouched. */
+.issues.jira {
+  --issue-key-track: 68px;
+}
+
+/* Jira is the host and its two files are not both there yet. Prose, in the
+   slot the reading of an issue would take: no control, nothing to click. */
+.issues .setup {
+  padding: 4px 0 0;
+  max-width: 62ch;
+}
+
+.issues .setup h2 {
+  font-size: 13px;
+  color: var(--ink);
+  margin-bottom: 12px;
+}
+
+.issues .setup dl {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.issues .setup dt code {
+  font: 12px var(--mono);
+  color: var(--accent);
+}
+
+.issues .setup dd {
+  color: var(--dim);
+  font-size: 12.5px;
+  line-height: 1.5;
+  margin-top: 3px;
+}
+
+.issues .setup p {
+  color: var(--faint);
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+
+.issues .setup p code {
+  font: 11.5px var(--mono);
+  margin-left: 0.35em;
 }
 
 /* In a narrow window the six tracks and the reading pane cannot both have
@@ -184,6 +233,12 @@
   display: flex;
   gap: 8px;
   align-items: center;
+}
+
+/* A Jira key is long enough to wrap in a narrow pane, and `EK-` over `341` is
+   not the name of anything. */
+.issues .rnum > span:first-child {
+  white-space: nowrap;
 }
 
 .issues .rnum b {

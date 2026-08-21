@@ -9,6 +9,10 @@ const HOUR = 60 * 60 * 1000
 
 // Anchored to launch, so nothing has lapsed by the time it paints.
 
+// The live work-account capture, to the cent: $2,119.26 of $5,000.
+const SPEND_USED = 2119.26
+const SPEND_LIMIT = 5000
+
 export function cannedQuotaSnapshot(launchedAt: number): QuotaSnapshot {
   const at = (hours: number): number => launchedAt + hours * HOUR
 
@@ -29,6 +33,19 @@ export function cannedQuotaSnapshot(launchedAt: number): QuotaSnapshot {
             resetsAt: at(107),
             scopeName: 'Fable',
             isActive: true
+          },
+          // Twelve days from the reset, so roughly three fifths of the month is
+          // gone and the 42% fill sits behind its tick on whatever day the app
+          // is launched. Offset from launch like every other canned meter,
+          // rather than on the real calendar, so the picture never depends on
+          // today's date.
+          {
+            kind: 'monthly',
+            label: 'MO',
+            usedPercent: (SPEND_USED / SPEND_LIMIT) * 100,
+            resetsAt: at(12 * 24),
+            usedDollars: SPEND_USED,
+            limitDollars: SPEND_LIMIT
           }
         ]
       },
