@@ -36,6 +36,11 @@ const DEFAULT_TOOLS = ['read', 'bash', 'edit', 'write', 'grep', 'find', 'ls']
 const NUDGE_LIMIT = 2
 const VALIDATION_RETRY_LIMIT = 3
 
+/** What a record that outlived its engine is told it is. */
+const INTERRUPTED =
+  'Crucible quit while this run was working, so it stopped where it stood. ' +
+  'Its worktree is left as it stands.'
+
 export interface StartRunRequest {
   readonly workspacePath: string
   readonly workspaceName: string
@@ -176,6 +181,30 @@ export function createWorkflowEngine(options: EngineOptions): WorkflowEngine {
   const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms))
 
   const nowIso = (): string => new Date().toISOString()
+
+  // Nothing resumes a run across launches: the sessions its nodes were
+  // holding died with the process. A record that still says it is working is
+  // therefore a lie the moment it is read back, and one nothing can act on —
+  // pause and cancel both need a live handle. Say what happened instead, and
+  // write it, so the next launch does not have to work it out again.
+  for (const stale of records) {
+    if (stale.status !== 'running' && stale.status !== 'paused') continue
+    stale.status = 'failed'
+    stale.error = stale.error === undefined ? INTERRUPTED : `${stale.error}; ${INTERRUPTED}`
+    stale.endedAt ??= nowIso()
+    stale.waiting = false
+    delete stale.question
+    for (const node of stale.nodes) {
+      if (node.status === 'pending' || node.status === 'complete' || node.status === 'failed') {
+        continue
+      }
+      node.status = 'failed'
+      node.error ??= INTERRUPTED
+      node.endedAt ??= nowIso()
+      delete node.now
+    }
+    store.save(stale as RunRecord)
+  }
 
   function save(run: LiveRun): void {
     store.save(run as RunRecord)

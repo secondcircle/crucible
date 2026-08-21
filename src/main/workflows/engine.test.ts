@@ -396,4 +396,53 @@ describe('the engine end to end', () => {
     ).rejects.toThrow(/no input named "extra"/)
     expect(engine.runs()).toHaveLength(0)
   })
+
+  // Quitting is the only way a record outlives the engine that was writing
+  // it: dispose() cannot outlive the process, so whatever it was mid-sentence
+  // about is still on disk saying "running" when the next launch reads it.
+  it('lays to rest the runs a previous launch left mid-flight', () => {
+    const stateDir = tempDir('crucible-engine-relaunch-')
+    const store = createRunStore(stateDir)
+    store.save({
+      id: 'aa11',
+      workflow: 'solo',
+      status: 'running',
+      workspacePath: '/somewhere',
+      workspaceName: 'somewhere',
+      sessionId: 'orchestrator-1',
+      waiting: true,
+      question: { reason: 'is this right?', nodeId: 'work', raisedAt: '2026-01-01T00:00:00.000Z' },
+      inputs: {},
+      nodes: [
+        { id: 'done', status: 'complete', parents: [], reads: [], artifacts: [] },
+        { id: 'work', status: 'blocked', parents: [], reads: [], artifacts: [], now: 'thinking…' },
+        { id: 'later', status: 'pending', parents: ['work'], reads: [], artifacts: [] }
+      ],
+      createdAt: '2026-01-01T00:00:00.000Z'
+    })
+
+    const engine = createWorkflowEngine({
+      loader: loaderOf({}),
+      store,
+      sessions: scriptedSessions(() => () => {}),
+      deliver: () => {},
+      onChanged: () => {}
+    })
+
+    const [run] = engine.runs()
+    expect(run.status).toBe('failed')
+    expect(run.error).toMatch(/quit while this run was working/)
+    expect(run.endedAt).toBeDefined()
+    // Nothing is owed an answer any more, and nothing claims to be thinking.
+    expect(run.waiting).toBe(false)
+    expect(run.question).toBeUndefined()
+    expect(run.nodes.map((node) => node.status)).toEqual(['complete', 'failed', 'pending'])
+    expect(run.nodes[1].now).toBeUndefined()
+    // Written through, so the next launch reads the settled record.
+    expect(store.load()[0].status).toBe('failed')
+
+    // And it is a record, not a ghost: the live-only operations say so
+    // plainly rather than pretending to work.
+    expect(() => engine.cancel('aa11')).toThrow(/not live/)
+  })
 })

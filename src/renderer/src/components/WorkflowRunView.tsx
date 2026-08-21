@@ -13,6 +13,7 @@ import {
   nodeProgress,
   shortAge,
   shortModel,
+  since,
   toViewItems
 } from '../runs/format'
 import { layerNodes } from '../runs/graph'
@@ -80,8 +81,8 @@ export function WorkflowRunView({
       })
   }, [shown, transcriptKey, transcript])
 
-  const layers = useMemo(() => layerNodes(run.nodes), [run.nodes])
   const live = runIsLive(run)
+  const layers = useMemo(() => layerNodes(run.nodes), [run.nodes])
   const cost = money(runCost(run))
   const question = run.question
 
@@ -92,7 +93,10 @@ export function WorkflowRunView({
         <span className="id">run {run.id}</span>
         <span className={`stat ${run.status}`}>
           {run.status}
-          {run.startedAt === undefined ? '' : ` · ${shortAge(run.startedAt)}`}
+          {/* How long it has been working, while it still is; how long ago it
+              stopped, once it has. Age-since-start on a settled run reads as
+              the time it took, which it is not. */}
+          {live ? ageSuffix(shortAge(run.startedAt)) : ageSuffix(since(run.endedAt))}
         </span>
         <span className="where">
           {run.branch === undefined ? null : <b>{run.branch}</b>}
@@ -266,4 +270,9 @@ function nodeMeta(node: RunNode): string {
 
 function firstLine(text: string): string {
   return text.split('\n')[0]
+}
+
+/** Nothing at all when there is no stamp to read, rather than a bare dot. */
+function ageSuffix(age: string): string {
+  return age === '' ? '' : ` · ${age}`
 }

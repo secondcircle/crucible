@@ -6,7 +6,7 @@ import {
   type RunRecord
 } from '../../../shared/workflows/run'
 import { UNTITLED } from '../labels'
-import { money, shortAge } from '../runs/format'
+import { money, shortAge, since } from '../runs/format'
 import './runs.css'
 
 // Every run across every workspace, grouped by workspace, sessions named
@@ -121,7 +121,7 @@ function statusText(run: RunRecord): string {
     const node = currentNode(run)
     return `▸ ${node?.id ?? '…'} · ${shortAge(run.startedAt)}`
   }
-  return `${run.status} · ${shortAge(run.endedAt)} ago`
+  return `${run.status} · ${since(run.endedAt)}`
 }
 
 function finishedToday(runs: readonly RunRecord[], now = Date.now()): number {

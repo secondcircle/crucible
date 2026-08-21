@@ -18,6 +18,13 @@ export function shortAge(iso: string | undefined, now = Date.now()): string {
   return `${Math.round(hours / 24)}d`
 }
 
+/** `2h ago`, and `just now` under the minute — never the "now ago" of a bare suffix. */
+export function since(iso: string | undefined, now = Date.now()): string {
+  const age = shortAge(iso, now)
+  if (age === '') return ''
+  return age === 'now' ? 'just now' : `${age} ago`
+}
+
 /** `$4.10`; nothing at all when no node has reported money. */
 export function money(amount: number | undefined): string {
   if (amount === undefined) return ''
