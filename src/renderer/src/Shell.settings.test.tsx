@@ -1,5 +1,7 @@
 // @vitest-environment jsdom
 //
+// Settings as a screen in the overlay region: a rail of sections beside one
+// card, and a body that is the only thing that changes when a section does.
 // Driven over the scripted port, so a login Crucible only renders and usage
 // summed from what the port answers cost no SDK call and no network.
 import { act, fireEvent, render, screen, within } from '@testing-library/react'
@@ -91,7 +93,16 @@ async function escape(): Promise<void> {
   await settled()
 }
 
-const sheet = (): HTMLElement | null => screen.queryByRole('dialog', { name: 'Settings' })
+const card = (): HTMLElement | null => screen.queryByRole('dialog', { name: 'Settings' })
+
+const railSection = (name: string): HTMLElement =>
+  within(screen.getByRole('navigation', { name: 'Settings sections' })).getByRole('button', {
+    name
+  })
+
+const header = (): string => document.querySelector('.sethead')?.textContent ?? ''
+
+const gear = (): HTMLElement => screen.getByRole('button', { name: 'Settings' })
 
 const providerRows = (): string[] =>
   Array.from(document.querySelectorAll('.prov')).map((row) => row.textContent ?? '')
@@ -106,17 +117,73 @@ const cell = (table: string, row: string): string[] => {
   return Array.from(found?.querySelectorAll('td') ?? []).map((td) => td.textContent ?? '')
 }
 
-describe('reaching the settings surface', () => {
+describe('reaching the settings screen', () => {
   it('opens on Providers from the gear, with no workspace and no session', async () => {
     await shell({ workspaces: [], sessions: [] })
 
     await click('Settings')
 
-    expect(sheet()).not.toBeNull()
-    expect(screen.getByRole('button', { name: 'Providers' })).toHaveAttribute(
-      'aria-current',
-      'true'
-    )
+    expect(card()).not.toBeNull()
+    expect(railSection('Providers')).toHaveAttribute('aria-current', 'true')
+  })
+
+  it('has its gear at the sidebar foot, beside Add workspace, lit while it is open', async () => {
+    await shell(TWO_SESSIONS)
+
+    const foot = document.querySelector('.side .sidefoot')
+    expect(foot).not.toBeNull()
+    expect(within(foot as HTMLElement).getByRole('button', { name: '＋ Add workspace' }))
+      .toBeInTheDocument()
+    expect(within(foot as HTMLElement).getByRole('button', { name: 'Settings' })).toBe(gear())
+    expect(gear()).toHaveAttribute('aria-pressed', 'false')
+
+    await click('Settings')
+
+    expect(gear()).toHaveAttribute('aria-pressed', 'true')
+    expect(gear().className).toContain('on')
+  })
+
+  it('opens on Providers from ⌘, too', async () => {
+    await shell(TWO_SESSIONS)
+
+    await act(async () => {
+      fireEvent.keyDown(document, { key: ',', metaKey: true })
+    })
+    await settled()
+
+    expect(card()).not.toBeNull()
+    expect(railSection('Providers')).toHaveAttribute('aria-current', 'true')
+  })
+
+  it('renders in the overlay region, leaving the sidebar and the top bar alone', async () => {
+    await shell(TWO_SESSIONS)
+
+    await click('Settings')
+
+    expect(card()?.closest('.region')).not.toBeNull()
+    expect(document.querySelector('.region nav.side')).toBeNull()
+    expect(document.querySelector('.region header.top')).toBeNull()
+    // Still clickable under it: the gear that opened it is one of them.
+    expect(gear()).toBeInTheDocument()
+  })
+
+  it('closes on Escape', async () => {
+    await shell(TWO_SESSIONS)
+    await click('Settings')
+
+    await escape()
+
+    expect(card()).toBeNull()
+    expect(document.querySelector('.region')).toBeNull()
+  })
+
+  it('closes on the header button', async () => {
+    await shell(TWO_SESSIONS)
+    await click('Settings')
+
+    await click('Close settings')
+
+    expect(card()).toBeNull()
   })
 
   it('shows the cost chip only with a session, and a dash until cost is reported', async () => {
@@ -141,16 +208,16 @@ describe('reaching the settings surface', () => {
     expect(screen.getByRole('button', { name: 'Session cost' })).toHaveTextContent('—')
   })
 
-  it('lands on the Usage tab from the chip', async () => {
+  it('lands on the Usage section from the cost chip', async () => {
     await shell(TWO_SESSIONS)
 
     await click('Session cost')
 
-    expect(screen.getByRole('button', { name: 'Usage' })).toHaveAttribute('aria-current', 'true')
+    expect(railSection('Usage')).toHaveAttribute('aria-current', 'true')
     expect(screen.getByRole('table', { name: 'This session' })).toBeInTheDocument()
   })
 
-  it('closes the login dialog before the sheet, and the sheet before anything else', async () => {
+  it('closes the login before the card, and the card before anything else', async () => {
     const port = await shell(TWO_SESSIONS)
     port.trees.set('s1', { roots: [], path: [] })
     await click('Settings')
@@ -158,21 +225,92 @@ describe('reaching the settings surface', () => {
     await click(/OpenRouter/)
     await click('Use an API key')
 
-    expect(screen.getByRole('dialog', { name: 'Log in to OpenRouter' })).toBeInTheDocument()
+    const login = screen.getByRole('dialog', { name: 'Log in to OpenRouter' })
+    expect(login).toBeInTheDocument()
+    // The one overlay that does not centre on the region: the login centres
+    // on the card it was launched from.
+    expect(login.closest('.setcard')).toBe(card())
 
     await escape()
     expect(screen.queryByRole('dialog', { name: 'Log in to OpenRouter' })).toBeNull()
-    expect(sheet()).not.toBeNull()
+    expect(card()).not.toBeNull()
+    expect(railSection('Providers')).toHaveAttribute('aria-current', 'true')
     expect(port.calls.map((call) => call.op)).toContain('cancelLogin')
 
     await escape()
-    expect(sheet()).toBeNull()
-    // Nothing else Escape does fired while the sheet was taking the presses.
+    expect(card()).toBeNull()
+    // Nothing else Escape does fired while the card was taking the presses.
     expect(port.calls.map((call) => call.op)).not.toContain('sessionTree')
   })
 })
 
-describe('the providers tab', () => {
+describe('the rail', () => {
+  it('lists only the sections that exist', async () => {
+    await shell(TWO_SESSIONS)
+    await click('Settings')
+
+    expect(
+      within(screen.getByRole('navigation', { name: 'Settings sections' }))
+        .getAllByRole('button')
+        .map((row) => row.textContent)
+    ).toEqual(['◉Providers', '$Usage'])
+  })
+
+  it('swaps the body and the header, and moves the marker, on a section click', async () => {
+    await shell(TWO_SESSIONS)
+    await click('Settings')
+
+    expect(header()).toContain('Providers')
+    expect(header()).toContain('Signed in on this machine')
+
+    await act(async () => {
+      fireEvent.click(railSection('Usage'))
+    })
+    await settled()
+
+    expect(railSection('Usage')).toHaveAttribute('aria-current', 'true')
+    expect(railSection('Providers')).not.toHaveAttribute('aria-current')
+    expect(header()).toContain('Usage')
+    expect(header()).toContain('Tokens and cost, recomputed on open')
+    expect(screen.getByRole('table', { name: 'This session' })).toBeInTheDocument()
+    expect(document.querySelectorAll('.prov')).toHaveLength(0)
+  })
+
+  it('keeps the card, the rail and the header as one shape across a flip', async () => {
+    await shell(TWO_SESSIONS)
+    await click('Settings')
+
+    // What jsdom can say about zero layout shift: the same elements, never
+    // rebuilt. The pixels are compared in the driven app.
+    const before = card()
+    const rail = screen.getByRole('navigation', { name: 'Settings sections' })
+    const head = document.querySelector('.sethead')
+    const body = document.querySelector('.setbody')
+
+    await act(async () => {
+      fireEvent.click(railSection('Usage'))
+    })
+    await settled()
+
+    expect(card()).toBe(before)
+    expect(screen.getByRole('navigation', { name: 'Settings sections' })).toBe(rail)
+    expect(document.querySelector('.sethead')).toBe(head)
+    expect(document.querySelector('.setbody')).toBe(body)
+  })
+
+  it('opens on Providers again next time, whatever was last looked at', async () => {
+    await shell(TWO_SESSIONS)
+    await click('Session cost')
+    expect(railSection('Usage')).toHaveAttribute('aria-current', 'true')
+
+    await escape()
+    await click('Settings')
+
+    expect(railSection('Providers')).toHaveAttribute('aria-current', 'true')
+  })
+})
+
+describe('the Providers section', () => {
   it('shows one row per credentialed provider, and nothing for the rest', async () => {
     await shell(TWO_SESSIONS)
 
@@ -327,6 +465,55 @@ describe('a login', () => {
     expect(screen.queryByRole('dialog', { name: 'Log in to OpenRouter' })).toBeNull()
   })
 
+  // The sidebar stays clickable under Settings, so a session click can close
+  // the card while a login flow is live. A flow that outlived its dialog
+  // invisibly would spend the next Escape press on the unseen login instead
+  // of counting toward double-Esc.
+  it('does not stay live and invisible after a sidebar click closes Settings', async () => {
+    const port = await shell({
+      ...TWO_SESSIONS,
+      sessions: TWO_SESSIONS.sessions.map((session) =>
+        session.id === 's2' ? { ...session, title: 'the other session' } : session
+      )
+    })
+    await click('Settings')
+    await click('Add provider')
+    await click(/OpenRouter/)
+    await click('Sign in with OAuth')
+    expect(screen.getByRole('dialog', { name: 'Log in to OpenRouter' })).toBeInTheDocument()
+
+    // The click lands and the occupant closes, the login's rendering with it.
+    await click('the other session')
+    expect(card()).toBeNull()
+    expect(screen.queryByRole('dialog', { name: 'Log in to OpenRouter' })).toBeNull()
+    expect(port.calls).toContainEqual({ op: 'activateSession', args: ['s2'] })
+
+    // Nothing is visibly up, so both presses fall through and open the tree.
+    await escape()
+    await escape()
+    expect(screen.getByRole('dialog', { name: 'Session tree' })).toBeInTheDocument()
+  })
+
+  // Which of the two readings the shell took: the flow is cancelled, the same
+  // cancel the dialog's own Close does, rather than kept alive for a reopen.
+  // An abandoned OAuth exchange is a flow nobody can finish or stop.
+  it('cancels the flow at the port when Settings leaves the region', async () => {
+    const port = await started()
+    expect(port.calls.map((call) => call.op)).not.toContain('cancelLogin')
+
+    // Another overlay taking the region over, not just a close: the rule is
+    // about the card leaving, however it leaves.
+    await click('Resume session…')
+
+    expect(screen.getByRole('dialog', { name: 'Resume session' })).toBeInTheDocument()
+    expect(card()).toBeNull()
+    expect(port.calls.map((call) => call.op)).toContain('cancelLogin')
+    // Reopening Settings shows Providers, not a dialog resumed from nowhere.
+    await click('Settings')
+    expect(screen.queryByRole('dialog', { name: 'Log in to OpenRouter' })).toBeNull()
+    expect(header()).toContain('Providers')
+  })
+
   it('refuses a second flow while one is live', async () => {
     const port = await started()
     const started_ = port.calls.filter((call) => call.op === 'login').length
@@ -340,7 +527,7 @@ describe('a login', () => {
   })
 })
 
-describe('the usage tab', () => {
+describe('the Usage section', () => {
   it('shows dashes everywhere until something has been reported', async () => {
     await shell(TWO_SESSIONS)
 

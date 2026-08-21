@@ -46,6 +46,8 @@ export function Sidebar({
   onActivateSession,
   onRemoveSession,
   onResume,
+  onOpenSettings,
+  settingsOpen,
   cache,
   quota
 }: {
@@ -63,6 +65,10 @@ export function Sidebar({
   readonly onActivateSession: (id: SessionId) => void
   readonly onRemoveSession: (id: SessionId) => void
   readonly onResume: () => void
+  /** The gear at the foot: the only place Settings is reachable by mouse. */
+  readonly onOpenSettings: () => void
+  /** Lit while Settings occupies the overlay region. */
+  readonly settingsOpen: boolean
   // The cache strip's data and its one action. Absent without a cache
   // service, and then no strip renders at all.
   readonly cache?: { readonly health?: CacheHealth; readonly onOpen: () => void }
@@ -234,9 +240,19 @@ export function Sidebar({
       {cache === undefined ? null : <CacheStrip health={cache.health} onOpen={cache.onOpen} />}
       {quota === undefined ? null : <QuotaStrip snapshot={quota.snapshot} now={quota.now} />}
 
-      <button className="addws" onClick={onAddWorkspace}>
-        ＋ Add workspace
-      </button>
+      <div className="sidefoot">
+        <button className="addws" onClick={onAddWorkspace}>
+          ＋ Add workspace
+        </button>
+        <button
+          className={`gearbtn${settingsOpen ? ' on' : ''}`}
+          aria-label="Settings"
+          aria-pressed={settingsOpen}
+          onClick={onOpenSettings}
+        >
+          <span aria-hidden="true">⚙</span>
+        </button>
+      </div>
     </nav>
   )
 }

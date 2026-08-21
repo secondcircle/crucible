@@ -357,8 +357,8 @@ describe('resume', () => {
 })
 
 describe('what the top bar says', () => {
-  // Everything left of the Tree button was a second copy of something already
-  // on screen, so the bar says none of it.
+  // Everything the bar used to hold on the left was a second copy of
+  // something already on screen, so the bar says none of it.
   it('repeats nothing the sidebar or the composer chip already says', async () => {
     await shellWithSession()
 
@@ -369,13 +369,18 @@ describe('what the top bar says', () => {
     expect(within(header).queryByLabelText('Agent working')).toBeNull()
   })
 
-  it('starts at the Tree button and keeps the right-hand cluster', async () => {
+  // Nothing on the left at all now: the tree button and the gear both left
+  // the bar, the tree to double-Esc and Settings to the sidebar foot.
+  it('is a right-hand cluster and nothing else', async () => {
     await shellWithSession()
 
     const header = screen.getByRole('banner')
-    const controls = within(header).getAllByRole('button').map((button) => button.getAttribute('aria-label'))
-    expect(controls[0]).toBe('Session tree')
-    expect(controls).toEqual(['Session tree', 'Session cost', 'Settings', 'Session menu'])
+    const controls = within(header)
+      .getAllByRole('button')
+      .map((button) => button.getAttribute('aria-label'))
+    expect(controls).toEqual(['Session cost', 'Session menu'])
+    expect(within(header).queryByRole('button', { name: 'Session tree' })).toBeNull()
+    expect(within(header).queryByRole('button', { name: 'Settings' })).toBeNull()
   })
 
   it('keeps the same shape with no session at all', async () => {
@@ -386,10 +391,10 @@ describe('what the top bar says', () => {
     })
 
     const header = screen.getByRole('banner')
-    expect(
-      within(header).getAllByRole('button').map((button) => button.getAttribute('aria-label'))
-    ).toEqual(['Settings'])
+    expect(within(header).queryAllByRole('button')).toEqual([])
     expect(header.textContent).not.toContain('No session')
+    // The gear is where it lives now, and it is there with no session.
+    expect(screen.getByRole('button', { name: 'Settings' })).toBeInTheDocument()
   })
 
   it('leaves the working state to the sidebar row', async () => {

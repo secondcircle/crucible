@@ -5,14 +5,45 @@
   overflow: hidden;
 }
 
+/* Everything right of the sidebar: the chat column, the divider and the
+   context panel, with the overlay region anchored across all three. */
+.body {
+  flex: 1;
+  display: flex;
+  min-width: 0;
+  position: relative;
+}
+
 .main {
   flex: 1;
   display: flex;
   flex-direction: column;
   /* What the chat column keeps whatever the divider is dragged to. */
   min-width: 320px;
-  /* The branch board covers this column and nothing else. */
+  /* The composer's popovers and the drawer anchor to this column. No overlay
+     does any more: they all anchor to the region. */
   position: relative;
+}
+
+/* The overlay region: every overlay renders in here and nothing else does,
+   so the sidebar, the top bar and the context panel's tab strip are never
+   covered. One backdrop for every occupant, so no occupant brings its own. */
+.region {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: var(--bar-h);
+  bottom: 0;
+  z-index: 5;
+  background: var(--overlay);
+  backdrop-filter: blur(3px);
+}
+
+/* Above the region rather than under it: the bar row stays live while an
+   occupant is up, and the session menu's popover drops over the region. */
+.main > .top {
+  position: relative;
+  z-index: 6;
 }
 
 /* Empty states: one sentence and the one thing to do. */
@@ -53,7 +84,8 @@
   font-size: 12.5px;
 }
 
-/* The transcript region, and the only thing the session tree overlays. */
+/* The transcript's own row, between the run strip and the composer. Nothing
+   overlays it any more: the tree moved out to the overlay region. */
 .stage {
   position: relative;
   flex: 1;

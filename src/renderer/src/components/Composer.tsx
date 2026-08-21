@@ -1,9 +1,10 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { MODEL_ALIASES } from '../../../shared/agent/known-models'
 import type { ModelInfo, SessionWorktree, ThinkingLevel } from '../../../shared/agent/port'
 import type { CommandInfo } from '../../../shared/commands/service'
 import { commandFragment, filterCommands } from '../../../shared/commands/template'
 import { worktreeLabel } from '../labels'
+import { boxHeight } from './composer-height'
 import './composer.css'
 
 // The textarea stays editable while the session works so the next instruction
@@ -164,6 +165,28 @@ export function Composer({
       : filterCommands(commands, fragment).slice(0, COMMAND_ROWS)
   const commandSelected = commandAt.of === fragment ? commandAt.at : 0
 
+  // The text area is held here and handed up: what restores a queued message
+  // also focuses it, and the sizing below has to measure it.
+  const box = useRef<HTMLTextAreaElement | null>(null)
+  const mirror = useRef<HTMLDivElement>(null)
+  const holdBox = useCallback(
+    (node: HTMLTextAreaElement | null): void => {
+      box.current = node
+      if (boxRef !== undefined) boxRef.current = node
+    },
+    [boxRef]
+  )
+
+  // Measured on the mirror rather than on the text area itself: measuring the
+  // text area means collapsing it first to read its scrollHeight, and a
+  // collapse the browser has laid out is a height the transition then
+  // animates from.
+  useLayoutEffect(() => {
+    const node = box.current
+    if (node === null) return
+    node.style.height = `${boxHeight(mirror.current?.scrollHeight ?? 0)}px`
+  }, [draft, bash, commandMode])
+
   function select(at: number): void {
     setSelection({ of: files, at })
   }
@@ -176,7 +199,7 @@ export function Composer({
   // with the space the arguments follow.
   function insertCommand(name: string): void {
     onDraft(`/${name} `)
-    boxRef?.current?.focus()
+    box.current?.focus()
   }
 
   // The alias when Crucible knows this id by heart, and the port's own label
@@ -206,12 +229,12 @@ export function Composer({
   // Plain text in the draft, matching π: nothing is attached and nothing is
   // read.
   function insertPath(path: string): void {
-    const box = boxRef?.current ?? null
-    const caret = box === null ? draft.length : (box.selectionStart ?? draft.length)
+    const node = box.current
+    const caret = node === null ? draft.length : (node.selectionStart ?? draft.length)
     const before = draft.slice(0, caret).replace(FILE_TOKEN, `@${path} `)
     onDraft(before + draft.slice(caret))
     onFileToken(undefined)
-    box?.focus()
+    node?.focus()
   }
 
   function run(): void {
@@ -306,93 +329,102 @@ export function Composer({
         ) : commandMode ? (
           <div className="modebadge command">command</div>
         ) : null}
-        <textarea
-          aria-label="Message"
-          placeholder={
-            disabled
-              ? 'No session'
-              : 'Message the agent — / for commands, @ a file, ! runs bash, ⌘V pastes an image'
-          }
-          value={draft}
-          disabled={disabled}
-          onChange={(changed) => {
-            onDraft(changed.target.value)
-            look(changed.target)
-          }}
-          onClick={(clicked) => look(clicked.currentTarget)}
-          onKeyUp={(pressed) => {
-            // Arrow keys move the caret out of a token without changing the
-            // text, so the popover follows the caret and not only the typing.
-            if (pressed.key.startsWith('Arrow')) look(pressed.currentTarget)
-          }}
-          ref={boxRef}
-          onKeyDown={(pressed) => {
-            // The command popover owns Enter while it is open, exactly as the
-            // file popover does: nothing can send from under it.
-            if (matches !== undefined) {
-              if (matches.length === 0) {
-                if (pressed.key === 'Enter' && !pressed.shiftKey) {
-                  pressed.preventDefault()
-                  return
-                }
-              } else {
-                if (pressed.key === 'ArrowDown' || pressed.key === 'ArrowUp') {
-                  pressed.preventDefault()
-                  const by = pressed.key === 'ArrowDown' ? 1 : matches.length - 1
-                  selectCommand((commandSelected + by) % matches.length)
-                  return
-                }
-                // Plain Tab keeps its popover meaning; Shift-Tab belongs to
-                // the document above and never inserts anything here.
-                if (pressed.key === 'Enter' || (pressed.key === 'Tab' && !pressed.shiftKey)) {
-                  pressed.preventDefault()
-                  const found = matches[commandSelected]
-                  if (found !== undefined) insertCommand(found.name)
-                  return
+        <div className="boxwrap">
+          <textarea
+            aria-label="Message"
+            placeholder={
+              disabled
+                ? 'No session'
+                : 'Message the agent — / for commands, @ a file, ! runs bash, ⌘V pastes an image'
+            }
+            value={draft}
+            disabled={disabled}
+            onChange={(changed) => {
+              onDraft(changed.target.value)
+              look(changed.target)
+            }}
+            onClick={(clicked) => look(clicked.currentTarget)}
+            onKeyUp={(pressed) => {
+              // Arrow keys move the caret out of a token without changing the
+              // text, so the popover follows the caret and not only the typing.
+              if (pressed.key.startsWith('Arrow')) look(pressed.currentTarget)
+            }}
+            ref={holdBox}
+            onKeyDown={(pressed) => {
+              // The command popover owns Enter while it is open, exactly as the
+              // file popover does: nothing can send from under it.
+              if (matches !== undefined) {
+                if (matches.length === 0) {
+                  if (pressed.key === 'Enter' && !pressed.shiftKey) {
+                    pressed.preventDefault()
+                    return
+                  }
+                } else {
+                  if (pressed.key === 'ArrowDown' || pressed.key === 'ArrowUp') {
+                    pressed.preventDefault()
+                    const by = pressed.key === 'ArrowDown' ? 1 : matches.length - 1
+                    selectCommand((commandSelected + by) % matches.length)
+                    return
+                  }
+                  // Plain Tab keeps its popover meaning; Shift-Tab belongs to
+                  // the document above and never inserts anything here.
+                  if (pressed.key === 'Enter' || (pressed.key === 'Tab' && !pressed.shiftKey)) {
+                    pressed.preventDefault()
+                    const found = matches[commandSelected]
+                    if (found !== undefined) insertCommand(found.name)
+                    return
+                  }
                 }
               }
-            }
-            // While the popover is open Enter belongs to it, so nothing here
-            // can send a draft nobody can unsend.
-            if (filesOpen) {
-              if (shown.length === 0) {
-                if (pressed.key === 'Enter' && !pressed.shiftKey) {
-                  pressed.preventDefault()
-                  onFileToken(undefined)
-                  return
-                }
-              } else {
-                if (pressed.key === 'ArrowDown' || pressed.key === 'ArrowUp') {
-                  pressed.preventDefault()
-                  const by = pressed.key === 'ArrowDown' ? 1 : shown.length - 1
-                  select((selected + by) % shown.length)
-                  return
-                }
-                if (pressed.key === 'Enter' || (pressed.key === 'Tab' && !pressed.shiftKey)) {
-                  pressed.preventDefault()
-                  const path = shown[selected]
-                  if (path !== undefined) insertPath(path)
-                  return
+              // While the popover is open Enter belongs to it, so nothing here
+              // can send a draft nobody can unsend.
+              if (filesOpen) {
+                if (shown.length === 0) {
+                  if (pressed.key === 'Enter' && !pressed.shiftKey) {
+                    pressed.preventDefault()
+                    onFileToken(undefined)
+                    return
+                  }
+                } else {
+                  if (pressed.key === 'ArrowDown' || pressed.key === 'ArrowUp') {
+                    pressed.preventDefault()
+                    const by = pressed.key === 'ArrowDown' ? 1 : shown.length - 1
+                    select((selected + by) % shown.length)
+                    return
+                  }
+                  if (pressed.key === 'Enter' || (pressed.key === 'Tab' && !pressed.shiftKey)) {
+                    pressed.preventDefault()
+                    const path = shown[selected]
+                    if (path !== undefined) insertPath(path)
+                    return
+                  }
                 }
               }
-            }
-            if (pressed.key === 'ArrowUp' && pressed.altKey) {
+              if (pressed.key === 'ArrowUp' && pressed.altKey) {
+                pressed.preventDefault()
+                onRestoreLast()
+                return
+              }
+              if (pressed.key !== 'Enter' || pressed.shiftKey) return
               pressed.preventDefault()
-              onRestoreLast()
-              return
-            }
-            if (pressed.key !== 'Enter' || pressed.shiftKey) return
-            pressed.preventDefault()
-            if (bash) {
-              run()
-              return
-            }
-            if (!sendable) return
-            // Never a dead key: idle, Option+Enter is a plain send.
-            if (pressed.altKey) onFollowUp()
-            else onSend()
-          }}
-        />
+              if (bash) {
+                run()
+                return
+              }
+              if (!sendable) return
+              // Never a dead key: idle, Option+Enter is a plain send.
+              if (pressed.altKey) onFollowUp()
+              else onSend()
+            }}
+          />
+          {/* The measuring twin: same width, same typography, never seen and
+              never read out. The trailing zero-width space keeps a draft that
+              ends in a newline one line taller, exactly as the text area is. */}
+          <div className="boxmirror" aria-hidden="true" ref={mirror}>
+            {draft}
+            {'\u200b'}
+          </div>
+        </div>
         <div className="crow">
           <div className="chipwrap">
             <button

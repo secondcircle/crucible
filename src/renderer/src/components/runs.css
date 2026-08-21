@@ -114,11 +114,13 @@
 
 /* ---------- shared overlay bones ---------- */
 
+/* Both are occupants of the overlay region; the opened run is the one
+   sanctioned stack, rendered after the overview it came from and so painted
+   above it. */
 .runview,
 .runsoverview {
   position: absolute;
   inset: 0;
-  z-index: 6;
   background: var(--bg);
   display: flex;
   flex-direction: column;

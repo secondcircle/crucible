@@ -15,7 +15,20 @@ import './settings.css'
 // Neither π nor Crucible keeps a usage ledger, so everything here is
 // recomputed on demand from π's per-message numbers.
 
-export type SettingsTab = 'providers' | 'usage'
+/** A row in the rail. Only sections that exist are listed. */
+export type SettingsSection = 'providers' | 'usage'
+
+// The rail's whole content. Adding a section here costs no layout anywhere,
+// which is the point of the fixed card.
+const SECTIONS: readonly {
+  readonly id: SettingsSection
+  readonly label: string
+  readonly glyph: string
+  readonly subtitle: string
+}[] = [
+  { id: 'providers', label: 'Providers', glyph: '◉', subtitle: 'Signed in on this machine' },
+  { id: 'usage', label: 'Usage', glyph: '$', subtitle: 'Tokens and cost, recomputed on open' }
+]
 
 /** Two decimals, or a dash while nothing has been reported (the meter's rule). */
 function money(value: number | undefined): string {
@@ -27,8 +40,8 @@ function count(value: number | undefined): string {
 }
 
 export function Settings({
-  tab,
-  onTab,
+  section,
+  onSection,
   onClose,
   port,
   auth,
@@ -37,8 +50,8 @@ export function Settings({
   activeSessionId,
   contextPercent
 }: {
-  readonly tab: SettingsTab
-  readonly onTab: (tab: SettingsTab) => void
+  readonly section: SettingsSection
+  readonly onSection: (section: SettingsSection) => void
   readonly onClose: () => void
   readonly port: AgentPort
   /** The login flow's whole state, held above so Escape can order the closes. */
@@ -50,46 +63,60 @@ export function Settings({
   /** The meter's own percentage, which stays path-based. */
   readonly contextPercent?: number
 }): React.JSX.Element {
+  const shown = SECTIONS.find((candidate) => candidate.id === section) ?? SECTIONS[0]
+
   return (
-    <div className="setveil" role="presentation">
-      <div className="sheet" role="dialog" aria-modal="true" aria-label="Settings">
-        <div className="sheethead">
-          <span className="t">Settings</span>
-          <button
-            className={`tab${tab === 'providers' ? ' on' : ''}`}
-            aria-current={tab === 'providers' ? 'true' : undefined}
-            onClick={() => onTab('providers')}
-          >
-            Providers
-          </button>
-          <button
-            className={`tab${tab === 'usage' ? ' on' : ''}`}
-            aria-current={tab === 'usage' ? 'true' : undefined}
-            onClick={() => onTab('usage')}
-          >
-            Usage
-          </button>
-          <button className="x" aria-label="Close settings" onClick={onClose}>
-            ✕
-          </button>
+    <div className="setwrap" role="presentation">
+      <div className="setcard" role="dialog" aria-modal="true" aria-label="Settings">
+        {/* Switching sections moves the marker and nothing else: no card
+            resize, no re-centring, no rail shift. */}
+        <nav className="setrail" aria-label="Settings sections">
+          <div className="t">Settings</div>
+          {SECTIONS.map((row) => (
+            <button
+              key={row.id}
+              className={row.id === section ? 'on' : undefined}
+              aria-current={row.id === section ? 'true' : undefined}
+              onClick={() => onSection(row.id)}
+            >
+              <span className="g" aria-hidden="true">
+                {row.glyph}
+              </span>
+              {row.label}
+            </button>
+          ))}
+        </nav>
+
+        <div className="setmain">
+          {/* The title and subtitle swap; the row itself never reflows. */}
+          <div className="sethead">
+            <h2>{shown?.label}</h2>
+            <span className="sub">{shown?.subtitle}</span>
+            <button className="x" aria-label="Close settings" onClick={onClose}>
+              Close <kbd>esc</kbd>
+            </button>
+          </div>
+
+          {/* The only thing on this screen that scrolls. */}
+          <div className="setbody">
+            <div className="setinner">
+              {section === 'providers' ? (
+                <ProvidersPane auth={auth} />
+              ) : (
+                <UsagePane
+                  port={port}
+                  workspace={workspace}
+                  sessions={sessions}
+                  activeSessionId={activeSessionId}
+                  contextPercent={contextPercent}
+                />
+              )}
+            </div>
+          </div>
         </div>
 
-        <div className="sheetbody">
-          {tab === 'providers' ? (
-            <ProvidersPane auth={auth} />
-          ) : (
-            <UsagePane
-              port={port}
-              workspace={workspace}
-              sessions={sessions}
-              activeSessionId={activeSessionId}
-              contextPercent={contextPercent}
-            />
-          )}
-        </div>
+        {auth.login === undefined ? null : <LoginDialog auth={auth} />}
       </div>
-
-      {auth.login === undefined ? null : <LoginDialog auth={auth} />}
     </div>
   )
 }

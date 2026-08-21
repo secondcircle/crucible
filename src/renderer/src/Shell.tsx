@@ -43,7 +43,7 @@ import { ResumeOverlay } from './components/ResumeOverlay'
 import { SessionTree } from './components/SessionTree'
 import { RunsOverview } from './components/RunsOverview'
 import { RunStrip } from './components/RunStrip'
-import { Settings, type SettingsTab } from './components/Settings'
+import { Settings, type SettingsSection } from './components/Settings'
 import { Sidebar } from './components/Sidebar'
 import { WorkflowRunView } from './components/WorkflowRunView'
 import { TopBar } from './components/TopBar'
@@ -69,8 +69,20 @@ import './shell.css'
 // The port and the workspace service arrive as props, which is the seam a
 // component test drives and why no component names `window.crucible` itself.
 
-/** At most one is open at a time. */
-type Popover = 'none' | 'model' | 'thinking' | 'sessionMenu' | 'resume'
+/** At most one is open at a time. A popover is not an overlay. */
+type Popover = 'none' | 'model' | 'thinking' | 'sessionMenu'
+
+// What occupies the overlay region. Every overlay is one of these, and they
+// all cover the same area.
+type Occupant =
+  | { readonly kind: 'board'; readonly workspaceId: WorkspaceId }
+  | { readonly kind: 'issues'; readonly workspaceId: WorkspaceId }
+  | { readonly kind: 'tree' }
+  | { readonly kind: 'settings'; readonly section: SettingsSection }
+  | { readonly kind: 'runs' }
+  | { readonly kind: 'run'; readonly runId: WorkflowRunId }
+  | { readonly kind: 'cache' }
+  | { readonly kind: 'resume' }
 
 type Question =
   | { readonly kind: 'reset'; readonly sessionId: SessionId }
@@ -127,7 +139,6 @@ export function Shell({
   const refreshQuota = quotaHold.refresh
   // The counter as main holds it, repainted whenever a miss lands anywhere.
   const cacheHealth = useCacheHealth(cacheService)
-  const [cacheOpen, setCacheOpen] = useState(false)
   // The badge's jump: a counter the transcript watches, because the request
   // carries nothing but itself.
   const [missJump, setMissJump] = useState(0)
@@ -166,15 +177,13 @@ export function Shell({
   >({})
   const [veil, setVeil] = useState(false)
   const [tree, setTree] = useState<Tree | undefined>(undefined)
-  const [treeOpen, setTreeOpen] = useState(false)
   // A summarizing jump pays for an LLM call, so the tree says it is working.
   const [jumping, setJumping] = useState<'jump' | 'summarize' | undefined>(undefined)
   const [toast, setToast] = useState<string | undefined>(undefined)
-  // The whole of the board's open state: only the chip and ⌘B put a workspace
-  // here, and everything that closes the board takes it back out.
-  const [boardFor, setBoardFor] = useState<WorkspaceId | undefined>(undefined)
-  /** The same, for the issue board. At most one of the two is ever open. */
-  const [issuesFor, setIssuesFor] = useState<WorkspaceId | undefined>(undefined)
+  // The whole of the overlay region's state: one occupant at most, except the
+  // sanctioned stack of an opened run above the runs overview it came from,
+  // which Esc unwinds.
+  const [region, setRegion] = useState<readonly Occupant[]>([])
   // The issue an Align is starting a session on, while it is starting it. One
   // at a time: a second click would make a second session on the same issue.
   const [aligning, setAligning] = useState<string | undefined>(undefined)
@@ -215,11 +224,6 @@ export function Shell({
   const [marks, setMarks] = useState<Marks>(() => new Set<SessionId>())
   /** The session the user is on, as of the last time that changed. */
   const [landedOn, setLandedOn] = useState<SessionId | undefined>(undefined)
-  // Open, and which tab: renderer state, per window, never persisted.
-  const [settings, setSettings] = useState<{
-    readonly open: boolean
-    readonly tab: SettingsTab
-  }>({ open: false, tab: 'providers' })
   /** Sessions whose settled history this document has already asked for. */
   const fetched = useRef<Set<SessionId>>(new Set())
   /** Workspaces already asked about, so the question is asked once each. */
@@ -237,10 +241,8 @@ export function Shell({
   const windowFocused = useRef(true)
   /** Sessions with a send under way, still waiting on its expansion. */
   const sending = useRef<Set<SessionId>>(new Set())
-  // The engine's records, whole on every event; and the two run overlays.
+  /** The engine's records, whole on every event. */
   const [runsSnapshot, setRunsSnapshot] = useState<RunsSnapshot | undefined>(undefined)
-  const [openRunId, setOpenRunId] = useState<WorkflowRunId | undefined>(undefined)
-  const [runsOverviewOpen, setRunsOverviewOpen] = useState(false)
   // Restoring a queued message puts the caret back where the words are.
   const box = useRef<HTMLTextAreaElement>(null)
   // Output can arrive before the id of the run it belongs to does.
@@ -249,6 +251,20 @@ export function Shell({
   const seedCaret = useRef<number | undefined>(undefined)
   const orphans = useRef<Map<RunId, WorkspaceEvent[]>>(new Map())
   const escapes = useRef<number>(0)
+
+  // One host, one occupant: opening any overlay replaces whatever was up.
+  const occupy = useCallback((occupant: Occupant): void => setRegion([occupant]), [])
+  /** Everything in the region goes, and the region itself with it. */
+  const closeRegion = useCallback((): void => setRegion([]), [])
+  /** Esc's unwind: the topmost surface only, so a stack comes apart in order. */
+  const closeTopOfRegion = useCallback((): void => setRegion((up) => up.slice(0, -1)), [])
+  // ⌘R toggles: it closes the runs surfaces when either is up, and otherwise
+  // takes the region over from whatever had it.
+  const toggleRuns = useCallback(
+    (): void =>
+      setRegion((up) => (up.some((one) => one.kind === 'runs') ? [] : [{ kind: 'runs' }])),
+    []
+  )
 
   const { snapshot, models, views } = state
   const activeWorkspaceId = snapshot.activeWorkspaceId
@@ -300,9 +316,22 @@ export function Shell({
       : allRuns.filter(
           (candidate) => candidate.sessionId === activeSessionId && runIsLive(candidate)
         )
+  // What the region holds, topmost last. Every overlay's open state is read
+  // off this and nowhere else, which is what makes "one at a time" a property
+  // of the shape rather than a rule everything has to remember.
+  const occupant = region[region.length - 1]
+  const treeOpen = occupant?.kind === 'tree'
+  const settingsOpen = occupant?.kind === 'settings'
+  const settingsSection: SettingsSection =
+    occupant?.kind === 'settings' ? occupant.section : 'providers'
+  const cacheOpen = occupant?.kind === 'cache'
+  const resumeOpen = occupant?.kind === 'resume'
+  /** The overview stays under an opened run, so Esc unwinds back onto it. */
+  const runsOverviewOpen = region.some((one) => one.kind === 'runs')
+  const openRunId = occupant?.kind === 'run' ? occupant.runId : undefined
   const openRun = openRunId === undefined ? undefined : allRuns.find((r) => r.id === openRunId)
   // A record can only vanish across a launch; the view must not outlive it.
-  if (openRunId !== undefined && openRun === undefined) setOpenRunId(undefined)
+  if (openRunId !== undefined && openRun === undefined) setRegion((up) => up.slice(0, -1))
 
   const report = useCallback((cause: unknown): void => {
     setFailure(cause instanceof Error ? cause.message : String(cause))
@@ -360,8 +389,6 @@ export function Shell({
   })
 
   const boardEntry = activeWorkspaceId === undefined ? undefined : boards[activeWorkspaceId]
-  const closeBoard = useCallback((): void => setBoardFor(undefined), [])
-  const closeIssues = useCallback((): void => setIssuesFor(undefined), [])
   const boardAnswer = boardEntry?.answer
   const board = boardAnswer?.kind === 'board' ? boardAnswer.board : undefined
   // Nothing renders that is not backed by real state: no chip before the first
@@ -426,16 +453,44 @@ export function Shell({
   const boardReachable = activeWorkspaceId !== undefined && boardAnswer?.kind !== 'noRepository'
   // A workspace that turns out not to be a repository has no board to show, so
   // the overlay is gone in the frame the answer says so.
-  const boardOpen = boardFor !== undefined && boardFor === activeWorkspaceId && boardReachable
-  // Cleared in the same render, so a close cannot come back true when the
-  // workspace is switched away from and back to.
-  if (boardFor !== undefined && !boardOpen) setBoardFor(undefined)
+  const boardOpen =
+    occupant?.kind === 'board' && occupant.workspaceId === activeWorkspaceId && boardReachable
 
   /** ⌘I does nothing where the workspace has no issue host to read. */
   const issuesReachable =
     activeWorkspaceId !== undefined && issueAnswer?.kind !== 'noIssueHost'
-  const issuesOpen = issuesFor !== undefined && issuesFor === activeWorkspaceId && issuesReachable
-  if (issuesFor !== undefined && !issuesOpen) setIssuesFor(undefined)
+  const issuesOpen =
+    occupant?.kind === 'issues' && occupant.workspaceId === activeWorkspaceId && issuesReachable
+
+  // Emptied in the same render, so a close cannot come back true when the
+  // workspace is switched away from and back to. The same for a tree with no
+  // session left to draw.
+  if (occupant?.kind === 'board' && !boardOpen) setRegion([])
+  if (occupant?.kind === 'issues' && !issuesOpen) setRegion([])
+  if (occupant?.kind === 'tree' && session === undefined) setRegion([])
+
+  // A confirm names the session it was raised on, so the render that lands an
+  // activation drops it: left up, its copy would read as being about the chat
+  // now on screen while its button still acted on the old one. Keyed to the
+  // active session, not the region: ⌘B/⌘I/⌘R only swap the occupant beneath
+  // a confirm, and that confirm is still about the session on screen.
+  if (question !== undefined && question.sessionId !== activeSessionId) setQuestion(undefined)
+
+  // What the region actually renders. Nothing is backed by less than real
+  // state, so an occupant whose data has not arrived shows no region at all
+  // rather than a dim over an empty frame.
+  const treeShown = treeOpen && session !== undefined
+  const runShown = openRun !== undefined && workflowRuns !== undefined
+  const cacheShown = cacheOpen && cacheService !== undefined && cacheHealth !== undefined
+  const occupied =
+    boardOpen ||
+    issuesOpen ||
+    treeShown ||
+    runsOverviewOpen ||
+    runShown ||
+    cacheShown ||
+    resumeOpen ||
+    settingsOpen
 
   // What a completed login or logout changes above the port: the models the
   // credentials now reach.
@@ -468,14 +523,14 @@ export function Shell({
     if (workflowRuns === undefined) return
     const stop = workflowRuns.onEvent((event) => {
       if (event.type === 'runs') setRunsSnapshot(event.snapshot)
-      if (event.type === 'toggle-overview') setRunsOverviewOpen((open) => !open)
+      if (event.type === 'toggle-overview') toggleRuns()
     })
     void workflowRuns
       .snapshot()
       .then(setRunsSnapshot)
       .catch(() => {})
     return stop
-  }, [workflowRuns])
+  }, [workflowRuns, toggleRuns])
 
   // Subscribed before anything is asked for: events can arrive before the
   // operation that caused them resolves, and there is no backlog to catch up.
@@ -656,11 +711,19 @@ export function Shell({
     }
   }, [browsingCommands, workspacePath, commands, report])
 
-  // The providers are read when the tab that shows them is on screen, never
-  // held between openings: a credential may have changed elsewhere.
+  // The providers are read when the section that shows them is on screen,
+  // never held between openings: a credential may have changed elsewhere.
   useEffect(() => {
-    if (settings.open && settings.tab === 'providers') refreshProviders()
-  }, [settings.open, settings.tab, refreshProviders])
+    if (settingsOpen && settingsSection === 'providers') refreshProviders()
+  }, [settingsOpen, settingsSection, refreshProviders])
+
+  // However the Settings card leaves the region, the login flow it drew goes
+  // with it: a flow that outlived its dialog would keep taking Escape and
+  // suppressing keys for a dialog nobody can see. The rule lives here, once,
+  // rather than as a closeLogin() every opener has to remember.
+  useEffect(() => {
+    if (liveLogin !== undefined && !settingsOpen) closeLogin()
+  }, [liveLogin, settingsOpen, closeLogin])
 
   const cancel = useCallback((): void => {
     if (activeSessionId === undefined || !working) return
@@ -672,13 +735,15 @@ export function Shell({
   const activateSession = useCallback(
     (id: SessionId): void => {
       setPopover('none')
-      setTreeOpen(false)
+      // The click lands and the occupant goes in the same frame: you end up
+      // where you clicked, on that session's chat, whatever was up.
+      closeRegion()
       // A failed creation belongs to the moment it was read in: switching
       // sessions is the user done with it.
       setWorktreeOutput(undefined)
       void port.activateSession(id).catch(report)
     },
-    [port, report]
+    [port, report, closeRegion]
   )
 
   const openTree = useCallback((): void => {
@@ -687,38 +752,31 @@ export function Shell({
     // Fetched fresh on every open, so what is shown is where the session
     // stands now.
     setTree(undefined)
-    setTreeOpen(true)
+    occupy({ kind: 'tree' })
     void port
       .sessionTree(id)
       .then(setTree)
       .catch(report)
-  }, [activeSessionId, port, report])
+  }, [activeSessionId, port, report, occupy])
 
   // Precedence cannot live in the components, which each know only one of the
-  // things Escape can close.
+  // things Escape can close. Esc closes the topmost thing that is up and
+  // stops there.
   useEffect(() => {
     function onKeyDown(pressed: KeyboardEvent): void {
       if (pressed.key !== 'Escape') return
-      // A login dialog closes before the sheet behind it, and the sheet before
-      // anything else Escape already does.
+      // The login dialog sits above the Settings card it was launched from, so
+      // it closes first and lands back on Providers.
       if (liveLogin !== undefined) {
         pressed.preventDefault()
         closeLogin()
         return
       }
-      if (settings.open) {
-        pressed.preventDefault()
-        setSettings((current) => ({ ...current, open: false }))
-        return
-      }
+      // A confirm is an answer to a click, not a navigation: it stacks above
+      // whatever is up and comes off first.
       if (question !== undefined) {
         pressed.preventDefault()
         setQuestion(undefined)
-        return
-      }
-      if (cacheOpen) {
-        pressed.preventDefault()
-        setCacheOpen(false)
         return
       }
       if (popover !== 'none') {
@@ -736,33 +794,12 @@ export function Shell({
         setFileToken(undefined)
         return
       }
-      // The run overlays close after the popovers — the view above the
-      // overview, so Esc from an opened run lands back where it was opened.
-      if (openRunId !== undefined) {
+      // The region's topmost surface, whichever it is — which unwinds an
+      // opened run back onto the overview it was opened from. While anything
+      // occupies the region Escape never cancels a turn.
+      if (region.length > 0) {
         pressed.preventDefault()
-        setOpenRunId(undefined)
-        return
-      }
-      if (runsOverviewOpen) {
-        pressed.preventDefault()
-        setRunsOverviewOpen(false)
-        return
-      }
-      // The boards close after the dialogs, sheets and popovers, and before
-      // the session tree. While one is open Escape never cancels a turn.
-      if (boardOpen) {
-        pressed.preventDefault()
-        closeBoard()
-        return
-      }
-      if (issuesOpen) {
-        pressed.preventDefault()
-        closeIssues()
-        return
-      }
-      if (treeOpen) {
-        pressed.preventDefault()
-        setTreeOpen(false)
+        closeTopOfRegion()
         return
       }
       if (activeSessionId !== undefined && working) {
@@ -784,24 +821,17 @@ export function Shell({
     return () => document.removeEventListener('keydown', onKeyDown)
   }, [
     question,
-    cacheOpen,
     popover,
     fileToken,
-    boardOpen,
-    issuesOpen,
-    treeOpen,
+    region,
+    closeTopOfRegion,
     activeSessionId,
     working,
     cancel,
     openTree,
     liveLogin,
     closeLogin,
-    settings.open,
-    browsingCommands,
-    closeBoard,
-    closeIssues,
-    openRunId,
-    runsOverviewOpen
+    browsingCommands
   ])
 
   // ⌘R is the global runs view (Q15). In the running app main intercepts the
@@ -815,28 +845,39 @@ export function Shell({
       if (pressed.shiftKey || pressed.altKey) return
       if (workflowRuns === undefined) return
       pressed.preventDefault()
-      setRunsOverviewOpen((open) => !open)
+      toggleRuns()
     }
     document.addEventListener('keydown', onKeyDown)
     return () => document.removeEventListener('keydown', onKeyDown)
-  }, [workflowRuns])
+  }, [workflowRuns, toggleRuns])
 
   const openBoard = useCallback((): void => {
     if (activeWorkspaceId === undefined) return
     // The overlay is there in the same frame; the collection catches up under
     // it, and says "Reading branches…" until it does.
-    setBoardFor(activeWorkspaceId)
-    // One overlay at a time: the two cover the same region.
-    setIssuesFor(undefined)
+    occupy({ kind: 'board', workspaceId: activeWorkspaceId })
     refreshBoard(activeWorkspaceId)
-  }, [activeWorkspaceId, refreshBoard])
+  }, [activeWorkspaceId, refreshBoard, occupy])
 
   const openIssues = useCallback((): void => {
     if (activeWorkspaceId === undefined) return
-    setIssuesFor(activeWorkspaceId)
-    setBoardFor(undefined)
+    occupy({ kind: 'issues', workspaceId: activeWorkspaceId })
     refreshIssues(activeWorkspaceId)
-  }, [activeWorkspaceId, refreshIssues])
+  }, [activeWorkspaceId, refreshIssues, occupy])
+
+  // ⌘, opens Settings on Providers. Nothing on screen names the chord; the
+  // gear at the sidebar foot is the affordance.
+  useEffect(() => {
+    function onKeyDown(pressed: KeyboardEvent): void {
+      if (pressed.key !== ',') return
+      if (!pressed.metaKey && !pressed.ctrlKey) return
+      if (pressed.shiftKey || pressed.altKey) return
+      pressed.preventDefault()
+      occupy({ kind: 'settings', section: 'providers' })
+    }
+    document.addEventListener('keydown', onKeyDown)
+    return () => document.removeEventListener('keydown', onKeyDown)
+  }, [occupy])
 
   // ⌘B is the board's own key, and the affordance is absent rather than
   // silently broken where there is nothing to open.
@@ -846,7 +887,7 @@ export function Shell({
       if (!pressed.metaKey && !pressed.ctrlKey) return
       if (boardOpen) {
         pressed.preventDefault()
-        closeBoard()
+        closeRegion()
         return
       }
       // Only claim the key where there is a board to open. The shortcut is
@@ -859,7 +900,7 @@ export function Shell({
     }
     document.addEventListener('keydown', onKeyDown)
     return () => document.removeEventListener('keydown', onKeyDown)
-  }, [boardOpen, boardReachable, openBoard, closeBoard])
+  }, [boardOpen, boardReachable, openBoard, closeRegion])
 
   // ⌘I, on exactly the same terms: claimed where there is an issue board to
   // open, and left to the OS where there is not (ADR 0010).
@@ -869,7 +910,7 @@ export function Shell({
       if (!pressed.metaKey && !pressed.ctrlKey) return
       if (issuesOpen) {
         pressed.preventDefault()
-        closeIssues()
+        closeRegion()
         return
       }
       if (!issuesReachable) return
@@ -878,7 +919,7 @@ export function Shell({
     }
     document.addEventListener('keydown', onKeyDown)
     return () => document.removeEventListener('keydown', onKeyDown)
-  }, [issuesOpen, issuesReachable, openIssues, closeIssues])
+  }, [issuesOpen, issuesReachable, openIssues, closeRegion])
   // The model ring. Nothing on screen names the key, and it works mid-turn
   // because the switch only reaches the next turn.
   useEffect(() => {
@@ -887,8 +928,8 @@ export function Shell({
       const sessionId = activeSessionId
       if (sessionId === undefined) return
       // A modal surface owns the keyboard while it is up.
-      if (liveLogin !== undefined || settings.open || question !== undefined) return
-      if (cacheOpen || popover === 'resume') return
+      if (liveLogin !== undefined || question !== undefined) return
+      if (settingsOpen || cacheOpen || resumeOpen) return
       // A ring model the adapter did not list is skipped; with none listed the
       // key is left exactly as it was, no toast and no error.
       const candidates = MODEL_RING.filter((id) =>
@@ -925,10 +966,10 @@ export function Shell({
     port,
     report,
     liveLogin,
-    settings.open,
+    settingsOpen,
     question,
     cacheOpen,
-    popover
+    resumeOpen
   ])
 
   // The Tab walk. Plain Tab is Crucible's key now: it takes the topmost
@@ -937,19 +978,20 @@ export function Shell({
   // again empties the queue from the top down.
   //
   // The cost is keyboard focus traversal, which this takes from the document.
-  // Every surface genuinely operated by focus keeps the key: a modal, the
-  // sheet, a popover, the board, the tree, and the composer's own completions,
-  // which have already called preventDefault by the time this runs.
+  // Every surface genuinely operated by focus keeps the key: a login, a
+  // confirm, a popover, the region occupants that were operated by focus
+  // before they moved into it, and the composer's own completions, which have
+  // already called preventDefault by the time this runs.
   useEffect(() => {
     function onKeyDown(pressed: KeyboardEvent): void {
       if (pressed.key !== 'Tab') return
       // Shift-Tab is the model ring and stays exactly as it was.
       if (pressed.shiftKey || pressed.metaKey || pressed.ctrlKey || pressed.altKey) return
       if (pressed.defaultPrevented) return
-      if (liveLogin !== undefined || settings.open || question !== undefined) return
-      if (cacheOpen) return
+      if (liveLogin !== undefined || question !== undefined) return
+      if (settingsOpen || cacheOpen) return
       if (popover !== 'none' || browsingCommands || fileToken !== undefined) return
-      if (boardOpen || issuesOpen || treeOpen) return
+      if (boardOpen || issuesOpen || treeOpen || resumeOpen) return
       pressed.preventDefault()
       const next = nextAsking(snapshot, asking)
       // Nothing asking, nothing happens: no wrap to an arbitrary session and
@@ -967,7 +1009,7 @@ export function Shell({
     asking,
     activateSession,
     liveLogin,
-    settings.open,
+    settingsOpen,
     question,
     cacheOpen,
     popover,
@@ -975,7 +1017,8 @@ export function Shell({
     fileToken,
     boardOpen,
     issuesOpen,
-    treeOpen
+    treeOpen,
+    resumeOpen
   ])
 
   // Paste and drag are the only ways in, and they do nothing with no session
@@ -1172,20 +1215,30 @@ export function Shell({
 
   function newSession(): void {
     if (activeWorkspaceId === undefined) return
+    // It creates, it activates, and an activation closes the occupant.
+    closeRegion()
     void port.createSession(activeWorkspaceId).catch(report)
   }
 
   function addWorkspace(): void {
+    // The new workspace becomes the active one, which is an activation like
+    // any other.
+    closeRegion()
     void port.addWorkspace().catch(report)
   }
 
   function activateWorkspace(id: WorkspaceId): void {
     setPopover('none')
+    // A board surviving a workspace switch would be showing the wrong
+    // repository.
+    closeRegion()
     void port.activateWorkspace(id).catch(report)
   }
 
   function removeWorkspace(id: WorkspaceId): void {
     setPopover('none')
+    // A removal that changes the active workspace counts as an activation.
+    if (id === activeWorkspaceId) closeRegion()
     void port.removeWorkspace(id).catch(report)
   }
 
@@ -1241,6 +1294,9 @@ export function Shell({
 
   function removeSession(id: SessionId): void {
     setPopover('none')
+    // The same rule: removing the session you are on lands you somewhere else,
+    // so whatever occupied the region goes with it.
+    if (id === activeSessionId) closeRegion()
     fetched.current.delete(id)
     void port.removeSession(id).catch(report)
   }
@@ -1299,7 +1355,7 @@ export function Shell({
 
   function resume(ref: string): void {
     const workspaceId = activeWorkspaceId
-    setPopover('none')
+    closeRegion()
     if (workspaceId === undefined) return
     void port.resumeSession(workspaceId, ref).catch(report)
   }
@@ -1314,7 +1370,7 @@ export function Shell({
     void port
       .jump(id, ref, { summarize })
       .then(async ({ editorText }) => {
-        setTreeOpen(false)
+        closeRegion()
         setToast(summarize ? JUMPED_WITH_SUMMARY : JUMPED)
         if (editorText !== undefined) restore(id, editorText)
         // The conversation stands somewhere else now, so the whole view is
@@ -1468,7 +1524,7 @@ export function Shell({
   function askAboutBranches(names: readonly string[]): void {
     const id = activeSessionId
     if (id === undefined) return
-    closeBoard()
+    closeRegion()
     const seeded = `${names.join('\n')}\n`
     setDrafts((current) => {
       const drafted = current[id] ?? ''
@@ -1503,7 +1559,7 @@ export function Shell({
     setAligning(row.reference)
     setFailure(undefined)
     setWorktreeOutput(undefined)
-    closeIssues()
+    closeRegion()
 
     void (async () => {
       const sessionId = await port.createSession(workspaceId, { issue: row.reference })
@@ -1541,15 +1597,20 @@ export function Shell({
       .finally(() => setAligning(undefined))
   }
 
+  // Opened from a row in the overview it stacks above it, so Esc unwinds back
+  // there; opened from the run strip's chip it is the occupant itself.
   const openWorkflowRun = useCallback((id: WorkflowRunId): void => {
-    setOpenRunId(id)
+    setRegion((up) =>
+      up.length === 1 && up[0]?.kind === 'runs'
+        ? [...up, { kind: 'run', runId: id }]
+        : [{ kind: 'run', runId: id }]
+    )
   }, [])
 
-  // The door out of a run surface: land in the orchestrator's chat.
+  // The door out of a run surface: land in the orchestrator's chat. The
+  // activation empties the region on its own.
   const goToRunSession = useCallback(
     (sessionId: SessionId): void => {
-      setOpenRunId(undefined)
-      setRunsOverviewOpen(false)
       activateSession(sessionId)
     },
     [activateSession]
@@ -1558,10 +1619,10 @@ export function Shell({
   /** A fresh chat in a session-less run's workspace (the future unattended kind). */
   const startRunSession = useCallback(
     (workspaceId: WorkspaceId): void => {
-      setRunsOverviewOpen(false)
+      closeRegion()
       void port.createSession(workspaceId).catch(report)
     },
-    [port, report]
+    [port, report, closeRegion]
   )
 
   const runTranscript = useCallback(
@@ -1587,7 +1648,7 @@ export function Shell({
     // wait indicator from here.
     dispatch({ type: 'sent', sessionId, text, images: [] })
     await port.prompt(sessionId, text)
-    setCacheOpen(false)
+    closeRegion()
   }
 
   function answer(): void {
@@ -1604,7 +1665,7 @@ export function Shell({
       onMouseDown={(clicked) => {
         const inside = (clicked.target as HTMLElement).closest('.chipwrap, .sessionmenu, .filepop')
         if (inside === null && fileToken !== undefined) setFileToken(undefined)
-        if (popover === 'none' || popover === 'resume') return
+        if (popover === 'none') return
         if (inside !== null) return
         setPopover('none')
       }}
@@ -1619,11 +1680,13 @@ export function Shell({
         onRemoveWorkspace={removeWorkspace}
         onActivateSession={activateSession}
         onRemoveSession={removeSession}
-        onResume={() => setPopover('resume')}
+        onResume={() => occupy({ kind: 'resume' })}
+        onOpenSettings={() => occupy({ kind: 'settings', section: 'providers' })}
+        settingsOpen={settingsOpen}
         cache={
           cacheService === undefined
             ? undefined
-            : { health: cacheHealth, onOpen: () => setCacheOpen(true) }
+            : { health: cacheHealth, onOpen: () => occupy({ kind: 'cache' }) }
         }
         quota={
           quota === undefined
@@ -1632,298 +1695,303 @@ export function Shell({
         }
       />
 
-      <main className="main">
-        <TopBar
-          session={session}
-          menuOpen={popover === 'sessionMenu'}
-          treeOpen={treeOpen}
-          onToggleMenu={() => setPopover(popover === 'sessionMenu' ? 'none' : 'sessionMenu')}
-          onToggleTree={() => {
-            if (treeOpen) setTreeOpen(false)
-            else openTree()
-          }}
-          onResetSession={resetSession}
-          onOpenSettings={() => setSettings({ open: true, tab: 'providers' })}
-          onOpenUsage={() => setSettings({ open: true, tab: 'usage' })}
-          onJumpToCacheMiss={() => setMissJump((asked) => asked + 1)}
-          issues={
-            issues === undefined
-              ? undefined
-              : { open: issues.open, yours: issues.yours, onOpen: openIssues }
-          }
-          board={
-            counts === undefined
-              ? undefined
-              : { landed: counts.landed, needYou: counts.needYou, onOpen: openBoard }
-          }
-          update={
-            updateCommit === undefined || appUpdate === undefined
-              ? undefined
-              : {
-                  commit: updateCommit,
-                  onRestart: () => {
-                    void appUpdate.restart().catch(() => {})
+      {/* Everything the overlay region spans, and the region itself: the chat
+          column, the divider and the context panel. The sidebar is outside
+          this box, which is why no overlay can reach it. */}
+      <div className="body">
+        <main className="main">
+          <TopBar
+            session={session}
+            menuOpen={popover === 'sessionMenu'}
+            onToggleMenu={() => setPopover(popover === 'sessionMenu' ? 'none' : 'sessionMenu')}
+            onResetSession={resetSession}
+            onOpenUsage={() => occupy({ kind: 'settings', section: 'usage' })}
+            onJumpToCacheMiss={() => setMissJump((asked) => asked + 1)}
+            issues={
+              issues === undefined
+                ? undefined
+                : { open: issues.open, yours: issues.yours, onOpen: openIssues }
+            }
+            board={
+              counts === undefined
+                ? undefined
+                : { landed: counts.landed, needYou: counts.needYou, onOpen: openBoard }
+            }
+            update={
+              updateCommit === undefined || appUpdate === undefined
+                ? undefined
+                : {
+                    commit: updateCommit,
+                    onRestart: () => {
+                      void appUpdate.restart().catch(() => {})
+                    }
                   }
-                }
-          }
-        />
+            }
+          />
 
-        <RunStrip runs={sessionRuns} onOpen={openWorkflowRun} />
+          <RunStrip runs={sessionRuns} onOpen={openWorkflowRun} />
 
-        {/* The tree overlays this region and nothing else: the composer below
-            stays where it is and keeps working. */}
-        <div className="stage">
-          {snapshot.workspaces.length === 0 ? (
-            <div className="blank">
-              <p>No workspace yet.</p>
-              <button className="btn primary" onClick={addWorkspace}>
-                Add workspace
-              </button>
-            </div>
-          ) : session === undefined ? (
-            <div className="blank">
-              <p>No session in this workspace.</p>
-              <button className="btn primary" onClick={newSession}>
-                New session
-              </button>
-            </div>
-          ) : (
-            <Transcript
-              items={items}
-              sessionId={session.id}
-              invocations={shownInvocations}
-              missJump={missJump}
-            />
-          )}
-
-          {treeOpen && session !== undefined ? (
-            tree === undefined ? (
-              <div className="tree loading">
-                <p className="nonodes">Reading this session's tree…</p>
+          {/* The transcript's own row. Nothing overlays it any more: every
+              overlay is in the region, which covers this, the composer and the
+              context panel together. */}
+          <div className="stage">
+            {snapshot.workspaces.length === 0 ? (
+              <div className="blank">
+                <p>No workspace yet.</p>
+                <button className="btn primary" onClick={addWorkspace}>
+                  Add workspace
+                </button>
+              </div>
+            ) : session === undefined ? (
+              <div className="blank">
+                <p>No session in this workspace.</p>
+                <button className="btn primary" onClick={newSession}>
+                  New session
+                </button>
               </div>
             ) : (
-              <SessionTree
-                tree={tree}
-                working={working}
-                busy={jumping}
-                onJump={jump}
-                onLabel={label}
-                onClose={() => setTreeOpen(false)}
+              <Transcript
+                items={items}
+                sessionId={session.id}
+                invocations={shownInvocations}
+                missJump={missJump}
               />
-            )
-          ) : null}
+            )}
 
-          {toast === undefined ? null : (
-            <p className="toast" role="status">
-              {toast}
+            {toast === undefined ? null : (
+              <p className="toast" role="status">
+                {toast}
+              </p>
+            )}
+          </div>
+
+          {failure === undefined ? null : (
+            <p className="failure" role="alert">
+              {failure}
             </p>
           )}
-        </div>
 
-        {failure === undefined ? null : (
-          <p className="failure" role="alert">
-            {failure}
-          </p>
-        )}
+          {queue === undefined ? null : <QueuedStrip queue={queue} onDequeue={dequeue} />}
 
-        {queue === undefined ? null : <QueuedStrip queue={queue} onDequeue={dequeue} />}
+          {run === undefined ? null : (
+            <BashDrawer run={run} onStop={stopRun} onShare={shareRun} onClose={closeRun} />
+          )}
 
-        {run === undefined ? null : (
-          <BashDrawer run={run} onStop={stopRun} onShare={shareRun} onClose={closeRun} />
-        )}
-
-        <Composer
-          draft={draft}
-          disabled={session === undefined}
-          working={working}
-          boxRef={box}
-          elapsedSeconds={elapsedSeconds}
-          model={model}
-          modelId={shownModel}
-          models={models}
-          modelPickerOpen={popover === 'model'}
-          thinkingLevel={session?.thinkingLevel}
-          thinkingMenuOpen={popover === 'thinking'}
-          attachments={chips}
-          files={shownFiles}
-          commands={browsingCommands ? commandList : undefined}
-          workspaceName={active?.name}
-          sessionDirectory={sessionDirectory}
-          worktree={session?.worktree}
-          worktreeShown={active !== undefined && gitWorkspaces[active.id] === true}
-          worktreeBusy={flipInFlight}
-          worktreeLocked={session !== undefined && !session.fresh}
-          worktreeOutput={
-            worktreeOutput !== undefined && worktreeOutput.sessionId === activeSessionId
-              ? worktreeOutput.output
-              : undefined
-          }
-          onDraft={setDraft}
-          onSend={send}
-          onFollowUp={followUp}
-          onRestoreLast={restoreLast}
-          onStop={cancel}
-          onToggleModelPicker={() => setPopover(popover === 'model' ? 'none' : 'model')}
-          onSelectModel={selectModel}
-          onToggleThinkingMenu={() => setPopover(popover === 'thinking' ? 'none' : 'thinking')}
-          onSelectThinkingLevel={selectThinkingLevel}
-          onRemoveAttachment={removeAttachment}
-          onFileToken={setFileToken}
-          onRunBash={runBash}
-          onToggleWorktree={toggleWorktree}
-        />
-
-        {/* Over the whole main column, top bar and composer included, and
-            never over the sidebar. */}
-        {boardOpen ? (
-          <BranchBoard
-            board={board}
-            refreshing={boardEntry?.refreshing ?? false}
-            failure={boardEntry?.failure}
-            hasSession={session !== undefined}
-            onRefresh={() => {
-              if (activeWorkspaceId !== undefined) refreshBoard(activeWorkspaceId)
-            }}
-            onOpenPr={openPullRequest}
-            onCopy={copyBranchName}
-            onAsk={askAboutBranches}
-            onClose={closeBoard}
-          />
-        ) : null}
-
-        {runsOverviewOpen ? (
-          <RunsOverview
-            runs={allRuns}
-            workspaces={snapshot.workspaces}
-            sessions={snapshot.sessions}
-            onOpenRun={openWorkflowRun}
-            onGoToSession={goToRunSession}
-            onStartSession={startRunSession}
-            onClose={() => setRunsOverviewOpen(false)}
-          />
-        ) : null}
-
-        {/* Rendered after the overview so an opened run sits above it and Esc
-            unwinds in the order the surfaces were entered. */}
-        {openRun !== undefined && workflowRuns !== undefined ? (
-          <WorkflowRunView
-            run={openRun}
-            canGoToSession={
-              openRun.sessionId !== undefined &&
-              snapshot.sessions.some((candidate) => candidate.id === openRun.sessionId)
+          <Composer
+            draft={draft}
+            disabled={session === undefined}
+            working={working}
+            boxRef={box}
+            elapsedSeconds={elapsedSeconds}
+            model={model}
+            modelId={shownModel}
+            models={models}
+            modelPickerOpen={popover === 'model'}
+            thinkingLevel={session?.thinkingLevel}
+            thinkingMenuOpen={popover === 'thinking'}
+            attachments={chips}
+            files={shownFiles}
+            commands={browsingCommands ? commandList : undefined}
+            workspaceName={active?.name}
+            sessionDirectory={sessionDirectory}
+            worktree={session?.worktree}
+            worktreeShown={active !== undefined && gitWorkspaces[active.id] === true}
+            worktreeBusy={flipInFlight}
+            worktreeLocked={session !== undefined && !session.fresh}
+            worktreeOutput={
+              worktreeOutput !== undefined && worktreeOutput.sessionId === activeSessionId
+                ? worktreeOutput.output
+                : undefined
             }
-            transcript={runTranscript}
-            onGoToSession={() => {
-              if (openRun.sessionId !== undefined) goToRunSession(openRun.sessionId)
-            }}
-            onPause={() => void workflowRuns.pause(openRun.id).catch(report)}
-            onResume={() => void workflowRuns.resume(openRun.id).catch(report)}
-            onCancel={() => void workflowRuns.cancel(openRun.id).catch(report)}
-            onClose={() => setOpenRunId(undefined)}
+            onDraft={setDraft}
+            onSend={send}
+            onFollowUp={followUp}
+            onRestoreLast={restoreLast}
+            onStop={cancel}
+            onToggleModelPicker={() => setPopover(popover === 'model' ? 'none' : 'model')}
+            onSelectModel={selectModel}
+            onToggleThinkingMenu={() => setPopover(popover === 'thinking' ? 'none' : 'thinking')}
+            onSelectThinkingLevel={selectThinkingLevel}
+            onRemoveAttachment={removeAttachment}
+            onFileToken={setFileToken}
+            onRunBash={runBash}
+            onToggleWorktree={toggleWorktree}
           />
-        ) : null}
+        </main>
 
-        {issuesOpen ? (
-          <IssueBoard
-            answer={issueAnswer}
-            refreshing={issueEntry?.refreshing ?? false}
-            failure={issueEntry?.failure}
-            sessions={issueSessions}
-            aligning={aligning}
-            onRefresh={() => {
-              if (activeWorkspaceId !== undefined) refreshIssues(activeWorkspaceId)
-            }}
-            onAlign={alignOn}
-            onOpenSession={(sessionId) => {
-              closeIssues()
-              activateSession(sessionId)
-            }}
-            onOpenIssue={openIssue}
-            onCopy={copyReference}
-            onClose={closeIssues}
+        {/* Nothing at all when the session has no tabs: the chat is full-width,
+            and there is no empty panel and no edge strip to explain. */}
+        {panel === undefined || activeSessionId === undefined ? null : panelCollapsed ? (
+          <PanelEdge
+            count={panel.tabs.length}
+            onOpen={() => setCollapsed((current) => ({ ...current, [activeSessionId]: false }))}
           />
+        ) : (
+          <ContextPanel
+            panel={panel}
+            sessionId={activeSessionId}
+            width={panelWidth}
+            port={port}
+            onResize={setPanelWidth}
+            onCollapse={() => setCollapsed((current) => ({ ...current, [activeSessionId]: true }))}
+          />
+        )}
+
+        {/* The overlay region: one host for every overlay. It is here at all
+            only while something is in it, and everything in it is anchored to
+            it, so no overlay can reach the sidebar or either bar. */}
+        {occupied || question !== undefined ? (
+          <div className="region">
+            {boardOpen ? (
+              <BranchBoard
+                board={board}
+                refreshing={boardEntry?.refreshing ?? false}
+                failure={boardEntry?.failure}
+                hasSession={session !== undefined}
+                onRefresh={() => {
+                  if (activeWorkspaceId !== undefined) refreshBoard(activeWorkspaceId)
+                }}
+                onOpenPr={openPullRequest}
+                onCopy={copyBranchName}
+                onAsk={askAboutBranches}
+                onClose={closeRegion}
+              />
+            ) : null}
+
+            {issuesOpen ? (
+              <IssueBoard
+                answer={issueAnswer}
+                refreshing={issueEntry?.refreshing ?? false}
+                failure={issueEntry?.failure}
+                sessions={issueSessions}
+                aligning={aligning}
+                onRefresh={() => {
+                  if (activeWorkspaceId !== undefined) refreshIssues(activeWorkspaceId)
+                }}
+                onAlign={alignOn}
+                onOpenSession={activateSession}
+                onOpenIssue={openIssue}
+                onCopy={copyReference}
+                onClose={closeRegion}
+              />
+            ) : null}
+
+            {treeShown ? (
+              tree === undefined ? (
+                <div className="tree loading">
+                  <p className="nonodes">Reading this session's tree…</p>
+                </div>
+              ) : (
+                <SessionTree
+                  tree={tree}
+                  working={working}
+                  busy={jumping}
+                  onJump={jump}
+                  onLabel={label}
+                  onClose={closeRegion}
+                />
+              )
+            ) : null}
+
+            {runsOverviewOpen ? (
+              <RunsOverview
+                runs={allRuns}
+                workspaces={snapshot.workspaces}
+                sessions={snapshot.sessions}
+                onOpenRun={openWorkflowRun}
+                onGoToSession={goToRunSession}
+                onStartSession={startRunSession}
+                onClose={closeRegion}
+              />
+            ) : null}
+
+            {/* Rendered after the overview so an opened run sits above it and
+                Esc unwinds in the order the surfaces were entered. */}
+            {runShown && openRun !== undefined && workflowRuns !== undefined ? (
+              <WorkflowRunView
+                run={openRun}
+                canGoToSession={
+                  openRun.sessionId !== undefined &&
+                  snapshot.sessions.some((candidate) => candidate.id === openRun.sessionId)
+                }
+                transcript={runTranscript}
+                onGoToSession={() => {
+                  if (openRun.sessionId !== undefined) goToRunSession(openRun.sessionId)
+                }}
+                onPause={() => void workflowRuns.pause(openRun.id).catch(report)}
+                onResume={() => void workflowRuns.resume(openRun.id).catch(report)}
+                onCancel={() => void workflowRuns.cancel(openRun.id).catch(report)}
+                onClose={closeTopOfRegion}
+              />
+            ) : null}
+
+            {cacheShown && cacheService !== undefined && cacheHealth !== undefined ? (
+              <CacheHealthView
+                health={cacheHealth}
+                workspaceOpen={activeWorkspaceId !== undefined}
+                // Appends a reset line and nothing else: the misses underneath
+                // survive it, which is what makes reset cheap enough to need no
+                // confirmation.
+                onReset={() => cacheService.reset().then(() => {})}
+                onInvestigate={investigateCache}
+                // The button says it copied; a toast over the transcript would
+                // be a second answer to one click.
+                onCopy={(path) => void navigator.clipboard?.writeText(path).catch(report)}
+                onClose={closeRegion}
+              />
+            ) : null}
+
+            {resumeOpen ? (
+              <ResumeOverlay onSearch={search} onChoose={resume} onClose={closeRegion} />
+            ) : null}
+
+            {settingsOpen ? (
+              <Settings
+                section={settingsSection}
+                onSection={(section) => occupy({ kind: 'settings', section })}
+                onClose={closeRegion}
+                port={port}
+                auth={auth}
+                workspace={active}
+                sessions={snapshot.sessions.filter(
+                  (candidate) => candidate.workspaceId === activeWorkspaceId
+                )}
+                activeSessionId={activeSessionId}
+                contextPercent={contextPercent(session?.usage)}
+              />
+            ) : null}
+
+            {/* Last, so a confirm raised over an open occupant stacks above it
+                and is answered before anything else is. */}
+            {question === undefined ? null : question.kind === 'reset' ? (
+              <ConfirmDialog
+                title="Reset this session?"
+                body="The conversation is replaced with a fresh one. This session keeps its place in the sidebar, and the old conversation stays findable through Resume session."
+                confirmLabel="Reset anyway"
+                cancelLabel="Keep the conversation"
+                onConfirm={answer}
+                onCancel={() => setQuestion(undefined)}
+              />
+            ) : (
+              <ConfirmDialog
+                title="Invalidate this session's cache?"
+                body={`Changing the thinking level to ${question.level} mid-conversation invalidates this session's prompt cache, so the whole conversation is re-sent at full price on the next message.`}
+                confirmLabel="Change anyway"
+                cancelLabel="Keep current level"
+                onConfirm={answer}
+                onCancel={() => setQuestion(undefined)}
+              />
+            )}
+          </div>
         ) : null}
-      </main>
+      </div>
 
-      {/* Nothing at all when the session has no tabs: the chat is full-width,
-          and there is no empty panel and no edge strip to explain. */}
-      {panel === undefined || activeSessionId === undefined ? null : panelCollapsed ? (
-        <PanelEdge
-          count={panel.tabs.length}
-          onOpen={() => setCollapsed((current) => ({ ...current, [activeSessionId]: false }))}
-        />
-      ) : (
-        <ContextPanel
-          panel={panel}
-          sessionId={activeSessionId}
-          width={panelWidth}
-          port={port}
-          onResize={setPanelWidth}
-          onCollapse={() => setCollapsed((current) => ({ ...current, [activeSessionId]: true }))}
-        />
-      )}
-
+      {/* Drop feedback, not a surface: it stays full-window. */}
       {veil ? (
         <div className="veil" role="status">
           Drop images to attach
         </div>
       ) : null}
-
-      {popover === 'resume' ? (
-        <ResumeOverlay onSearch={search} onChoose={resume} onClose={() => setPopover('none')} />
-      ) : null}
-
-      {settings.open ? (
-        <Settings
-          tab={settings.tab}
-          onTab={(tab) => setSettings((current) => ({ ...current, tab }))}
-          onClose={() => setSettings((current) => ({ ...current, open: false }))}
-          port={port}
-          auth={auth}
-          workspace={active}
-          sessions={snapshot.sessions.filter(
-            (candidate) => candidate.workspaceId === activeWorkspaceId
-          )}
-          activeSessionId={activeSessionId}
-          contextPercent={contextPercent(session?.usage)}
-        />
-      ) : null}
-
-      {cacheOpen && cacheService !== undefined && cacheHealth !== undefined ? (
-        <CacheHealthView
-          health={cacheHealth}
-          workspaceOpen={activeWorkspaceId !== undefined}
-          // Appends a reset line and nothing else: the misses underneath
-          // survive it, which is what makes reset cheap enough to need no
-          // confirmation.
-          onReset={() => cacheService.reset().then(() => {})}
-          onInvestigate={investigateCache}
-          // The button says it copied; a toast over the transcript would be a
-          // second answer to one click.
-          onCopy={(path) => void navigator.clipboard?.writeText(path).catch(report)}
-          onClose={() => setCacheOpen(false)}
-        />
-      ) : null}
-
-      {question === undefined ? null : question.kind === 'reset' ? (
-        <ConfirmDialog
-          title="Reset this session?"
-          body="The conversation is replaced with a fresh one. This session keeps its place in the sidebar, and the old conversation stays findable through Resume session."
-          confirmLabel="Reset anyway"
-          cancelLabel="Keep the conversation"
-          onConfirm={answer}
-          onCancel={() => setQuestion(undefined)}
-        />
-      ) : (
-        <ConfirmDialog
-          title="Invalidate this session's cache?"
-          body={`Changing the thinking level to ${question.level} mid-conversation invalidates this session's prompt cache, so the whole conversation is re-sent at full price on the next message.`}
-          confirmLabel="Change anyway"
-          cancelLabel="Keep current level"
-          onConfirm={answer}
-          onCancel={() => setQuestion(undefined)}
-        />
-      )}
     </div>
   )
 }

@@ -1,12 +1,10 @@
 /* The frame both boards share: the overlay, its heading, the sub-line that
    dates it, the group headings and the footer that answers its keys. Neither
    board owns it, so neither can drift the other's. */
+/* An occupant of the overlay region, which supplies the dim and the blur. */
 .board {
   position: absolute;
   inset: 0;
-  z-index: 5;
-  background: var(--overlay);
-  backdrop-filter: blur(3px);
   display: flex;
   flex-direction: column;
   padding: 30px 36px 22px;

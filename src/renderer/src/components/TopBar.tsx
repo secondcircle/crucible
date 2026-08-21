@@ -12,11 +12,8 @@ import './topbar.css'
 export function TopBar({
   session,
   menuOpen,
-  treeOpen,
   onToggleMenu,
-  onToggleTree,
   onResetSession,
-  onOpenSettings,
   onOpenUsage,
   onJumpToCacheMiss,
   issues,
@@ -25,13 +22,9 @@ export function TopBar({
 }: {
   readonly session?: SessionState
   readonly menuOpen: boolean
-  readonly treeOpen: boolean
   readonly onToggleMenu: () => void
-  readonly onToggleTree: () => void
   readonly onResetSession: () => void
-  /** The gear: providers are global, so it is there with no session too. */
-  readonly onOpenSettings: () => void
-  /** The cost chip, which lands on the same sheet's Usage tab. */
+  /** The cost chip, which lands on Settings → Usage. */
   readonly onOpenUsage: () => void
   /** The cache badge: scroll the transcript to the most recent seam. */
   readonly onJumpToCacheMiss: () => void
@@ -61,20 +54,8 @@ export function TopBar({
 
   return (
     <header className="top">
-      {/* The mouse and dictation path into the tree; double-Esc is only an
-          accelerator for it. */}
-      {session === undefined ? null : (
-        <button
-          className={`treebtn${treeOpen ? ' active' : ''}`}
-          aria-label="Session tree"
-          aria-expanded={treeOpen}
-          onClick={onToggleTree}
-        >
-          <span aria-hidden="true">⑂</span> Tree <span className="hint">esc esc</span>
-        </button>
-      )}
-
-      {/* Everything from here is right-aligned, as mocked. */}
+      {/* Nothing on the left: the tree button and the gear both left the bar,
+          the tree to double-Esc and Settings to the sidebar foot. */}
       <span className="spacer" />
 
       {/* Lit exactly while an issue is assigned to you: unclaimed ones are
@@ -160,10 +141,6 @@ export function TopBar({
           </>
         )}
       </div>
-
-      <button className="gear" aria-label="Settings" onClick={onOpenSettings}>
-        <span aria-hidden="true">⚙</span>
-      </button>
 
       {session === undefined ? null : (
         <div className="sessionmenu">

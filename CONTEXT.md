@@ -188,8 +188,8 @@ _Avoid_: system prompt (the composed whole), base prompt.
 The block at the foot of the sidebar, above Add workspace, showing how much of
 each provider subscription this machine has spent. Global: one per app, not per
 workspace and not per session.
-_Avoid_: usage strip, usage panel (the Settings sheet's Usage tab means session
-tokens and cost), limits, meters panel.
+_Avoid_: usage strip, usage panel (Settings' Usage section means session tokens
+and cost), limits, meters panel.
 
 **Quota meter**:
 One window of one plan in the quota strip — a short label, a percent used, and
