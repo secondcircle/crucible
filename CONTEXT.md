@@ -249,6 +249,27 @@ the code. Ships with Crucible; a workspace that disagrees replaces the whole
 workflow.
 _Avoid_: comment style guide, comment policy.
 
+**Cache miss**:
+A model turn that re-billed prompt tokens the previous turn had already
+paid to cache. π's word and π's arithmetic, adopted verbatim; Crucible
+never decides that one was justified.
+_Avoid_: cache break (the earlier docs' word), cache invalidation, cache hit
+rate.
+
+**Cache ledger**:
+The append-only file recording every cache miss Crucible observes, across
+every workspace, session and run, plus a line for each counter reset. One
+per installation, never pruned: it is the evidence an agent reads when asked
+why the misses keep happening.
+_Avoid_: cache log, miss history, usage ledger.
+
+**Cache strip**:
+The row at the foot of the sidebar counting misses and dollars re-billed
+since the last reset, with the reset's date. Global, like the quota strip
+below it, and it opens the cache health view.
+_Avoid_: cache badge (that is the per-session one in the top bar), cache
+meter, cache counter.
+
 **Standing prompt**:
 The text appended to every agent Crucible starts, whatever its role prompt
 says — things true of every agent regardless of its job. Day one it is the
