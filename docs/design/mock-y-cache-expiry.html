@@ -1,0 +1,290 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Mock Y — the expired-cache choice</title>
+<style>
+  :root{
+    --bg:#191419; --bg2:#211a20; --panel:#241c23; --panel2:#2e242d; --line:#3a2e38;
+    --code:#120e12; --ink:#e8dfe2; --dim:#9b8a94; --faint:#6b5d66;
+    --accent:#e07a4f; --accent2:#f0a37c; --ok:#7fb069; --bad:#d96a5a; --warn:#d9a441;
+    --user:#2c2230; --lit:#5c4436; --overlay:rgb(15 11 15 / 86%);
+    --thinking:#b08cc9;
+    --mono:ui-monospace,'SF Mono',Menlo,monospace;
+    --bar-h:50px; --side-w:248px;
+  }
+  *{box-sizing:border-box;margin:0}
+  body{background:#0f0c0f;color:var(--ink);font:14px/1.55 -apple-system,'Segoe UI',sans-serif;padding:32px 24px 80px}
+  button{font:inherit;cursor:pointer}
+  h1{font-size:16px;letter-spacing:.04em;margin:0 auto 4px;max-width:1120px}
+  h1 em{color:var(--accent);font-style:normal}
+  .lede{color:var(--dim);font-size:13px;max-width:1120px;margin:0 auto 28px}
+  section{max-width:1120px;margin:0 auto 44px}
+  h2{font-size:13px;text-transform:uppercase;letter-spacing:.12em;color:var(--faint);margin-bottom:12px}
+  .cap{border-left:3px solid var(--accent);background:var(--bg2);padding:10px 14px;font-size:12.5px;color:var(--dim);border-radius:0 8px 8px 0;margin:14px 0 0}
+  .cap b{color:var(--ink)} .cap code{font:11.5px var(--mono);color:var(--accent2)}
+  .frame{border:1px solid var(--line);border-radius:12px;overflow:hidden;background:var(--bg);position:relative}
+
+  /* ---- window bones ---- */
+  .win{display:flex;height:520px}
+  .side{width:var(--side-w);flex:none;background:var(--bg2);border-right:1px solid var(--line);display:flex;flex-direction:column}
+  .brand{padding:16px 16px 10px;font-weight:700;letter-spacing:.06em;font-size:15px}
+  .brand em{color:var(--accent);font-style:normal}
+  .wslabel{padding:4px 16px;font-size:10.5px;text-transform:uppercase;letter-spacing:.12em;color:var(--faint)}
+  .ws{padding:7px 16px;font-size:13px;color:var(--ink);background:var(--panel);display:flex;align-items:center;gap:8px}
+  .ws .dot{width:7px;height:7px;border-radius:50%;background:var(--accent);box-shadow:0 0 6px var(--accent);flex:none}
+  .sessions{margin:2px 0 10px 22px;border-left:1px solid var(--line)}
+  .sess{padding:5px 12px;font-size:12.5px;color:var(--dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .sess.active{color:var(--accent2)}
+  .strip{margin-top:auto;padding:10px 14px;border-top:1px solid var(--line);font-size:11.5px;color:var(--faint);display:flex;justify-content:space-between}
+  .strip b{color:var(--dim);font-weight:600}
+
+  .main{flex:1;display:flex;flex-direction:column;min-width:0;position:relative}
+  .top{display:flex;align-items:center;gap:10px;padding:0 20px;height:var(--bar-h);flex:none;border-bottom:1px solid var(--line);font-size:12.5px;color:var(--dim)}
+  .grow{margin-left:auto}
+  .cost{font:12px var(--mono);color:var(--dim);border:1px solid var(--line);border-radius:6px;padding:2px 9px;background:none}
+  .meter{display:flex;align-items:center;gap:8px}
+  .meter .bar{width:110px;height:5px;border-radius:3px;background:var(--panel);overflow:hidden}
+  .meter .bar i{display:block;height:100%;background:linear-gradient(90deg,var(--accent),var(--accent2))}
+  .meter .counts{color:var(--faint)}
+
+  .chat{flex:1;overflow-y:auto;padding:22px 0;min-height:0}
+  .msg{max-width:640px;margin:0 auto 22px;padding:0 24px}
+  .msg .who{font-size:11px;text-transform:uppercase;letter-spacing:.1em;color:var(--faint);margin-bottom:6px}
+  .msg.agent .who{color:var(--accent)}
+  .msg.user .bubble{background:var(--user);border:1px solid var(--line);border-radius:10px;padding:10px 14px}
+  .msg p{margin-bottom:8px}
+  .stamp{max-width:640px;margin:0 auto 22px;padding:0 24px;display:flex;align-items:center;gap:10px}
+  .stamp .rule{flex:1;height:1px;background:var(--line)}
+  .stamp .txt{font:11px var(--mono);color:var(--faint)}
+
+  /* the summary item already in the port */
+  .sumitem{max-width:640px;margin:0 auto 22px;padding:12px 15px;background:var(--panel);border:1px solid var(--line);border-left:3px solid var(--thinking);border-radius:8px}
+  .sumitem .k{font-size:10.5px;text-transform:uppercase;letter-spacing:.12em;color:var(--thinking);margin-bottom:6px}
+  .sumitem p{font-size:12.5px;color:var(--dim);margin:0}
+
+  .composer{max-width:640px;width:100%;margin:0 auto;padding:0 24px 18px;flex:none}
+  .cbox{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px 14px 10px}
+  .cbox .text{color:var(--ink);font:14px/1.5 inherit}
+  .cbox .text .ph{color:var(--faint)}
+  .crow{display:flex;align-items:center;gap:8px;margin-top:8px}
+  .chip{font-size:12px;color:var(--dim);border:1px solid var(--line);border-radius:14px;padding:3px 10px;background:none}
+  .send{margin-left:auto;background:var(--accent);color:#1c120c;border:none;border-radius:8px;padding:6px 14px;font-weight:700}
+
+  /* ---- the overlay region + the dialog ---- */
+  .region{position:absolute;left:0;right:0;top:var(--bar-h);bottom:0;z-index:5;
+          background:var(--overlay);backdrop-filter:blur(3px);display:flex;
+          align-items:center;justify-content:center;padding:24px}
+  .dlg{width:min(540px,100%);background:var(--bg2);border:1px solid var(--line);border-radius:12px;overflow:hidden}
+  .dlghead{padding:16px 20px 0}
+  .dlghead h3{font-size:14.5px;font-weight:650}
+  .dlghead .sub{font-size:12.5px;color:var(--dim);margin-top:5px}
+  .facts{display:flex;gap:8px;padding:14px 20px 0}
+  .fact{flex:1;background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:9px 11px}
+  .fact .k{font-size:10px;text-transform:uppercase;letter-spacing:.09em;color:var(--faint)}
+  .fact .v{font:600 15px var(--mono);margin-top:3px;color:var(--ink)}
+  .fact .v.warn{color:var(--warn)}
+
+  .opts{padding:16px 20px 0;display:flex;flex-direction:column;gap:9px}
+  .opt{display:flex;gap:12px;align-items:flex-start;text-align:left;width:100%;
+       background:var(--panel);border:1px solid var(--line);border-radius:9px;padding:11px 13px;color:var(--ink)}
+  .opt:hover{border-color:var(--accent2)}
+  .opt.primary{border-color:var(--lit)}
+  .opt .ic{flex:none;width:18px;text-align:center;color:var(--faint);font-size:13px;margin-top:1px}
+  .opt.primary .ic{color:var(--accent)}
+  .opt .tt{flex:1;min-width:0}
+  .opt .t{font-size:13.5px;font-weight:600;display:flex;align-items:baseline;gap:8px}
+  .opt .t kbd{font:10.5px var(--mono);border:1px solid var(--line);border-radius:4px;padding:1px 5px;color:var(--faint);font-weight:400}
+  .opt .d{font-size:12px;color:var(--dim);margin-top:3px;line-height:1.45}
+  .opt .price{flex:none;font:12px var(--mono);color:var(--warn);margin-top:1px}
+  .opt .price.good{color:var(--ok)}
+  .dlgfoot{padding:13px 20px 15px;margin-top:14px;border-top:1px solid var(--line);
+           display:flex;align-items:center;gap:10px;font-size:11.5px;color:var(--faint)}
+  .dlgfoot kbd{font:10.5px var(--mono);border:1px solid var(--line);border-radius:4px;padding:1px 5px;color:var(--dim)}
+  .dlgfoot .sp{margin-left:auto}
+
+  .callout{position:absolute;z-index:20;background:var(--code);border:1px solid var(--accent);border-radius:8px;
+           padding:7px 11px;font-size:11.5px;color:var(--accent2);max-width:250px;line-height:1.45;pointer-events:none}
+
+  /* working state */
+  .work{display:flex;align-items:center;gap:9px;font-size:12.5px;color:var(--dim);padding:14px 20px 16px}
+  .spin{width:11px;height:11px;border-radius:50%;border:2px solid var(--line);border-top-color:var(--accent);animation:sp .8s linear infinite;flex:none}
+  @keyframes sp{to{transform:rotate(360deg)}}
+  .barwrap{flex:1;height:4px;border-radius:3px;background:var(--panel);overflow:hidden}
+  .barwrap i{display:block;height:100%;width:38%;background:var(--accent)}
+
+  .tbl{width:100%;border-collapse:collapse;font-size:12.5px;margin-top:6px}
+  .tbl th{text-align:left;font-size:10.5px;text-transform:uppercase;letter-spacing:.08em;color:var(--faint);font-weight:600;padding:6px 10px}
+  .tbl td{padding:7px 10px;border-top:1px solid var(--line);color:var(--dim)}
+  .tbl td:first-child{color:var(--ink)}
+  .yes{color:var(--ok)} .no{color:var(--faint)}
+</style></head><body>
+
+<h1><em>◆</em> Mock Y — the expired-cache choice</h1>
+<p class="lede">You come back to a session hours later, type, and hit send. The prefix that was cached is long gone,
+and the next turn silently re-bills all of it. Four of the seven misses in the ledger window that prompted this work
+are exactly this &mdash; gaps of 80 to 133 minutes, $1.63 between them. This is the moment Crucible gets to say so,
+and offer the one alternative that actually helps.</p>
+
+<section>
+  <h2>1 &middot; The choice, at send</h2>
+  <div class="frame">
+    <div class="win">
+      <nav class="side">
+        <div class="brand"><em>◆</em> CRUCIBLE</div>
+        <div class="wslabel">Workspaces</div>
+        <div class="ws"><span class="dot"></span> crucible</div>
+        <div class="sessions">
+          <div class="sess active">Merging build workflow results</div>
+          <div class="sess">issue board polish</div>
+          <div class="sess">cache ledger notes</div>
+        </div>
+        <div class="strip"><span>Cache misses</span><span><b>7</b> &middot; $2.59</span></div>
+        <div class="strip"><span>Anthropic Max</span><span><b>41%</b> &middot; resets Fri</span></div>
+      </nav>
+      <main class="main">
+        <header class="top">
+          <span class="grow"></span>
+          <button class="cost">$18.40</button>
+          <div class="meter"><span>55% ctx</span><span class="bar"><i style="width:55%"></i></span><span class="counts">110k / 200k</span></div>
+        </header>
+        <div class="chat">
+          <div class="msg agent"><div class="who">Agent</div>
+            <p>Branch is merged and the worktree is clean. Nothing else outstanding.</p></div>
+          <div class="stamp"><span class="rule"></span><span class="txt">2h 13m ago</span><span class="rule"></span></div>
+        </div>
+        <div class="composer"><div class="cbox">
+          <div class="text">Now let's pick up the artifact rail work.</div>
+          <div class="crow"><span class="chip">Opus &middot; high</span><button class="send">Send</button></div>
+        </div></div>
+
+        <div class="region">
+          <div class="dlg">
+            <div class="dlghead">
+              <h3>The cache for this conversation has expired</h3>
+              <div class="sub">Sending now re-bills the whole conversation as new input. Nothing is wrong &mdash; it has just been sitting longer than the cache lives.</div>
+            </div>
+            <div class="facts">
+              <div class="fact"><div class="k">Idle</div><div class="v warn">2h 13m</div></div>
+              <div class="fact"><div class="k">In context</div><div class="v">110k</div></div>
+              <div class="fact"><div class="k">Re-bill</div><div class="v warn">~$0.63</div></div>
+            </div>
+            <div class="opts">
+              <button class="opt primary">
+                <span class="ic">&#9654;</span>
+                <span class="tt">
+                  <span class="t">Send anyway <kbd>&#9166;</kbd></span>
+                  <span class="d">Keep every message. Pay to re-cache the prefix now, and carry all 110k on every turn from here.</span>
+                </span>
+                <span class="price">+$0.63</span>
+              </button>
+              <button class="opt">
+                <span class="ic">&#8623;</span>
+                <span class="tt">
+                  <span class="t">Summarize, then continue <kbd>S</kbd></span>
+                  <span class="d">Read the conversation once, carry a summary forward, and send your message against a small base. The full history stays in the session tree.</span>
+                </span>
+                <span class="price good">~2k after</span>
+              </button>
+            </div>
+            <div class="dlgfoot">
+              <kbd>esc</kbd> back to the composer, message kept
+              <span class="sp"></span>
+              <span>retention 1 hour</span>
+            </div>
+          </div>
+        </div>
+      </main>
+    </div>
+    <div class="callout" style="left:300px;top:344px">The typed message is never lost &mdash; every path here keeps it.</div>
+  </div>
+  <div class="cap"><b>Three facts, two doors.</b> The dialog exists to make one invisible number visible: what this
+  send costs. <code>Send anyway</code> is the default because the message is already typed and that was the intent;
+  the dialog informs, it does not nag you into compressing. <b>The prices are the point</b> &mdash; without them this
+  is a scold, and a scold you dismiss by reflex. Escape returns to the composer with the text intact, which is the
+  third door nobody should have to look for.</div>
+</section>
+
+<section>
+  <h2>2 &middot; While the summary is written</h2>
+  <div class="frame" style="padding:0">
+    <div style="display:flex;justify-content:center;padding:34px 24px;background:var(--overlay)">
+      <div class="dlg" style="width:min(540px,100%)">
+        <div class="dlghead">
+          <h3>Summarizing the conversation</h3>
+          <div class="sub">Reading 110k tokens once. Your message goes out the moment this lands.</div>
+        </div>
+        <div class="work"><span class="spin"></span><span class="barwrap"><i></i></span><span style="font:12px var(--mono)">~15s</span></div>
+        <div class="dlgfoot"><kbd>esc</kbd> cancel &mdash; the conversation is left exactly as it was<span class="sp"></span></div>
+      </div>
+    </div>
+  </div>
+  <div class="cap"><b>Cancellable, and already built.</b> The port's <code>cancel(sessionId)</code> explicitly stops
+  &ldquo;a summarizing jump waiting on &pi;'s summary&rdquo;, so this wait has a defined exit that leaves the leaf
+  where it was. This whole path is <code>jump(id, firstRef, { summarize: true })</code> &mdash; the capability
+  exists; what is new is reaching it from send instead of from the tree.</div>
+</section>
+
+<section>
+  <h2>3 &middot; What you land in</h2>
+  <div class="frame">
+    <div class="win" style="height:400px">
+      <nav class="side">
+        <div class="brand"><em>◆</em> CRUCIBLE</div>
+        <div class="wslabel">Workspaces</div>
+        <div class="ws"><span class="dot"></span> crucible</div>
+        <div class="sessions">
+          <div class="sess active">Merging build workflow results</div>
+          <div class="sess">issue board polish</div>
+        </div>
+        <div class="strip"><span>Cache misses</span><span><b>7</b> &middot; $2.59</span></div>
+      </nav>
+      <main class="main">
+        <header class="top">
+          <span class="grow"></span>
+          <button class="cost">$18.40</button>
+          <div class="meter"><span>2% ctx</span><span class="bar"><i style="width:2%"></i></span><span class="counts">2.1k / 200k</span></div>
+        </header>
+        <div class="chat">
+          <div class="sumitem">
+            <div class="k">Carried forward</div>
+            <p>Merged <code>crucible/run-7728</code> into main after the gate approved: the run graph now draws real
+            edges, revisions included, and the comment pass landed as 4b18cdb. Outstanding: the artifact rail brief at
+            <code>.crucible/align/260821-run-artifacts.md</code> has not been started.</p>
+          </div>
+          <div class="msg user"><div class="who">You</div><div class="bubble">Now let's pick up the artifact rail work.</div></div>
+          <div class="msg agent"><div class="who">Agent</div><p>Reading the artifact rail brief now&hellip;</p></div>
+        </div>
+        <div class="composer"><div class="cbox">
+          <div class="text"><span class="ph">Reply&hellip;</span></div>
+          <div class="crow"><span class="chip">Opus &middot; high</span><button class="send">Send</button></div>
+        </div></div>
+      </main>
+    </div>
+    <div class="callout" style="left:296px;top:96px">The <code style="color:inherit">summary</code> transcript item the port already defines &mdash; same one a compaction leaves.</div>
+    <div class="callout" style="left:640px;top:64px">Context falls 110k &rarr; 2.1k. Every later turn is cheap.</div>
+  </div>
+  <div class="cap"><b>Same session, same sidebar row, nothing deleted.</b> This is a jump, so the entire old path
+  survives in the session tree and double-Esc still reaches it. The sidebar does not gain an entry and the session
+  title does not change. Spend is cumulative across every branch, so the <code>$18.40</code> does not reset either
+  &mdash; money spent does not vanish on a jump.</div>
+</section>
+
+<section>
+  <h2>4 &middot; When it does not appear</h2>
+  <table class="tbl">
+    <tr><th>Situation</th><th>Dialog?</th><th>Why</th></tr>
+    <tr><td>Idle 2h, 110k in context</td><td class="yes">yes</td><td>The cache is gone; ~$0.63 to rebuild it</td></tr>
+    <tr><td>Idle 4h, 3k in context</td><td class="yes">yes</td><td>Two cents, and you still get to see it. No dollar floor</td></tr>
+    <tr><td>Idle 20 min</td><td class="no">no</td><td>Inside the hour; the cache is alive</td></tr>
+    <tr><td>Fresh session, first message</td><td class="no">no</td><td>Nothing cached, so nothing broken</td></tr>
+    <tr><td>A run's message waking its orchestrator</td><td class="no">no</td><td>No human at the keyboard to ask</td></tr>
+    <tr><td>Steering or follow-up while working</td><td class="no">no</td><td>The turn is live; the cache is warm</td></tr>
+    <tr><td>Model or thinking switched</td><td class="no">no</td><td>A certain break, but one you just chose</td></tr>
+  </table>
+  <div class="cap"><b>Every idle expiry, no dollar floor.</b> Idle expiry is rare enough that the interruption is
+  always worth it, and the person deciding wants the facts rather than a threshold guessing on their behalf. A
+  two-cent break still shows its two cents. Deliberate breaks stay silent: a model switch is one keystroke old and
+  telling you about it turns Shift-Tab into a two-step gesture. <b>The orchestrator row is the honest gap in this
+  feature</b>: the sessions that idle longest are the ones a run wakes, and a run's message cannot stop to ask
+  anybody. Those keep taking the miss until the hour covers them, which is what the retention change is for.</div>
+</section>
+
+</body></html>

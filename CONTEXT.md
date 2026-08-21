@@ -303,6 +303,14 @@ below it, and it opens the cache health view.
 _Avoid_: cache badge (that is the per-session one in the top bar), cache
 meter, cache counter.
 
+**Cache expiry choice**:
+The dialog raised when a send would certainly re-bill the whole conversation
+because its prompt cache has expired on idle: the idle time, the context size
+and the estimated re-bill, over two doors — send anyway, or summarize and
+continue on a small base. Only idle expiry raises it; a break the user just
+caused, like a model switch, never does.
+_Avoid_: cache warning, expiry popup, stale-cache dialog.
+
 **Overlay region**:
 The area every overlay covers: from below the 50px bar row to the bottom of
 the window, and from the sidebar's right edge to the window's right edge —
