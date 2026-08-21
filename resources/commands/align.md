@@ -90,8 +90,8 @@ you just said partial cancellation is possible — which is right?"
 
 When a term is resolved, update `CONTEXT.md` right there. Don't batch these up
 — capture them as they happen. `/align` is the ONLY writer of `CONTEXT.md` and
-`docs/adr/`, in any workspace: a term that needs adding or sharpening is
-raised here, never patched in passing.
+the ONLY author of `docs/adr/`, in any workspace: a term that needs adding or
+sharpening is raised here, never patched in passing.
 
 `CONTEXT.md` lives at the workspace root; create it lazily when the first term
 is resolved. It is a glossary and nothing else — totally devoid of

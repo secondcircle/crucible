@@ -55,10 +55,10 @@ is worth more than any number of questions.
 
 Update `CONTEXT.md` inline when a term crystallizes: the entry is the term in
 bold, one or two sentences on what it IS, and an `_Avoid_:` line naming the
-rejected synonyms. This interview is the only writer of `CONTEXT.md` and
-`docs/adr/`. Offer an ADR only when a decision is hard to reverse, surprising
-without context, and a real trade-off — a combination this interview should
-rarely produce.
+rejected synonyms. This interview is the only writer of `CONTEXT.md` and the
+only author of `docs/adr/`. Offer an ADR only when a decision is hard to
+reverse, surprising without context, and a real trade-off — a combination this
+interview should rarely produce.
 
 ## Ending it
 
