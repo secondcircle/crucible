@@ -418,14 +418,21 @@ export function createWorkflowEngine(options: EngineOptions): WorkflowEngine {
           desc: output.desc
         }))
 
-      // Dataflow edges: parents are the producers of what this node reads.
-      const parents = [
-        ...new Set(
-          (spec.reads ?? [])
-            .map((path) => producerByArtifact.get(path))
-            .filter((producer): producer is string => producer !== undefined)
-        )
-      ]
+      const ghost = run.nodes.findIndex(
+        (candidate) => candidate.id === id && candidate.status === 'pending'
+      )
+      // A node states what it follows. The spec's own declaration wins the
+      // moment the node starts; failing that the plan's forecast stands,
+      // because a fresh record built from inference alone would erase edges
+      // the workflow had already got right.
+      const forecast = ghost >= 0 ? run.nodes[ghost].parents : []
+      const declared = spec.from === undefined ? forecast : keptParents(run, id, spec.from)
+      // Reading an artifact may reveal an edge nobody declared; it never
+      // takes one away, so this is a union in every case.
+      const inferred = (spec.reads ?? [])
+        .map((path) => producerByArtifact.get(path))
+        .filter((producer): producer is string => producer !== undefined)
+      const parents = [...new Set([...declared, ...inferred])].filter((parent) => parent !== id)
       for (const path of Object.values(outputPaths)) producerByArtifact.set(path, id)
 
       // The record currently carrying this session; revisions swap it.
@@ -442,9 +449,6 @@ export function createWorkflowEngine(options: EngineOptions): WorkflowEngine {
         artifacts: declaredArtifacts(),
         startedAt: nowIso()
       }
-      const ghost = run.nodes.findIndex(
-        (candidate) => candidate.id === id && candidate.status === 'pending'
-      )
       if (ghost >= 0) run.nodes[ghost] = node
       else run.nodes.push(node)
       save(run)
@@ -545,7 +549,7 @@ export function createWorkflowEngine(options: EngineOptions): WorkflowEngine {
           revisionId = `${id}·r${revisions}`
         } while (known.has(revisionId))
         const revisionParents = [
-          ...new Set([node.id, ...(from ?? []).filter((parent) => known.has(parent))])
+          ...new Set([node.id, ...keptParents(run, revisionId, from ?? [])])
         ]
         captureStats()
         statBase = { ...sessionStats }
@@ -1128,6 +1132,19 @@ export function createWorkflowEngine(options: EngineOptions): WorkflowEngine {
       }
     }
   }
+}
+
+/**
+ * A declaration filtered to the nodes the run actually has, and never the
+ * declaring node itself: a parent never points at nothing.
+ */
+function keptParents(
+  run: { nodes: readonly { id: string }[] },
+  id: string,
+  from: readonly string[]
+): string[] {
+  const known = new Set(run.nodes.map((candidate) => candidate.id))
+  return from.filter((parent) => parent !== id && known.has(parent))
 }
 
 function nodeRolePrompt(nodeId: string, workflow: string, cwd: string): string {

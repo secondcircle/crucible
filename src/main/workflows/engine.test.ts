@@ -567,6 +567,159 @@ describe('the engine end to end', () => {
   })
 })
 
+// A node states what it follows, and the record is where the run graph reads
+// it. Everything below is about one moment: what parents the engine writes
+// when a node starts.
+describe('what the record says a node follows', () => {
+  /** A node whose only work is to claim it is done. */
+  const idle: NodeScript = (_prompt, tools) => tools.complete({ summary: 'done' })
+
+  const declaring: WorkflowDef = {
+    description: 'declares its own edges, and reads one file besides',
+    inputs: { prompt: 'the task file' },
+    plan: (): PlannedNode[] => [
+      { id: 'alpha', outputs: { note: { file: 'alpha.md', desc: 'a note' } } },
+      { id: 'beta', parents: ['alpha'] },
+      { id: 'gamma', parents: ['alpha'] },
+      { id: 'delta', parents: ['beta'] }
+    ],
+    run: async (ctx) => {
+      const alpha = await ctx.node('alpha', {
+        prompt: 'write the note',
+        outputs: { note: { file: 'alpha.md', desc: 'a note' } }
+      })
+      // Declares nothing: the plan said what it follows and that stands.
+      await ctx.node('beta', { prompt: 'follow alpha' })
+      // Declares something else: the spec wins over the plan's forecast.
+      await ctx.node('gamma', { prompt: 'follow beta', from: ['beta'] })
+      // Declared and inferred together, plus an id naming nothing.
+      await ctx.node('delta', {
+        prompt: 'follow gamma, and read what alpha wrote',
+        from: ['gamma', 'nobody-by-that-name'],
+        reads: [alpha.outputs.note]
+      })
+      // Neither declaration nor a read anyone produced: a root, and the
+      // stray root is the point — no edge is invented from running last.
+      await ctx.node('epsilon', { prompt: 'follow nothing' })
+    }
+  }
+
+  it('keeps the plan’s parents, lets a spec replace them, and adds what dataflow reveals', async () => {
+    const { engine, repo } = rig({ declaring }, (nodeId) =>
+      nodeId !== 'alpha'
+        ? idle
+        : (prompt, tools) => {
+            writeFileSync(outputPath(prompt, 'alpha.md'), 'the note\n')
+            tools.complete({ summary: 'wrote the note' })
+          }
+    )
+    const task = join(repo, 'task.md')
+    writeFileSync(task, 'the task\n')
+    await engine.start(startRequest(repo, 'declaring', { prompt: task }))
+    await until(() => engine.runs()[0].status === 'complete')
+
+    const parents = Object.fromEntries(
+      engine.runs()[0].nodes.map((node) => [node.id, node.parents])
+    )
+    expect(parents).toEqual({
+      alpha: [],
+      // The plan declared it and the node starting did not erase it.
+      beta: ['alpha'],
+      // The spec replaces the forecast rather than unioning with it.
+      gamma: ['beta'],
+      // Declared first, then what reading alpha's file revealed; the id
+      // naming no node is dropped the way revise() drops one.
+      delta: ['gamma', 'alpha'],
+      epsilon: []
+    })
+  })
+
+  it('never erases a declared edge because the node read nothing', async () => {
+    const noPlan: WorkflowDef = {
+      description: 'declares edges with no plan behind them',
+      inputs: {},
+      run: async (ctx) => {
+        await ctx.node('first', { prompt: 'go' })
+        await ctx.node('second', { prompt: 'go', from: ['first'] })
+        await ctx.node('third', { prompt: 'go', from: ['first', 'second'] })
+      }
+    }
+    const { engine, repo } = rig({ noPlan }, () => idle)
+    await engine.start(startRequest(repo, 'noPlan', {}))
+    await until(() => engine.runs()[0].status === 'complete')
+
+    expect(engine.runs()[0].nodes.map((node) => node.parents)).toEqual([
+      [],
+      ['first'],
+      ['first', 'second']
+    ])
+  })
+
+  it('keeps a parent that is still a ghost, so the edge is drawn before it is walked', async () => {
+    const aheadOfItself: WorkflowDef = {
+      description: 'follows a node the plan has forecast but nobody has started',
+      inputs: {},
+      plan: (): PlannedNode[] => [{ id: 'later' }, { id: 'omega', parents: ['later'] }],
+      run: async (ctx) => {
+        await ctx.node('omega', { prompt: 'go', from: ['later'] })
+        await ctx.node('later', { prompt: 'go' })
+      }
+    }
+    // Omega stays mid-turn until the test has read the record, so what is
+    // asserted is the moment its parent is still a ghost.
+    let release: (() => void) | undefined
+    const held = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const { engine, repo } = rig({ aheadOfItself }, (nodeId) =>
+      nodeId !== 'omega'
+        ? idle
+        : async (_prompt, tools) => {
+            await held
+            tools.complete({ summary: 'done' })
+          }
+    )
+    await engine.start(startRequest(repo, 'aheadOfItself', {}))
+
+    // While `later` is still a ghost, the node that follows it already names
+    // it: the record holds it, so the edge exists to draw.
+    await until(() =>
+      engine.runs()[0].nodes.some((node) => node.id === 'omega' && node.status === 'running')
+    )
+    expect(engine.runs()[0].nodes.find((node) => node.id === 'later')?.status).toBe('pending')
+    expect(engine.runs()[0].nodes.find((node) => node.id === 'omega')?.parents).toEqual(['later'])
+
+    release?.()
+    await until(() => engine.runs()[0].status === 'complete')
+    expect(engine.runs()[0].nodes.find((node) => node.id === 'omega')?.parents).toEqual(['later'])
+  })
+
+  it('chains a revision after the tip and the nodes that sent it back', async () => {
+    const revising: WorkflowDef = {
+      description: 'holds a node open and revises it',
+      inputs: {},
+      run: async (ctx) => {
+        await ctx.node('reviewer', { prompt: 'judge it' })
+        const held = await ctx.openNode('writer', { prompt: 'write it', from: ['reviewer'] })
+        await held.revise('again, with the finding fixed', {
+          from: ['reviewer', 'nobody-by-that-name']
+        })
+        held.close()
+      }
+    }
+    const { engine, repo } = rig({ revising }, () => idle)
+    await engine.start(startRequest(repo, 'revising', {}))
+    await until(() => engine.runs()[0].status === 'complete')
+
+    const nodes = engine.runs()[0].nodes
+    expect(nodes.map((node) => node.id)).toEqual(['reviewer', 'writer', 'writer·r1'])
+    expect(nodes[1].parents).toEqual(['reviewer'])
+    // The current tip, then whoever sent it back; a name nobody answers to is
+    // dropped rather than drawn to nothing.
+    expect(nodes[2].parents).toEqual(['writer', 'reviewer'])
+  })
+})
+
 // The artifact rail draws from the record alone, so what the record says
 // about a declared file — before, during and after it lands — is engine
 // behavior and tested here.

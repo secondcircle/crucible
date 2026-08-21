@@ -41,6 +41,8 @@
   --merged-line: #5c3f75;
   /* the chip's lit border, which is the only thing that says "look here" */
   --lit: #5c4436;
+  /* a run graph edge at rest: visible against the pane, quiet beside a card */
+  --edge: #4a3c47;
 
   --font: -apple-system, 'Segoe UI', system-ui, sans-serif;
   --mono: ui-monospace, 'SF Mono', Menlo, monospace;

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { TranscriptItem } from '../../../shared/agent/port'
 import {
   currentNode,
@@ -12,27 +12,45 @@ import { artifactName } from '../../../shared/workflows/artifacts'
 import type { ArtifactView } from '../../../shared/workflows/service'
 import {
   money,
-  nodeDuration,
   nodeProgress,
   shortAge,
   shortModel,
   since,
   toViewItems
 } from '../runs/format'
-import { layerNodes } from '../runs/graph'
 import { railOf, rowFor, type RailModel } from '../runs/rail'
 import { relativeTime } from '../labels'
 import { ArtifactRail } from './ArtifactRail'
 import { ArtifactReader } from './ArtifactReader'
+import { RunGraph } from './RunGraph'
 import { Transcript } from './Transcript'
 import './runs.css'
 
+/** What the graph pane is worth before anyone has dragged it. */
+const DEFAULT_GRAPH_WIDTH = 640
+
+/** Below these the two columns stop being what they are. */
+const MIN_GRAPH = 360
+const MIN_DETAIL = 400
+
+/** The splitter's own width and the rail's, as runs.css draws them. */
+const SPLITTER = 5
+const RAIL = 273
+
+// One value for the whole app, in the profile's own storage: a dev launch and
+// the installed app keep their own userData, so neither can move the other's
+// splitter.
+const WIDTH_KEY = 'crucible.run-graph-width'
+
+// Full screen puts the detail column away without taking it apart, so leaving
+// it again lands on the same transcript, scrolled where it was.
+const HIDDEN: React.CSSProperties = { display: 'none' }
+
 // The full-screen dig: read-only observability plus the mechanical Pause and
-// Cancel (ADR 0017). The graph is layered top-down (Q14); a node's
-// transcript renders through the chat pane's own component, tool chains
-// collapsed; the routed banner shows what was asked and where it went —
-// never an input box. Talking happens in the session; Go to session is the
-// door.
+// Cancel (ADR 0017). A node's transcript renders through the chat pane's own
+// component, tool chains collapsed; the routed banner shows what was asked
+// and where it went — never an input box. Talking happens in the session; Go
+// to session is the door.
 export function WorkflowRunView({
   run,
   canGoToSession,
@@ -46,7 +64,9 @@ export function WorkflowRunView({
   onPause,
   onResume,
   onCancel,
-  onClose
+  onClose,
+  fullScreen,
+  onToggleFullScreen
 }: {
   readonly run: RunRecord
   readonly canGoToSession: boolean
@@ -65,6 +85,10 @@ export function WorkflowRunView({
   readonly onResume: () => void
   readonly onCancel: () => void
   readonly onClose: () => void
+  // Held above this view, like the open artifact: Escape unwinds full screen
+  // before the reader, and the reader before the run.
+  readonly fullScreen: boolean
+  readonly onToggleFullScreen: () => void
 }): React.JSX.Element {
   // Follows the run's own frontier until the user picks a node; their pick
   // then stands until they pick again or the node leaves the record.
@@ -101,8 +125,9 @@ export function WorkflowRunView({
   }, [shown, transcriptKey, transcript])
 
   const live = runIsLive(run)
-  const layers = useMemo(() => layerNodes(run.nodes), [run.nodes])
   const rail = usePlacedRail(run)
+  const body = useRef<HTMLDivElement>(null)
+  const { graphWidth, railShown, startDrag } = useSplitter(body)
   // The reader shows what the record still names: an artifact whose row leaves
   // the record (a pruned ghost's) puts the node's transcript back by itself.
   const openRow = openArtifact === undefined ? undefined : rowFor(rail, openArtifact)
@@ -159,33 +184,36 @@ export function WorkflowRunView({
         </button>
       </header>
 
-      <div className="rvbody">
-        <div className="graph" aria-label="Run graph">
-          {layers.map((layer, at) => (
-            <div className="glayer" key={at}>
-              {layer.map((node) => (
-                <button
-                  key={node.id}
-                  className={`gnode ${nodeClass(node)}${shown?.id === node.id ? ' sel' : ''}`}
-                  onClick={() => {
-                    // Picking a node in the graph is also a way out of the
-                    // reader: that node's transcript is what it asks for.
-                    onOpenArtifact(undefined)
-                    setPicked(node.id)
-                  }}
-                >
-                  <span className="n">
-                    <span className="s" />
-                    {node.id}
-                  </span>
-                  <span className="meta">{nodeMeta(node)}</span>
-                </button>
-              ))}
-            </div>
-          ))}
+      <div className="rvbody" ref={body}>
+        {/* The graph is the last thing to yield room: full screen takes the
+            whole body, and on a narrow window the rail goes before the
+            splitter clamps this down. */}
+        <div className="gwrap" style={{ width: fullScreen ? '100%' : graphWidth }}>
+          <RunGraph
+            nodes={run.nodes}
+            shownId={shown?.id}
+            fullScreen={fullScreen}
+            onToggleFullScreen={onToggleFullScreen}
+            onPick={(nodeId) => {
+              // Picking a node in the graph is also a way out of the
+              // reader: that node's transcript is what it asks for.
+              onOpenArtifact(undefined)
+              setPicked(nodeId)
+            }}
+          />
         </div>
 
-        <div className="detail">
+        {fullScreen ? null : (
+          <div
+            className="split"
+            role="separator"
+            aria-label="Resize the run graph"
+            aria-orientation="vertical"
+            onMouseDown={startDrag}
+          />
+        )}
+
+        <div className="detail" style={fullScreen ? HIDDEN : undefined}>
           {openRow !== undefined ? (
             <ArtifactReader
               runId={run.id}
@@ -259,10 +287,104 @@ export function WorkflowRunView({
           )}
         </div>
 
-        <ArtifactRail rail={rail} selected={selected} onOpen={onOpenArtifact} />
+        {fullScreen || !railShown ? null : (
+          <ArtifactRail rail={rail} selected={selected} onOpen={onOpenArtifact} />
+        )}
       </div>
     </section>
   )
+}
+
+/**
+ * The width the graph pane is given, and what a drag on the splitter does to
+ * it. The set width is remembered for the whole app; what the pane actually
+ * gets is that width against the room the window has, where the rail yields
+ * before the graph does.
+ */
+function useSplitter(body: React.RefObject<HTMLDivElement | null>): {
+  readonly graphWidth: number
+  readonly railShown: boolean
+  readonly startDrag: (pressed: React.MouseEvent) => void
+} {
+  const [wanted, setWanted] = useState(rememberedWidth)
+  const [room, setRoom] = useState(0)
+  // Set for as long as a drag is under way, so a view that goes away mid-drag
+  // takes its listeners with it.
+  const endDrag = useRef<(() => void) | undefined>(undefined)
+
+  useLayoutEffect(() => {
+    const element = body.current
+    if (element === null) return
+    const measure = (): void => setRoom(element.getBoundingClientRect().width)
+    measure()
+    if (typeof ResizeObserver === 'undefined') {
+      window.addEventListener('resize', measure)
+      return () => window.removeEventListener('resize', measure)
+    }
+    const observer = new ResizeObserver(measure)
+    observer.observe(element)
+    return () => observer.disconnect()
+  }, [body])
+
+  useEffect(() => () => endDrag.current?.(), [])
+
+  // An unmeasured body (nothing laid out yet) is treated as roomy: the pane
+  // gets what it asked for rather than collapsing to its minimum.
+  const ceiling =
+    room === 0 ? Number.POSITIVE_INFINITY : Math.max(MIN_GRAPH, room - SPLITTER - MIN_DETAIL)
+  const railShown = room === 0 || room - wanted - SPLITTER - MIN_DETAIL >= RAIL
+  const forRail = railShown && room !== 0 ? RAIL : 0
+  const graphWidth = Math.max(MIN_GRAPH, Math.min(wanted, ceiling - forRail))
+
+  const startDrag = useCallback(
+    (pressed: React.MouseEvent): void => {
+      if (endDrag.current !== undefined) return
+      // Without this the press begins a native selection drag, which is what
+      // takes the col-resize cursor away and highlights text while resizing.
+      pressed.preventDefault()
+      const style = document.body.style
+      const selection = style.userSelect
+      style.userSelect = 'none'
+      const left = body.current?.getBoundingClientRect().left ?? 0
+
+      // The pane follows the pointer frame by frame; the profile hears about
+      // it once, when the drag ends, rather than sixty times a second.
+      let landed = wanted
+      function onMove(moved: MouseEvent): void {
+        landed = Math.max(MIN_GRAPH, Math.min(moved.clientX - left, ceiling))
+        setWanted(landed)
+      }
+      function onUp(): void {
+        endDrag.current = undefined
+        style.userSelect = selection
+        window.removeEventListener('mousemove', onMove)
+        window.removeEventListener('mouseup', onUp)
+        try {
+          window.localStorage?.setItem(WIDTH_KEY, String(Math.round(landed)))
+        } catch {
+          // A profile that cannot write its storage still resizes; it just
+          // forgets, which beats a drag that throws.
+        }
+      }
+      endDrag.current = onUp
+      window.addEventListener('mousemove', onMove)
+      window.addEventListener('mouseup', onUp)
+    },
+    [body, ceiling, wanted]
+  )
+
+  return { graphWidth, railShown, startDrag }
+}
+
+/** What the profile remembers, or the default on a fresh one. */
+function rememberedWidth(): number {
+  try {
+    const held = Number(window.localStorage?.getItem(WIDTH_KEY))
+    if (Number.isFinite(held) && held >= MIN_GRAPH) return held
+  } catch {
+    // No storage in this profile: the default stands for this launch.
+  }
+  return DEFAULT_GRAPH_WIDTH
 }
 
 // The rail's placement memory. Each snapshot is derived against the order the
@@ -348,42 +470,6 @@ function NodeStrip({
       )}
     </div>
   )
-}
-
-function nodeClass(node: RunNode): string {
-  switch (node.status) {
-    case 'complete':
-      return 'done'
-    case 'running':
-      return 'live'
-    case 'pending':
-      return 'wait'
-    case 'failed':
-      return 'bad'
-    default:
-      // blocked, stalled, paused: parked states share the amber look.
-      return 'parked'
-  }
-}
-
-function nodeMeta(node: RunNode): string {
-  if (node.status === 'pending') return 'pending'
-  const verdict =
-    typeof node.verdict === 'object' && node.verdict !== null && 'verdict' in node.verdict
-      ? String((node.verdict as { verdict: unknown }).verdict)
-      : undefined
-  const parts = [
-    shortModel(node.model),
-    money(node.cost),
-    nodeDuration(node),
-    node.toolCalls === undefined || node.toolCalls === 0 ? '' : `${node.toolCalls} tools`,
-    node.status === 'running' && node.contextPercent !== undefined
-      ? `ctx ${node.contextPercent}%`
-      : '',
-    verdict === undefined ? '' : `verdict: ${verdict}`,
-    node.status === 'failed' ? 'failed' : ''
-  ]
-  return parts.filter((part) => part !== '').join(' · ')
 }
 
 function firstLine(text: string): string {

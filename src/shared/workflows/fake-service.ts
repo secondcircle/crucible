@@ -74,6 +74,7 @@ interface LiveNode {
   reads: RunArtifact[]
   artifacts: RunArtifact[]
   verdict?: unknown
+  error?: string
   summary?: string
   startedAt?: string
   endedAt?: string
@@ -126,6 +127,8 @@ interface ScriptedNode {
   /** Input names this node reads, then artifact files of earlier nodes. */
   readonly readsInputs: readonly string[]
   readonly readsFiles: readonly string[]
+  /** What the node concludes, for the nodes that conclude anything. */
+  readonly verdict?: { readonly verdict: string; readonly reason: string }
 }
 
 const SPEC_BODY = `# Spec — the scripted build
@@ -146,12 +149,33 @@ const CHANGES_BODY = `# Changes
 - \`src/main/workflows/engine.ts\` — declared outputs recorded at node start.
 `
 
-const REVIEW_BODY = `# Review — approved
+const REVIEW_BODY = `# Review — changes required
 
-The branch does what the spec asked. Two notes, neither blocking:
+The branch does what the spec asked, with one finding that must land first:
 
 1. The rail's count reads artifacts, not nodes, which is what the mock draws.
-2. A failed node keeps its row, marked never written.
+2. A failed node keeps its row, marked never written — this one drops it.
+`
+
+const REVIEW_TESTS_BODY = `# Review (tests) — approved
+
+Ran against the same branch as the code review, at the same time.
+
+- Every seam the spec named has a test at it.
+- Nothing here needs the code review's finding resolved first.
+`
+
+const FIXES_BODY = `# Fixes
+
+What the code review asked for, done:
+
+- A failed node keeps its declared row and is marked never written.
+- The regression the review left failing now passes.
+`
+
+const REVIEW_R1_BODY = `# Review — approved
+
+The finding is resolved and the reproduction passes. Nothing else changed.
 `
 
 const REPORT_BODY = `<!doctype html>
@@ -179,6 +203,8 @@ const CANNED_BODIES: Readonly<Record<string, string>> = {
   'spec.md': SPEC_BODY,
   'changes.md': CHANGES_BODY,
   'review.md': REVIEW_BODY,
+  'review-tests.md': REVIEW_TESTS_BODY,
+  'fixes.md': FIXES_BODY,
   'report.html': REPORT_BODY
 }
 
@@ -239,6 +265,7 @@ function scriptOf(workflow: string): readonly ScriptedNode[] {
       readsInputs: ['intent'],
       readsFiles: ['spec.md']
     },
+    // Two reviewers on one builder, so the graph has a fan-out to draw.
     {
       id: 'review-1',
       parents: ['builder'],
@@ -253,7 +280,61 @@ function scriptOf(workflow: string): readonly ScriptedNode[] {
         }
       ],
       readsInputs: [],
-      readsFiles: ['spec.md', 'changes.md']
+      readsFiles: ['spec.md', 'changes.md'],
+      verdict: { verdict: 'changes-required', reason: 'one finding, with its reproduction' }
+    },
+    {
+      id: 'review-tests',
+      parents: ['builder'],
+      model: 'anthropic/claude-fable-5:high',
+      planned: true,
+      outputs: [
+        {
+          name: 'review',
+          file: 'review-tests.md',
+          desc: 'the branch judged at its test seams',
+          body: REVIEW_TESTS_BODY
+        }
+      ],
+      readsInputs: [],
+      readsFiles: ['changes.md'],
+      verdict: { verdict: 'approved', reason: 'every seam the spec named has a test at it' }
+    },
+    // Both reviews arrive at one fixer: the fan-in.
+    {
+      id: 'fixer-1',
+      parents: ['review-1', 'review-tests'],
+      model: 'anthropic/claude-opus-5:high',
+      planned: false,
+      outputs: [
+        {
+          name: 'fixes',
+          file: 'fixes.md',
+          desc: 'what the review asked for, and what was done about it',
+          body: FIXES_BODY
+        }
+      ],
+      readsInputs: [],
+      readsFiles: ['review.md', 'review-tests.md']
+    },
+    // The send-back: the same reviewer's session, one round on, re-declaring
+    // the file it wrote the first time.
+    {
+      id: 'review-1·r1',
+      parents: ['fixer-1', 'review-tests'],
+      model: 'anthropic/claude-fable-5:high',
+      planned: true,
+      outputs: [
+        {
+          name: 'review',
+          file: 'review.md',
+          desc: "the reviewer's verdict and its evidence",
+          body: REVIEW_R1_BODY
+        }
+      ],
+      readsInputs: [],
+      readsFiles: ['fixes.md'],
+      verdict: { verdict: 'approved', reason: 'the finding is resolved and its repro passes' }
     }
   ]
 }
@@ -383,9 +464,7 @@ export function createFakeWorkflowRunService({
           files?.write(artifact.path, body)
           return { ...artifact, writtenAt: nowIso() }
         })
-        if (node.id.includes('review')) {
-          node.verdict = { verdict: 'approved', reason: 'the scripted diff holds up' }
-        }
+        if (script?.verdict !== undefined) node.verdict = script.verdict
         changed()
 
         // The build script parks once after its builder node: the question
@@ -809,6 +888,21 @@ function cannedUnattended(artifactDir: (runId: WorkflowRunId) => string): LiveRu
         toolCalls: 22,
         startedAt: hoursAgo(1),
         lastActivityAt: hoursAgo(0.7)
+      },
+      // A node that failed and did not take the run with it: the failed card,
+      // its reason, and the walked edge into it, without staging anything.
+      {
+        id: 'spec-audit',
+        status: 'failed',
+        parents: ['planner'],
+        model: 'anthropic/claude-fable-5:high',
+        reads: [{ name: 'spec.md', path: spec, desc: 'input' }],
+        artifacts: [],
+        error: 'the audit ran out of context re-reading the spec, twice',
+        cost: 0.34,
+        toolCalls: 7,
+        startedAt: hoursAgo(1),
+        endedAt: hoursAgo(0.9)
       }
     ],
     createdAt: hoursAgo(1.2),
