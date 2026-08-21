@@ -50,8 +50,12 @@ The workspace folder's own git working directory, where a session works unless i
 _Avoid_: local, live checkout.
 
 **Worktree**:
-A git worktree of the workspace's repository, created for exactly one session to work in place of the checkout. Crucible creates worktrees and never deletes them.
+A git worktree of the workspace's repository, created for exactly one session to work in place of the checkout, or for exactly one run. Crucible creates worktrees and never deletes them.
 _Avoid_: venue, sandbox, branch (a worktree holds a branch; it is not one).
+
+**Worktree setup**:
+What turns a freshly created worktree into one an agent can work in: the install, the env file, the generated code. The repository owns it, in an executable `.crucible/worktree-setup` that Crucible runs inside the new worktree. Distinct from worktree *creation*, which `.crucible/worktree` owns.
+_Avoid_: provisioning (the rejected Makefile contract's word), bootstrap, init.
 
 **Session**:
 A user-curated workspace sidebar item holding one agent conversation. It appears only when the user creates or adds it in Crucible; adapter-managed history never populates the sidebar by discovery.

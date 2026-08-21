@@ -9,6 +9,7 @@ import type {
   UsageRequest
 } from './adapter'
 import type { PanelToolName, PanelTools } from './panel-tools'
+import { isRunMessage } from '../workflows/run'
 import type { RunTools } from './run-tools'
 import type {
   AuthMethod,
@@ -523,7 +524,7 @@ export function createFakeAdapter({
     const asked = text.toLowerCase()
     const { workspacePath } = bound.conversation
 
-    if (text.startsWith('⚑ Crucible run')) {
+    if (isRunMessage(text)) {
       const runId = /run (\w+)/.exec(text)?.[1] ?? ''
       if (asked.includes('checking in') || asked.includes('blocker') || asked.includes('stalled')) {
         return {
@@ -1242,9 +1243,11 @@ export function createFakeAdapter({
     ): Promise<{ title: string } | undefined> {
       const bound = sessions.get(sessionId)
       if (bound === undefined) return undefined
+      // Past a run's own messages, for the reason the real titler skips them:
+      // nobody typed them, and they are status rather than subject.
       const said = [...pathEntries(bound.conversation)]
         .reverse()
-        .find((entry) => entry.item.kind === 'user')
+        .find((entry) => entry.item.kind === 'user' && !isRunMessage(entry.item.text))
       if (said === undefined || said.item.kind !== 'user') return undefined
       const title = fakeTitle(said.item.text)
       return title === '' ? undefined : { title }

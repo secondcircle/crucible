@@ -30,6 +30,32 @@ describe('what the titler sees', () => {
     expect(input).not.toContain('that turn failed')
   })
 
+  it('is never what a run said, in the transcript or still in flight', () => {
+    // A run's report arrives in the user's role because prompting an agent is
+    // the only voice a run has. Nobody typed it, and a session is not about
+    // the fact that a run it started has finished.
+    const items: TranscriptItem[] = [
+      { kind: 'user', text: 'take the auth rewrite from the intent doc' },
+      { kind: 'assistant', markdown: 'Started a build run on it.' },
+      { kind: 'user', text: '⚑ Crucible run fk139 (build) is checking in:\n\nwhere does it live?' },
+      { kind: 'assistant', markdown: 'Answered it: beside its caller.' },
+      { kind: 'user', text: '⚑ Crucible run fk139 (build) completed · branch crucible/run-fk139.' }
+    ]
+
+    const input = titleInput(items, '⚑ Crucible run fk139 (build) failed · branch x.') ?? ''
+
+    expect(input).toContain('take the auth rewrite')
+    expect(input).not.toContain('Crucible run')
+  })
+
+  it('would rather name nothing than name a session after the runs it started', () => {
+    // Everything filtered leaves no input, which the caller reads as a failed
+    // pass — so the session keeps the name it had rather than taking a run's.
+    expect(
+      titleInput([{ kind: 'user', text: '⚑ Crucible run fk139 (build) completed.' }])
+    ).toBeUndefined()
+  })
+
   it('can name a compacted conversation by its summary alone', () => {
     // Right after a compaction the summary may be all there is: the titler
     // reading nothing here is how a session once earned the title "I need

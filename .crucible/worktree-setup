@@ -1,0 +1,43 @@
+#!/usr/bin/env bash
+#
+# Crucible runs this inside a freshly created worktree, with the worktree as
+# the working directory, whenever it makes one with plain git — which is every
+# workflow run. Its job is to turn a checkout into somewhere an agent can
+# actually work: here, that means `npm test`, `npm run lint` and
+# `npm run typecheck` have to run.
+#
+# See resources/agent-docs/worktrees.md for the contract.
+set -euo pipefail
+
+# The main checkout this worktree belongs to. `--git-common-dir` points at the
+# shared .git no matter how deep the worktree is.
+common="$(git rev-parse --path-format=absolute --git-common-dir)"
+checkout="${common%/.git}"
+
+if [ ! -d "$checkout/node_modules" ]; then
+  echo "the checkout at $checkout has no node_modules — run npm install there first" >&2
+  exit 1
+fi
+
+if [ -e node_modules ]; then
+  echo "node_modules is already here; leaving it alone"
+  exit 0
+fi
+
+# A real install is ~800M and several minutes, and a run would pay it every
+# time. So the common case borrows the checkout's dependencies: this worktree
+# is branched from that checkout's own history, and when the lockfile has not
+# moved, its node_modules is by definition the right one.
+if cmp -s package-lock.json "$checkout/package-lock.json"; then
+  ln -s "$checkout/node_modules" node_modules
+  echo "node_modules -> $checkout/node_modules (same lockfile)"
+  exit 0
+fi
+
+# The lockfile moved, so the checkout's dependencies are the wrong ones and
+# borrowing them would install nothing and fail strangely later. Pay for the
+# real thing. Anything this run then installs stays its own, which is also
+# what a run that is changing dependencies wants.
+echo "package-lock.json differs from the checkout's — installing for real" >&2
+npm ci >&2
+echo "node_modules installed from this worktree's own lockfile"

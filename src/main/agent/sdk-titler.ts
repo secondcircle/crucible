@@ -1,4 +1,5 @@
 import type { TranscriptItem } from '../../shared/agent/port'
+import { isRunMessage } from '../../shared/workflows/run'
 
 // No SDK type reaches this module, so the shaping and sanitizing stay testable
 // without constructing an SDK adapter.
@@ -25,6 +26,12 @@ const INPUT_LIMIT = 4_000
 // compaction or a summarized branch jump the summary IS the conversation,
 // and without it the titler would read an almost empty session.
 //
+// A run's messages arrive in the user's role because prompting an agent is
+// the only voice a run has (ADR 0017), but nobody typed them and they are
+// status, not subject. Left in, they take over the name of any session short
+// enough for a few of them to be most of it — the sidebar ends up reading
+// "Crucible run fk139 completed" instead of the work the human came for.
+//
 // `asked` is a prompt sent but not yet in the conversation the caller holds.
 // Without it the first title of a session would have nothing to read, and
 // every later one would name the session by the message before the newest.
@@ -34,13 +41,15 @@ export function titleInput(
 ): string | undefined {
   const lines: string[] = []
   for (const item of items) {
+    if (item.kind === 'user' && isRunMessage(item.text)) continue
     if (item.kind === 'user') lines.push(`user: ${clip(item.text)}`)
     else if (item.kind === 'assistant') lines.push(`assistant: ${clip(item.markdown)}`)
     else if (item.kind === 'summary') lines.push(`summary: ${clip(item.text)}`)
   }
   // The conversation may have caught up with it in the meantime, and the same
   // message twice says no more than once.
-  const pending = asked === undefined ? undefined : `user: ${clip(asked)}`
+  const pending =
+    asked === undefined || isRunMessage(asked) ? undefined : `user: ${clip(asked)}`
   if (pending !== undefined && !lines.includes(pending)) lines.push(pending)
   // The newest messages say most about what a session is about now, so the
   // oldest are the ones dropped when the whole is too long.

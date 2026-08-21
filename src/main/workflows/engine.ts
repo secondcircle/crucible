@@ -2,12 +2,13 @@ import { randomBytes } from 'node:crypto'
 import { existsSync, statSync } from 'node:fs'
 import { basename, join } from 'node:path'
 import type { SessionId, TranscriptItem } from '../../shared/agent/port'
-import type {
-  RunArtifact,
-  RunNodeStatus,
-  RunRecord,
-  RunStatus,
-  WorkflowRunId
+import {
+  runMessageHeader,
+  type RunArtifact,
+  type RunNodeStatus,
+  type RunRecord,
+  type RunStatus,
+  type WorkflowRunId
 } from '../../shared/workflows/run'
 import type {
   NodeResult,
@@ -578,7 +579,7 @@ export function createWorkflowEngine(options: EngineOptions): WorkflowEngine {
         tell(
           run,
           [
-            `⚑ Crucible run ${run.id} (${run.workflow}) ${
+            `${runMessageHeader(run)} ${
               status === 'blocked' ? 'raised a blocker' : 'stalled'
             } at node "${node.id}":`,
             '',
@@ -833,7 +834,7 @@ export function createWorkflowEngine(options: EngineOptions): WorkflowEngine {
       tell(
         run,
         [
-          `⚑ Crucible run ${run.id} (${run.workflow}) is checking in:`,
+          `${runMessageHeader(run)} is checking in:`,
           '',
           question.reason,
           ...(artifactLines.length === 0 ? [] : ['', 'Documents that come with it:', ...artifactLines]),
@@ -944,7 +945,7 @@ export function createWorkflowEngine(options: EngineOptions): WorkflowEngine {
         } catch (cause) {
           tell(
             run,
-            `⚑ Crucible run ${run.id} (${run.workflow}) staged a "${staged.workflow}" run that ` +
+            `${runMessageHeader(run)} staged a "${staged.workflow}" run that ` +
               `could not start: ${cause instanceof Error ? cause.message : String(cause)}`
           )
         }
@@ -986,7 +987,7 @@ export function createWorkflowEngine(options: EngineOptions): WorkflowEngine {
           '(merge or cherry-pick; the run never touches your tree). '
         : 'It left no new commits beyond what the workflow committed itself. '
       return (
-        `⚑ Crucible run ${run.id} (${run.workflow}) completed · ${where}.` +
+        `${runMessageHeader(run)} completed · ${where}.` +
         outputs +
         `\n\n${work}` +
         'Tell the user what came back and what you did about it.'
@@ -994,12 +995,12 @@ export function createWorkflowEngine(options: EngineOptions): WorkflowEngine {
     }
     if (outcome === 'cancelled') {
       return (
-        `⚑ Crucible run ${run.id} (${run.workflow}) was cancelled · ${where}. ` +
+        `${runMessageHeader(run)} was cancelled · ${where}. ` +
         'Whatever it had done is committed on its branch; nothing else happens on its own.'
       )
     }
     return (
-      `⚑ Crucible run ${run.id} (${run.workflow}) failed · ${where}.\n\n` +
+      `${runMessageHeader(run)} failed · ${where}.\n\n` +
       `${run.error ?? 'No error was recorded.'}\n\n` +
       'Its worktree is left as it stands for inspection. Decide whether to retry, repair, or ' +
       'bring it to the user.'

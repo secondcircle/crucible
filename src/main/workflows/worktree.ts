@@ -1,6 +1,7 @@
 import { spawn } from 'node:child_process'
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { setUpWorktree } from '../workspace/worktree-setup'
 
 // Run worktrees are plain git on purpose: a run's base is a commit named at
 // kickoff (ADR 0016), and the repo worktree script of ADR 0014 takes no base
@@ -62,6 +63,17 @@ export async function createRunWorktree(request: RunWorktreeRequest): Promise<Ru
   if (added.code !== 0) {
     throw new Error(`git worktree add failed for run ${runId}\n${added.output}`)
   }
+
+  // A worktree straight out of git is a checkout, not a working environment:
+  // no node_modules, no env file, nothing the repository's own setup puts
+  // there. Nodes run the project's checks, so failing here — before a single
+  // node has cost anything — beats a run that spends its budget rediscovering
+  // that it cannot build.
+  const setUp = await setUpWorktree(workspacePath, path)
+  if (!setUp.ok) {
+    throw new Error(`the worktree for run ${runId} could not be set up\n${setUp.output}`)
+  }
+
   return { path, branch, baseCommit }
 }
 

@@ -104,6 +104,23 @@ export interface RunRecord {
   readonly endedAt?: string
 }
 
+// Every message a run sends its orchestrator opens with this, and three
+// things downstream read it back: the fake orchestrator recognizes a run
+// speaking, the titler declines to name a session after one, and a human
+// scanning a transcript sees at a glance which messages nobody typed. It is a
+// protocol, so it is spelled once.
+export const RUN_MESSAGE_PREFIX = '⚑ Crucible run'
+
+/** Opens a message from a run to its orchestrator, and marks it as one. */
+export function runMessageHeader(run: Pick<RunRecord, 'id' | 'workflow'>): string {
+  return `${RUN_MESSAGE_PREFIX} ${run.id} (${run.workflow})`
+}
+
+/** Whether a message in a session's transcript is a run talking, not a human. */
+export function isRunMessage(text: string): boolean {
+  return text.startsWith(RUN_MESSAGE_PREFIX)
+}
+
 /** Billed dollars across the run's nodes, which is what the chip shows. */
 export function runCost(run: RunRecord): number | undefined {
   const costs = run.nodes

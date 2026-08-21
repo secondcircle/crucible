@@ -4,7 +4,15 @@
 // node loop, the orchestrator routing and the worktree life all run exactly
 // as shipped, with no SDK session anywhere (the seam is the point).
 import { execFileSync } from 'node:child_process'
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -395,6 +403,39 @@ describe('the engine end to end', () => {
       engine.start(startRequest(repo, 'solo', { prompt: join(repo, 'README.md'), extra: 'x' }))
     ).rejects.toThrow(/no input named "extra"/)
     expect(engine.runs()).toHaveLength(0)
+  })
+
+  it('sets the worktree up before a node costs anything, and fails loudly if it cannot', async () => {
+    const { engine, repo } = rig({ solo: oneNode }, () => {
+      return (prompt, tools) => {
+        writeFileSync(outputPath(prompt, 'report.md'), 'the report\n')
+        tools.complete({ summary: 'did the thing' })
+      }
+    })
+    const prompt = join(repo, 'task.md')
+    writeFileSync(prompt, 'do the thing\n')
+
+    // The repository claims the mechanism and its script refuses. Nothing is
+    // worth starting: every node would run the project's checks against a
+    // worktree that cannot build.
+    mkdirSync(join(repo, '.crucible'), { recursive: true })
+    const script = join(repo, '.crucible', 'worktree-setup')
+    writeFileSync(script, '#!/usr/bin/env bash\necho "no dependencies here" >&2\nexit 1\n', 'utf8')
+    chmodSync(script, 0o755)
+
+    await expect(engine.start(startRequest(repo, 'solo', { prompt }))).rejects.toThrow(
+      /could not be set up[\s\S]*no dependencies here/
+    )
+    // Refused at kickoff, so there is no record of a run and no session was
+    // ever started.
+    expect(engine.runs()).toHaveLength(0)
+
+    // And with a script that works, the node finds what it left behind.
+    writeFileSync(script, '#!/usr/bin/env bash\necho ready > .set-up\n', 'utf8')
+    chmodSync(script, 0o755)
+    const run = await engine.start(startRequest(repo, 'solo', { prompt }))
+    await until(() => engine.runs()[0].status === 'complete')
+    expect(readFileSync(join(run.worktreePath ?? '', '.set-up'), 'utf8').trim()).toBe('ready')
   })
 
   // Quitting is the only way a record outlives the engine that was writing

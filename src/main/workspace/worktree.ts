@@ -4,6 +4,7 @@ import { existsSync, mkdirSync, statSync, writeFileSync } from 'node:fs'
 import { access, constants } from 'node:fs/promises'
 import { isAbsolute, join } from 'node:path'
 import type { WorktreeCreation } from '../../shared/workspace/service'
+import { setUpWorktree } from './worktree-setup'
 
 // Creating a worktree is a process, so it lives behind the workspace service
 // with the rest of the OS facts. Two mechanisms and no third: the repo's own
@@ -93,6 +94,14 @@ async function fromGit(workspacePath: string): Promise<WorktreeCreation> {
   if (ran.code !== 0) {
     return { ok: false, output: `${headline('git worktree add', ran)}\n${ran.output}` }
   }
+
+  // The fallback made a checkout; the repository's own script, when it has
+  // one, makes it a place an agent can work. Only the fallback asks: the full
+  // mechanism above is the whole mechanism, and calls this itself if it wants
+  // it. A failure here leaves the worktree on disk, like every other failure.
+  const setUp = await setUpWorktree(workspacePath, path)
+  if (!setUp.ok) return { ok: false, output: setUp.output }
+
   return { ok: true, path, branch }
 }
 

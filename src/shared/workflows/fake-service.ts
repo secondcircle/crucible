@@ -1,6 +1,6 @@
 import type { SessionId, TranscriptItem, Unsubscribe } from '../agent/port'
 import type { RunTools } from '../agent/run-tools'
-import type { RunNode, RunRecord, WorkflowRunId } from './run'
+import { runMessageHeader, type RunNode, type RunRecord, type WorkflowRunId } from './run'
 import type {
   MainWorkflowRunService,
   RunsSnapshot,
@@ -155,7 +155,7 @@ export function createFakeWorkflowRunService({
           changed()
           tell(
             run,
-            `⚑ Crucible run ${run.id} (${run.workflow}) is checking in:\n\n${FAKE_QUESTION}\n\n` +
+            `${runMessageHeader(run)} is checking in:\n\n${FAKE_QUESTION}\n\n` +
               `Answer with the crucible_answer tool (runId "${run.id}").`
           )
           waiting.set(run.id, (answer) => {
@@ -185,7 +185,7 @@ export function createFakeWorkflowRunService({
     changed()
     tell(
       run,
-      `⚑ Crucible run ${run.id} (${run.workflow}) completed · branch ${run.branch} · ` +
+      `${runMessageHeader(run)} completed · branch ${run.branch} · ` +
         `worktree ${run.worktreePath}.\n\nIts work is committed on that branch — pull it in ` +
         'when you judge the moment right. Tell the user what came back.'
     )
