@@ -49,8 +49,9 @@ describe('the fake workflow run service', () => {
     expect(fannedOut.map((node) => node.id)).toEqual(['review-1', 'review-tests'])
     // A fan-in: one node naming two parents.
     expect(parentsOf('fixer-1')).toEqual(['review-1', 'review-tests'])
-    // A send-back, with a real revision id and a reviewer among its parents.
-    expect(parentsOf('review-1·r1')).toEqual(['fixer-1', 'review-tests'])
+    // A send-back, with a real revision id and the parents revise() writes:
+    // its base, two layers up, and the fixer the round answered.
+    expect(parentsOf('review-1·r1')).toEqual(['review-1', 'fixer-1'])
 
     // Every parent names a node the record holds: nothing draws to nothing.
     const ids = new Set(nodes.map((node) => node.id))

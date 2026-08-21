@@ -161,25 +161,29 @@ describe('the run graph layout', () => {
     expect(new Set(long.cards.map(() => long.cardWidth)).size).toBe(1)
   })
 
-  it('bows an edge that crosses a layer around the cards between, not through them', () => {
+  it('bows a revision’s edge to its base around the round between, so a send-back reaches back up the page', () => {
     const layout = layOutGraph([
       nodeOf('planner'),
       nodeOf('builder', ['planner']),
       nodeOf('review-1', ['builder']),
       nodeOf('fixer-1', ['review-1']),
-      // Two layers down from its base, so the line has cards to get past.
-      nodeOf('review-1·r1', ['fixer-1', 'builder'])
+      // Parents as revise() writes them: the base, then the fixer that
+      // answered the round it was sent back over.
+      nodeOf('review-1·r1', ['review-1', 'fixer-1'])
     ])
-    const bowed = layout.edges.find((edge) => edge.from === 'builder' && edge.to === 'review-1·r1')
+    const bowed = layout.edges.find((edge) => edge.from === 'review-1' && edge.to === 'review-1·r1')
 
     expect(bowed).toBeDefined()
+    // A whole round stands between the two ends, which is what makes this
+    // line the one that travels back up the page rather than one step down.
+    expect(card(layout, 'review-1·r1').layer - card(layout, 'review-1').layer).toBe(2)
+    expect(card(layout, 'review-1').y).toBeLessThan(card(layout, 'fixer-1').y)
+
     // The long run of the line is a straight vertical segment, and it is
     // clear of every card it passes.
     const lane = Number(/L([-\d.]+),/.exec(bowed?.d ?? '')?.[1])
     expect(Number.isNaN(lane)).toBe(false)
-    const passed = layout.cards.filter(
-      (one) => one.id === 'review-1' || one.id === 'fixer-1'
-    )
+    const passed = layout.cards.filter((one) => one.layer === card(layout, 'fixer-1').layer)
     for (const one of passed) {
       expect(lane < one.x || lane > one.x + layout.cardWidth, `lane through ${one.id}`).toBe(true)
     }

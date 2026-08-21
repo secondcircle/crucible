@@ -131,7 +131,6 @@ export function RunGraph({
             })}
           </div>
         </div>
-        {nodes.length === 0 ? <p className="gempty">No nodes yet.</p> : null}
       </div>
     </section>
   )

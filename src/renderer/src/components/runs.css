@@ -318,11 +318,6 @@
   pointer-events: none;
 }
 
-.gempty {
-  color: var(--faint);
-  font-size: 12.5px;
-}
-
 /* The drag handle between the graph and the detail column. */
 .rvbody > .split {
   width: 5px;
