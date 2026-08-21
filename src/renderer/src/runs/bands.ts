@@ -7,6 +7,10 @@ export type Band = 'running' | 'needsYou' | 'done'
 
 /** Total over `RunStatus`: no run is unclassified, and none is in two bands. */
 export function bandOf(run: RunRecord): Band {
+  // A dismissed run is one the user has cleared: it asks for nothing, whatever
+  // its status. The service only ever stamps a settled run, so this clause
+  // cannot hide live work.
+  if (run.dismissedAt !== undefined) return 'done'
   if (run.status === 'complete' || run.status === 'cancelled') return 'done'
   // A failed run is the one most likely to need a human, and a paused one is
   // stopped until somebody moves it.
@@ -52,11 +56,14 @@ function stamp(iso: string): number {
   return Number.isNaN(at) ? 0 : at
 }
 
-/** Ended within the last day, which is what "finished today" has always meant. */
+// Ended within the last day, which is what "finished today" has always meant.
+// A dismissed run is never counted, though it ended within the day too: a
+// dismissal is a clearing, not a finish.
 export function finishedToday(runs: readonly RunRecord[], now = Date.now()): number {
   return runs.filter(
     (run) =>
       bandOf(run) === 'done' &&
+      run.dismissedAt === undefined &&
       run.endedAt !== undefined &&
       now - stamp(run.endedAt) < 24 * 3_600_000
   ).length

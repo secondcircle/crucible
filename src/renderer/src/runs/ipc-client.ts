@@ -36,6 +36,8 @@ export function createWorkflowRunClient(): WorkflowRunService {
     pause: (runId: string) => call<void>('pause', runId),
     resume: (runId: string) => call<void>('resume', runId),
     cancel: (runId: string) => call<void>('cancel', runId),
+    dismiss: (runId: string) => call<void>('dismiss', runId),
+    adopt: (runId: string, sessionId: string) => call<void>('adopt', runId, sessionId),
     nodeTranscript: (runId: string, nodeId: string) =>
       call<readonly TranscriptItem[]>('nodeTranscript', runId, nodeId),
     artifact: (runId: string, path: string) => call<ArtifactView>('artifact', runId, path),

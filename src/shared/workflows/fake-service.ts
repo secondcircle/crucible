@@ -2,6 +2,7 @@ import type { SessionId, TranscriptItem, Unsubscribe } from '../agent/port'
 import type { RunTools } from '../agent/run-tools'
 import { artifactKind, artifactName, recordNamesPath } from './artifacts'
 import {
+  dismissRefusal,
   runMessageHeader,
   type RunArtifact,
   type RunNode,
@@ -19,14 +20,19 @@ import type {
 // tool call starts a run that walks its nodes on a timer, parks once when
 // the workflow is `build` (so the routed-question surfaces are exercisable),
 // and completes with the same message-to-the-orchestrator the engine sends.
-// Two canned records seed the global view — one waiting on a person, one
-// finished — so ⌘R shows its bands without anything having been started.
+// Three canned records seed the global view — one waiting on a person, one
+// finished, one failed whose orchestrator session is gone — so ⌘R shows its
+// bands, and Dismiss and Investigate both have something to act on, without
+// anything having been started.
 //
 // Scripted nodes declare the artifacts they will write and then write them,
 // so the artifact rail, the reader and the exhibit-run route are all
 // exercised under `npm run dev`.
 
 const CANNED_WORKSPACE = { path: '/fake/resume-site', name: 'resume-site' }
+
+/** The parked-with-no-one-to-ask run, named because its answer path is wired. */
+const CANNED_UNATTENDED_ID = 'g8x2'
 
 /** Slow enough to watch under `npm run dev`; tests pass zero. */
 const DEFAULT_BEAT_MS = 700
@@ -75,6 +81,7 @@ interface LiveNode {
   artifacts: RunArtifact[]
   verdict?: unknown
   summary?: string
+  error?: string
   startedAt?: string
   endedAt?: string
   lastActivityAt?: string
@@ -105,6 +112,8 @@ interface LiveRun {
   createdAt: string
   startedAt?: string
   endedAt?: string
+  dismissedAt?: string
+  dir?: string
 }
 
 /** One output of a scripted node: what it declares, and what it writes. */
@@ -287,7 +296,17 @@ export function createFakeWorkflowRunService({
   const artifactDir = (runId: WorkflowRunId): string =>
     files?.dir(runId) ?? `/fake/state/workflow-runs/${runId}/artifacts`
 
-  const records: LiveRun[] = [cannedUnattended(artifactDir), cannedFinished(artifactDir)]
+  // The run's own directory, which is the artifact directory's parent — the
+  // same `<root>/<runId>/` the live store lays out. It is what the
+  // Investigate prompt names as the place to read run.json and transcripts.
+  const runDir = (runId: WorkflowRunId): string =>
+    artifactDir(runId).replace(/[\\/]artifacts$/, '')
+
+  const records: LiveRun[] = [
+    cannedUnattended(artifactDir, runDir),
+    cannedFailed(artifactDir, runDir),
+    cannedFinished(artifactDir, runDir)
+  ]
   // The canned runs' files exist from the moment the service does, so opening
   // one in the reader shows real content without anything having been started.
   for (const run of records) {
@@ -297,6 +316,16 @@ export function createFakeWorkflowRunService({
         files?.write(artifact.path, CANNED_BODIES[artifactName(artifact.path)] ?? CANNED_BODY)
       }
     }
+  }
+  // The canned parked run is answerable, not just observable: once a session
+  // has adopted it, crucible_answer from there unblocks its builder and the
+  // script walks the rest of the run home. That is the unstick demo, free.
+  const stuck = records.find((run) => run.id === CANNED_UNATTENDED_ID)
+  if (stuck !== undefined) {
+    waiting.set(stuck.id, (answer) => {
+      waiting.delete(stuck.id)
+      resumeCannedParked(stuck, answer)
+    })
   }
 
   function changed(): void {
@@ -420,6 +449,35 @@ export function createFakeWorkflowRunService({
     })
   }
 
+  // The canned parked run's own resume path. It has no script behind it — it
+  // was born mid-run — so its blocked node is completed here, and the script
+  // takes over from the node after it.
+  function resumeCannedParked(run: LiveRun, answer: string): void {
+    run.waiting = false
+    if (run.question !== undefined) {
+      run.question.answeredAt = nowIso()
+      run.question.answer = answer
+    }
+    const blocked = run.nodes.find((node) => node.status === 'blocked')
+    if (blocked !== undefined) {
+      blocked.status = 'complete'
+      blocked.endedAt = nowIso()
+      blocked.summary = 'Unblocked by the answer; finished what it was holding.'
+      delete blocked.now
+      blocked.artifacts = blocked.artifacts.map((artifact) => {
+        files?.write(artifact.path, CANNED_BODIES[artifactName(artifact.path)] ?? CANNED_BODY)
+        return { ...artifact, writtenAt: nowIso() }
+      })
+    }
+    changed()
+    const next = run.nodes.findIndex((node) => node.status === 'pending')
+    beat(run, () => {
+      if (next < 0) finish(run)
+      // The cost the resumed node bills, in the same scale the script uses.
+      else startNode(run, next, 0.42)
+    })
+  }
+
   function finish(run: LiveRun): void {
     run.status = 'complete'
     run.endedAt = nowIso()
@@ -495,7 +553,8 @@ export function createFakeWorkflowRunService({
         inputDescs: describeInputs(workflow, inputs),
         nodes,
         createdAt: nowIso(),
-        startedAt: nowIso()
+        startedAt: nowIso(),
+        dir: runDir(id)
       }
       records.unshift(run)
       changed()
@@ -552,6 +611,23 @@ export function createFakeWorkflowRunService({
       if (run.status !== 'paused') return
       paused.delete(runId)
       run.status = 'running'
+      changed()
+    },
+
+    async dismiss(runId: WorkflowRunId): Promise<void> {
+      const run = requireRun(runId)
+      if (run.status === 'running' || run.status === 'paused') throw new Error(dismissRefusal(runId))
+      if (run.dismissedAt !== undefined) return
+      run.dismissedAt = nowIso()
+      changed()
+    },
+
+    async adopt(runId: WorkflowRunId, sessionId: SessionId): Promise<void> {
+      const run = requireRun(runId)
+      if (run.sessionId === sessionId) return
+      // Every later message follows the record, so the new session gets the
+      // check-ins, the completion and the run in its crucible_runs list.
+      run.sessionId = sessionId
       changed()
     },
 
@@ -633,7 +709,10 @@ function hoursAgo(hours: number): string {
 }
 
 /** A finished run in another workspace, so the global view has grouping. */
-function cannedFinished(artifactDir: (runId: WorkflowRunId) => string): LiveRun {
+function cannedFinished(
+  artifactDir: (runId: WorkflowRunId) => string,
+  runDir: (runId: WorkflowRunId) => string
+): LiveRun {
   const dir = artifactDir('d3p8')
   const intent = `${CANNED_WORKSPACE.path}/docs/intent/og-images.md`
   const read = (path: string): RunArtifact => ({ name: artifactName(path), path, desc: 'input' })
@@ -739,18 +818,100 @@ function cannedFinished(artifactDir: (runId: WorkflowRunId) => string): LiveRun 
     outputs: { verdict: 'approved' },
     createdAt: hoursAgo(4),
     startedAt: hoursAgo(4),
-    endedAt: hoursAgo(2)
+    endedAt: hoursAgo(2),
+    dir: runDir('d3p8')
   }
 }
 
-/** A session-less parked run: the future unattended kind, seeding ⌘R's
- *  "Start session" state without any unattended machinery existing. */
-function cannedUnattended(artifactDir: (runId: WorkflowRunId) => string): LiveRun {
-  const dir = artifactDir('g8x2')
+// The screenshot state: a failed build whose orchestrator session has been
+// removed from the sidebar, so the row has no Go to session and nothing that
+// can end it. Dismiss clears it into Done; Investigate adopts it and asks
+// what happened.
+function cannedFailed(
+  artifactDir: (runId: WorkflowRunId) => string,
+  runDir: (runId: WorkflowRunId) => string
+): LiveRun {
+  const dir = artifactDir('b1n7')
+  const intent = `${CANNED_WORKSPACE.path}/docs/intent/og-images.md`
+  const spec = `${dir}/spec.md`
+  return {
+    id: 'b1n7',
+    workflow: 'build',
+    status: 'failed',
+    workspacePath: CANNED_WORKSPACE.path,
+    workspaceName: CANNED_WORKSPACE.name,
+    // A session that is not in the sidebar and never will be again.
+    sessionId: 'fake-removed-session',
+    worktreePath: `${CANNED_WORKSPACE.path}/.crucible/worktrees/run-b1n7`,
+    branch: 'crucible/run-b1n7',
+    baseCommit: 'd00d1efake',
+    inputs: { intent },
+    inputDescs: { intent: 'The intent document for the work.' },
+    nodes: [
+      {
+        id: 'planner',
+        status: 'complete',
+        parents: [],
+        model: 'anthropic/claude-fable-5:high',
+        reads: [{ name: artifactName(intent), path: intent, desc: 'input' }],
+        artifacts: [
+          {
+            name: 'spec',
+            path: spec,
+            desc: 'the Spec: what to build, derived from the intent document',
+            writtenAt: hoursAgo(5.4)
+          }
+        ],
+        summary: 'Wrote the spec.',
+        cost: 0.58,
+        toolCalls: 11,
+        startedAt: hoursAgo(5.6),
+        endedAt: hoursAgo(5.4)
+      },
+      {
+        id: 'builder',
+        status: 'failed',
+        parents: ['planner'],
+        model: 'anthropic/claude-opus-5:high',
+        reads: [
+          { name: artifactName(intent), path: intent, desc: 'input' },
+          { name: 'spec.md', path: spec, desc: 'input' }
+        ],
+        artifacts: [
+          {
+            name: 'changes',
+            path: `${dir}/changes.md`,
+            desc: 'every file the builder touched, with reasons'
+          }
+        ],
+        error:
+          'output validation failed 3x: required output "changes" is missing or empty',
+        cost: 1.3,
+        toolCalls: 34,
+        startedAt: hoursAgo(5.4),
+        endedAt: hoursAgo(5),
+        lastActivityAt: hoursAgo(5)
+      }
+    ],
+    error: 'node "builder" failed validation: required output "changes" is missing or empty',
+    createdAt: hoursAgo(5.6),
+    startedAt: hoursAgo(5.6),
+    endedAt: hoursAgo(5),
+    dir: runDir('b1n7')
+  }
+}
+
+/** A session-less parked run: the unattended kind, parked with no one to ask
+ *  until a session investigates it and adopts it. */
+function cannedUnattended(
+  artifactDir: (runId: WorkflowRunId) => string,
+  runDir: (runId: WorkflowRunId) => string
+): LiveRun {
+  const dir = artifactDir(CANNED_UNATTENDED_ID)
   const intent = `${CANNED_WORKSPACE.path}/docs/intent/quota-flicker.md`
   const spec = `${dir}/spec.md`
   return {
-    id: 'g8x2',
+    id: CANNED_UNATTENDED_ID,
     workflow: 'build',
     status: 'running',
     workspacePath: CANNED_WORKSPACE.path,
@@ -809,10 +970,20 @@ function cannedUnattended(artifactDir: (runId: WorkflowRunId) => string): LiveRu
         toolCalls: 22,
         startedAt: hoursAgo(1),
         lastActivityAt: hoursAgo(0.7)
+      },
+      // Waiting its turn, so answering the check-in has somewhere to walk to.
+      {
+        id: 'review-1',
+        status: 'pending',
+        parents: ['builder'],
+        model: 'anthropic/claude-fable-5:high',
+        reads: [],
+        artifacts: []
       }
     ],
     createdAt: hoursAgo(1.2),
-    startedAt: hoursAgo(1.2)
+    startedAt: hoursAgo(1.2),
+    dir: runDir(CANNED_UNATTENDED_ID)
   }
 }
 

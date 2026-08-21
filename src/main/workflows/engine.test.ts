@@ -698,6 +698,143 @@ describe('what the record says about artifacts', () => {
   })
 })
 
+// Clearing a run and handing it to another session: the two acts ⌘R offers
+// on a run that is asking for attention nobody is left to give.
+describe('dismissing and adopting a run', () => {
+  /** A run taken to completion, which is the only kind that can be dismissed. */
+  async function finishedRun(): Promise<Rig> {
+    const built = rig({ solo: oneNode }, () => {
+      return (prompt, tools) => {
+        writeFileSync(outputPath(prompt, 'report.md'), 'the report\n')
+        tools.complete({ summary: 'did the thing' })
+      }
+    })
+    const task = join(built.repo, 'task.md')
+    writeFileSync(task, 'the task\n')
+    await built.engine.start(startRequest(built.repo, 'solo', { prompt: task }))
+    await until(() => built.engine.runs()[0].status === 'complete')
+    return built
+  }
+
+  it('refuses to dismiss a run that is still working', async () => {
+    let release = (): void => {}
+    const held = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const { engine, repo } = rig({ solo: oneNode }, () => {
+      return async (prompt, tools) => {
+        await held
+        writeFileSync(outputPath(prompt, 'report.md'), 'late\n')
+        tools.complete({ summary: 'done at last' })
+      }
+    })
+    const task = join(repo, 'task.md')
+    writeFileSync(task, 'the task\n')
+    const started = await engine.start(startRequest(repo, 'solo', { prompt: task }))
+
+    expect(() => engine.dismiss(started.id)).toThrow(/still working/)
+    expect(engine.runs()[0].dismissedAt).toBeUndefined()
+
+    release()
+    await until(() => engine.runs()[0].status === 'complete')
+  })
+
+  it('stamps a settled run once, and the stamp outlives the launch', async () => {
+    const { engine, stateDir } = await finishedRun()
+    const runId = engine.runs()[0].id
+
+    engine.dismiss(runId)
+    const stamped = engine.runs()[0].dismissedAt
+    expect(stamped).toBeDefined()
+
+    // Dismissing again says nothing new: the first stamp stands.
+    engine.dismiss(runId)
+    expect(engine.runs()[0].dismissedAt).toBe(stamped)
+    // And nothing else about the run moved.
+    expect(engine.runs()[0].status).toBe('complete')
+    expect(existsSync(engine.runs()[0].worktreePath ?? '')).toBe(true)
+
+    const reloaded = createRunStore(stateDir).load()
+    expect(reloaded[0].dismissedAt).toBe(stamped)
+  })
+
+  it('hands a live run to another session, and its next messages follow', async () => {
+    const { engine, repo, delivered } = rig({ solo: oneNode }, () => {
+      return (_prompt, tools, turn) => {
+        if (turn === 1) {
+          tools.block({ reason: 'nobody is left to ask' })
+          return
+        }
+        writeFileSync(outputPath(tools.taskPrompt, 'report.md'), 'fixed\n')
+        tools.complete({ summary: 'done after help' })
+      }
+    })
+    const task = join(repo, 'task.md')
+    writeFileSync(task, 'the task\n')
+    const started = await engine.start(startRequest(repo, 'solo', { prompt: task }))
+    await until(() => engine.runs()[0].waiting === true)
+
+    // The blocker was already sent, and it stays where it landed.
+    expect(delivered.at(-1)?.sessionId).toBe('orchestrator-1')
+    const alreadySent = delivered.length
+
+    engine.adopt(started.id, 'investigator-9')
+    expect(engine.runs()[0].sessionId).toBe('investigator-9')
+
+    // The adopting session answers the question the old orchestrator never
+    // could, and the run walks on.
+    engine.answer(started.id, 'use the fallback')
+    await until(() => engine.runs()[0].status === 'complete')
+
+    const after = delivered.slice(alreadySent)
+    expect(after.length).toBeGreaterThan(0)
+    expect(after.every((message) => message.sessionId === 'investigator-9')).toBe(true)
+    expect(after.at(-1)?.text).toContain('completed')
+  })
+
+  it('hands a settled run over too, and writes the new owner down', async () => {
+    const { engine, stateDir } = await finishedRun()
+    const runId = engine.runs()[0].id
+
+    engine.adopt(runId, 'investigator-9')
+    expect(engine.runs()[0].sessionId).toBe('investigator-9')
+    expect(createRunStore(stateDir).load()[0].sessionId).toBe('investigator-9')
+
+    // A run already owned by that session is a quiet no-op.
+    engine.adopt(runId, 'investigator-9')
+    expect(engine.runs()[0].sessionId).toBe('investigator-9')
+    expect(() => engine.adopt('nosuchrun', 'investigator-9')).toThrow(/No run is named/)
+  })
+
+  it('carries the run directory on every record, backfilling the old ones', async () => {
+    const { engine, stateDir } = await finishedRun()
+    const runId = engine.runs()[0].id
+    expect(engine.runs()[0].dir).toBe(join(stateDir, runId))
+
+    // A record written before the field existed: the store knows where it
+    // read it from, so it says so.
+    const older = join(stateDir, 'old1')
+    mkdirSync(older, { recursive: true })
+    writeFileSync(
+      join(older, 'run.json'),
+      JSON.stringify({
+        id: 'old1',
+        workflow: 'adhoc',
+        status: 'complete',
+        workspacePath: '/repos/thing',
+        workspaceName: 'thing',
+        inputs: {},
+        nodes: [],
+        createdAt: '2020-01-01T00:00:00.000Z'
+      })
+    )
+
+    const loaded = createRunStore(stateDir).load()
+    expect(loaded.find((run) => run.id === 'old1')?.dir).toBe(older)
+    expect(loaded.find((run) => run.id === runId)?.dir).toBe(join(stateDir, runId))
+  })
+})
+
 /** Where a run's artifacts live, as the store lays them out. */
 function stateDirOf(runId: string, built: Rig): string {
   return join(built.stateDir, runId, 'artifacts')

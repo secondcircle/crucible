@@ -14,6 +14,8 @@ export interface RunStore {
   /** Every persisted record, newest first. Unreadable ones are skipped. */
   load(): readonly RunRecord[]
   save(run: RunRecord): void
+  /** The run's own directory: run.json, artifacts/, transcripts/. */
+  runDir(runId: WorkflowRunId): string
   /** The run's artifact directory, created on first ask. */
   artifactDir(runId: WorkflowRunId): string
   writeTranscript(runId: WorkflowRunId, nodeId: string, items: readonly TranscriptItem[]): void
@@ -56,7 +58,10 @@ export function createRunStore(
         try {
           const record = JSON.parse(readFileSync(path, 'utf8')) as RunRecord
           if (typeof record.id === 'string' && typeof record.workflow === 'string') {
-            records.push(record)
+            // Backfilled rather than trusted: the directory the record was
+            // read from is where it lives, whatever a record written before
+            // the field existed says.
+            records.push({ ...record, dir: join(root, name) })
           }
         } catch (cause) {
           onFailure?.(path, cause)
@@ -74,6 +79,8 @@ export function createRunStore(
       }
       writeJsonAtomic(join(runDir(run.id), 'run.json'), run)
     },
+
+    runDir,
 
     artifactDir(runId: WorkflowRunId): string {
       const dir = join(runDir(runId), 'artifacts')

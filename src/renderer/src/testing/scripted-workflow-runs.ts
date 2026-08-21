@@ -66,6 +66,14 @@ export function createScriptedWorkflowRuns(
       calls.push({ op: 'cancel', args: [runId] })
     },
 
+    async dismiss(runId: string) {
+      calls.push({ op: 'dismiss', args: [runId] })
+    },
+
+    async adopt(runId: string, sessionId: string) {
+      calls.push({ op: 'adopt', args: [runId, sessionId] })
+    },
+
     async nodeTranscript(runId: string, nodeId: string) {
       calls.push({ op: 'nodeTranscript', args: [runId, nodeId] })
       return transcripts.get(`${runId}:${nodeId}`) ?? []

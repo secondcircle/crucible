@@ -172,6 +172,14 @@ export function createLiveWorkflowRunService({
       engine.cancel(runId)
     },
 
+    async dismiss(runId: string): Promise<void> {
+      engine.dismiss(runId)
+    },
+
+    async adopt(runId: string, sessionId: SessionId): Promise<void> {
+      engine.adopt(runId, sessionId)
+    },
+
     async nodeTranscript(runId: string, nodeId: string): Promise<readonly TranscriptItem[]> {
       return engine.nodeTranscript(runId, nodeId)
     },

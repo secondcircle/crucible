@@ -10,6 +10,8 @@ function serviceRecorder(): MainWorkflowRunService {
     pause: vi.fn(async () => {}),
     resume: vi.fn(async () => {}),
     cancel: vi.fn(async () => {}),
+    dismiss: vi.fn(async () => {}),
+    adopt: vi.fn(async () => {}),
     nodeTranscript: vi.fn(async () => []),
     artifact: vi.fn(async () => ({ kind: 'markdown' as const, body: '# spec', bytes: 6 })),
     revealArtifact: vi.fn(async () => {}),
@@ -34,6 +36,17 @@ describe('the workflow-run channel', () => {
     expect(service.pause).toHaveBeenCalledWith('ab12')
     await invoke(service, { op: 'nodeTranscript', args: ['ab12', 'work'] })
     expect(service.nodeTranscript).toHaveBeenCalledWith('ab12', 'work')
+  })
+
+  it('dispatches Dismiss and Investigate’s adoption, arguments checked', async () => {
+    const service = serviceRecorder()
+    await invoke(service, { op: 'dismiss', args: ['ab12'] })
+    expect(service.dismiss).toHaveBeenCalledWith('ab12')
+    await invoke(service, { op: 'adopt', args: ['ab12', 's7'] })
+    expect(service.adopt).toHaveBeenCalledWith('ab12', 's7')
+
+    await expect(invoke(service, { op: 'dismiss', args: [] })).rejects.toThrow(/needs text/)
+    await expect(invoke(service, { op: 'adopt', args: ['ab12'] })).rejects.toThrow(/needs text/)
   })
 
   it('dispatches the artifact operations, both arguments checked', async () => {

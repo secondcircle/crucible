@@ -3,6 +3,7 @@ import { existsSync, statSync } from 'node:fs'
 import { basename, join } from 'node:path'
 import type { SessionId, TranscriptItem } from '../../shared/agent/port'
 import {
+  dismissRefusal,
   runMessageHeader,
   type RunArtifact,
   type RunNodeStatus,
@@ -63,6 +64,10 @@ export interface WorkflowEngine {
   pause(runId: WorkflowRunId): void
   resume(runId: WorkflowRunId): void
   cancel(runId: WorkflowRunId): void
+  /** Stamps a settled run dismissed; refuses a live one. Stamping twice is a no-op. */
+  dismiss(runId: WorkflowRunId): void
+  /** Hands the run to another session: every later message goes there. */
+  adopt(runId: WorkflowRunId, sessionId: SessionId): void
   /** The orchestrator's answer to whatever the run is waiting on. */
   answer(runId: WorkflowRunId, message: string): void
   nodeTranscript(runId: WorkflowRunId, nodeId: string): readonly TranscriptItem[]
@@ -143,6 +148,8 @@ interface LiveRun {
   createdAt: string
   startedAt?: string
   endedAt?: string
+  dismissedAt?: string
+  dir?: string
 }
 
 interface Waiter {
@@ -320,6 +327,7 @@ export function createWorkflowEngine(options: EngineOptions): WorkflowEngine {
       baseCommit: worktree.baseCommit,
       inputs,
       inputDescs: { ...def.inputs },
+      dir: store.runDir(id),
       nodes: planned.map(
         (plan): LiveNode => ({
           id: plan.id,
@@ -1098,6 +1106,25 @@ export function createWorkflowEngine(options: EngineOptions): WorkflowEngine {
       handle.cancelRequested = true
       rejectWaiters(handle, 'the run was cancelled')
       void releaseLiveNodes(handle)
+    },
+
+    dismiss(runId: WorkflowRunId): void {
+      const run = requireRecord(runId)
+      if (run.status === 'running' || run.status === 'paused') throw new Error(dismissRefusal(runId))
+      // The first stamp stands: dismissing twice says nothing new.
+      if (run.dismissedAt !== undefined) return
+      run.dismissedAt = nowIso()
+      save(run)
+    },
+
+    adopt(runId: WorkflowRunId, sessionId: SessionId): void {
+      // The record is the run, live or settled: the handle holds the same
+      // object, so a live run's next message follows the record's session.
+      const run = requireRecord(runId)
+      if (run.sessionId === sessionId) return
+      run.sessionId = sessionId
+      save(run)
+      log?.({ event: 'run_adopted', runId, sessionId })
     },
 
     answer(runId: WorkflowRunId, message: string): void {

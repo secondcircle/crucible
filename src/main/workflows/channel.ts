@@ -72,6 +72,10 @@ export async function invoke(service: WorkflowRunService, request: unknown): Pro
       return service.resume(text(0))
     case 'cancel':
       return service.cancel(text(0))
+    case 'dismiss':
+      return service.dismiss(text(0))
+    case 'adopt':
+      return service.adopt(text(0), text(1))
     case 'nodeTranscript':
       return service.nodeTranscript(text(0), text(1))
     case 'artifact':

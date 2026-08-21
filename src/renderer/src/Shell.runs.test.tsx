@@ -98,6 +98,15 @@ const row = (id: string): HTMLElement | null =>
     (found) => found.querySelector('.id')?.textContent === id
   ) ?? null
 
+/** The buttons on one run's row, in the order the row lays them out. */
+const buttonsOf = (id: string): string[] =>
+  [...(row(id)?.querySelectorAll('button') ?? [])].map((button) => button.textContent ?? '')
+
+const investigateIn = (id: string): HTMLButtonElement | undefined =>
+  [...(row(id)?.querySelectorAll<HTMLButtonElement>('button') ?? [])].find(
+    (button) => button.textContent === 'Investigate'
+  )
+
 /** The run ids in one band, in the order the band renders them. */
 function rowsOf(band: string): string[] {
   const held = [...document.querySelectorAll('.band')].find(
@@ -220,7 +229,7 @@ describe('the run view', () => {
     expect(screen.getByText('the spec holds')).toBeInTheDocument()
   })
 
-  it('Pause and Cancel reach the service; a parked run shows the routed banner', async () => {
+  it('Pause reaches the service; a parked run shows the routed banner', async () => {
     const { workflowRuns } = mount([
       runOf({
         waiting: true,
@@ -243,10 +252,33 @@ describe('the run view', () => {
 
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: 'Pause' }))
-      fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
       await settled()
     })
     expect(workflowRuns.calls).toContainEqual({ op: 'pause', args: ['en42'] })
+  })
+
+  // One dialog, wherever Cancel is offered: the header path asks exactly as
+  // the row path does.
+  it('Cancel in the header raises the confirm, and confirming stops the run', async () => {
+    const { workflowRuns } = mount([runOf({})])
+    await act(settled)
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /build.*builder/s }))
+      await settled()
+    })
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+      await settled()
+    })
+
+    expect(screen.getByRole('dialog', { name: 'Cancel this run?' })).toBeInTheDocument()
+    expect(workflowRuns.calls).not.toContainEqual({ op: 'cancel', args: ['en42'] })
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Cancel the run' }))
+      await settled()
+    })
     expect(workflowRuns.calls).toContainEqual({ op: 'cancel', args: ['en42'] })
   })
 })
@@ -391,16 +423,8 @@ describe('the global runs view', () => {
     expect(screen.getByLabelText('All runs')).toBeInTheDocument()
   })
 
-  it('Go to session lands in the orchestrator session; Start session opens one in the run workspace', async () => {
-    const { port } = mount([
-      runOf({}),
-      runOf({
-        id: 'g8x2',
-        sessionId: undefined,
-        workspacePath: '/repos/resume-site',
-        workspaceName: 'resume-site'
-      })
-    ])
+  it('Go to session lands in the orchestrator session', async () => {
+    const { port } = mount([runOf({})])
     await act(settled)
 
     await act(async () => {
@@ -413,15 +437,260 @@ describe('the global runs view', () => {
     })
     expect(port.calls).toContainEqual({ op: 'activateSession', args: ['s1'] })
     expect(screen.queryByLabelText('All runs')).toBeNull()
+  })
 
+  // Start session offered a chat that knew nothing about the run. Investigate
+  // took its slot, its emphasis, and its job.
+  it('has no Start session anywhere; Investigate is primary on the session-less row', async () => {
+    await open([
+      runOf({}),
+      runOf({
+        id: 'g8x2',
+        sessionId: undefined,
+        workspacePath: '/repos/resume-site',
+        workspaceName: 'resume-site'
+      })
+    ])
+
+    expect(screen.queryByRole('button', { name: 'Start session' })).toBeNull()
+    expect(buttonsOf('en42')).toEqual(['Open run', 'Go to session', 'Investigate'])
+    expect(buttonsOf('g8x2')).toEqual(['Open run', 'Investigate'])
+    expect(investigateIn('g8x2')?.className).toContain('primary')
+    expect(investigateIn('en42')?.className).not.toContain('primary')
+  })
+})
+
+// One button, two states, on the rows that are asking for something.
+describe('clearing a run that needs you', () => {
+  it('offers Cancel on the live rows, Dismiss on the failed one, and neither elsewhere', async () => {
+    await open([
+      runOf({}),
+      runOf({
+        id: 'park',
+        waiting: true,
+        question: { reason: 'which way?', raisedAt: '2026-08-20T10:10:00.000Z' }
+      }),
+      runOf({ id: 'paus', status: 'paused' }),
+      runOf({ id: 'fail', status: 'failed', endedAt: '2026-08-20T11:00:00.000Z' }),
+      runOf({ id: 'done', status: 'complete', endedAt: '2026-08-20T11:00:00.000Z' })
+    ])
+
+    expect(buttonsOf('park')).toEqual(['Open run', 'Go to session', 'Cancel', 'Investigate'])
+    expect(buttonsOf('paus')).toEqual(['Open run', 'Go to session', 'Cancel', 'Investigate'])
+    expect(buttonsOf('fail')).toEqual(['Open run', 'Go to session', 'Dismiss', 'Investigate'])
+    // A healthy running row is not asking, and a done row asks nothing.
+    expect(buttonsOf('en42')).toEqual(['Open run', 'Go to session', 'Investigate'])
+    expect(buttonsOf('done')).toEqual(['Open run', 'Go to session', 'Investigate'])
+  })
+
+  it('dismisses without a confirm, disables the button, and re-bands on the snapshot', async () => {
+    const { workflowRuns } = mount([
+      runOf({ id: 'fail', status: 'failed', endedAt: '2026-08-20T11:00:00.000Z' })
+    ])
+    await act(settled)
+    await act(async () => {
+      fireEvent.keyDown(document, { key: 'r', metaKey: true })
+      await settled()
+    })
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Dismiss' }))
+      await settled()
+    })
+    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(workflowRuns.calls).toContainEqual({ op: 'dismiss', args: ['fail'] })
+    expect((screen.getByRole('button', { name: 'Dismiss' }) as HTMLButtonElement).disabled).toBe(
+      true
+    )
+    // Still in Needs you until the record says otherwise.
+    expect(rowsOf('Needs you')).toEqual(['fail'])
+
+    await act(async () => {
+      workflowRuns.setRuns([
+        runOf({
+          id: 'fail',
+          status: 'failed',
+          endedAt: '2026-08-20T11:00:00.000Z',
+          dismissedAt: '2026-08-20T12:00:00.000Z'
+        })
+      ])
+      await settled()
+    })
+
+    expect(bands()).toEqual(['Done'])
+    expect(rowsOf('Done')).toEqual(['fail'])
+    // The row stops shouting: dimmed, saying it was dismissed, still openable.
+    const cleared = row('fail')
+    expect(cleared?.className).toContain('done')
+    expect(cleared?.className).not.toContain('failed')
+    expect(cleared?.querySelector('.st')?.textContent).toMatch(/^failed · dismissed · /)
+    expect(buttonsOf('fail')).toEqual(['Open run', 'Go to session', 'Investigate'])
+    // And it never counts as work finished today.
+    expect(count()).toBe('nothing running')
+  })
+
+  it('asks before cancelling, in the pinned words, and does nothing when declined', async () => {
+    const { workflowRuns } = mount([runOf({ id: 'paus', status: 'paused' })])
+    await act(settled)
+    await act(async () => {
+      fireEvent.keyDown(document, { key: 'r', metaKey: true })
+      await settled()
+    })
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+      await settled()
+    })
+    const dialog = screen.getByRole('dialog', { name: 'Cancel this run?' })
+    expect(dialog).toHaveTextContent('Its agents stop where they stand')
+    expect(dialog).toHaveTextContent('The worktree, branch and artifacts all stay.')
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Let it keep working' }))
+      await settled()
+    })
+    expect(workflowRuns.calls).toEqual([])
+    // The run keeps working, so its button is a button again.
+    expect((screen.getByRole('button', { name: 'Cancel' }) as HTMLButtonElement).disabled).toBe(
+      false
+    )
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+      await settled()
+    })
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Cancel the run' }))
+      await settled()
+    })
+    expect(workflowRuns.calls).toContainEqual({ op: 'cancel', args: ['paus'] })
+    expect(screen.queryByRole('dialog')).toBeNull()
+    expect((screen.getByRole('button', { name: 'Cancel' }) as HTMLButtonElement).disabled).toBe(
+      true
+    )
+  })
+})
+
+describe('investigating a run', () => {
+  it('makes a session in the run workspace, adopts the run, then prompts it', async () => {
+    const { port, workflowRuns } = mount([
+      runOf({
+        id: 'fail',
+        status: 'failed',
+        endedAt: '2026-08-20T11:00:00.000Z',
+        error: 'the builder never wrote its changes file',
+        dir: '/state/workflow-runs/fail',
+        workspacePath: '/repos/resume-site',
+        workspaceName: 'resume-site'
+      })
+    ])
+    await act(settled)
+    await act(async () => {
+      fireEvent.keyDown(document, { key: 'r', metaKey: true })
+      await settled()
+    })
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Investigate' }))
+      await settled()
+    })
+
+    const created = port.calls.find((call) => call.op === 'createSession')
+    const prompted = port.calls.find((call) => call.op === 'prompt')
+    // The session is made in the run's own workspace, not the active one.
+    expect(created?.args).toEqual(['w2'])
+    const sessionId = String(prompted?.args[0])
+    // Adopted before the prompt went out, so crucible_runs already lists it.
+    expect(workflowRuns.calls).toContainEqual({ op: 'adopt', args: ['fail', sessionId] })
+    expect(port.calls.findIndex((call) => call.op === 'prompt')).toBeGreaterThan(
+      port.calls.findIndex((call) => call.op === 'activateSession')
+    )
+    expect(port.snapshotNow.activeSessionId).toBe(sessionId)
+
+    const text = String(prompted?.args[1])
+    expect(text).toContain('fail')
+    expect(text).toContain('failed')
+    expect(text).toContain('crucible/run-en42')
+    expect(text).toContain('the builder never wrote its changes file')
+    expect(text).toContain('/state/workflow-runs/fail')
+    // Echoed in the transcript, and the region is gone: you land in the chat.
+    expect(screen.getByText(/Investigate Crucible run fail/)).toBeTruthy()
+    expect(screen.queryByLabelText('All runs')).toBeNull()
+  })
+
+  it('disables the button for the whole flight, so one click makes one session', async () => {
+    const { port } = mount([runOf({})])
+    await act(settled)
+    await act(async () => {
+      fireEvent.keyDown(document, { key: 'r', metaKey: true })
+      await settled()
+    })
+
+    // Held open the way a real session creation is.
+    let release = (): void => {}
+    const held = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const create = port.createSession.bind(port)
+    port.createSession = async (workspaceId: string) => {
+      await held
+      return create(workspaceId)
+    }
+
+    const button = (): HTMLButtonElement =>
+      screen.getByRole('button', { name: 'Investigate' }) as HTMLButtonElement
+    await act(async () => {
+      fireEvent.click(button())
+      await settled()
+    })
+    expect(button().disabled).toBe(true)
+    await act(async () => {
+      fireEvent.click(button())
+      await settled()
+    })
+
+    await act(async () => {
+      release()
+      await settled()
+    })
+    expect(port.calls.filter((call) => call.op === 'createSession')).toHaveLength(1)
+  })
+
+  it('says why it cannot act when the run workspace is not in the sidebar', async () => {
+    await open([
+      runOf({ id: 'away', workspacePath: '/repos/elsewhere', workspaceName: 'elsewhere' })
+    ])
+
+    const button = investigateIn('away')
+    expect(button?.disabled).toBe(true)
+    expect(button?.title).toBe(
+      'Add elsewhere to the sidebar first — an investigation runs in a session of its own.'
+    )
+  })
+
+  it('is offered in the run view header too, whatever the run status', async () => {
+    const { port, workflowRuns } = mount([
+      runOf({ id: 'd3p8', status: 'complete', endedAt: '2026-08-20T11:00:00.000Z' })
+    ])
+    await act(settled)
     await act(async () => {
       fireEvent.keyDown(document, { key: 'r', metaKey: true })
       await settled()
     })
     await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: 'Start session' }))
+      fireEvent.click(screen.getByRole('button', { name: 'Open run' }))
       await settled()
     })
-    expect(port.calls).toContainEqual({ op: 'createSession', args: ['w2'] })
+
+    const header = screen.getByLabelText('Run d3p8').querySelector('.rvtop')
+    await act(async () => {
+      fireEvent.click(within(header as HTMLElement).getByRole('button', { name: 'Investigate' }))
+      await settled()
+    })
+
+    expect(workflowRuns.calls.some((call) => call.op === 'adopt')).toBe(true)
+    expect(port.calls.some((call) => call.op === 'prompt')).toBe(true)
+    // The whole region closes on landing: the run view goes with it.
+    expect(screen.queryByLabelText('Run d3p8')).toBeNull()
   })
 })

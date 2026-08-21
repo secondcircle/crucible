@@ -24,11 +24,13 @@ import { railOf, rowFor, type RailModel } from '../runs/rail'
 import { relativeTime } from '../labels'
 import { ArtifactRail } from './ArtifactRail'
 import { ArtifactReader } from './ArtifactReader'
+import { InvestigateButton } from './InvestigateButton'
 import { Transcript } from './Transcript'
 import './runs.css'
 
 // The full-screen dig: read-only observability plus the mechanical Pause and
-// Cancel (ADR 0017). The graph is layered top-down (Q14); a node's
+// Cancel, with Investigate beside them (ADR 0017). The graph is layered
+// top-down (Q14); a node's
 // transcript renders through the chat pane's own component, tool chains
 // collapsed; the routed banner shows what was asked and where it went —
 // never an input box. Talking happens in the session; Go to session is the
@@ -36,6 +38,7 @@ import './runs.css'
 export function WorkflowRunView({
   run,
   canGoToSession,
+  workspaceOpen,
   transcript,
   artifact,
   openArtifact,
@@ -46,10 +49,13 @@ export function WorkflowRunView({
   onPause,
   onResume,
   onCancel,
+  onInvestigate,
   onClose
 }: {
   readonly run: RunRecord
   readonly canGoToSession: boolean
+  /** Whether the run's workspace is open, which Investigate needs. */
+  readonly workspaceOpen: boolean
   /** Reads one node's transcript; called again as the node moves. */
   readonly transcript: (nodeId: string) => Promise<readonly TranscriptItem[]>
   /** Reads one artifact of this run, gated on its record. */
@@ -63,7 +69,10 @@ export function WorkflowRunView({
   readonly onGoToSession: () => void
   readonly onPause: () => void
   readonly onResume: () => void
+  /** Raises the same confirm the run row raises; stopping never goes silent. */
   readonly onCancel: () => void
+  /** The same flow the row's Investigate runs, landing in a new session. */
+  readonly onInvestigate: () => Promise<void>
   readonly onClose: () => void
 }): React.JSX.Element {
   // Follows the run's own frontier until the user picks a node; their pick
@@ -154,6 +163,13 @@ export function WorkflowRunView({
             Cancel
           </button>
         ) : null}
+        {/* On every status: what happened is a question worth asking of a
+            finished run as much as a stuck one. */}
+        <InvestigateButton
+          run={run}
+          workspaceOpen={workspaceOpen}
+          onInvestigate={onInvestigate}
+        />
         <button className="btn" onClick={onClose}>
           esc
         </button>

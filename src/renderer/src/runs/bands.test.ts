@@ -46,6 +46,15 @@ describe('which band a run is in', () => {
   it('reads an absent waiting flag as not waiting', () => {
     expect(bandOf(runOf({ status: 'running' }))).toBe('running')
   })
+
+  // Dismissing is the user saying this row is asking for attention it no
+  // longer deserves. The service only ever stamps a settled run.
+  it('puts a dismissed run in Done whatever it was', () => {
+    const dismissed = { dismissedAt: '2026-08-21T13:30:00.000Z' }
+    expect(bandOf(runOf({ status: 'failed', ...dismissed }))).toBe('done')
+    expect(bandOf(runOf({ status: 'cancelled', ...dismissed }))).toBe('done')
+    expect(bandOf(runOf({ status: 'complete', ...dismissed }))).toBe('done')
+  })
 })
 
 describe('the bands themselves', () => {
@@ -140,6 +149,38 @@ describe('the header line', () => {
     expect(runsHeadline([runOf({ status: 'failed' })], NOW)).toBe(
       'nothing running · 1 needs you'
     )
+  })
+
+  // A dismissal is a clearing, not a finish: it leaves Needs you without
+  // pretending anything was accomplished.
+  it('stops counting a dismissed run as needing you, and never counts it finished', () => {
+    const runs = [
+      runOf({
+        id: 'cleared',
+        status: 'failed',
+        endedAt: '2026-08-21T13:00:00.000Z',
+        dismissedAt: '2026-08-21T13:30:00.000Z'
+      })
+    ]
+
+    expect(finishedToday(runs, NOW)).toBe(0)
+    expect(runsHeadline(runs, NOW)).toBe('nothing running')
+    expect(bandsOf(runs).map((band) => band.band)).toEqual(['done'])
+  })
+
+  it('orders a dismissed run in Done by when it ended, like every other row', () => {
+    const bands = bandsOf([
+      runOf({
+        id: 'cleared',
+        status: 'failed',
+        endedAt: '2026-08-21T12:00:00.000Z',
+        dismissedAt: '2026-08-21T13:30:00.000Z'
+      }),
+      runOf({ id: 'newer', status: 'complete', endedAt: '2026-08-21T13:00:00.000Z' }),
+      runOf({ id: 'older', status: 'complete', endedAt: '2026-08-21T09:00:00.000Z' })
+    ])
+
+    expect(bands[0]?.runs.map((run) => run.id)).toEqual(['newer', 'cleared', 'older'])
   })
 
   it('time-boxes finished today, whatever the Done band still holds', () => {

@@ -45,6 +45,13 @@ function engineOf(runs: RunRecord[]): WorkflowEngine & { started: StartRunReques
     pause: vi.fn(),
     resume: vi.fn(),
     cancel: vi.fn(),
+    dismiss: vi.fn(),
+    // The record is what crucible_runs reads, so the stub moves it the way
+    // the engine does rather than only counting the call.
+    adopt: vi.fn((runId: string, sessionId: string) => {
+      const at = runs.findIndex((run) => run.id === runId)
+      if (at >= 0) runs[at] = { ...runs[at], sessionId }
+    }),
     answer: vi.fn(),
     nodeTranscript: (): readonly TranscriptItem[] => [{ kind: 'assistant', markdown: 'hi' }],
     dispose: vi.fn()
@@ -102,6 +109,24 @@ describe('the live run service', () => {
     expect(text).toContain('cd34')
     expect(text).toContain('⚑ waiting on an answer: which way?')
     expect(text).not.toContain('zz99')
+  })
+
+  it('carries Dismiss and Investigate’s adoption through to the engine', async () => {
+    const { engine, service } = serviceOver([record({})])
+    await service.dismiss('ab12')
+    expect(engine.dismiss).toHaveBeenCalledWith('ab12')
+    await service.adopt('ab12', 's7')
+    expect(engine.adopt).toHaveBeenCalledWith('ab12', 's7')
+  })
+
+  it('lists an adopted run for its new session and stops listing it for the old', async () => {
+    const { service } = serviceOver([record({ id: 'cd34' })])
+
+    expect(await service.tools.list('s1')).toContain('cd34')
+    await service.adopt('cd34', 'investigator-9')
+
+    expect(await service.tools.list('investigator-9')).toContain('cd34')
+    expect(await service.tools.list('s1')).toBe('This session has no workflow runs.')
   })
 
   it('says so when the session has no runs', async () => {

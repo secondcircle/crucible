@@ -22,6 +22,84 @@ describe('the fake workflow run service', () => {
     service.dispose()
   })
 
+  // The screenshot state, shipped: a failed run whose orchestrator session is
+  // gone, so the row has no Go to session and nothing that can end it.
+  it('seeds a failed run whose session no longer exists, and dismissing it re-bands the row', async () => {
+    const service = createFakeWorkflowRunService({ beatMs: 0 })
+    const failed = (await service.snapshot()).runs.find((run) => run.id === 'b1n7')
+
+    expect(failed?.status).toBe('failed')
+    expect(failed?.workflow).toBe('build')
+    expect(failed?.sessionId).toBeDefined()
+    expect(failed?.error).toBeDefined()
+    // Ended hours ago, so the row reads as the stale thing it is.
+    expect(Date.now() - Date.parse(failed?.endedAt ?? '')).toBeGreaterThan(3_600_000)
+    expect(failed?.dismissedAt).toBeUndefined()
+
+    // The stamp is the whole of what moves the row out of Needs you; that
+    // banding is proved over bandOf itself in the renderer's band tests.
+    await service.dismiss('b1n7')
+    const cleared = (await service.snapshot()).runs.find((run) => run.id === 'b1n7')
+    expect(cleared?.dismissedAt).toBeDefined()
+    // Only where it sits changed: the record is otherwise the same run.
+    expect(cleared?.status).toBe('failed')
+    expect(cleared?.branch).toBe(failed?.branch)
+    expect(cleared?.nodes).toHaveLength(failed?.nodes.length ?? 0)
+
+    // Dismissing twice says nothing new, and a live run is refused outright.
+    await service.dismiss('b1n7')
+    expect(
+      (await service.snapshot()).runs.find((run) => run.id === 'b1n7')?.dismissedAt
+    ).toBe(cleared?.dismissedAt)
+    await expect(service.dismiss('g8x2')).rejects.toThrow(/still working/)
+    service.dispose()
+  })
+
+  // The unstick demo end to end: the parked run has nobody to ask until a
+  // session adopts it, and then the answer walks it home.
+  it('resumes the canned parked run once a session has adopted it', async () => {
+    const delivered: { sessionId: string; text: string }[] = []
+    const service = createFakeWorkflowRunService({
+      beatMs: 0,
+      deliver: (sessionId, text) => delivered.push({ sessionId, text })
+    })
+
+    const parked = (await service.snapshot()).runs.find((run) => run.id === 'g8x2')
+    expect(parked?.sessionId).toBeUndefined()
+    expect(parked?.waiting).toBe(true)
+
+    await service.adopt('g8x2', 'investigator-9')
+    expect((await service.snapshot()).runs.find((run) => run.id === 'g8x2')?.sessionId).toBe(
+      'investigator-9'
+    )
+
+    await service.tools.answer('investigator-9', 'g8x2', 'put the helper in the merge module')
+    await until(() => delivered.some((message) => message.text.includes('completed')))
+
+    const done = (await service.snapshot()).runs.find((run) => run.id === 'g8x2')
+    expect(done?.status).toBe('complete')
+    expect(done?.waiting).toBe(false)
+    expect(done?.question?.answer).toBe('put the helper in the merge module')
+    expect(done?.nodes.every((node) => node.status === 'complete')).toBe(true)
+    // The completion reached the session that adopted it, and no other.
+    expect(delivered.every((message) => message.sessionId === 'investigator-9')).toBe(true)
+    service.dispose()
+  })
+
+  it('carries the run directory on every record it hands out', async () => {
+    const files = memoryArtifactFiles()
+    const service = createFakeWorkflowRunService({ beatMs: 0, files })
+
+    for (const run of (await service.snapshot()).runs) {
+      expect(run.dir, run.id).toBe(files.dir(run.id).replace(/\/artifacts$/, ''))
+    }
+
+    await service.tools.start('s1', '/repos/thing', 'adhoc', {})
+    const started = (await service.snapshot()).runs.find((run) => run.sessionId === 's1')
+    expect(started?.dir).toBe(files.dir(started?.id ?? '').replace(/\/artifacts$/, ''))
+    service.dispose()
+  })
+
   it('walks a scripted adhoc run to completion and tells the orchestrator', async () => {
     const delivered: { sessionId: string; text: string }[] = []
     const service = createFakeWorkflowRunService({

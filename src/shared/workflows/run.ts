@@ -112,6 +112,15 @@ export interface RunRecord {
   readonly createdAt: string
   readonly startedAt?: string
   readonly endedAt?: string
+  // ISO instant the user dismissed the run: cleared a settled run that was
+  // asking for attention it no longer deserves. Set only on a settled run,
+  // never cleared, never set twice — the first stamp stands.
+  readonly dismissedAt?: string
+  // The run's own directory, holding run.json, artifacts/ and transcripts/.
+  // It exists so a prompt can tell an agent where to read this run without
+  // the renderer guessing at storage layout; the store backfills it at load,
+  // because the store is what knows its own layout.
+  readonly dir?: string
 }
 
 // Every message a run sends its orchestrator opens with this, and three
@@ -124,6 +133,12 @@ export const RUN_MESSAGE_PREFIX = '⚑ Crucible run'
 /** Opens a message from a run to its orchestrator, and marks it as one. */
 export function runMessageHeader(run: Pick<RunRecord, 'id' | 'workflow'>): string {
   return `${RUN_MESSAGE_PREFIX} ${run.id} (${run.workflow})`
+}
+
+// Both flavors refuse the same way, so the sentence is spelled once: a live
+// run is stopped, never cleared, and the UI offers Cancel there instead.
+export function dismissRefusal(runId: WorkflowRunId): string {
+  return `The run "${runId}" is still working, so there is nothing to dismiss — cancel it instead.`
 }
 
 /** Whether a message in a session's transcript is a run talking, not a human. */

@@ -1,21 +1,31 @@
+import { useState } from 'react'
 import type { SessionState, WorkspaceState } from '../../../shared/agent/port'
 import { currentNode, runIsLive, runCost, type RunRecord } from '../../../shared/workflows/run'
 import { UNTITLED } from '../labels'
 import { bandsOf, runsHeadline } from '../runs/bands'
 import { money, shortAge, since } from '../runs/format'
+import { InvestigateButton } from './InvestigateButton'
 import './runs.css'
 
 // Every run across every workspace, in three bands: running, needs you, done.
-// A run with an orchestrator gets Go to session; a session-less run
-// gets Start session — a fresh chat in the run's workspace — and the record
-// outlives the run, so finished work is reachable here too.
+// A run with an orchestrator gets Go to session, and the record outlives the
+// run, so finished work is reachable here too.
+//
+// Two acts clear a row without opening anything. One button, two states, on
+// the Needs-you rows: Cancel stops a live or paused run after a confirm,
+// Dismiss clears a settled one that is asking for attention it no longer
+// deserves. Investigate is on every row in every band — it starts a session
+// that already knows the run, and takes the session-less row's primary slot,
+// where a blank fresh chat used to sit.
 export function RunsOverview({
   runs,
   workspaces,
   sessions,
   onOpenRun,
   onGoToSession,
-  onStartSession,
+  onDismiss,
+  onCancel,
+  onInvestigate,
   onClose
 }: {
   readonly runs: readonly RunRecord[]
@@ -23,10 +33,23 @@ export function RunsOverview({
   readonly sessions: readonly SessionState[]
   readonly onOpenRun: (runId: string) => void
   readonly onGoToSession: (sessionId: string) => void
-  readonly onStartSession: (workspaceId: string) => void
+  /** Clears a settled run. No confirm: nothing is destroyed by it. */
+  readonly onDismiss: (runId: string) => Promise<void>
+  // Raises the app's confirm and answers with what the user chose, so the
+  // button knows whether the run is on its way out or still working.
+  readonly onCancel: (runId: string) => Promise<'cancelled' | 'kept'>
+  readonly onInvestigate: (runId: string) => Promise<void>
   readonly onClose: () => void
 }): React.JSX.Element {
   const bands = bandsOf(runs)
+  // Rows whose Dismiss or Cancel is done being clicked: the button is dead
+  // from that frame until the snapshot re-bands the row out of Needs you and
+  // takes the button with it (ADR 0010).
+  const [acting, setActing] = useState<readonly string[]>([])
+  const clearing = (runId: string): boolean => acting.includes(runId)
+  const markActing = (runId: string): void => setActing((current) => [...current, runId])
+  const unmarkActing = (runId: string): void =>
+    setActing((current) => current.filter((held) => held !== runId))
 
   return (
     <section className="runsoverview" aria-label="All runs">
@@ -59,11 +82,15 @@ export function RunsOverview({
                 const workspace = workspaces.find(
                   (candidate) => candidate.path === run.workspacePath
                 )
-                const parked = runIsLive(run) && run.waiting === true
-                // A failed run has its own treatment and is never dimmed:
-                // done is complete and cancelled.
-                const failed = run.status === 'failed'
-                const done = run.status === 'complete' || run.status === 'cancelled'
+                const live = runIsLive(run)
+                const parked = live && run.waiting === true
+                const dismissed = run.dismissedAt !== undefined
+                // A failed run has its own treatment and is never dimmed —
+                // until it is dismissed, which is the whole point of
+                // dismissing: the row stops shouting.
+                const failed = run.status === 'failed' && !dismissed
+                const done =
+                  dismissed || run.status === 'complete' || run.status === 'cancelled'
                 return (
                   <div
                     className={`runrow${parked ? ' parked' : ''}${failed ? ' failed' : ''}${
@@ -93,14 +120,40 @@ export function RunsOverview({
                       <button className="btn" onClick={() => onGoToSession(session.id)}>
                         Go to session
                       </button>
-                    ) : run.sessionId === undefined && workspace !== undefined ? (
-                      <button
-                        className="btn primary"
-                        onClick={() => onStartSession(workspace.id)}
-                      >
-                        Start session
-                      </button>
                     ) : null}
+                    {/* One button, two states, and only where the run is
+                        asking: a Done row asks nothing, and a healthy Running
+                        row is not asking either. */}
+                    {band.band !== 'needsYou' ? null : live ? (
+                      <button
+                        className="btn"
+                        disabled={clearing(run.id)}
+                        onClick={() => {
+                          void onCancel(run.id).then((chose) => {
+                            if (chose === 'cancelled') markActing(run.id)
+                          })
+                        }}
+                      >
+                        Cancel
+                      </button>
+                    ) : (
+                      <button
+                        className="btn"
+                        disabled={clearing(run.id)}
+                        onClick={() => {
+                          markActing(run.id)
+                          void onDismiss(run.id).catch(() => unmarkActing(run.id))
+                        }}
+                      >
+                        Dismiss
+                      </button>
+                    )}
+                    <InvestigateButton
+                      run={run}
+                      workspaceOpen={workspace !== undefined}
+                      primary={run.sessionId === undefined}
+                      onInvestigate={() => onInvestigate(run.id)}
+                    />
                   </div>
                 )
               })}
@@ -122,5 +175,8 @@ function statusText(run: RunRecord): string {
     const node = currentNode(run)
     return `▸ ${node?.id ?? '…'} · ${shortAge(run.startedAt)}`
   }
-  return `${run.status} · ${since(run.endedAt)}`
+  // The row says it was dismissed, beside the status it still holds: a
+  // dismissal clears a run, it does not rewrite how the run ended.
+  const cleared = run.dismissedAt === undefined ? '' : ' · dismissed'
+  return `${run.status}${cleared} · ${since(run.endedAt)}`
 }

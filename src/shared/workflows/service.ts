@@ -2,7 +2,7 @@
 // interface and nothing behind it, so a component test hands in a fake and
 // the IPC client implements the same shape over the preload bridge.
 
-import type { TranscriptItem, Unsubscribe } from '../agent/port'
+import type { SessionId, TranscriptItem, Unsubscribe } from '../agent/port'
 import type { RunTools } from '../agent/run-tools'
 import type { ArtifactKind } from './artifacts'
 import type { RunRecord, WorkflowRunId } from './run'
@@ -43,6 +43,19 @@ export interface WorkflowRunService {
   pause(runId: WorkflowRunId): Promise<void>
   resume(runId: WorkflowRunId): Promise<void>
   cancel(runId: WorkflowRunId): Promise<void>
+
+  // Clearing a run that asks for attention it no longer deserves. It changes
+  // where the run sits and nothing else: no worktree, no branch, no artifact,
+  // no other field of the record. Refuses a live run with a sentence, and
+  // dismissing an already-dismissed run is a quiet no-op.
+  dismiss(runId: WorkflowRunId): Promise<void>
+
+  // Investigate's first act: the session about to ask what happened becomes
+  // the run's orchestrator, live or settled, so every later message arrives
+  // there and crucible_runs lists the run for it. ADR 0017 is untouched —
+  // this changes which session the orchestrator is, not that questions travel
+  // through one. Refuses an unknown run with a sentence.
+  adopt(runId: WorkflowRunId, sessionId: SessionId): Promise<void>
 
   // A node's transcript in the chat pane's own shape, read at call time:
   // the run view renders it with the same code the chat does.

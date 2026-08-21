@@ -53,6 +53,7 @@ import { WorkflowRunView } from './components/WorkflowRunView'
 import { TopBar } from './components/TopBar'
 import { Transcript } from './components/Transcript'
 import { investigationPrompt } from './cache/prompt'
+import { investigationPrompt as runInvestigationPrompt } from './runs/prompt'
 import { useCacheHealth } from './cache/use-cache'
 import { readAttachment, refuse } from './images'
 import { contextPercent, UNTITLED } from './labels'
@@ -100,6 +101,10 @@ type Occupant =
 type Question =
   | { readonly kind: 'reset'; readonly sessionId: SessionId }
   | { readonly kind: 'thinking'; readonly sessionId: SessionId; readonly level: ThinkingLevel }
+  // Stopping a run confirms first wherever it is offered — the Needs-you row
+  // and the run view header alike — so no path stops work silently while
+  // another asks. It belongs to a run, not to a session.
+  | { readonly kind: 'cancelRun'; readonly runId: WorkflowRunId }
 
 /** Two Escapes this far apart are the tree's accelerator. */
 const DOUBLE_ESCAPE_MS = 500
@@ -270,6 +275,9 @@ export function Shell({
   const windowFocused = useRef(true)
   /** Sessions with a send under way, still waiting on its expansion. */
   const sending = useRef<Set<SessionId>>(new Set())
+  // What a raised cancel confirm owes its asker: the row's button waits on
+  // this to learn whether the run is on its way out or still working.
+  const cancelChoice = useRef<((chose: 'cancelled' | 'kept') => void) | undefined>(undefined)
   /** The engine's records, whole on every event. */
   const [runsSnapshot, setRunsSnapshot] = useState<RunsSnapshot | undefined>(undefined)
   // Lives here rather than in the run view because Escape unwinds one surface
@@ -533,8 +541,15 @@ export function Shell({
   // activation drops it: left up, its copy would read as being about the chat
   // now on screen while its button still acted on the old one. Keyed to the
   // active session, not the region: ⌘B/⌘I/⌘R only swap the occupant beneath
-  // a confirm, and that confirm is still about the session on screen.
-  if (question !== undefined && question.sessionId !== activeSessionId) setQuestion(undefined)
+  // a confirm, and that confirm is still about the session on screen. A run
+  // confirm is about a run and survives any of that.
+  if (
+    question !== undefined &&
+    question.kind !== 'cancelRun' &&
+    question.sessionId !== activeSessionId
+  ) {
+    setQuestion(undefined)
+  }
 
   // What the region actually renders. Nothing is backed by less than real
   // state, so an occupant whose data has not arrived shows no region at all
@@ -812,6 +827,15 @@ export function Shell({
     const clear = setTimeout(() => setToast(undefined), TOAST_MS)
     return () => clearTimeout(clear)
   }, [toast])
+
+  // A cancel confirm that left the screen without being confirmed — Esc, the
+  // backdrop, Decline, an arrival — means the run keeps working, and the
+  // button that raised it hears so. One place, so no closer has to remember.
+  useEffect(() => {
+    if (question?.kind === 'cancelRun') return
+    cancelChoice.current?.('kept')
+    cancelChoice.current = undefined
+  }, [question])
 
   // The caret can only be placed once the draft it belongs to has rendered,
   // which is why this waits a frame rather than happening at the seeding.
@@ -1835,13 +1859,67 @@ export function Shell({
     [activateSession]
   )
 
-  /** A fresh chat in a session-less run's workspace (the future unattended kind). */
-  const startRunSession = useCallback(
-    (workspaceId: WorkspaceId): void => {
-      arrive()
-      void port.createSession(workspaceId).catch(report)
+  // Clearing a settled run that is asking for attention it no longer
+  // deserves. No confirm: nothing on disk moves, and the record stays
+  // openable in ⌘R.
+  const dismissRun = useCallback(
+    async (runId: WorkflowRunId): Promise<void> => {
+      if (workflowRuns === undefined) return
+      await workflowRuns.dismiss(runId)
     },
-    [arrive, port, report]
+    [workflowRuns]
+  )
+
+  // Stopping a run always asks first. The confirm stacks above whatever holds
+  // the region, and the caller learns what the user chose so its button can
+  // go dead for the wait.
+  const askToCancelRun = useCallback(
+    (runId: WorkflowRunId): Promise<'cancelled' | 'kept'> =>
+      new Promise((resolve) => {
+        // A confirm already up is answered before anything else, so the
+        // previous asker is told its run is untouched.
+        cancelChoice.current?.('kept')
+        cancelChoice.current = resolve
+        setQuestion({ kind: 'cancelRun', runId })
+      }),
+    []
+  )
+
+  // The app starts the investigation: a fresh session in the run's workspace,
+  // made the run's orchestrator before it is prompted, with the opening
+  // prompt already sent. From there it is an ordinary conversation.
+  const investigateRun = useCallback(
+    async (runId: WorkflowRunId): Promise<void> => {
+      if (workflowRuns === undefined) return
+      try {
+        const run = allRuns.find((candidate) => candidate.id === runId)
+        if (run === undefined) throw new Error('That run is no longer known.')
+        const workspace = railNow.current.workspaces.find(
+          (candidate) => candidate.path === run.workspacePath
+        )
+        if (workspace === undefined) {
+          throw new Error(
+            `Add ${run.workspaceName} to the sidebar first — an investigation runs in a session of its own.`
+          )
+        }
+        const sessionId = await port.createSession(workspace.id)
+        // Before the prompt is sent, so the agent's crucible_runs already
+        // lists the run when its first turn starts.
+        await workflowRuns.adopt(runId, sessionId)
+        await port.activateSession(sessionId)
+        const text = runInvestigationPrompt(run)
+        // Echoed in the transcript as any prompt is; the working state is the
+        // wait indicator from here.
+        dispatch({ type: 'sent', sessionId, text, images: [] })
+        await port.prompt(sessionId, text)
+        closeRegion()
+      } catch (cause) {
+        // Nothing retries silently: the flow stops where it broke and says so
+        // where every other refusal is said.
+        report(cause)
+      }
+    },
+    [workflowRuns, port, report, closeRegion, allRuns]
   )
 
   const runTranscript = useCallback(
@@ -1881,6 +1959,17 @@ export function Shell({
   function answer(): void {
     if (question === undefined) return
     const asked = question
+    if (asked.kind === 'cancelRun') {
+      // Answered before the question comes off screen, so the effect below
+      // does not read it as a decline.
+      cancelChoice.current?.('cancelled')
+      cancelChoice.current = undefined
+      setQuestion(undefined)
+      // Cancel's own semantics are untouched: if the run settled between the
+      // click and the confirm, the refusal surfaces where refusals do.
+      if (workflowRuns !== undefined) void workflowRuns.cancel(asked.runId).catch(report)
+      return
+    }
     setQuestion(undefined)
     if (asked.kind === 'reset') applyReset(asked.sessionId)
     else void port.setThinkingLevel(asked.sessionId, asked.level).catch(report)
@@ -2143,7 +2232,9 @@ export function Shell({
                 sessions={snapshot.sessions}
                 onOpenRun={openWorkflowRun}
                 onGoToSession={goToRunSession}
-                onStartSession={startRunSession}
+                onDismiss={dismissRun}
+                onCancel={askToCancelRun}
+                onInvestigate={investigateRun}
                 onClose={closeRegion}
               />
             ) : null}
@@ -2157,6 +2248,9 @@ export function Shell({
                   openRun.sessionId !== undefined &&
                   snapshot.sessions.some((candidate) => candidate.id === openRun.sessionId)
                 }
+                workspaceOpen={snapshot.workspaces.some(
+                  (candidate) => candidate.path === openRun.workspacePath
+                )}
                 transcript={runTranscript}
                 artifact={runArtifact}
                 openArtifact={openArtifactPath}
@@ -2170,7 +2264,8 @@ export function Shell({
                 }}
                 onPause={() => void workflowRuns.pause(openRun.id).catch(report)}
                 onResume={() => void workflowRuns.resume(openRun.id).catch(report)}
-                onCancel={() => void workflowRuns.cancel(openRun.id).catch(report)}
+                onCancel={() => void askToCancelRun(openRun.id)}
+                onInvestigate={() => investigateRun(openRun.id)}
                 onClose={closeTopOfRegion}
               />
             ) : null}
@@ -2213,7 +2308,16 @@ export function Shell({
 
             {/* Last, so a confirm raised over an open occupant stacks above it
                 and is answered before anything else is. */}
-            {question === undefined ? null : question.kind === 'reset' ? (
+            {question === undefined ? null : question.kind === 'cancelRun' ? (
+              <ConfirmDialog
+                title="Cancel this run?"
+                body="Its agents stop where they stand and the run lands in Done as cancelled. The worktree, branch and artifacts all stay."
+                confirmLabel="Cancel the run"
+                cancelLabel="Let it keep working"
+                onConfirm={answer}
+                onCancel={() => setQuestion(undefined)}
+              />
+            ) : question.kind === 'reset' ? (
               <ConfirmDialog
                 title="Reset this session?"
                 body="The conversation is replaced with a fresh one. This session keeps its place in the sidebar, and the old conversation stays findable through Resume session."
