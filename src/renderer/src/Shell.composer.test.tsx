@@ -1,10 +1,9 @@
 // @vitest-environment jsdom
 //
 // The composer's height, driven through the shell. jsdom lays nothing out, so
-// the mirror the composer measures is given a height per character here and
-// the assertions are about what the composer does with a measurement — the
-// clamp itself is pinned in composer-height.test.ts, and how it looks is
-// checked in the driven app.
+// the mirror the composer measures is given a height per character here, and
+// what is pinned is what the composer does with a measurement — never how it
+// looks.
 import { act, fireEvent, render, screen } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 import { Shell } from './Shell'

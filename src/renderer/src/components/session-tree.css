@@ -1,5 +1,5 @@
-/* An occupant of the overlay region like every other overlay (Q1): it covers
-   the composer and the context panel too, and never the sidebar or the bars. */
+/* An occupant of the overlay region like every other overlay: it covers the
+   composer and the context panel too, and never the sidebar or the bars. */
 .tree {
   position: absolute;
   inset: 0;

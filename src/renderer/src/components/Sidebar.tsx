@@ -240,8 +240,6 @@ export function Sidebar({
       {cache === undefined ? null : <CacheStrip health={cache.health} onOpen={cache.onOpen} />}
       {quota === undefined ? null : <QuotaStrip snapshot={quota.snapshot} now={quota.now} />}
 
-      {/* One row at the foot: Add workspace gives up width and keeps its
-          label, and the gear takes only the square it needs. */}
       <div className="sidefoot">
         <button className="addws" onClick={onAddWorkspace}>
           ＋ Add workspace

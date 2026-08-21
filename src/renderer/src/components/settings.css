@@ -1,7 +1,6 @@
-/* Settings is a screen in the overlay region, not a sheet: one card of fixed
-   geometry, a rail of sections beside it, and a body that is the only thing
-   that scrolls. Switching sections must move nothing outside that body, which
-   is what lets a section be added later for no layout cost at all. */
+/* Settings is a screen in the overlay region, not a sheet. Switching sections
+   must move nothing outside the scrolling body, which is what lets a section
+   be added later for no layout cost at all. */
 .setwrap {
   position: absolute;
   inset: 0;
@@ -261,8 +260,8 @@
   line-height: 1.5;
 }
 
-/* Q4's one exception: the login centres on the Settings card it was launched
-   from, not on the region, and sits above it. */
+/* The one overlay that does not centre on the region: the login centres on
+   the Settings card it was launched from, and sits above it. */
 .logveil {
   position: absolute;
   inset: 0;

@@ -73,8 +73,7 @@ import './shell.css'
 type Popover = 'none' | 'model' | 'thinking' | 'sessionMenu'
 
 // What occupies the overlay region. Every overlay is one of these, and they
-// all cover the same area: below the bar row, right of the sidebar, the chat
-// column and the context panel together.
+// all cover the same area.
 type Occupant =
   | { readonly kind: 'board'; readonly workspaceId: WorkspaceId }
   | { readonly kind: 'issues'; readonly workspaceId: WorkspaceId }
@@ -181,10 +180,9 @@ export function Shell({
   // A summarizing jump pays for an LLM call, so the tree says it is working.
   const [jumping, setJumping] = useState<'jump' | 'summarize' | undefined>(undefined)
   const [toast, setToast] = useState<string | undefined>(undefined)
-  // The whole of the overlay region's state. At most one occupant is up:
-  // opening any overlay closes whatever occupied the region before it. The
-  // list is only ever longer than one for the sanctioned stack — an opened run
-  // above the runs overview it came from — and Esc unwinds it.
+  // The whole of the overlay region's state: one occupant at most, except the
+  // sanctioned stack of an opened run above the runs overview it came from,
+  // which Esc unwinds.
   const [region, setRegion] = useState<readonly Occupant[]>([])
   // The issue an Align is starting a session on, while it is starting it. One
   // at a time: a second click would make a second session on the same issue.
@@ -464,24 +462,18 @@ export function Shell({
   const issuesOpen =
     occupant?.kind === 'issues' && occupant.workspaceId === activeWorkspaceId && issuesReachable
 
-  // A board whose workspace is no longer the active one, or which turns out to
-  // hold nothing to show, empties the region in the same render, so a close
-  // cannot come back true when the workspace is switched away from and back
-  // to. The same for a tree with no session left to draw.
+  // Emptied in the same render, so a close cannot come back true when the
+  // workspace is switched away from and back to. The same for a tree with no
+  // session left to draw.
   if (occupant?.kind === 'board' && !boardOpen) setRegion([])
   if (occupant?.kind === 'issues' && !issuesOpen) setRegion([])
   if (occupant?.kind === 'tree' && session === undefined) setRegion([])
 
-  // A confirm names the session it acts on, and both are raised on the session
-  // that was active. Land on another one and the question is about a session
-  // you can no longer see: "Reset this session?" would read as being about the
-  // chat now on screen while "Reset anyway" still reset the old one. Q2 is what
-  // makes that reachable, the sidebar being live under every modal surface now,
-  // so the render that lands the activation drops the question — one rule for
-  // the sidebar click, the workspace switch, New session, the Tab walk and a
-  // removal alike. It reads the active session and not the region because
-  // ⌘B/⌘I/⌘R only swap the occupant beneath a confirm, which section 4
-  // sanctions: that confirm is still about the session on screen.
+  // A confirm names the session it was raised on, so the render that lands an
+  // activation drops it: left up, its copy would read as being about the chat
+  // now on screen while its button still acted on the old one. Keyed to the
+  // active session, not the region: ⌘B/⌘I/⌘R only swap the occupant beneath
+  // a confirm, and that confirm is still about the session on screen.
   if (question !== undefined && question.sessionId !== activeSessionId) setQuestion(undefined)
 
   // What the region actually renders. Nothing is backed by less than real
@@ -725,14 +717,10 @@ export function Shell({
     if (settingsOpen && settingsSection === 'providers') refreshProviders()
   }, [settingsOpen, settingsSection, refreshProviders])
 
-  // The login flow lives exactly as long as the Settings card that draws its
-  // dialog. Any way the card leaves the region (a sidebar click landing under
-  // it, another overlay taking the region over, a removal, Esc) cancels the
-  // flow, because a flow that outlived its dialog would be live behind an
-  // empty screen: Escape would go on closing a dialog nobody can see, the
-  // model ring and the Tab walk would stay suppressed for it, and a real OAuth
-  // exchange would be abandoned instead of cancelled. The rule lives here,
-  // once, rather than as a closeLogin() every opener has to remember.
+  // However the Settings card leaves the region, the login flow it drew goes
+  // with it: a flow that outlived its dialog would keep taking Escape and
+  // suppressing keys for a dialog nobody can see. The rule lives here, once,
+  // rather than as a closeLogin() every opener has to remember.
   useEffect(() => {
     if (liveLogin !== undefined && !settingsOpen) closeLogin()
   }, [liveLogin, settingsOpen, closeLogin])
@@ -747,8 +735,8 @@ export function Shell({
   const activateSession = useCallback(
     (id: SessionId): void => {
       setPopover('none')
-      // Q2: the click lands and the occupant goes, in the same frame. You end
-      // up where you clicked, on that session's chat, whatever was up.
+      // The click lands and the occupant goes in the same frame: you end up
+      // where you clicked, on that session's chat, whatever was up.
       closeRegion()
       // A failed creation belongs to the moment it was read in: switching
       // sessions is the user done with it.
@@ -1227,22 +1215,22 @@ export function Shell({
 
   function newSession(): void {
     if (activeWorkspaceId === undefined) return
-    // It creates, it activates, and the occupant closes (Q2).
+    // It creates, it activates, and an activation closes the occupant.
     closeRegion()
     void port.createSession(activeWorkspaceId).catch(report)
   }
 
   function addWorkspace(): void {
     // The new workspace becomes the active one, which is an activation like
-    // any other (Q2).
+    // any other.
     closeRegion()
     void port.addWorkspace().catch(report)
   }
 
   function activateWorkspace(id: WorkspaceId): void {
     setPopover('none')
-    // Q2 again: a board surviving a workspace switch would be showing the
-    // wrong repository.
+    // A board surviving a workspace switch would be showing the wrong
+    // repository.
     closeRegion()
     void port.activateWorkspace(id).catch(report)
   }

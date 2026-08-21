@@ -177,17 +177,10 @@ export function Composer({
     [boxRef]
   )
 
-  // The height tracks the draft (Q3): resting at 46px, growing in place to a
-  // 300px ceiling, scrolling internally past it, and back to resting when the
-  // draft is gone — on send, on a queued send, on the text being deleted.
-  // Every path that changes the shown draft comes through here: typing, paste,
-  // a restored draft, a switch to another session's draft.
-  //
-  // Measured on the mirror rather than on the text area itself. Measuring the
+  // Measured on the mirror rather than on the text area itself: measuring the
   // text area means collapsing it first to read its scrollHeight, and a
-  // collapse the browser has laid out is a height the transition then animates
-  // from. The mirror carries the same typography and the same width, so the
-  // text area's height only ever moves from one settled value to the next.
+  // collapse the browser has laid out is a height the transition then
+  // animates from.
   useLayoutEffect(() => {
     const node = box.current
     if (node === null) return

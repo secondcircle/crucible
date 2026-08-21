@@ -1,9 +1,8 @@
 // @vitest-environment jsdom
 //
-// The overlay region: one host, one occupant, and a sidebar and bar row that
-// stay live under whatever is up. jsdom has no layout, so nothing here
-// measures anything — what is pinned is which elements exist, where in the
-// tree they sit, and what a click or a key does to them.
+// The overlay region, driven through the shell. jsdom lays nothing out, so
+// what is pinned is which elements exist, where they sit, and what a click or
+// a key does to them — never a measurement.
 import { act, fireEvent, render, screen } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 import type { ShellSnapshot } from '../../shared/agent/port'
@@ -186,7 +185,6 @@ describe('where an overlay renders', () => {
 
       const surface = screen.getByRole(occupant.role, { name: occupant.surface })
       expect(surface.closest('.region')).toBe(region())
-      // Exactly one host, whatever is in it.
       expect(document.querySelectorAll('.region')).toHaveLength(1)
     })
 
@@ -357,13 +355,9 @@ describe('the sidebar under an open overlay (Q2)', () => {
     expect(port.calls).toContainEqual({ op: 'removeSession', args: ['s1'] })
   })
 
-  // Q2's promise is "you end up where you clicked, on that session's chat".
-  // A confirm raised over the old session must not survive the navigation:
-  // left up, its copy ("Reset this session?") reads as being about the session
-  // now on screen while its confirm button still acts on the one navigated
-  // away from. Before this branch the state was unreachable — the confirm's
-  // veil covered the sidebar — so the click's arrival is what makes the
-  // dialog's lifetime this shell's problem, exactly as it was for the login.
+  // A confirm must not survive the navigation: left up, its copy ("Reset this
+  // session?") reads as being about the session now on screen while its
+  // confirm button still acts on the one navigated away from.
   it('does not leave a confirm dialog up over the session a click landed on', async () => {
     const { port } = await shell({ conversation: true })
     await click('Session menu')
@@ -407,7 +401,7 @@ describe('the sidebar under an open overlay (Q2)', () => {
 
   // The other side of that rule. ⌘B under a live confirm swaps the occupant
   // beneath it and navigates nowhere, so the confirm is still about the
-  // session on screen and section 4's stacking holds.
+  // session on screen.
   it('keeps a confirm up when an overlay opens beneath it', async () => {
     await shell({ conversation: true })
     await click('Session menu')

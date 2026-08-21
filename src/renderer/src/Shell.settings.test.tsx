@@ -227,7 +227,8 @@ describe('reaching the settings screen', () => {
 
     const login = screen.getByRole('dialog', { name: 'Log in to OpenRouter' })
     expect(login).toBeInTheDocument()
-    // Q4's one exception: it centres on the card it was launched from.
+    // The one overlay that does not centre on the region: the login centres
+    // on the card it was launched from.
     expect(login.closest('.setcard')).toBe(card())
 
     await escape()
@@ -464,10 +465,10 @@ describe('a login', () => {
     expect(screen.queryByRole('dialog', { name: 'Log in to OpenRouter' })).toBeNull()
   })
 
-  // The sidebar stays clickable under Settings (Q2), so a session click can
-  // close the card while a login flow is live. The flow must not outlive its
-  // dialog invisibly: today it does, and the next Escape press is spent on the
-  // unseen login instead of counting toward double-Esc (section 8, step 7).
+  // The sidebar stays clickable under Settings, so a session click can close
+  // the card while a login flow is live. A flow that outlived its dialog
+  // invisibly would spend the next Escape press on the unseen login instead
+  // of counting toward double-Esc.
   it('does not stay live and invisible after a sidebar click closes Settings', async () => {
     const port = await shell({
       ...TWO_SESSIONS,

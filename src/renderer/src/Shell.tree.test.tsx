@@ -152,10 +152,9 @@ describe('opening and closing the tree', () => {
     expect(port.calls.map((call) => call.op)).toContain('cancel')
   })
 
-  // There is deliberately no test that the tree opens mid-turn. That
-  // capability went with the top-bar button, by ruling: while a session works
+  // Deliberately no test that the tree opens mid-turn: while a session works
   // Esc means stop, so the accelerator cannot fire and nothing else opens the
-  // tree. It was removed, not lost.
+  // tree. The capability was removed with the top-bar button, not lost.
 
   it('closes the model picker before it closes itself', async () => {
     await shell()

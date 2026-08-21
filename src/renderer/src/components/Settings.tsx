@@ -15,11 +15,10 @@ import './settings.css'
 // Neither π nor Crucible keeps a usage ledger, so everything here is
 // recomputed on demand from π's per-message numbers.
 
-/** A row in the rail. Only sections that exist are listed (ADR 0010). */
+/** A row in the rail. Only sections that exist are listed. */
 export type SettingsSection = 'providers' | 'usage'
 
-// The rail's whole content: what each section is called, the glyph beside it,
-// and what its header says. Adding a section here costs no layout anywhere,
+// The rail's whole content. Adding a section here costs no layout anywhere,
 // which is the point of the fixed card.
 const SECTIONS: readonly {
   readonly id: SettingsSection
@@ -69,8 +68,8 @@ export function Settings({
   return (
     <div className="setwrap" role="presentation">
       <div className="setcard" role="dialog" aria-modal="true" aria-label="Settings">
-        {/* Fixed at 200px. Switching sections moves the marker and nothing
-            else: no card resize, no re-centring, no rail shift. */}
+        {/* Switching sections moves the marker and nothing else: no card
+            resize, no re-centring, no rail shift. */}
         <nav className="setrail" aria-label="Settings sections">
           <div className="t">Settings</div>
           {SECTIONS.map((row) => (
@@ -89,8 +88,7 @@ export function Settings({
         </nav>
 
         <div className="setmain">
-          {/* 46px, whatever the section. The title and subtitle swap; the row
-              itself never reflows. */}
+          {/* The title and subtitle swap; the row itself never reflows. */}
           <div className="sethead">
             <h2>{shown?.label}</h2>
             <span className="sub">{shown?.subtitle}</span>

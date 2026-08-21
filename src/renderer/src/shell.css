@@ -25,12 +25,9 @@
   position: relative;
 }
 
-/* The overlay region: from below the 50px bar row to the bottom of the
-   window, and from the sidebar's right edge to the window's right edge. Every
-   overlay renders in here and nothing else does, so the sidebar, the top bar
-   and the context panel's tab strip are never covered.
-
-   One backdrop for every occupant, so no occupant brings its own. */
+/* The overlay region: every overlay renders in here and nothing else does,
+   so the sidebar, the top bar and the context panel's tab strip are never
+   covered. One backdrop for every occupant, so no occupant brings its own. */
 .region {
   position: absolute;
   left: 0;
