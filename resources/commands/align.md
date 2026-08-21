@@ -6,8 +6,8 @@ argument-hint: "[subject]"
 
 Interview the user relentlessly until you reach a shared understanding. Until
 the interview ends, this is the only work in this session: no implementation,
-no refactors, no commits, and no files written except the ones named below.
-You are the interviewer. The user decides.
+no refactors, no commits, and no files written except mocks and the ones
+named below. You are the interviewer. The user decides.
 
 The subject: ${@:-(none given - make asking for it your first question)}
 
@@ -69,6 +69,16 @@ are different things."
 When domain relationships are being discussed, stress-test them with specific
 scenarios. Invent scenarios that probe edge cases and force the user to be
 precise about the boundaries between concepts.
+
+### Settle visuals with mocks, not prose
+
+If the subject has a visual surface the workspace hasn't already settled,
+settle it the way this project settles visuals — an HTML mock against the
+project's design references, iterated until approved — not prose. Questions
+about layout, hierarchy, or look are answered faster by a mock the user can
+react to than by any number of rounds: show the mock, take the reaction,
+revise, as part of the round it belongs to. The approved mock is settled
+scope and goes in the brief's source material.
 
 ### Cross-reference with code
 
@@ -187,4 +197,4 @@ own words.>
 ## Source material (read these — do not work from paraphrase)
 
 - <Path, URL, or prior work, each with one line saying what it is for and what
-  to take from it.>
+  to take from it. An approved mock belongs here.>
