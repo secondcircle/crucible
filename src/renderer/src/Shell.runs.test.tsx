@@ -184,7 +184,9 @@ describe('the run view', () => {
       await settled()
     })
     await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: /planner/ }))
+      // The graph's own node, not the rail row that names it as a producer.
+      const graph = screen.getByLabelText('Run graph')
+      fireEvent.click(within(graph).getByRole('button', { name: /planner/ }))
       await settled()
     })
     expect(screen.getByText('the spec holds')).toBeInTheDocument()

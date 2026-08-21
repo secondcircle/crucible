@@ -31,6 +31,15 @@ export function money(amount: number | undefined): string {
   return `$${amount.toFixed(2)}`
 }
 
+/** `812 B`, `6.2 KB`, `1.4 MB` — what the artifact reader's header shows. */
+export function fileSize(bytes: number): string {
+  if (bytes < 1024) return `${Math.max(0, Math.round(bytes))} B`
+  const kb = bytes / 1024
+  if (kb < 1024) return `${kb < 10 ? kb.toFixed(1) : Math.round(kb)} KB`
+  const mb = kb / 1024
+  return `${mb < 10 ? mb.toFixed(1) : Math.round(mb)} MB`
+}
+
 /** `anthropic/claude-opus-5:high` worn short: `opus-5:high`. */
 export function shortModel(model: string | undefined): string {
   if (model === undefined) return ''

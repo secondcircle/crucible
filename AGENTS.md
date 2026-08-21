@@ -38,6 +38,17 @@ The port exists in dev only — the installed app never opens it — and it bind
 loopback. Check yours with `lsof -nP -iTCP:$(npm run dev:port --silent)
 -sTCP:LISTEN`.
 
+The vite dev server gets the same treatment. `scripts/renderer-port.sh` gives
+this checkout a pinned port in 5222-5292, mirroring the debug port one for
+one. Left to itself vite slides off a busy 5173 to the next free port while
+electron-vite still points the window at 5173, so the window loads *another*
+checkout's renderer and the app you drive is not the code you are testing.
+Nothing says so. Pinned, a collision fails the launch instead. When a window
+surprises you, check it with `agent-browser get url`, which must read
+`http://localhost:$(bash scripts/renderer-port.sh)/`. The CLI can also hold a
+session open against an app you connected to earlier, and that reads as the
+same symptom.
+
 **Never kill by name or pattern.** `pkill -f Crucible` and `killall Electron`
 match `/Applications/Crucible.app` and take down the human's live app, its
 running turn with it. That is the one unrecoverable mistake available here. To

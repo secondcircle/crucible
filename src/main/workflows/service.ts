@@ -1,8 +1,11 @@
+import { readFileSync, statSync } from 'node:fs'
 import { basename, join } from 'node:path'
 import type { SessionId, TranscriptItem, Unsubscribe } from '../../shared/agent/port'
 import type { RunTools } from '../../shared/agent/run-tools'
+import { artifactKind, recordNamesPath } from '../../shared/workflows/artifacts'
 import { currentNode, runCost, type RunRecord } from '../../shared/workflows/run'
 import type {
+  ArtifactView,
   MainWorkflowRunService,
   RunsSnapshot,
   WorkflowRunListener
@@ -25,12 +28,18 @@ export interface LiveWorkflowRunOptions {
   readonly loader: WorkflowLoader
   /** Called when the engine's state changed; wired to engine.onChanged. */
   readonly changes: { subscribe(listener: () => void): void }
+  /** Shows a file in the OS file manager; absent leaves Reveal unable to act. */
+  readonly reveal?: (path: string) => void
 }
+
+/** Refused with the same sentence whatever was asked for. */
+const NOT_THIS_RUNS = 'That file is not one this run touched.'
 
 export function createLiveWorkflowRunService({
   engine,
   loader,
-  changes
+  changes,
+  reveal
 }: LiveWorkflowRunOptions): MainWorkflowRunService {
   const listeners = new Set<WorkflowRunListener>()
   let broadcastTimer: ReturnType<typeof setTimeout> | undefined
@@ -47,6 +56,18 @@ export function createLiveWorkflowRunService({
       for (const listener of [...listeners]) listener(event)
     }, BROADCAST_MS)
   })
+
+  // A file is reachable through here because the named run's record names it,
+  // and for no other reason: the path is a lookup key, never resolved.
+  function fileOf(runId: string, path: string): { readonly path: string } | undefined {
+    const run = engine.runs().find((candidate) => candidate.id === runId)
+    if (run === undefined || !recordNamesPath(run, path)) return undefined
+    return { path }
+  }
+
+  function gate(runId: string, path: string): void {
+    if (fileOf(runId, path) === undefined) throw new Error(NOT_THIS_RUNS)
+  }
 
   // The session's working directory is what the adapter knows; the workspace
   // the run belongs to is that directory's checkout root, which is the same
@@ -155,11 +176,46 @@ export function createLiveWorkflowRunService({
       return engine.nodeTranscript(runId, nodeId)
     },
 
+    async artifact(runId: string, path: string): Promise<ArtifactView> {
+      gate(runId, path)
+      const kind = artifactKind(path)
+      let bytes: number
+      let modifiedAt: string | undefined
+      try {
+        const stat = statSync(path)
+        bytes = stat.size
+        modifiedAt = stat.mtime.toISOString()
+      } catch {
+        throw new Error(`That artifact could not be read: ${basename(path)}.`)
+      }
+      if (kind === 'html') {
+        return { kind, bytes, ...(modifiedAt === undefined ? {} : { modifiedAt }) }
+      }
+      try {
+        return {
+          kind,
+          body: readFileSync(path, 'utf8'),
+          bytes,
+          ...(modifiedAt === undefined ? {} : { modifiedAt })
+        }
+      } catch {
+        throw new Error(`That artifact could not be read: ${basename(path)}.`)
+      }
+    },
+
+    async revealArtifact(runId: string, path: string): Promise<void> {
+      gate(runId, path)
+      if (reveal === undefined) throw new Error('This launch cannot open a file manager.')
+      reveal(path)
+    },
+
     tools,
 
     toggleOverview(): void {
       for (const listener of [...listeners]) listener({ type: 'toggle-overview' })
     },
+
+    artifactFile: fileOf,
 
     dispose(): void {
       if (broadcastTimer !== undefined) clearTimeout(broadcastTimer)

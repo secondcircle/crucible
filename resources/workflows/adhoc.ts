@@ -8,7 +8,17 @@ import { workflow } from 'crucible:workflow'
 export default workflow({
   description: 'one node running a prompt file, in a worktree',
   inputs: { prompt: "A file containing the node's task, used verbatim." },
-  plan: () => [{ id: 'work' }],
+  plan: () => [
+    {
+      id: 'work',
+      outputs: {
+        report: {
+          file: 'report.html',
+          desc: "the node's report of what it did and why, for the human"
+        }
+      }
+    }
+  ],
   run: async (ctx) => {
     const result = await ctx.node('work', {
       prompt: readFileSync(ctx.inputs.prompt, 'utf8').trim(),

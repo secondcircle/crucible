@@ -28,6 +28,10 @@ export interface RunArtifact {
   readonly path: string
   /** One-line human description. */
   readonly desc: string
+  // ISO instant the engine first saw the file on disk, non-empty. Absent means
+  // the file has not been written yet — a declared output is recorded from the
+  // moment its node starts.
+  readonly writtenAt?: string
 }
 
 // A check-in or a blocker, already routed: what is shown is what was asked
@@ -92,6 +96,9 @@ export interface RunRecord {
   readonly finalCommit?: string
   /** Input name -> absolute file path. */
   readonly inputs: Readonly<Record<string, string>>
+  // Input name -> the workflow's one-line description of it. Absent on records
+  // written before descriptions were kept.
+  readonly inputDescs?: Readonly<Record<string, string>>
   /** The latest question, answered or not; `waiting` says which. */
   readonly question?: RunQuestion
   /** True while somebody owes the run an answer. */

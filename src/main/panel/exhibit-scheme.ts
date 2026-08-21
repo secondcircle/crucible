@@ -1,5 +1,7 @@
 import { protocol, session } from 'electron'
-import { EXHIBIT_SCHEME } from '../../shared/agent/exhibit-url'
+import { EXHIBIT_SCHEME, parseExhibitUrl } from '../../shared/agent/exhibit-url'
+import type { MainWorkflowRunService } from '../../shared/workflows/service'
+import { serveRunArtifact } from '../workflows/serve-run-artifact'
 import type { PanelModel } from './model'
 import { serveExhibit } from './serve-exhibit'
 
@@ -12,9 +14,14 @@ export function registerExhibitScheme(): void {
 }
 
 /** Installed once per launch, on the session the app window uses. */
-export function serveExhibitScheme(panel: PanelModel): void {
+export function serveExhibitScheme(
+  panel: PanelModel,
+  runs: Pick<MainWorkflowRunService, 'artifactFile'>
+): void {
   session.defaultSession.protocol.handle(EXHIBIT_SCHEME, (request) => {
-    const { status, headers, body } = serveExhibit(panel, request)
+    const asked = parseExhibitUrl(request.url)
+    const { status, headers, body } =
+      asked?.kind === 'run' ? serveRunArtifact(runs, request) : serveExhibit(panel, request)
     return new Response(body, { status, headers })
   })
 }

@@ -16,6 +16,14 @@ export default defineConfig({
     }
   },
   renderer: {
-    plugins: [react()]
+    plugins: [react()],
+    // Pinned to the per-checkout port dev launches hand in: electron-vite
+    // loads the window from the configured port, not the one vite falls back
+    // to on a busy one, so an unpinned collision would quietly show another
+    // checkout's renderer. Pinned, it fails the launch instead.
+    server:
+      process.env.CRUCIBLE_RENDERER_PORT === undefined
+        ? {}
+        : { port: Number(process.env.CRUCIBLE_RENDERER_PORT), strictPort: true }
   }
 })

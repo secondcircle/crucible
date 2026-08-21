@@ -4,7 +4,19 @@
 
 import type { TranscriptItem, Unsubscribe } from '../agent/port'
 import type { RunTools } from '../agent/run-tools'
+import type { ArtifactKind } from './artifacts'
 import type { RunRecord, WorkflowRunId } from './run'
+
+/** One artifact as the artifact reader receives it. */
+export interface ArtifactView {
+  readonly kind: ArtifactKind
+  // Present for markdown and text; absent for html, which rides the exhibit
+  // frame and never enters the renderer as a string.
+  readonly body?: string
+  readonly bytes: number
+  /** File mtime, ISO; the reader's time when the record has no `writtenAt`. */
+  readonly modifiedAt?: string
+}
 
 export interface RunsSnapshot {
   /** Every run the app knows, newest first. The record outlives the run. */
@@ -35,6 +47,12 @@ export interface WorkflowRunService {
   // A node's transcript in the chat pane's own shape, read at call time:
   // the run view renders it with the same code the chat does.
   nodeTranscript(runId: WorkflowRunId, nodeId: string): Promise<readonly TranscriptItem[]>
+
+  // Reads one artifact of one run. Rejects honestly when the path is not in
+  // the run's record or the file cannot be read.
+  artifact(runId: WorkflowRunId, path: string): Promise<ArtifactView>
+  /** Reveals the file in the OS file manager. Same gate, same honesty. */
+  revealArtifact(runId: WorkflowRunId, path: string): Promise<void>
 }
 
 // What main holds beyond the channel: the tool behaviors the adapters mount
@@ -43,5 +61,8 @@ export interface MainWorkflowRunService extends WorkflowRunService {
   readonly tools: RunTools
   /** Emits `toggle-overview` to every listener; main calls it on ⌘R. */
   toggleOverview(): void
+  // The gate's question, as the exhibit scheme's handler needs it: the on-disk
+  // file behind (runId, path), or nothing when the record does not name it.
+  artifactFile(runId: WorkflowRunId, path: string): { readonly path: string } | undefined
   dispose(): void
 }

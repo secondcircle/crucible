@@ -6,7 +6,7 @@
   "main": "./out/main/index.js",
   "scripts": {
     "postinstall": "install-electron",
-    "dev": "electron-vite dev --remoteDebuggingPort=$(bash scripts/dev-port.sh)",
+    "dev": "CRUCIBLE_RENDERER_PORT=$(bash scripts/renderer-port.sh) electron-vite dev --remoteDebuggingPort=$(bash scripts/dev-port.sh)",
     "dev:port": "bash scripts/dev-port.sh",
     "dev:sdk": "CRUCIBLE_AGENT=sdk npm run dev",
     "prove:sdk": "CRUCIBLE_AGENT=sdk node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/prove-sdk.ts",
