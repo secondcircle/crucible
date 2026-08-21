@@ -289,6 +289,14 @@ below it, and it opens the cache health view.
 _Avoid_: cache badge (that is the per-session one in the top bar), cache
 meter, cache counter.
 
+**Overlay region**:
+The area every overlay covers: from below the 50px bar row to the bottom of
+the window, and from the sidebar's right edge to the window's right edge —
+the chat column and the context panel together. The sidebar, the top bar and
+the context panel's tab strip are never covered. Boards, the runs views, the
+session tree, Settings and the small dialogs all live here.
+_Avoid_: modal layer, full-screen overlay, scrim.
+
 **Standing prompt**:
 The text appended to every agent Crucible starts, whatever its role prompt
 says — things true of every agent regardless of its job. Day one it is the
