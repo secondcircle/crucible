@@ -246,6 +246,14 @@ directory, outside the repo. The files handed in at kickoff are shown beside
 them but are the repo's, not the run's.
 _Avoid_: output file, deliverable, exhibit (an exhibit is a context panel tab).
 
+**Run graph**:
+The drawn picture of a run's nodes and the edges between them, layered
+top-down in the run view's left pane: what followed what, what fanned out in
+parallel, what was sent back for revision. An edge means the work of one node
+reached another, and carries no text; a node states what it follows rather
+than having it inferred.
+_Avoid_: the flow, the graph rail, the DAG view, pipeline diagram.
+
 **Artifact rail**:
 The third column of the run view, listing every artifact the run has touched
 in production order — inputs first, then what the run wrote — each naming the
