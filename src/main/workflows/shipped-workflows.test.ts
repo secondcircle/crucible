@@ -8,12 +8,21 @@
 //
 // No SDK session is constructed and no model is called: loading a workflow
 // is reading a file.
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it } from 'vitest'
 import { shippedWorkflowLibPath, shippedWorkflowsPath } from '../shipped'
+import type { NodeSpec, RunContext } from './authoring'
 import { createWorkflowLoader } from './loader'
 
 const APP = join(import.meta.dirname, '..', '..', '..')
+
+const cleanUp: string[] = []
+
+afterEach(() => {
+  for (const dir of cleanUp.splice(0)) rmSync(dir, { recursive: true, force: true })
+})
 
 /** A user folder that exists nowhere, so only the built-ins are found. */
 const NO_USER_FOLDER = join(APP, 'resources', 'workflows', 'no-such-user-folder')
@@ -101,6 +110,31 @@ describe('the workflows Crucible ships', () => {
       'gate-comments-1': [],
       'gate-verdict-1': []
     })
+  })
+
+  // adhoc reads the file it was handed and nothing anyone produced, so it is
+  // a root; declaring anything would be an invented edge.
+  it('leaves adhoc’s one node a root, declaring nothing to follow', async () => {
+    const scratch = mkdtempSync(join(tmpdir(), 'crucible-adhoc-'))
+    cleanUp.push(scratch)
+    const prompt = join(scratch, 'task.md')
+    writeFileSync(prompt, 'do the thing\n')
+
+    const dispatched: NodeSpec[] = []
+    const adhoc = await shippedLoader().resolve(APP, 'adhoc')
+    await adhoc.def.run({
+      inputs: { prompt },
+      artifactDir: scratch,
+      cwd: scratch,
+      node: async (_id: string, spec: NodeSpec) => {
+        dispatched.push(spec)
+        return { outputs: { report: join(scratch, 'report.html') }, verdict: undefined, summary: '' }
+      }
+    } as unknown as RunContext)
+
+    expect(dispatched).toHaveLength(1)
+    expect(dispatched[0].from).toBeUndefined()
+    expect(dispatched[0].reads).toEqual([prompt])
   })
 
   it('says which workflow a name misses', async () => {

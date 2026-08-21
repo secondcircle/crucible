@@ -30,6 +30,12 @@ export interface OutputSpec {
 export interface NodeSpec {
   /** The node's task. Keep it locally scoped: no references to other nodes. */
   prompt: string
+  /**
+   * Ids of the nodes this node follows — declared here because nodes born
+   * inside a runtime loop can never appear in plan(). Ids naming no node in
+   * the run are ignored; artifact dataflow adds edges, never removes one.
+   */
+  from?: string[]
   /** Absolute paths of required input files. Preflight fails if any is missing. */
   reads?: string[]
   /** Declared output artifacts; the node is not complete until they validate. */

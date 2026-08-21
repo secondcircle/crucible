@@ -284,6 +284,10 @@ export function Shell({
   // at a time and this is where that ladder is; the reader is a step of it,
   // above the run occupying the region.
   const [openArtifactPath, setOpenArtifactPath] = useState<string | undefined>(undefined)
+  // The graph pane taken full screen, for the same reason: Escape unwinds it
+  // before the reader, and the reader before the run. Per open view, never
+  // persisted, and never how a run opens.
+  const [graphFullScreen, setGraphFullScreen] = useState(false)
   // Restoring a queued message puts the caret back where the words are.
   const box = useRef<HTMLTextAreaElement>(null)
   // Output can arrive before the id of the run it belongs to does.
@@ -946,6 +950,13 @@ export function Shell({
         setFileToken(undefined)
         return
       }
+      // The graph over the whole body covers the reader as well as the
+      // transcript, so it is the first layer to come off.
+      if (graphFullScreen && openRunId !== undefined) {
+        pressed.preventDefault()
+        setGraphFullScreen(false)
+        return
+      }
       // An artifact is read above the run that lists it, so it comes off
       // before the region unwinds a surface.
       if (openArtifactPath !== undefined) {
@@ -1014,6 +1025,8 @@ export function Shell({
     browsingCommands,
     treeOpen,
     openArtifactPath,
+    graphFullScreen,
+    openRunId,
     port,
     report
   ])
@@ -1846,8 +1859,10 @@ export function Shell({
         ? [...up, { kind: 'run', runId: id }]
         : [{ kind: 'run', runId: id }]
     )
-    // A run is entered on its node detail, never on whatever was last read.
+    // A run is entered on its node detail, never on whatever was last read,
+    // and never full screen.
     setOpenArtifactPath(undefined)
+    setGraphFullScreen(false)
   }, [])
 
   // The door out of a run surface: land in the orchestrator's chat. The
@@ -2259,6 +2274,7 @@ export function Shell({
                 Esc unwinds in the order the surfaces were entered. */}
             {runShown && openRun !== undefined && workflowRuns !== undefined ? (
               <WorkflowRunView
+                key={openRun.id}
                 run={openRun}
                 canGoToSession={
                   openRun.sessionId !== undefined &&
@@ -2282,7 +2298,12 @@ export function Shell({
                 onResume={() => void workflowRuns.resume(openRun.id).catch(report)}
                 onCancel={() => void cancelRun(openRun.id)}
                 onInvestigate={() => investigateRun(openRun.id)}
-                onClose={closeTopOfRegion}
+                onClose={() => {
+                  setGraphFullScreen(false)
+                  closeTopOfRegion()
+                }}
+                fullScreen={graphFullScreen}
+                onToggleFullScreen={() => setGraphFullScreen((up) => !up)}
               />
             ) : null}
 

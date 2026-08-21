@@ -229,105 +229,271 @@
   min-height: 0;
 }
 
-/* The graph rail: layered top-down, a row per layer, click-through to the
-   node detail. Fit to width inside the rail; scroll as the escape hatch. */
-.runview .graph {
-  width: 300px;
-  border-right: 1px solid var(--line);
+/* ---------- the run graph ---------- */
+
+/* The pane the graph gets: 640px by default, dragged wider by the splitter,
+   and the whole body in full screen. */
+.gwrap {
+  display: flex;
+  flex-shrink: 0;
+  min-width: 0;
+}
+
+.gpane {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
   background: var(--bg2);
-  padding: 16px;
-  overflow-y: auto;
+  border-right: 1px solid var(--line);
+}
+
+.gpane.full {
+  border-right: 0;
+}
+
+.ghead {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 11px 16px;
+  border-bottom: 1px solid var(--line);
+}
+
+.ghead .t {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--faint);
+}
+
+/* The count gives way before the controls do: at the pane's narrowest the
+   pills still have to be reachable. */
+.ghead .c {
+  font: 11px var(--mono);
+  color: var(--faint);
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ghead .sp {
+  margin-left: auto;
+  display: flex;
+  gap: 6px;
+  align-items: center;
   flex-shrink: 0;
 }
 
-.glayer {
-  position: relative;
-  display: flex;
-  gap: 8px;
-  margin-bottom: 22px;
-}
-
-/* The spine between layers, in place of drawn edges (v1). */
-.glayer:not(:last-child)::after {
-  content: '';
-  position: absolute;
-  left: 50%;
-  bottom: -23px;
-  width: 1px;
-  height: 22px;
-  background: var(--line);
-}
-
-.gnode {
-  flex: 1;
-  min-width: 0;
-  text-align: left;
+.ghead .pill {
+  font: 10.5px var(--mono);
   border: 1px solid var(--line);
-  border-radius: 10px;
-  background: var(--panel);
-  padding: 9px 12px;
-}
-
-.gnode .n {
-  font-size: 13px;
-  font-weight: 600;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  color: var(--ink);
-  overflow: hidden;
-  text-overflow: ellipsis;
+  border-radius: 12px;
+  padding: 2px 9px;
+  background: none;
+  color: var(--dim);
   white-space: nowrap;
 }
 
-.gnode .n .s {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--faint);
-  flex-shrink: 0;
-}
-
-.gnode.done .n .s {
-  background: var(--ok);
-}
-
-.gnode.live {
+.ghead .pill.on {
   border-color: var(--accent);
+  color: var(--accent2);
 }
 
-.gnode.live .n .s {
-  background: var(--accent);
-  animation: run-breathe 2.2s infinite;
+/* The canvas scrolls in both directions: fit stops at a floor where the
+   cards are still legible, and past that the pane scrolls. */
+.gscroll {
+  flex: 1;
+  overflow: auto;
+  padding: 22px 26px 30px;
+  min-height: 0;
 }
 
-.gnode.parked {
-  border-color: var(--warn);
+.gscroll .canvas {
+  position: relative;
 }
 
-.gnode.parked .n .s {
-  background: var(--warn);
+.cstage {
+  position: relative;
+  transform-origin: 0 0;
 }
 
-.gnode.bad .n .s {
-  background: var(--error);
+.cstage svg {
+  position: absolute;
+  inset: 0;
+  overflow: visible;
+  pointer-events: none;
 }
 
-.gnode.wait {
-  opacity: 0.55;
+/* The drag handle between the graph and the detail column. */
+.rvbody > .split {
+  width: 5px;
+  flex-shrink: 0;
+  background: var(--line);
+  cursor: col-resize;
+  position: relative;
 }
 
-.gnode .meta {
-  display: block;
-  font: 11px var(--mono);
+.rvbody > .split::after {
+  content: '';
+  position: absolute;
+  left: 1px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 3px;
+  height: 34px;
+  border-radius: 2px;
+  background: var(--faint);
+}
+
+/* ---------- node cards ---------- */
+
+.gpane .nd {
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel);
+  padding: 8px 11px;
+  text-align: left;
+  overflow: hidden;
+}
+
+.gpane .nd .ndtop {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+
+/* The id renders whole, always: the graph has to agree with the ids in the
+   run's own messages and logs. The meta lines below it give way first. */
+.gpane .nd .nm {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--ink);
+  white-space: nowrap;
+}
+
+.gpane .nd .st {
+  font: 10px var(--mono);
+  margin-left: auto;
+  color: var(--faint);
+  white-space: nowrap;
+}
+
+.gpane .nd .facts,
+.gpane .nd .vd,
+.gpane .nd .now,
+.gpane .nd .err {
+  font: 10.5px var(--mono);
   color: var(--faint);
   margin-top: 4px;
-  white-space: normal;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
-.gnode.sel {
-  outline: 2px solid var(--accent2);
-  outline-offset: 1px;
+.gpane .nd .now {
+  font: 11px var(--font);
+  color: var(--run);
+}
+
+.gpane .nd .err {
+  color: var(--error);
+}
+
+.gpane .nd .vd.ok {
+  color: var(--ok);
+}
+
+.gpane .nd .vd.warn {
+  color: var(--warn);
+}
+
+.gpane .nd.done {
+  border-left: 3px solid var(--ok);
+}
+
+.gpane .nd.done .st {
+  color: var(--ok);
+}
+
+.gpane .nd.live {
+  border-color: var(--run);
+  border-left: 3px solid var(--run);
+  background: var(--panel2);
+}
+
+.gpane .nd.live .st {
+  color: var(--run);
+}
+
+.gpane .nd.bad {
+  border-color: var(--error);
+  border-left: 3px solid var(--error);
+}
+
+.gpane .nd.bad .st {
+  color: var(--error);
+}
+
+.gpane .nd.parked {
+  border-color: var(--warn);
+  border-left: 3px solid var(--warn);
+}
+
+.gpane .nd.parked .st {
+  color: var(--warn);
+}
+
+.gpane .nd.wait {
+  opacity: 0.5;
+  border-style: dashed;
+}
+
+.gpane .nd.sel {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* ---------- edges ---------- */
+
+/* Four states, each distinct in shape as well as hue, because colour never
+   carries a meaning on its own. */
+.gpane .e {
+  stroke: var(--edge);
+  stroke-width: 1.5;
+  fill: none;
+}
+
+.gpane .e.lit {
+  stroke: var(--accent);
+  stroke-width: 2;
+}
+
+.gpane .e.future {
+  stroke: var(--line);
+  stroke-dasharray: 4 4;
+}
+
+.gpane .e.flowing {
+  stroke: var(--run);
+  stroke-width: 2;
+  stroke-dasharray: 5 9;
+  animation: edge-march 1s linear infinite;
+}
+
+/* A parked child holds its line still: the march means work in flight. */
+.gpane .e.flowing.still {
+  animation: none;
+}
+
+@keyframes edge-march {
+  to {
+    stroke-dashoffset: -14;
+  }
 }
 
 /* Node detail: the chat pane's own rendering inside the run view. */

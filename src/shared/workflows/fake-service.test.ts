@@ -19,6 +19,45 @@ describe('the fake workflow run service', () => {
     expect(runs.some((run) => run.status === 'complete')).toBe(true)
     const unattended = runs.find((run) => run.sessionId === undefined && runIsLive(run))
     expect(unattended?.waiting).toBe(true)
+
+    // One canned record carries a failed node with its reason, so the failed
+    // card and the walked edge into it are visible without staging anything.
+    const failed = (unattended?.nodes ?? []).find((node) => node.status === 'failed')
+    expect(failed?.error).toBeDefined()
+    expect(failed?.parents).toEqual(['planner'])
+    service.dispose()
+  })
+
+  // The graph is only checkable under the fake flavor if the fake draws a
+  // graph worth checking: a fan-out, a fan-in, a send-back and edges nobody
+  // has walked yet.
+  it('scripts a build run with a shape the graph can be read against', async () => {
+    const service = createFakeWorkflowRunService({ beatMs: 0 })
+    await service.tools.start('s1', '/repos/thing', 'build', { intent: '/repos/thing/i.md' })
+    const run = (await service.snapshot()).runs.find((candidate) => candidate.sessionId === 's1')
+    const nodes = run?.nodes ?? []
+    const parentsOf = (id: string): readonly string[] =>
+      nodes.find((node) => node.id === id)?.parents ?? []
+
+    // Every node stands as a ghost at kickoff, so the planned edges are drawn
+    // dashed before the walk reaches them.
+    expect(nodes.length).toBeGreaterThan(3)
+    expect(nodes.filter((node) => node.status === 'pending').length).toBeGreaterThan(1)
+
+    // A fan-out: two nodes naming one parent.
+    const fannedOut = nodes.filter((node) => node.parents.includes('builder'))
+    expect(fannedOut.map((node) => node.id)).toEqual(['review-1', 'review-tests'])
+    // A fan-in: one node naming two parents.
+    expect(parentsOf('fixer-1')).toEqual(['review-1', 'review-tests'])
+    // A send-back, with a real revision id and the parents revise() writes:
+    // its base, two layers up, and the fixer the round answered.
+    expect(parentsOf('review-1·r1')).toEqual(['review-1', 'fixer-1'])
+
+    // Every parent names a node the record holds: nothing draws to nothing.
+    const ids = new Set(nodes.map((node) => node.id))
+    for (const node of nodes) {
+      for (const parent of node.parents) expect(ids.has(parent), parent).toBe(true)
+    }
     service.dispose()
   })
 
@@ -226,10 +265,15 @@ describe('the fake flavor\u2019s artifacts', () => {
     await service.tools.answer('s1', runId, 'carry on')
     await until(() => latest(runId)?.status === 'complete')
     const done = latest(runId)
-    expect(done?.nodes.map((node) => node.artifacts.map((one) => one.name))).toEqual([
-      ['spec'],
-      ['changes'],
-      ['review']
+    expect(
+      done?.nodes.map((node) => node.artifacts.map((one) => one.path.split('/').at(-1)))
+    ).toEqual([
+      ['spec.md'],
+      ['changes.md'],
+      ['review.md'],
+      ['review-tests.md'],
+      ['fixes.md'],
+      ['review.md']
     ])
     expect(done?.nodes[1].reads.map((read) => read.name)).toEqual(['rail.md', 'spec.md'])
     expect(done?.nodes[2].reads.map((read) => read.name)).toEqual(['spec.md', 'changes.md'])

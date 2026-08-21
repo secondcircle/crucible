@@ -92,6 +92,8 @@ interface Dispatch {
   readonly id: string
   readonly prompt: string
   readonly reads: readonly string[]
+  /** What the node declared it follows, which is what the graph draws. */
+  readonly from: readonly string[] | undefined
   readonly model: string | undefined
   /** The tree as the node found it: subject of the last commit, and dirt. */
   readonly head: string
@@ -143,6 +145,7 @@ function driver(repo: string, script: Script = {}): Driver {
         id,
         prompt: spec.prompt,
         reads: [...(spec.reads ?? [])],
+        from: spec.from === undefined ? undefined : [...spec.from],
         model: spec.model,
         head: git(repo, 'log', '-1', '--format=%s'),
         dirty: git(repo, 'status', '--porcelain')
@@ -449,6 +452,54 @@ describe('the merge-cleanliness test', () => {
 
     expect(rig.outputs.merge).toEqual({ result: 'clean' })
     expect(snapshot(repo)).toEqual(before)
+  })
+})
+
+// A graph that is right only because the renderer guessed well is not fixed:
+// the workflow says what each node follows, including the nodes a plan() can
+// never enumerate because a runtime loop gives birth to them.
+describe('the edges the build workflow declares', () => {
+  it('names a parent for every node the loops produce, and none for the root', async () => {
+    const rig = await build(tempRepo(), {
+      // One refused review and one refused verdict, so a second round of each
+      // loop exists to declare its own edges.
+      verdicts: { 'review-1': 'changes-required', ...gateRefusals(1) }
+    })
+
+    expect(rig.nodes.map((node) => `${node.id}<-${(node.from ?? []).join(',')}`)).toEqual([
+      // The planner takes only the kickoff input, so it is a root and says so
+      // by declaring nothing.
+      'planner<-',
+      'builder<-planner',
+      'review-1<-builder',
+      'fixer-1<-review-1',
+      'review-2<-fixer-1',
+      // The gate opens on the review that approved the branch.
+      'gate-alignment-1<-review-2',
+      'gate-comments-1<-gate-alignment-1',
+      'gate-verdict-1<-gate-alignment-1,gate-comments-1',
+      'gate-fixer-1<-gate-verdict-1',
+      'gate-alignment-2<-gate-fixer-1',
+      'gate-comments-2<-gate-alignment-2',
+      'gate-verdict-2<-gate-alignment-2,gate-comments-2'
+    ])
+    expect(rig.node('planner').from).toBeUndefined()
+
+    // Every declared parent is a node this run actually ran.
+    const ran = new Set(rig.nodes.map((node) => node.id))
+    for (const node of rig.nodes) {
+      for (const parent of node.from ?? []) expect(ran.has(parent), parent).toBe(true)
+    }
+  })
+
+  it('follows the review that approved, whichever round that was', async () => {
+    const rig = await build(tempRepo(), {
+      verdicts: { 'review-1': 'changes-required', 'review-2': 'changes-required' }
+    })
+
+    // The plan's forecast of review-1 would draw a lying edge; the third
+    // round is what the gate actually followed.
+    expect(rig.node('gate-alignment-1').from).toEqual(['review-3'])
   })
 })
 

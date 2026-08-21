@@ -667,6 +667,8 @@ export default workflow({
     const target = localDefaultBranch(ctx.cwd)
     const intent = ctx.inputs.intent
 
+    // The planner takes only the kickoff input: a root, so declaring
+    // anything to follow would be an invented edge.
     const planner = await ctx.node('planner', {
       prompt: plannerPrompt(intent),
       reads: [intent],
@@ -679,6 +681,7 @@ export default workflow({
 
     await ctx.node('builder', {
       prompt: builderPrompt(intent, spec),
+      from: ['planner'],
       reads: [intent, spec],
       model: CODE_MODEL
     })
@@ -689,9 +692,13 @@ export default workflow({
     const reviews: string[] = []
     const corrections: string[] = []
     let sinceCheckIn = 0
+    // The loop leaves only through an approving review, so what the merge
+    // gate follows is settled on the way out of it.
+    let approvedBy: string
     for (let round = 1; ; round++) {
       const review = await ctx.node(`review-${round}`, {
         prompt: reviewerPrompt(target, intent, spec, corrections),
+        from: [round === 1 ? 'builder' : `fixer-${round - 1}`],
         reads: [intent, spec, ...reviews],
         outputs: {
           review: {
@@ -709,7 +716,10 @@ export default workflow({
       const { verdict } = review.verdict as { verdict: string; reason: string }
       // Approval ends the interior loop, not the run: nothing has yet judged
       // the branch against what was agreed.
-      if (verdict === 'approved') break
+      if (verdict === 'approved') {
+        approvedBy = `review-${round}`
+        break
+      }
 
       // Between the review and the fixer it dispatches, so a correction
       // reaches the agent it was written for.
@@ -730,6 +740,7 @@ export default workflow({
 
       await ctx.node(`fixer-${round}`, {
         prompt: fixerPrompt(target, intent, spec, review.outputs.review, corrections),
+        from: [`review-${round}`],
         reads: [intent, spec, ...reviews],
         model: CODE_MODEL
       })
@@ -747,6 +758,7 @@ export default workflow({
       // rather than one the police has already edited.
       const alignment = await ctx.node(`gate-alignment-${round}`, {
         prompt: gateAlignmentPrompt(target, intent, gateCorrections),
+        from: [round === 1 ? approvedBy : `gate-fixer-${round - 1}`],
         reads: [intent, ...coverageReports],
         outputs: {
           report: {
@@ -760,6 +772,7 @@ export default workflow({
 
       const police = await ctx.node(`gate-comments-${round}`, {
         prompt: gateCommentsPrompt(target, gateCorrections),
+        from: [`gate-alignment-${round}`],
         outputs: {
           report: {
             file: `gate-comments-${round}.html`,
@@ -775,6 +788,7 @@ export default workflow({
 
       const gate = await ctx.node(`gate-verdict-${round}`, {
         prompt: gateVerdictPrompt(target, intent, gateCorrections),
+        from: [`gate-alignment-${round}`, `gate-comments-${round}`],
         reads: [intent, alignment.outputs.report, police.outputs.report],
         verdict: VERDICT,
         model: DOCUMENT_MODEL
@@ -820,6 +834,7 @@ export default workflow({
           police.outputs.report,
           gateCorrections
         ),
+        from: [`gate-verdict-${round}`],
         reads: [intent, spec, ...coverageReports, ...commentReports],
         model: CODE_MODEL
       })

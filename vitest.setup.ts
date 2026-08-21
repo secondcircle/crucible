@@ -6,4 +6,31 @@ import { afterEach } from 'vitest'
 if (typeof document !== 'undefined') {
   const { cleanup } = await import('@testing-library/react')
   afterEach(cleanup)
+  installStorage()
+  // A document's storage outlives a component but not a test: what one test
+  // remembered must not be what the next one starts from.
+  afterEach(() => window.localStorage.clear())
+}
+
+// Node 25's own `localStorage` global stores nothing without
+// `--localstorage-file` and shadows the working one jsdom provides, so tests
+// of anything the renderer remembers would silently prove nothing.
+function installStorage(): void {
+  if (typeof window.localStorage?.setItem === 'function') return
+  const held = new Map<string, string>()
+  const storage: Storage = {
+    get length() {
+      return held.size
+    },
+    key: (at) => [...held.keys()][at] ?? null,
+    getItem: (name) => held.get(name) ?? null,
+    setItem: (name, value) => {
+      held.set(name, String(value))
+    },
+    removeItem: (name) => {
+      held.delete(name)
+    },
+    clear: () => held.clear()
+  }
+  Object.defineProperty(window, 'localStorage', { configurable: true, value: storage })
 }
