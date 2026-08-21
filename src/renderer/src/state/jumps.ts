@@ -57,7 +57,7 @@ export function summaryFailure(message: string): string {
   return `Summary failed — ${message}. Nothing moved; press s to try again.`
 }
 
-/** The one line the overlay's action note shows for this state. */
+/** The one line said for this state, wherever the session narrates it. */
 export function jumpNote(state: JumpState): string {
   switch (state.kind) {
     case 'jumping':

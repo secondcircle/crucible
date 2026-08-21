@@ -1499,7 +1499,7 @@ export function Shell({
         }
       })
       .catch((cause: unknown) => {
-        // π's three attempts are spent and nothing moved. The summary's
+        // π's retries are spent and nothing moved. The summary's
         // failure stays with its session until the next attempt clears it;
         // a plain jump has no narration to leave behind and reports as any
         // other refusal does.
@@ -1937,12 +1937,10 @@ export function Shell({
           </p>
         )}
 
-        {/* What the tree would say about this session's jump, for whenever the
-            tree is not there to say it: a summarize runs for seconds behind a
-            closed overlay and through the arrival that closed it, and a
-            session that looks idle while it pays for a call is a wait nobody
-            can see. The failure outlives the call, so it is read here the
-            moment the user arrives, before they reopen anything. */}
+        {/* A summarize keeps running behind a closed overlay, and a session
+            that looks idle while it pays for a call is a wait nobody can see.
+            The failure outlives the call, so it is read the moment the user
+            arrives, before they reopen anything. */}
         {activeJump === undefined || treeShowing ? null : activeJump.kind === 'failed' ? (
           <p className="failure" role="alert">
             {jumpNote(activeJump)}

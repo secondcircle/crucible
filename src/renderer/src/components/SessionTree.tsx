@@ -201,8 +201,8 @@ export function SessionTree({
 
             const { node } = row
             const open = selected === node.ref || jumpRef === node.ref
-            // The jump's own node: the narration and the failure belong at
-            // the point the jump was attempted from and nowhere else.
+            // The jump's own node: within the tree, the narration and the
+            // failure belong at the point the jump was attempted from.
             const mine = jumpRef === node.ref
             return (
               <div
