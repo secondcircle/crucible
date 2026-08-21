@@ -1,9 +1,6 @@
 import { spawnSync } from 'node:child_process'
 import { workflow, type OutputSpec, type PlannedNode } from 'crucible:workflow'
 
-// ADRs accumulate and nobody prunes them, which is what a run of this is for.
-// It maintains the folder and reports; authoring and merging stay elsewhere.
-
 const DOCUMENT_MODEL = 'anthropic/claude-fable-5:high'
 
 /**

@@ -215,10 +215,8 @@ describe('what the report is told', () => {
   })
 })
 
-// The workflow bans citing a specific ADR anywhere outside the folder. Its own
-// text is outside the folder, so the enforcer is the first thing the ban binds
-// — and an example written to illustrate the rule is exactly how it would be
-// broken.
+// The citation rule binds the enforcer's own text first, since it lives
+// outside the folder, and an example written to illustrate it would break it.
 describe('the enforcer is clean of what it treats', () => {
   it('names no specific ADR in anything it emits', () => {
     for (const [what, text] of Object.entries(everythingEmitted())) {
