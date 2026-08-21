@@ -695,8 +695,11 @@ describe('a workspace where Jira is the host and not yet configured', () => {
     expect(said).toHaveTextContent('A KEY=VALUE line in .env.local at the workspace root.')
     expect(said).toHaveTextContent('.crucible/jira.json')
     expect(said).toHaveTextContent('{"projectKey": "EK"}')
-    // And that a session can do it, and that reopening re-checks.
-    expect(said).toHaveTextContent('agent docs')
+    // And that a session can do it, and that reopening re-checks. The doc's
+    // name must survive as its own word: JSX swallows the newline between the
+    // sentence and the <code> element, so without an explicit space this
+    // renders as "docs, asjira.md".
+    expect(said).toHaveTextContent('agent docs, as jira.md')
     expect(said).toHaveTextContent(/Open this board again/)
     expect(rows()).toEqual([])
   })

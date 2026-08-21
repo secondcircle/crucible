@@ -340,6 +340,25 @@ describe('a Jira that could not answer', () => {
     })
   })
 
+  it('answers rather than throwing when the base URL cannot form a request', async () => {
+    // A person copying the host without its scheme, which nothing validates
+    // before the first request is built.
+    const wired = wire(GOOD)
+    const answer = await collectJiraIssues({
+      config: { ...CONFIG, baseUrl: 'secondcircle.atlassian.net' },
+      fetchImpl: wired.impl,
+      remaining: () => 30_000,
+      limit: 100,
+      now: () => NOW
+    })
+
+    // Never a rejection: a thrown TypeError leaves the board on "Reading
+    // issues…" forever, which is exactly the dead state this answer exists
+    // to prevent.
+    expect(answer.kind).toBe('unreachable')
+    expect(answer.kind === 'unreachable' && answer.reason).toContain('JIRA_BASE_URL')
+  })
+
   it('says so for a server error too, rather than showing an empty board', async () => {
     expect(await reason([[/\/myself$/, { status: 500, body: 'gateway' }]])).toContain(
       'could not reach Jira'
