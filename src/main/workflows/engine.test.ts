@@ -19,7 +19,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import type { ObservedCacheMiss } from '../../shared/agent/adapter'
 import type { SessionId, TranscriptItem } from '../../shared/agent/port'
 import type { CacheRecorder, RecordedCacheMiss } from '../cache/ledger'
-import type { WorkflowDef } from './authoring'
+import type { PlannedNode, WorkflowDef } from './authoring'
 import { createWorkflowEngine, type WorkflowEngine } from './engine'
 import type {
   NodeBlocker,
@@ -65,13 +65,17 @@ interface NodeTools {
   readonly block: (blocker: NodeBlocker) => void
   /** A cache miss on this node's turn, as the SDK factory reports one. */
   readonly cacheMiss: (miss: ObservedCacheMiss) => void
+  /** A line of liveness, which is what the engine snapshots the node on. */
+  readonly activity: (doing: string) => void
   readonly cwd: string
   // The first prompt of the session, which is the one naming the output
   // paths; later prompts (rejections, blocker answers, shoves) do not.
   readonly taskPrompt: string
 }
 
-type NodeScript = (prompt: string, tools: NodeTools, turn: number) => void
+// A script that returns a promise is a turn still under way, which is how a
+// node's record is read while its agent is working.
+type NodeScript = (prompt: string, tools: NodeTools, turn: number) => void | Promise<void>
 
 /** The prompt names every output path; a script writes one by its file name. */
 function outputPath(prompt: string, file: string): string {
@@ -93,18 +97,22 @@ function scriptedSessions(
       let turn = 0
       let disposed = false
       let taskPrompt = ''
+      const activityListeners = new Set<(now: string | undefined) => void>()
       return {
         async prompt(text: string): Promise<void> {
           if (disposed) return
           prompts.push(`${nodeId}: ${text.split('\n')[0]}`)
           turn += 1
           if (turn === 1) taskPrompt = text
-          script(
+          await script(
             text,
             {
               complete: (completion) => request.onComplete(completion),
               block: (blocker) => request.onBlocker(blocker),
               cacheMiss: (miss) => request.onCacheMiss?.(miss),
+              activity: (doing) => {
+                for (const listener of [...activityListeners]) listener(doing)
+              },
               cwd: request.cwd,
               taskPrompt
             },
@@ -117,7 +125,10 @@ function scriptedSessions(
         transcript: (): readonly TranscriptItem[] => [
           { kind: 'assistant', markdown: `scripted node ${nodeId}, turn ${turn}` }
         ],
-        onActivity: () => () => {},
+        onActivity: (listener) => {
+          activityListeners.add(listener)
+          return () => activityListeners.delete(listener)
+        },
         dispose: () => {
           disposed = true
         }
@@ -555,3 +566,139 @@ describe('the engine end to end', () => {
     expect(() => engine.cancel('aa11')).toThrow(/not live/)
   })
 })
+
+// The artifact rail draws from the record alone, so what the record says
+// about a declared file — before, during and after it lands — is engine
+// behavior and tested here.
+describe('what the record says about artifacts', () => {
+  const twoNodes: WorkflowDef = {
+    description: 'a node that works a while, then one that follows it',
+    inputs: { prompt: 'the task file' },
+    plan: (): PlannedNode[] => [
+      { id: 'work', outputs: { report: { file: 'report.md', desc: 'what happened' } } },
+      {
+        id: 'after',
+        parents: ['work'],
+        outputs: { summary: { file: 'summary.md', desc: 'the gist' } }
+      }
+    ],
+    run: async (ctx) => {
+      await ctx.node('work', {
+        prompt: 'do the thing',
+        reads: [ctx.inputs.prompt],
+        outputs: {
+          report: { file: 'report.md', desc: 'what happened' },
+          notes: { file: 'notes.md', desc: 'what was learned' }
+        }
+      })
+      await ctx.node('after', {
+        prompt: 'sum it up',
+        outputs: { summary: { file: 'summary.md', desc: 'the gist' } }
+      })
+    }
+  }
+
+  /** A rig whose first node stays mid-turn until the test lets it finish. */
+  function heldRig(): { rig: Rig; release: () => void } {
+    let release: (() => void) | undefined
+    const held = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const built = rig({ two: twoNodes }, (nodeId) => {
+      if (nodeId !== 'work') {
+        return (prompt, tools) => {
+          writeFileSync(outputPath(prompt, 'summary.md'), 'the gist\n')
+          tools.complete({ summary: 'summed up' })
+        }
+      }
+      return async (prompt, tools) => {
+        // The report lands early, the notes only at the end: one node with
+        // two outputs is how a half-written node is observable at all.
+        writeFileSync(outputPath(prompt, 'report.md'), 'the report\n')
+        tools.activity('writing the notes…')
+        await held
+        writeFileSync(outputPath(prompt, 'notes.md'), 'the notes\n')
+        tools.complete({ summary: 'did the thing' })
+      }
+    })
+    return { rig: built, release: () => release?.() }
+  }
+
+  it('declares what a node will write, on the plan\u2019s ghost and again at start', async () => {
+    const { rig: built, release } = heldRig()
+    const { engine, repo } = built
+    const task = join(repo, 'task.md')
+    writeFileSync(task, 'the task\n')
+    const started = await engine.start(startRequest(repo, 'two', { prompt: task }))
+
+    await until(() => engine.runs()[0].nodes[0].status === 'running')
+    const run = engine.runs()[0]
+
+    // The ghost of the node that has not started names the file it will write,
+    // resolved under the run's artifact directory, and calls it unwritten.
+    const ghost = run.nodes[1]
+    expect(ghost.status).toBe('pending')
+    expect(ghost.artifacts.map((artifact) => artifact.name)).toEqual(['summary'])
+    expect(ghost.artifacts[0].path).toBe(join(stateDirOf(run.id, built), 'summary.md'))
+    expect(ghost.artifacts[0].writtenAt).toBeUndefined()
+
+    // The started node carries its spec's outputs — both of them — from the
+    // first moment, rather than only once it has validated.
+    const working = run.nodes[0]
+    expect(working.artifacts.map((artifact) => artifact.name)).toEqual(['report', 'notes'])
+    expect(working.artifacts[1].writtenAt).toBeUndefined()
+    expect(working.reads.map((read) => read.path)).toEqual([task])
+    // The workflow's inputs are described on the record, for the rail's rows.
+    expect(started.inputDescs).toEqual({ prompt: 'the task file' })
+
+    release()
+    await until(() => engine.runs()[0].status === 'complete')
+  })
+
+  it('stamps an output the moment it lands, without waiting for the node to finish', async () => {
+    const { rig: built, release } = heldRig()
+    const { engine, repo } = built
+    const task = join(repo, 'task.md')
+    writeFileSync(task, 'the task\n')
+    await engine.start(startRequest(repo, 'two', { prompt: task }))
+
+    await until(() => engine.runs()[0].nodes[0].artifacts[0]?.writtenAt !== undefined)
+    const mid = engine.runs()[0].nodes[0]
+    expect(mid.status).toBe('running')
+    expect(mid.artifacts[1].writtenAt).toBeUndefined()
+
+    const stamped = mid.artifacts[0].writtenAt
+    release()
+    await until(() => engine.runs()[0].status === 'complete')
+    const done = engine.runs()[0].nodes[0]
+    // A stamp is the first observation, never the last write.
+    expect(done.artifacts[0].writtenAt).toBe(stamped)
+    expect(done.artifacts[1].writtenAt).toBeDefined()
+    for (const artifact of done.artifacts) {
+      expect(readFileSync(artifact.path, 'utf8')).not.toBe('')
+    }
+  })
+
+  it('leaves a failed node holding the row for what it never wrote', async () => {
+    const { engine, repo } = rig({ two: twoNodes }, () => {
+      return (_prompt, tools) => {
+        // Claims done without writing anything, every time.
+        tools.complete({ summary: 'nothing to show' })
+      }
+    })
+    const task = join(repo, 'task.md')
+    writeFileSync(task, 'the task\n')
+    await engine.start(startRequest(repo, 'two', { prompt: task }))
+
+    await until(() => engine.runs()[0].status === 'failed')
+    const node = engine.runs()[0].nodes[0]
+    expect(node.status).toBe('failed')
+    expect(node.artifacts.map((artifact) => artifact.name)).toEqual(['report', 'notes'])
+    expect(node.artifacts.every((artifact) => artifact.writtenAt === undefined)).toBe(true)
+  })
+})
+
+/** Where a run's artifacts live, as the store lays them out. */
+function stateDirOf(runId: string, built: Rig): string {
+  return join(built.stateDir, runId, 'artifacts')
+}

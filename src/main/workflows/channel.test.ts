@@ -11,6 +11,9 @@ function serviceRecorder(): MainWorkflowRunService {
     resume: vi.fn(async () => {}),
     cancel: vi.fn(async () => {}),
     nodeTranscript: vi.fn(async () => []),
+    artifact: vi.fn(async () => ({ kind: 'markdown' as const, body: '# spec', bytes: 6 })),
+    revealArtifact: vi.fn(async () => {}),
+    artifactFile: vi.fn(() => undefined),
     tools: {
       workflows: async () => '',
       start: async () => '',
@@ -31,6 +34,21 @@ describe('the workflow-run channel', () => {
     expect(service.pause).toHaveBeenCalledWith('ab12')
     await invoke(service, { op: 'nodeTranscript', args: ['ab12', 'work'] })
     expect(service.nodeTranscript).toHaveBeenCalledWith('ab12', 'work')
+  })
+
+  it('dispatches the artifact operations, both arguments checked', async () => {
+    const service = serviceRecorder()
+    await invoke(service, { op: 'artifact', args: ['ab12', '/state/ab12/artifacts/spec.md'] })
+    expect(service.artifact).toHaveBeenCalledWith('ab12', '/state/ab12/artifacts/spec.md')
+    await invoke(service, { op: 'revealArtifact', args: ['ab12', '/state/ab12/artifacts/spec.md'] })
+    expect(service.revealArtifact).toHaveBeenCalledWith('ab12', '/state/ab12/artifacts/spec.md')
+
+    await expect(invoke(service, { op: 'artifact', args: ['ab12'] })).rejects.toThrow(
+      /needs text/
+    )
+    await expect(
+      invoke(service, { op: 'revealArtifact', args: [{ path: '/etc/passwd' }, 'ab12'] })
+    ).rejects.toThrow(/needs text/)
   })
 
   it('refuses garbage rather than passing it through', async () => {

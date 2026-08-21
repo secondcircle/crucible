@@ -42,7 +42,7 @@ export function serveExhibit(panel: PanelModel, request: ExhibitRequest): Exhibi
   if (request.method !== 'GET') return refuse(NOT_SHOWN)
 
   const asked = parseExhibitUrl(request.url)
-  if (asked === undefined) return refuse(NOT_SHOWN)
+  if (asked === undefined || asked.kind !== 'panel') return refuse(NOT_SHOWN)
 
   // An exact lookup of the decoded ids, never a path: `..`, encoded separators
   // and every other smuggling shape simply match no tab.

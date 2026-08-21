@@ -29,7 +29,11 @@ import type {
   WorkspaceService
 } from '../../shared/workspace/service'
 import { runIsLive, type RunRecord, type WorkflowRunId } from '../../shared/workflows/run'
-import type { RunsSnapshot, WorkflowRunService } from '../../shared/workflows/service'
+import type {
+  ArtifactView,
+  RunsSnapshot,
+  WorkflowRunService
+} from '../../shared/workflows/service'
 import { useBranchBoards, useIssueBoards } from './board/use-boards'
 import { BashDrawer, type RunView } from './components/BashDrawer'
 import { BranchBoard } from './components/BranchBoard'
@@ -240,6 +244,10 @@ export function Shell({
   // The engine's records, whole on every event; and the two run overlays.
   const [runsSnapshot, setRunsSnapshot] = useState<RunsSnapshot | undefined>(undefined)
   const [openRunId, setOpenRunId] = useState<WorkflowRunId | undefined>(undefined)
+  // The artifact the run view's reader is showing, by path. It lives here
+  // because Escape unwinds one surface at a time and this is where that ladder
+  // is: the reader is a step of it, above the run view itself.
+  const [openArtifactPath, setOpenArtifactPath] = useState<string | undefined>(undefined)
   const [runsOverviewOpen, setRunsOverviewOpen] = useState(false)
   // Restoring a queued message puts the caret back where the words are.
   const box = useRef<HTMLTextAreaElement>(null)
@@ -740,7 +748,8 @@ export function Shell({
       // overview, so Esc from an opened run lands back where it was opened.
       if (openRunId !== undefined) {
         pressed.preventDefault()
-        setOpenRunId(undefined)
+        if (openArtifactPath !== undefined) setOpenArtifactPath(undefined)
+        else setOpenRunId(undefined)
         return
       }
       if (runsOverviewOpen) {
@@ -801,6 +810,7 @@ export function Shell({
     closeBoard,
     closeIssues,
     openRunId,
+    openArtifactPath,
     runsOverviewOpen
   ])
 
@@ -1543,6 +1553,8 @@ export function Shell({
 
   const openWorkflowRun = useCallback((id: WorkflowRunId): void => {
     setOpenRunId(id)
+    // A run is entered on its node detail, never on whatever was last read.
+    setOpenArtifactPath(undefined)
   }, [])
 
   // The door out of a run surface: land in the orchestrator's chat.
@@ -1569,6 +1581,14 @@ export function Shell({
       workflowRuns === undefined || openRunId === undefined
         ? Promise.resolve([] as const)
         : workflowRuns.nodeTranscript(openRunId, nodeId),
+    [workflowRuns, openRunId]
+  )
+
+  const runArtifact = useCallback(
+    (path: string): Promise<ArtifactView> =>
+      workflowRuns === undefined || openRunId === undefined
+        ? Promise.reject(new Error('That run is no longer open.'))
+        : workflowRuns.artifact(openRunId, path),
     [workflowRuns, openRunId]
   )
 
@@ -1813,6 +1833,13 @@ export function Shell({
               snapshot.sessions.some((candidate) => candidate.id === openRun.sessionId)
             }
             transcript={runTranscript}
+            artifact={runArtifact}
+            openArtifact={openArtifactPath}
+            onOpenArtifact={setOpenArtifactPath}
+            onRevealArtifact={(path) =>
+              void workflowRuns.revealArtifact(openRun.id, path).catch(report)
+            }
+            onCopyPath={(path) => void navigator.clipboard?.writeText(path).catch(report)}
             onGoToSession={() => {
               if (openRun.sessionId !== undefined) goToRunSession(openRun.sessionId)
             }}

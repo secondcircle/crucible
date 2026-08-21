@@ -1,6 +1,7 @@
 import type { TranscriptItem } from '../../../shared/agent/port'
 import type { RunRecord } from '../../../shared/workflows/run'
 import type {
+  ArtifactView,
   WorkflowRunListener,
   WorkflowRunService
 } from '../../../shared/workflows/service'
@@ -15,6 +16,8 @@ export interface ScriptedWorkflowRuns extends WorkflowRunService {
   emitToggle(): void
   /** What `nodeTranscript` answers with, keyed `runId:nodeId`. */
   readonly transcripts: Map<string, readonly TranscriptItem[]>
+  /** What `artifact` answers with, keyed `runId:path`; anything else rejects. */
+  readonly artifacts: Map<string, ArtifactView>
 }
 
 export function createScriptedWorkflowRuns(
@@ -24,10 +27,12 @@ export function createScriptedWorkflowRuns(
   const listeners = new Set<WorkflowRunListener>()
   const calls: Array<{ op: string; args: string[] }> = []
   const transcripts = new Map<string, readonly TranscriptItem[]>()
+  const artifacts = new Map<string, ArtifactView>()
 
   return {
     calls,
     transcripts,
+    artifacts,
 
     setRuns(next: readonly RunRecord[]): void {
       runs = next
@@ -64,6 +69,17 @@ export function createScriptedWorkflowRuns(
     async nodeTranscript(runId: string, nodeId: string) {
       calls.push({ op: 'nodeTranscript', args: [runId, nodeId] })
       return transcripts.get(`${runId}:${nodeId}`) ?? []
+    },
+
+    async artifact(runId: string, path: string) {
+      calls.push({ op: 'artifact', args: [runId, path] })
+      const canned = artifacts.get(`${runId}:${path}`)
+      if (canned === undefined) throw new Error('That file is not one this run touched.')
+      return canned
+    },
+
+    async revealArtifact(runId: string, path: string) {
+      calls.push({ op: 'revealArtifact', args: [runId, path] })
     }
   }
 }
