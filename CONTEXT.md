@@ -234,6 +234,25 @@ The bar above a session's chat pane where runs appear, one chip each —
 workflow, current node, age, spend.
 _Avoid_: run bar, pill row, status bar.
 
+**Run artifact**:
+A file a node of a run declares as an output and writes into the run's own
+directory, outside the repo. The files handed in at kickoff are shown beside
+them but are the repo's, not the run's.
+_Avoid_: output file, deliverable, exhibit (an exhibit is a context panel tab).
+
+**Artifact rail**:
+The third column of the run view, listing every artifact the run has touched
+in production order — inputs first, then what the run wrote — each naming the
+node that wrote it and the nodes that read it. Declared outputs appear dimmed
+from the moment their node starts.
+_Avoid_: artifacts panel, output list, artifact sidebar.
+
+**Artifact reader**:
+The rendered view of one artifact, opened in place of the node transcript
+while the graph and the artifact rail stay put. Read-only, like the rest of
+the run view.
+_Avoid_: preview, viewer, artifact tab.
+
 **Merge gate**:
 The final phase of a build run: one map-level pass over the whole branch —
 coverage against the intent document, scope creep against incidental extras,
