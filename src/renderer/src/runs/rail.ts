@@ -31,7 +31,18 @@ export interface RailModel {
   readonly written: number
 }
 
-export function railOf(run: RunRecord): RailModel {
+/**
+ * The rail model for one snapshot of one run.
+ *
+ * `placed` is the order this same run's rows were last given, oldest first.
+ * The record alone cannot say when a row first appeared. A node's declared
+ * outputs read the same whether the plan placed them at kickoff or the node
+ * declared them when it started, so the caller carries the placement order
+ * forward and passes it back (spec §3, "a row never moves once placed").
+ * Pass nothing and the record's own node order decides, which is all a rail
+ * opened mid-flight can honor.
+ */
+export function railOf(run: RunRecord, placed: readonly string[] = []): RailModel {
   const readersOf = (path: string): string[] => {
     const found: string[] = []
     for (const node of run.nodes) {
@@ -53,8 +64,9 @@ export function railOf(run: RunRecord): RailModel {
     }
   })
 
-  // First appearance in the record decides the order, and the record keeps a
-  // node's place when a ghost becomes the real thing, so a row never moves.
+  // One row per path, backed by the furthest copy that declares it. Building
+  // by node order puts paths never seen before in record order, which is plan
+  // order for the ghosts standing at kickoff.
   const produced = new Map<string, RailRow>()
   for (const node of run.nodes) {
     for (const artifact of node.artifacts) {
@@ -74,13 +86,34 @@ export function railOf(run: RunRecord): RailModel {
     }
   }
 
-  const rows = [...produced.values()]
+  const rows = inPlacedOrder(produced, placed)
   return {
     inputs,
     produced: rows,
     declared: rows.length,
     written: rows.filter((row) => row.state === 'written').length
   }
+}
+
+// Rows keep the slot they were placed in: every remembered path first, in the
+// order it was placed, then whatever the record has grown since, in node
+// order. A path the record no longer names (a pruned ghost's) drops out and
+// takes its slot with it.
+function inPlacedOrder(produced: Map<string, RailRow>, placed: readonly string[]): RailRow[] {
+  const rows: RailRow[] = []
+  const taken = new Set<string>()
+  for (const path of placed) {
+    const row = produced.get(path)
+    if (row === undefined || taken.has(path)) continue
+    rows.push(row)
+    taken.add(path)
+  }
+  for (const [path, row] of produced) {
+    if (taken.has(path)) continue
+    rows.push(row)
+    taken.add(path)
+  }
+  return rows
 }
 
 /** The row for one path, whichever group it sits in. */

@@ -153,6 +153,9 @@ const rail = (): HTMLElement => screen.getByLabelText('Artifacts')
 const rows = (): readonly HTMLElement[] => within(rail()).queryAllByRole('button')
 
 describe('the artifact rail', () => {
+  // Opened mid-flight, so the rail has watched nothing appear: the record's
+  // own node order is every bit of first appearance it can be asked for, and
+  // spec.md, changes.md, review.md is that order.
   it('lists kickoff inputs first, then what the run wrote, in first-appearance order', async () => {
     await openRun([runOf()])
 

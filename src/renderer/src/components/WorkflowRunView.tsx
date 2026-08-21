@@ -20,7 +20,7 @@ import {
   toViewItems
 } from '../runs/format'
 import { layerNodes } from '../runs/graph'
-import { railOf, rowFor } from '../runs/rail'
+import { railOf, rowFor, type RailModel } from '../runs/rail'
 import { relativeTime } from '../labels'
 import { ArtifactRail } from './ArtifactRail'
 import { ArtifactReader } from './ArtifactReader'
@@ -102,7 +102,7 @@ export function WorkflowRunView({
 
   const live = runIsLive(run)
   const layers = useMemo(() => layerNodes(run.nodes), [run.nodes])
-  const rail = useMemo(() => railOf(run), [run])
+  const rail = usePlacedRail(run)
   // The reader shows what the record still names: an artifact whose row leaves
   // the record (a pruned ghost's) puts the node's transcript back by itself.
   const openRow = openArtifact === undefined ? undefined : rowFor(rail, openArtifact)
@@ -265,6 +265,36 @@ export function WorkflowRunView({
       </div>
     </section>
   )
+}
+
+// The rail's placement memory. Each snapshot is derived against the order the
+// last one produced, so a path a later node's start drops into the middle of
+// the record joins the list at the end instead of pushing its neighbors down
+// (spec §3). The memory lives as long as the view. A run reopened later starts
+// from record order again, which is the most first appearance any record can
+// be asked for.
+function usePlacedRail(run: RunRecord): RailModel {
+  const [placed, setPlaced] = useState<{
+    readonly runId: string
+    readonly order: readonly string[]
+  }>({ runId: run.id, order: NO_ORDER })
+
+  const remembered = placed.runId === run.id ? placed.order : NO_ORDER
+  const rail = useMemo(() => railOf(run, remembered), [run, remembered])
+  const order = rail.produced.map((row) => row.path)
+  // Adjusting state during render, the way React prescribes for state that
+  // depends on its own last value. Deriving a snapshot against the order it
+  // just produced gives that order back, so the second pass settles.
+  if (placed.runId !== run.id || !sameOrder(placed.order, order)) {
+    setPlaced({ runId: run.id, order })
+  }
+  return rail
+}
+
+const NO_ORDER: readonly string[] = []
+
+function sameOrder(held: readonly string[], next: readonly string[]): boolean {
+  return held.length === next.length && held.every((path, at) => path === next[at])
 }
 
 // Took these, made these: the node's own dataflow, one clickable chip per
