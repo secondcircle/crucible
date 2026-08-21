@@ -3,6 +3,7 @@ import { join } from 'node:path'
 import type { SessionId } from '../../shared/agent/port'
 import { createFakeWorkflowRunService } from '../../shared/workflows/fake-service'
 import type { MainWorkflowRunService } from '../../shared/workflows/service'
+import type { CacheRecorder } from '../cache/ledger'
 import type { Flavor } from '../agent/select-adapter'
 import type { LogSink } from '../log/sink'
 import { readShippedStandingPrompt, shippedWorkflowLibPath, shippedWorkflowsPath } from '../shipped'
@@ -23,6 +24,8 @@ export interface WorkflowRunWiring {
   readonly stateDir: string
   /** How a run speaks: a message to its orchestrator session's agent. */
   readonly deliver: (sessionId: SessionId, text: string) => void
+  /** The cache ledger every observed miss is appended to, sessions and runs alike. */
+  readonly cache?: CacheRecorder
 }
 
 // One flavor decision governs all seams: a fake-flavor launch runs scripted
@@ -72,6 +75,7 @@ export function selectWorkflowRunService(
       agentDir: join(wiring.stateDir, 'workflow-agent')
     }),
     deliver: wiring.deliver,
+    ...(wiring.cache === undefined ? {} : { cache: wiring.cache }),
     onChanged: () => {
       for (const listener of [...changeListeners]) listener()
     },

@@ -85,8 +85,9 @@ names the milestone from `m1-parity-core.md`. **never** means ruled out.
 | π feature | π behavior | Crucible status |
 |---|---|---|
 | Context meter | footer context % | **built** — top-bar meter, shows a dash until the adapter reports real usage (A16, honest-data rule) |
-| Token/cost footer | ↑↓ tokens, cache, cost | **built, in part** — a cost-only chip beside the context meter, dashed until the adapter reports real cost, and a full input/output/cache breakdown in the Usage tab. The cache-health badge and the transcript seam are still later (M1 block 5) |
-| Usage history | `pi usage` | **built for the workspace** — Usage tab sums π's per-message usage for the active session and for every curated session of the workspace. No all-time or cross-workspace ledger, and nothing about usage is persisted |
+| Token/cost footer | ↑↓ tokens, cache, cost | **built** — a cost-only chip beside the context meter, dashed until the adapter reports real cost, a full input/output/cache breakdown in the Usage tab, and the amber cache badge beside the cost pill on any miss in this conversation |
+| Cache misses | `showCacheMissNotices`, off by default | **built** — π's arithmetic mirrored (same noise floor, π's 20k/$0.10 display threshold dropped), every miss recorded in one permanent ledger across workspaces, sessions and runs (ADR 0019), counted by the sidebar cache strip since the last reset, investigable from the cache health view, and seamed into the transcript at the turn that paid. Facts only: no cause, no severity, no filtering past the noise floor |
+| Usage history | `pi usage` | **built for the workspace** — Usage tab sums π's per-message usage for the active session and for every curated session of the workspace. No all-time or cross-workspace ledger, and nothing about usage is persisted — the cache ledger is the one deliberate exception (ADR 0019) |
 
 ## Principles that shaped the statuses
 

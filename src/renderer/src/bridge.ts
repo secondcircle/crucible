@@ -2,6 +2,8 @@ import type { AppUpdateRequest, AppUpdateResult } from '../../shared/app-update/
 import type { UpdateReady } from '../../shared/app-update/service'
 import type { PortRequest, PortResult } from '../../shared/agent/channels'
 import type { PortEvent } from '../../shared/agent/port'
+import type { CacheRequest, CacheResult } from '../../shared/cache/channels'
+import type { CacheHealth } from '../../shared/cache/service'
 import type { CommandRequest, CommandResult } from '../../shared/commands/channels'
 import type { NeedsYouRequest, NeedsYouResult } from '../../shared/needs-you/channels'
 import type { QuotaRequest, QuotaResult } from '../../shared/quota/channels'
@@ -45,6 +47,11 @@ export interface CrucibleQuota {
   onEvent(listener: (snapshot: QuotaSnapshot) => void): () => void
 }
 
+export interface CrucibleCache {
+  request(request: CacheRequest): Promise<CacheResult>
+  onEvent(listener: (health: CacheHealth) => void): () => void
+}
+
 /** The needs-you half. One member: main announces nothing back. */
 export interface CrucibleNeedsYou {
   request(request: NeedsYouRequest): Promise<NeedsYouResult>
@@ -64,6 +71,7 @@ declare global {
       commands?: CrucibleCommands
       appUpdate?: CrucibleAppUpdate
       quota?: CrucibleQuota
+      cache?: CrucibleCache
       needsYou?: CrucibleNeedsYou
       workflowRuns?: CrucibleWorkflowRuns
     }
@@ -110,6 +118,14 @@ export function quotaBridge(): CrucibleQuota {
     throw new Error('renderer: window.crucible.quota is missing — the preload did not load')
   }
   return quota
+}
+
+export function cacheBridge(): CrucibleCache {
+  const cache = window.crucible?.cache
+  if (cache === undefined) {
+    throw new Error('renderer: window.crucible.cache is missing — the preload did not load')
+  }
+  return cache
 }
 
 export function needsYouBridge(): CrucibleNeedsYou {

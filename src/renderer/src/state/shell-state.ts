@@ -1,4 +1,5 @@
 import type {
+  CacheMissFacts,
   ImageAttachment,
   ModelInfo,
   PortEvent,
@@ -46,6 +47,7 @@ export type ViewItem =
       readonly exitCode?: number
     }
   | { readonly kind: 'summary'; readonly text: string }
+  | { readonly kind: 'cacheMiss'; readonly miss: CacheMissFacts }
   | { readonly kind: 'stopped' }
   | { readonly kind: 'error'; readonly message: string }
 
@@ -175,6 +177,7 @@ function restored(item: TranscriptItem): ViewItem {
       }
     case 'bashRun':
     case 'summary':
+    case 'cacheMiss':
     case 'stopped':
     case 'error':
       return item
@@ -345,6 +348,15 @@ function heard(state: ShellState, event: PortEvent, at: number): ShellState {
         }))
       })
 
+    // The detection event arrives after the paying message has streamed, so
+    // the seam is inserted above that message's block rather than appended.
+    // One turn can pay for more than one miss; each gets its own seam.
+    case 'cache_miss':
+      return withView(state, sessionId, {
+        ...view,
+        items: withSeam(view.items, event.miss)
+      })
+
     case 'turn_ended':
       return withView(state, sessionId, {
         ...view,
@@ -394,6 +406,23 @@ function appendThinking(
     ...settle(items, at),
     { kind: 'thinking', text: delta, running: true, startedAt: at }
   ]
+}
+
+// Where the seam goes: immediately above the block the paying message
+// produced — its assistant text, or the chain it opened when it rendered no
+// text at all — with any thinking that message did counted as part of it.
+function withSeam(
+  items: readonly ViewItem[],
+  miss: CacheMissFacts
+): readonly ViewItem[] {
+  let at = items.length
+  const last = items[at - 1]
+  if (last?.kind === 'assistant') at -= 1
+  else if (last?.kind === 'tool') {
+    while (items[at - 1]?.kind === 'tool') at -= 1
+  }
+  while (items[at - 1]?.kind === 'thinking') at -= 1
+  return [...items.slice(0, at), { kind: 'cacheMiss', miss }, ...items.slice(at)]
 }
 
 function settle(items: readonly ViewItem[], at: number): readonly ViewItem[] {

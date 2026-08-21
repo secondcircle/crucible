@@ -4,6 +4,7 @@ import type {
   AuthPromptKind,
   AuthPromptOption,
   BashRunShare,
+  ChangeFact,
   HistoryMatch,
   ImageAttachment,
   ModelId,
@@ -22,6 +23,31 @@ import type {
 
 // Crucible's identities go down and π's never come up: where a conversation
 // lives is an opaque token nothing above this seam interprets.
+
+// What changed between the compared turns, as far as the observer genuinely
+// knows. Every value is a fact or an admission of ignorance; none is a cause.
+export interface CacheMissChanges {
+  readonly model: ChangeFact
+  readonly thinking: ChangeFact
+  readonly jump: ChangeFact
+  readonly compaction: ChangeFact
+  readonly tools: ChangeFact
+  readonly rolePrompt: ChangeFact
+}
+
+// One observed miss, carrying the facts only the observer holds. Main adds
+// the identity (which session or run) and the retention in force.
+export interface ObservedCacheMiss {
+  readonly provider: string
+  readonly model: string
+  /** Absent when the observer does not know it. */
+  readonly thinkingLevel?: ThinkingLevel
+  readonly tokensRebilled: number
+  readonly dollarsRebilled: number
+  /** Since the previous request. */
+  readonly gapMs: number
+  readonly changed: CacheMissChanges
+}
 
 export interface Binding {
   /** Opaque; the store persists it, and only this adapter reads it. */
@@ -125,6 +151,15 @@ export type AdapterEvent =
       readonly turnId: TurnId
       readonly message: string
     }
+  // Per detected miss, on the message that paid for it. No identity beyond
+  // the session and the turn: what the ledger line says about where it
+  // happened is main's to add.
+  | {
+      readonly type: 'cache_miss'
+      readonly sessionId: SessionId
+      readonly turnId: TurnId
+      readonly miss: ObservedCacheMiss
+    }
   | {
       readonly type: 'usage'
       readonly sessionId: SessionId
@@ -132,6 +167,9 @@ export type AdapterEvent =
       readonly contextWindow: number
       /** The conversation's dollars so far; absent until genuinely known. */
       readonly cost?: number
+      // The whole conversation's misses, reported at the same moments the
+      // tokens are. Absent until genuinely known.
+      readonly cacheMisses?: { readonly count: number; readonly dollars: number }
     }
   // A live login's questions and running commentary. Session-less, because
   // credentials belong to the machine rather than to any conversation.

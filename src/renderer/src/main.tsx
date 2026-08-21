@@ -2,6 +2,7 @@ import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { createIpcClient } from './agent/ipc-client'
 import { createAppUpdateClient } from './app-update/ipc-client'
+import { createCacheClient } from './cache/ipc-client'
 import { createCommandClient } from './commands/ipc-client'
 import { createNeedsYouClient } from './needs-you/ipc-client'
 import { createQuotaClient } from './quota/ipc-client'
@@ -24,6 +25,7 @@ function mountApp(): void {
         commands={createCommandClient()}
         appUpdate={createAppUpdateClient()}
         quota={createQuotaClient()}
+        cache={createCacheClient()}
         needsYou={createNeedsYouClient()}
         workflowRuns={createWorkflowRunClient()}
       />

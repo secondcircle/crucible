@@ -1,7 +1,13 @@
 import type { AgentSession, AgentSessionEvent } from '@earendil-works/pi-coding-agent'
-import type { BashRunShare, ImageAttachment, TranscriptItem } from '../../shared/agent/port'
+import type {
+  BashRunShare,
+  CacheMissFacts,
+  ImageAttachment,
+  TranscriptItem
+} from '../../shared/agent/port'
 // Spelled with its extension so this module can also be loaded by plain Node.
 import { displaySafeMessage } from './adapter-error.ts'
+import type { CacheMessage, CacheScanEntry } from './cache-miss.ts'
 import { renderToolOutput, summarizeToolArgs } from './sdk-events.ts'
 
 // Stored messages produce the same item kinds a live turn does, so history
@@ -12,11 +18,19 @@ export type StoredMessage = AgentSession['messages'][number]
 // shows a shared run as a run rather than as prose.
 export const BASH_RUN_TYPE = 'crucible.bashRun'
 
-export function toTranscript(messages: readonly StoredMessage[]): TranscriptItem[] {
+// A seam per message that paid for a miss, keyed by that message's position
+// in `messages`, so a restored conversation shows the miss immediately above
+// the assistant message it happened on.
+export function toTranscript(
+  messages: readonly StoredMessage[],
+  seams?: ReadonlyMap<number, CacheMissFacts>
+): TranscriptItem[] {
   const items: TranscriptItem[] = []
   const calls = new Map<string, { name: string; summary: string }>()
 
-  for (const message of messages) {
+  for (const [index, message] of messages.entries()) {
+    const seam = seams?.get(index)
+    if (seam !== undefined) items.push({ kind: 'cacheMiss', miss: seam })
     if (message.role === 'user') {
       const text = userTextOf(message.content)
       const images = imagesOf(message.content)
@@ -106,6 +120,63 @@ export function toTranscript(messages: readonly StoredMessage[]): TranscriptItem
   }
 
   return items
+}
+
+// π's own shapes read as the mirror reads them. Both sequences below stay
+// index-aligned with what they were built from, so a miss can be put back
+// beside the message that paid for it.
+
+/** One entry of a π session file, as much of it as the mirror needs. */
+interface StoredEntry {
+  readonly type?: unknown
+  readonly message?: unknown
+}
+
+/** The current path's messages: what a transcript is built from. */
+export function messagesToScan(messages: readonly StoredMessage[]): CacheScanEntry[] {
+  return messages.map((message): CacheScanEntry => {
+    // π writes these when a branch is left with a summary or the context is
+    // compacted: the next prompt is new content, not re-billed content.
+    if (message.role === 'branchSummary' || message.role === 'compactionSummary') {
+      return { kind: 'contextReset' }
+    }
+    const scanned = message.role === 'assistant' ? toCacheMessage(message) : undefined
+    return scanned === undefined ? { kind: 'other' } : { kind: 'assistant', message: scanned }
+  })
+}
+
+// Every entry of the conversation, every branch of it: what the whole-session
+// totals are counted over, exactly as the money is.
+export function entriesToScan(entries: readonly unknown[]): CacheScanEntry[] {
+  return entries.map((raw): CacheScanEntry => {
+    const entry = (raw ?? {}) as StoredEntry
+    if (entry.type === 'compaction' || entry.type === 'branch_summary') {
+      return { kind: 'contextReset' }
+    }
+    if (entry.type !== 'message') return { kind: 'other' }
+    const message = entry.message as StoredMessage | undefined
+    if (message === undefined || message.role !== 'assistant') return { kind: 'other' }
+    const scanned = toCacheMessage(message)
+    return scanned === undefined ? { kind: 'other' } : { kind: 'assistant', message: scanned }
+  })
+}
+
+// An assistant message that carries no usage carries no arithmetic either,
+// and nothing is invented for it.
+export function toCacheMessage(message: StoredMessage): CacheMessage | undefined {
+  const carrier = message as unknown as {
+    provider?: unknown
+    model?: unknown
+    timestamp?: unknown
+    usage?: unknown
+  }
+  if (typeof carrier.usage !== 'object' || carrier.usage === null) return undefined
+  return {
+    provider: typeof carrier.provider === 'string' ? carrier.provider : '',
+    model: typeof carrier.model === 'string' ? carrier.model : '',
+    timestamp: typeof carrier.timestamp === 'number' ? carrier.timestamp : 0,
+    usage: carrier.usage
+  }
 }
 
 // `message_end` is the only event π emits for a steered custom message, and

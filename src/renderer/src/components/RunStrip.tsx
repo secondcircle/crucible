@@ -1,5 +1,11 @@
-import { currentNode, runCost, type RunRecord } from '../../../shared/workflows/run'
+import {
+  currentNode,
+  runCacheMisses,
+  runCost,
+  type RunRecord
+} from '../../../shared/workflows/run'
 import { chipNodeLabel, money, shortAge } from '../runs/format'
+import './cache-strip.css'
 import './runs.css'
 
 // The bar above the chat where a session's runs live, one chip each:
@@ -20,6 +26,7 @@ export function RunStrip({
       {runs.map((run) => {
         const node = currentNode(run)
         const cost = money(runCost(run))
+        const misses = runCacheMisses(run)
         const parked = run.waiting === true || run.status === 'paused'
         return (
           <button
@@ -35,6 +42,16 @@ export function RunStrip({
               {shortAge(run.startedAt)}
               {cost === '' ? '' : ` · ${cost}`}
             </span>
+            {/* Part of the chip, not a second thing to click: what makes a
+                sub-agent's misses visible while nobody is watching the run. */}
+            {misses === 0 ? null : (
+              <span
+                className="miss"
+                title={`${misses} cache ${misses === 1 ? 'miss' : 'misses'} in this run`}
+              >
+                ⚠ {misses}
+              </span>
+            )}
           </button>
         )
       })}
