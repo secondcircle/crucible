@@ -1,0 +1,338 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Mock X — the run graph</title>
+<style>
+  :root{
+    --bg:#191419; --bg2:#211a20; --panel:#241c23; --panel2:#2e242d; --line:#3a2e38;
+    --code:#120e12; --ink:#e8dfe2; --dim:#9b8a94; --faint:#6b5d66;
+    --accent:#e07a4f; --accent2:#f0a37c; --ok:#7fb069; --run:#5fa89c;
+    --warn:#d9a441; --error:#d96a5a; --thinking:#b08cc9;
+    --edge:#4a3c47; --edge-lit:#e07a4f;
+    --mono:ui-monospace,'SF Mono',Menlo,monospace;
+  }
+  *{box-sizing:border-box;margin:0}
+  body{background:#0f0c0f;color:var(--ink);font:14px/1.55 -apple-system,'Segoe UI',sans-serif;padding:32px 24px 80px}
+  h1{font-size:16px;letter-spacing:.04em;margin:0 auto 4px;max-width:1240px}
+  h1 em{color:var(--accent);font-style:normal}
+  .lede{color:var(--dim);font-size:13px;max-width:1240px;margin:0 auto 28px}
+  section{max-width:1240px;margin:0 auto 44px}
+  h2{font-size:13px;text-transform:uppercase;letter-spacing:.12em;color:var(--faint);margin-bottom:12px}
+  .cap{border-left:3px solid var(--accent);background:var(--bg2);padding:10px 14px;font-size:12.5px;color:var(--dim);border-radius:0 8px 8px 0;margin:14px 0 0}
+  .cap b{color:var(--ink)}
+  .cap.bad{border-left-color:var(--error)}
+  .cap code{font:11.5px var(--mono);color:var(--accent2)}
+  .frame{border:1px solid var(--line);border-radius:12px;overflow:hidden;background:var(--bg)}
+  .btn{font-size:12px;border:1px solid var(--line);border-radius:8px;background:var(--bg2);color:var(--ink);padding:4px 11px;cursor:pointer}
+  .btn.primary{background:var(--accent);border-color:var(--accent);color:#1c120c;font-weight:700}
+  @keyframes breathe{50%{opacity:.35}}
+  @keyframes dash{to{stroke-dashoffset:-14}}
+
+  /* ---------- run view bones ---------- */
+  .runview{display:flex;flex-direction:column;background:var(--bg)}
+  .rvtop{display:flex;align-items:center;gap:14px;padding:12px 20px;border-bottom:1px solid var(--line);flex-wrap:wrap}
+  .rvtop .wf{font-weight:700;font-size:15px}
+  .rvtop .id{font:12px var(--mono);color:var(--faint)}
+  .rvtop .stat{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--run)}
+  .rvtop .where{font:11.5px var(--mono);color:var(--dim)}
+  .rvtop .where b{color:var(--accent2);font-weight:600}
+  .rvtop .spend{margin-left:auto;font:12px var(--mono);color:var(--dim)}
+  .rvbody{flex:1;display:flex;min-height:0}
+
+  /* ---------- the graph pane ---------- */
+  .gpane{width:640px;background:var(--bg2);flex-shrink:0;display:flex;flex-direction:column;min-height:0;position:relative}
+  .ghead{display:flex;align-items:center;gap:10px;padding:11px 16px;border-bottom:1px solid var(--line)}
+  .ghead .t{font-size:11px;text-transform:uppercase;letter-spacing:.12em;color:var(--faint)}
+  .ghead .c{font:11px var(--mono);color:var(--faint)}
+  .ghead .sp{margin-left:auto;display:flex;gap:6px;align-items:center}
+  .pill{font:10.5px var(--mono);border:1px solid var(--line);border-radius:12px;padding:2px 9px;color:var(--dim);cursor:pointer}
+  .pill.on{border-color:var(--accent);color:var(--accent2)}
+  .gscroll{flex:1;overflow:auto;padding:22px 26px 30px}
+  .canvas{position:relative}
+  .canvas svg{position:absolute;inset:0;overflow:visible;pointer-events:none}
+  /* the drag handle between graph and transcript */
+  .split{width:5px;background:var(--line);cursor:col-resize;flex-shrink:0;position:relative}
+  .split::after{content:'';position:absolute;left:1px;top:50%;transform:translateY(-50%);width:3px;height:34px;border-radius:2px;background:var(--faint)}
+
+  /* ---------- node cards ---------- */
+  .nd{position:absolute;width:168px;border:1px solid var(--line);border-radius:10px;background:var(--panel);padding:8px 11px;text-align:left;cursor:pointer;overflow:hidden}
+  .nd .top{display:flex;align-items:baseline;gap:6px}
+  .nd .nm{font-size:12.5px;font-weight:600;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .nd .st{font:10px var(--mono);margin-left:auto;color:var(--faint);white-space:nowrap}
+  .nd .facts{font:10.5px var(--mono);color:var(--faint);margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .nd .vd{font:10.5px var(--mono);margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .nd .now{font-size:11px;color:var(--run);margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .nd.done .st{color:var(--ok)}
+  .nd.done{border-left:3px solid var(--ok)}
+  .nd.live{border-color:var(--run);border-left:3px solid var(--run);background:var(--panel2)}
+  .nd.live .st{color:var(--run)}
+  .nd.bad{border-color:var(--error);border-left:3px solid var(--error)}
+  .nd.bad .st{color:var(--error)}
+  .nd.wait{opacity:.5;border-style:dashed}
+  .nd.sel{outline:2px solid var(--accent);outline-offset:2px}
+  .vd.ok{color:var(--ok)} .vd.no{color:var(--warn)} .vd.er{color:var(--error)}
+
+  /* ---------- edges ---------- */
+  .e{stroke:var(--edge);stroke-width:1.5;fill:none}
+  .e.lit{stroke:var(--edge-lit);stroke-width:2}
+  .e.future{stroke:var(--line);stroke-dasharray:4 4}
+  .e.flowing{stroke:var(--run);stroke-width:2;stroke-dasharray:5 9;animation:dash 1s linear infinite}
+  .elbl{font:10px var(--mono);fill:var(--faint)}
+  .elbl.lit{fill:var(--accent2)}
+  .ehit{stroke:transparent;stroke-width:14;fill:none;pointer-events:stroke;cursor:pointer}
+
+  /* ---------- detail pane ---------- */
+  .detail{flex:1;display:flex;flex-direction:column;min-width:0}
+  .dhead{padding:13px 18px;border-bottom:1px solid var(--line)}
+  .dhead .n{font-weight:700;font-size:13.5px}
+  .dhead .facts{display:flex;gap:14px;font:11px var(--mono);color:var(--dim);margin-top:6px;flex-wrap:wrap}
+  .dhead .facts b{color:var(--ink);font-weight:600}
+  .transcript{flex:1;overflow-y:auto;padding:18px 0}
+  .msg{max-width:640px;margin:0 auto 20px;padding:0 22px}
+  .msg .who{font-size:11px;text-transform:uppercase;letter-spacing:.1em;color:var(--accent);margin-bottom:6px}
+  .think{color:var(--thinking);font-style:italic;margin-bottom:10px;font-size:13px}
+  .chainbox{display:flex;gap:8px;align-items:center;font:11.5px var(--mono);color:var(--dim);background:var(--code);border:1px solid var(--line);border-radius:6px;padding:6px 11px;margin:9px 0}
+  .inout{border-top:1px solid var(--line);padding:9px 18px;display:flex;gap:7px;align-items:center;font-size:12px;color:var(--dim);flex-wrap:wrap}
+  .inout .lbl{font-size:10px;text-transform:uppercase;letter-spacing:.12em;color:var(--faint)}
+  .inout .a{border:1px solid var(--line);border-radius:8px;padding:2px 8px;font:11px var(--mono);color:var(--accent2)}
+  .inout .a.pending{color:var(--faint);border-style:dashed}
+  .inout .sep{width:1px;height:15px;background:var(--line);margin:0 3px}
+
+  /* ---------- today ---------- */
+  .oldgraph{width:300px;border-right:1px solid var(--line);background:var(--bg2);padding:16px;flex-shrink:0}
+  .oldlayer{position:relative;display:flex;gap:8px;margin-bottom:22px}
+  .oldlayer:not(:last-child)::after{content:'';position:absolute;left:50%;bottom:-23px;width:1px;height:22px;background:var(--line)}
+  .oldnode{flex:1;min-width:0;border:1px solid var(--line);border-radius:10px;background:var(--panel);padding:9px 12px}
+  .oldnode .n{font-size:13px;font-weight:600;display:flex;align-items:center;gap:8px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .oldnode .n .s{width:8px;height:8px;border-radius:50%;background:var(--faint);flex-shrink:0}
+  .oldnode.done .n .s{background:var(--ok)}
+  .oldnode.live{border-color:var(--accent)} .oldnode.live .n .s{background:var(--accent)}
+  .oldnode.wait{opacity:.55}
+  .oldnode .meta{display:block;font:11px var(--mono);color:var(--faint);margin-top:4px}
+
+  .legend{display:flex;gap:26px;flex-wrap:wrap;padding:18px 22px;background:var(--bg2)}
+  .legend .item{display:flex;gap:9px;align-items:center;font-size:12.5px;color:var(--dim)}
+  .legend svg{flex-shrink:0}
+</style></head><body>
+
+<h1><em>◆</em> Mock X — the run graph: a real DAG, drawn, with room to read it</h1>
+<p class="lede">A workflow is not a line. It fans out into parallel reviewers, fans back in at a gate,
+sends work back for revision, and can carry independent subtrees that never touch each other. The
+run record already holds that shape — <code style="font:11.5px var(--mono);color:var(--accent2)">RunNode.parents</code>
+is an arbitrary list and the engine runs nodes concurrently. What the run view draws is flex rows
+with one hairline down the middle, which is why three parallel reviewers look exactly like three
+strangers. Same layout as today, graph pane much bigger, edges actually drawn.</p>
+
+<section>
+  <h2>0 · Today, for the record</h2>
+  <div class="frame"><div class="runview" style="height:250px">
+    <div class="rvbody">
+      <div class="oldgraph">
+        <div class="oldlayer">
+          <div class="oldnode done"><div class="n"><span class="s"></span>planner</div><span class="meta">fable-5:high · $8.75 · 12m · 61 tools</span></div>
+          <div class="oldnode live"><div class="n"><span class="s"></span>gate-alignment-1</div><span class="meta">fable-5:high · $2.94 · 6m · 22 tools</span></div>
+          <div class="oldnode wait"><div class="n"><span class="s"></span>gate-comments-1</div><span class="meta">fable-5:high · $2.11 · 3m</span></div>
+        </div>
+        <div class="oldlayer">
+          <div class="oldnode done"><div class="n"><span class="s"></span>builder</div><span class="meta">opus-5:high · $27.93 · 32m · 211 tools</span></div>
+          <div class="oldnode done"><div class="n"><span class="s"></span>review-1</div><span class="meta">fable-5:high · $5.98 · verdict: approved</span></div>
+          <div class="oldnode wait"><div class="n"><span class="s"></span>gate-verdict-1</div><span class="meta">pending</span></div>
+        </div>
+      </div>
+      <div class="detail"><div class="transcript"><div class="msg"><div class="who">Agent</div><p style="color:var(--dim)">…the transcript, in a 680px column with 800px of empty gutter beside it.</p></div></div></div>
+    </div>
+  </div></div>
+  <div class="cap bad"><b>No edges exist to draw.</b> <code>engine.ts:404</code> derives a node's
+  parents from who produced the files it reads, and discards the correct parents the workflow
+  declared in <code>plan()</code>. <code>builder</code> writes no artifact, so <code>review-1</code>
+  — which ran on its code — inherits no edge to it and lands beside it. The gate nodes read the
+  branch, so they have no parents at all and float to row one. Then
+  <code>runs/graph.ts</code> buckets by depth and draws one centred hairline per row, which
+  connects nothing. Every complaint follows from those two facts.</div>
+</section>
+
+<section>
+  <h2>1 · The graph pane — fan-out, fan-in, drawn</h2>
+  <div class="frame"><div class="runview" style="height:660px">
+    <div class="rvtop">
+      <span class="wf">build</span><span class="id">run en42</span><span class="stat">running · 1h 22m</span>
+      <span class="where"><b>crucible/en42</b> · from <b>6c90bb0</b></span>
+      <span class="spend">$61.40 · 6/9 nodes</span>
+      <button class="btn primary">Go to session</button><button class="btn">Pause</button><button class="btn">Cancel</button>
+    </div>
+    <div class="rvbody">
+      <div class="gpane">
+        <div class="ghead"><span class="t">Graph</span><span class="c">9 nodes · 6 done · 1 running</span>
+          <span class="sp"><span class="pill on">fit</span><span class="pill">100%</span><span class="pill">⤢ full screen</span></span></div>
+        <div class="gscroll"><div class="canvas" style="width:560px;height:566px">
+          <svg viewBox="0 0 560 566">
+            <!-- planner → builder -->
+            <path class="e" d="M280,64 L280,100"/>
+            <!-- builder → three reviewers -->
+            <path class="e" d="M280,164 C280,186 84,178 84,200"/>
+            <path class="e" d="M280,164 L280,200"/>
+            <path class="e" d="M280,164 C280,186 476,178 476,200"/>
+            <!-- reviewers → fixer-1 (lit: fixer-1 is selected) -->
+            <path class="e lit" d="M84,264 C84,286 280,278 280,300"/>
+            <path class="e lit" d="M280,264 L280,300"/>
+            <path class="e lit" d="M476,264 C476,286 280,278 280,300"/>
+            <!-- fixer-1 → the gate pair -->
+            <path class="e flowing" d="M280,364 C280,386 182,378 182,400"/>
+            <path class="e future" d="M280,364 C280,386 378,378 378,400"/>
+            <!-- gate pair → verdict -->
+            <path class="e future" d="M182,464 C182,486 280,478 280,500"/>
+            <path class="e future" d="M378,464 C378,486 280,478 280,500"/>
+          </svg>
+
+          <button class="nd done" style="left:196px;top:0">
+            <div class="top"><span class="nm">planner</span><span class="st">done · 12m</span></div>
+            <div class="facts">fable-5:high · $8.75 · 61 tools</div></button>
+
+          <button class="nd done" style="left:196px;top:100px">
+            <div class="top"><span class="nm">builder</span><span class="st">done · 32m</span></div>
+            <div class="facts">opus-5:high · $27.93 · 211 tools</div></button>
+
+          <button class="nd done" style="left:0;top:200px">
+            <div class="top"><span class="nm">review-code</span><span class="st">done · 9m</span></div>
+            <div class="facts">fable-5:high · $5.98 · 51 tools</div>
+            <div class="vd no">changes required</div></button>
+
+          <button class="nd done" style="left:196px;top:200px">
+            <div class="top"><span class="nm">review-tests</span><span class="st">done · 7m</span></div>
+            <div class="facts">fable-5:high · $4.10 · 38 tools</div>
+            <div class="vd no">changes required</div></button>
+
+          <button class="nd done" style="left:392px;top:200px">
+            <div class="top"><span class="nm">review-docs</span><span class="st">done · 4m</span></div>
+            <div class="facts">fable-5:high · $1.82 · 16 tools</div>
+            <div class="vd ok">approved</div></button>
+
+          <button class="nd done sel" style="left:196px;top:300px">
+            <div class="top"><span class="nm">fixer-1</span><span class="st">done · 18m</span></div>
+            <div class="facts">opus-5:high · $9.40 · 96 tools</div>
+            <div class="vd ok">7 commits</div></button>
+
+          <button class="nd live" style="left:98px;top:400px">
+            <div class="top"><span class="nm">gate-alignment-1</span><span class="st">running · 6m</span></div>
+            <div class="facts">fable-5:high · $2.94 · ctx 9%</div>
+            <div class="now">▸ checking activeJump usages…</div></button>
+
+          <button class="nd wait" style="left:294px;top:400px">
+            <div class="top"><span class="nm">gate-comments-1</span><span class="st">pending</span></div>
+            <div class="facts">fable-5:high</div></button>
+
+          <button class="nd wait" style="left:196px;top:500px">
+            <div class="top"><span class="nm">gate-verdict-1</span><span class="st">pending</span></div>
+            <div class="facts">fable-5:high</div></button>
+        </div></div>
+      </div>
+      <div class="split"></div>
+
+      <div class="detail">
+        <div class="dhead"><div class="n">fixer-1</div>
+          <div class="facts"><span>model <b>opus-5:high</b></span><span>tools <b>96</b></span><span>ctx <b>44%</b></span><span>cost <b>$9.40</b></span><span>ran <b>18m</b></span></div></div>
+        <div class="transcript">
+          <div class="msg"><div class="who">Agent · opus-5:high</div>
+            <div class="think">Three reviews landed at once. Code review wants the layering pass rewritten, test review wants a repro for the closed-tree case; docs review approved, so nothing to do there.</div>
+            <div class="chainbox">▸ <b>14 tool calls</b><span>read ×6 · edit ×5 · bash ×3</span><span style="margin-left:auto">done</span></div>
+            <p>Both findings are fixed and the suite is green. Seven commits on the branch.</p>
+          </div>
+        </div>
+        <div class="inout">
+          <span class="lbl">took</span><span class="a">spec.md</span><span class="a">review-code.md</span><span class="a">review-tests.md</span><span class="a">review-docs.md</span>
+          <span class="sep"></span><span class="lbl">made</span><span class="a">7 commits</span>
+        </div>
+      </div>
+    </div>
+  </div></div>
+  <div class="cap"><b>Layered top-down, edges drawn, one node per node.</b> A fan-out is three lines
+  leaving one card; a fan-in is three lines arriving at one. The pane is 640px and draggable; the
+  transcript is a centred column either way, so the graph takes the gutter that was already dead.
+  <b>No text on the edges.</b> A line says the work reached that node, and <i>what</i> reached it is
+  the artifact rail's job — clicking a node fills the rail, and the node's own strip along the
+  bottom reads took/made. Selecting a node lights its edges so its lineage stands out of a crowded
+  graph. The teal marching line is work in flight right now; dashed grey is a path not yet
+  walked.</div>
+</section>
+
+<section>
+  <h2>2 · The edge vocabulary</h2>
+  <div class="frame"><div class="legend">
+    <div class="item"><svg width="52" height="16"><path class="e" d="M2,8 L50,8"/></svg> ran after, and took its work</div>
+    <div class="item"><svg width="52" height="16"><path class="e lit" d="M2,8 L50,8"/></svg> an edge of the selected node</div>
+    <div class="item"><svg width="52" height="16"><path class="e flowing" d="M2,8 L50,8"/></svg> being walked right now</div>
+    <div class="item"><svg width="52" height="16"><path class="e future" d="M2,8 L50,8"/></svg> planned, not yet walked</div>
+    <div class="item"><svg width="52" height="16"><path class="e" d="M2,3 L26,3 L26,13 L50,13" stroke-dasharray="0"/><circle cx="26" cy="8" r="0"/></svg> sent back for revision — the edge that goes up the page</div>
+  </div></div>
+  <div class="cap"><b>A line means one thing</b>: the work of the node above reached the node below.
+  It never says which file carried it — the artifact rail owns dataflow, and duplicating it on the
+  edges is how a seventeen-node graph turns into a wall of file names. Colour never carries meaning
+  alone: a node's status is a word on its card, and the four edge states differ in shape as well as
+  hue.</div>
+</section>
+
+<section>
+  <h2>3 · Full screen — for the graph that got away from you</h2>
+  <div class="frame"><div class="runview" style="height:560px">
+    <div class="rvtop">
+      <span class="wf">build</span><span class="id">run k7f2</span><span class="stat">running · 3h 08m</span>
+      <span class="where"><b>crucible/k7f2</b></span>
+      <span class="spend">$188.20 · 14/17 nodes</span>
+      <button class="btn">⤢ back to transcript</button><button class="btn">esc</button>
+    </div>
+    <div class="rvbody"><div class="gpane" style="width:100%">
+      <div class="ghead"><span class="t">Graph</span><span class="c">17 nodes · 2 subtrees · 3 revisions</span>
+        <span class="sp"><span class="pill on">fit 74%</span><span class="pill">100%</span><span class="pill">⤢ exit full screen</span></span></div>
+      <div class="gscroll"><div class="canvas" style="width:1150px;height:460px">
+        <svg viewBox="0 0 1150 460">
+          <path class="e" d="M170,52 L170,86"/>
+          <path class="e" d="M170,150 C170,170 60,164 60,186"/>
+          <path class="e" d="M170,150 L170,186"/>
+          <path class="e" d="M170,150 C170,170 280,164 280,186"/>
+          <path class="e" d="M60,238 C60,258 170,254 170,276"/>
+          <path class="e" d="M170,238 L170,276"/>
+          <path class="e" d="M280,238 C280,258 170,254 170,276"/>
+          <!-- revision edge going back up the page -->
+          <path class="e" d="M240,300 C330,300 330,206 300,196"/>
+          <path class="e" d="M170,340 L170,376"/>
+          <!-- second, independent subtree -->
+          <path class="e" d="M700,52 L700,86"/>
+          <path class="e" d="M700,150 C700,170 590,164 590,186"/>
+          <path class="e" d="M700,150 C700,170 810,164 810,186"/>
+          <path class="e" d="M590,238 C590,258 700,254 700,276"/>
+          <path class="e" d="M810,238 C810,258 700,254 700,276"/>
+          <path class="e flowing" d="M700,340 L700,376"/>
+          <!-- the two subtrees meeting at the gate -->
+          <path class="e future" d="M170,428 C420,428 420,410 700,410" opacity="0"/>
+          <path class="e" d="M960,52 L960,186"/>
+          <path class="e future" d="M960,238 L960,276"/>
+        </svg>
+        <button class="nd done" style="left:86px;top:0"><div class="top"><span class="nm">planner</span><span class="st">done</span></div><div class="facts">$8.75 · 12m</div></button>
+        <button class="nd done" style="left:86px;top:86px"><div class="top"><span class="nm">builder</span><span class="st">done</span></div><div class="facts">$27.93 · 32m</div></button>
+        <button class="nd done" style="left:0;top:186px"><div class="top"><span class="nm">review-code</span><span class="st">done</span></div><div class="vd no">changes required</div></button>
+        <button class="nd done" style="left:86px;top:186px"><div class="top"><span class="nm">review-tests</span><span class="st">done</span></div><div class="vd ok">approved</div></button>
+        <button class="nd done" style="left:196px;top:186px"><div class="top"><span class="nm">review-docs</span><span class="st">done</span></div><div class="vd ok">approved</div></button>
+        <button class="nd done" style="left:86px;top:276px"><div class="top"><span class="nm">fixer-1</span><span class="st">done</span></div><div class="facts">$9.40 · 18m</div></button>
+        <button class="nd done" style="left:86px;top:376px"><div class="top"><span class="nm">review-code·r1</span><span class="st">done</span></div><div class="vd ok">approved</div></button>
+
+        <button class="nd done" style="left:616px;top:0"><div class="top"><span class="nm">migration-plan</span><span class="st">done</span></div><div class="facts">$3.10 · 6m</div></button>
+        <button class="nd done" style="left:616px;top:86px"><div class="top"><span class="nm">migrator</span><span class="st">done</span></div><div class="facts">$18.60 · 24m</div></button>
+        <button class="nd done" style="left:506px;top:186px"><div class="top"><span class="nm">schema-audit</span><span class="st">done</span></div><div class="vd ok">approved</div></button>
+        <button class="nd bad" style="left:726px;top:186px"><div class="top"><span class="nm">perf-audit</span><span class="st">failed</span></div><div class="vd er">stalled 12m</div></button>
+        <button class="nd done" style="left:616px;top:276px"><div class="top"><span class="nm">migrate-fixer</span><span class="st">done</span></div><div class="facts">$6.20 · 11m</div></button>
+        <button class="nd live" style="left:616px;top:376px"><div class="top"><span class="nm">gate-alignment-1</span><span class="st">running · 6m</span></div><div class="now">▸ coverage vs intent…</div></button>
+
+        <button class="nd done" style="left:876px;top:0"><div class="top"><span class="nm">docs-writer</span><span class="st">done</span></div><div class="facts">$2.40 · 5m</div></button>
+        <button class="nd done" style="left:876px;top:186px"><div class="top"><span class="nm">docs-review</span><span class="st">done</span></div><div class="vd ok">approved</div></button>
+        <button class="nd wait" style="left:876px;top:276px"><div class="top"><span class="nm">docs-publish</span><span class="st">pending</span></div></button>
+      </div></div>
+    </div></div>
+  </div></div>
+  <div class="cap"><b>Independent subtrees sit side by side; nothing is forced into one trunk.</b>
+  A revision edge is the one line that travels back up the page, so a send-back is visible as a
+  send-back. A node with no ancestors starts its own column — the third one here reads
+  <code>intent.md</code> straight from kickoff and never touches the build. <b>Fit</b> scales the
+  whole canvas to the pane down to a floor where the cards are still readable; past that it
+  scrolls, and full screen is the escape hatch. No minimap, no free zoom, no dragging nodes
+  around: the layout is computed, and computing it the same way twice is the point.</div>
+</section>
+
+</body></html>
