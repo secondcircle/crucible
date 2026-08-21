@@ -372,13 +372,15 @@
   font-weight: 600;
 }
 
-/* the whole of the at-a-glance worktree signal: between the working dot and
-   the title, so the title's own clamp is undisturbed */
+/* the whole of the at-a-glance worktree signal: inline at the head of the
+   title, inside the clamp box. Upright even on an italic untitled row, and a
+   shade larger than the title so the fork reads as a fork rather than a
+   speck; the gap keeps the first glyph of the title off its tines. */
 .sess .wt {
-  flex: none;
   color: var(--faint);
-  font-size: 11.5px;
-  margin-right: -2px;
+  font-size: 13.5px;
+  font-style: normal;
+  margin-right: 4px;
 }
 
 .sess.active .wt {
