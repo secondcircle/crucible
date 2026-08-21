@@ -318,9 +318,8 @@ function scriptOf(workflow: string): readonly ScriptedNode[] {
       readsFiles: ['review.md', 'review-tests.md']
     },
     // The send-back: the same reviewer's session, one round on, re-declaring
-    // the file it wrote the first time. Parents as revise() writes them, the
-    // base first and then what the round was sent back over, so the edge from
-    // review-1 skips the fixer's layer and reaches back up the page.
+    // the file it wrote the first time. Parents as revise() writes them: the
+    // base, a whole round up, so one edge in the fake spans layers.
     {
       id: 'review-1·r1',
       parents: ['review-1', 'fixer-1'],

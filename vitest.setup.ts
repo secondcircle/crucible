@@ -12,10 +12,9 @@ if (typeof document !== 'undefined') {
   afterEach(() => window.localStorage.clear())
 }
 
-// Node 25 has a `localStorage` global of its own that stores nothing without
-// `--localstorage-file`, and the jsdom environment carries it onto the window
-// over the one jsdom provides. Tests of anything the renderer remembers would
-// silently prove nothing, so the document gets a working store back.
+// Node 25's own `localStorage` global stores nothing without
+// `--localstorage-file` and shadows the working one jsdom provides, so tests
+// of anything the renderer remembers would silently prove nothing.
 function installStorage(): void {
   if (typeof window.localStorage?.setItem === 'function') return
   const held = new Map<string, string>()
