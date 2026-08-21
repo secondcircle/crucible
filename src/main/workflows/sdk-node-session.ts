@@ -2,10 +2,23 @@ import type {
   AgentSession,
   ToolDefinition
 } from '@earendil-works/pi-coding-agent'
-import type { TranscriptItem, Unsubscribe } from '../../shared/agent/port'
+import type { ObservedCacheMiss } from '../../shared/agent/adapter'
+import type { CacheMissFacts, TranscriptItem, Unsubscribe } from '../../shared/agent/port'
 // Spelled with extensions so plain Node can load this module too.
 import { composeSystemPrompt } from '../agent/system-prompt.ts'
-import { toTranscript, type StoredMessage } from '../agent/sdk-transcript.ts'
+import {
+  scanCacheMisses,
+  type CacheMissTrackerOptions,
+  type DetectedCacheMiss
+} from '../agent/cache-miss.ts'
+import {
+  entriesToScan,
+  pathSeams,
+  toCacheMessage,
+  toTranscript,
+  type StoredMessage
+} from '../agent/sdk-transcript.ts'
+import { retentionInForce } from '../cache/retention.ts'
 import type {
   NodeSession,
   NodeSessionFactory,
@@ -148,16 +161,90 @@ export function createSdkNodeSessionFactory({
         settingsManager: pi.SettingsManager.inMemory()
       })
 
-      return wrap(session)
+      // A node's turns are watched for cache misses exactly as a session's
+      // are: same mirror, same arithmetic, and the engine writes the entry.
+      return wrap(session, {
+        listedCacheReadPerMillion: (provider, id) => models.getModel(provider, id)?.cost.cacheRead,
+        ...(request.onCacheMiss === undefined ? {} : { onCacheMiss: request.onCacheMiss })
+      })
     }
   }
 }
 
-function wrap(session: AgentSession): NodeSession {
+interface CacheWatch extends CacheMissTrackerOptions {
+  readonly onCacheMiss?: (miss: ObservedCacheMiss) => void
+}
+
+function wrap(session: AgentSession, cache: CacheWatch): NodeSession {
   const activityListeners = new Set<(now: string | undefined) => void>()
   const inflight = new Map<string, string>()
+  const retention = retentionInForce()
+
+  /** Rounded to a hundredth of a cent, so no dollar figure carries a tail. */
+  const round = (dollars: number): number => Math.round(dollars * 10_000) / 10_000
+
+  // Detection per completed assistant message, against the conversation as it
+  // stands without that message: π's own shape, and the run's node sessions
+  // are short-lived and in memory, so the scan is over a handful of entries.
+  function observe(message: StoredMessage): void {
+    if (cache.onCacheMiss === undefined) return
+    const scanned = toCacheMessage(message)
+    if (scanned === undefined) return
+    const entries = session.sessionManager
+      .getEntries()
+      .filter((entry) => (entry as { message?: unknown }).message !== message)
+    const miss = scanCacheMisses(entriesToScan(entries), cache).tracker.observe(scanned)
+    if (miss === undefined) return
+    cache.onCacheMiss({
+      provider: scanned.provider,
+      model: scanned.model,
+      ...(session.thinkingLevel === undefined ? {} : { thinkingLevel: session.thinkingLevel }),
+      tokensRebilled: miss.missedTokens,
+      dollarsRebilled: round(miss.missedCost),
+      gapMs: miss.gapMs,
+      changed: {
+        model: miss.modelChanged ? 'yes' : 'no',
+        // A node session is one conversation of one launch: nothing here
+        // changes the level, jumps, compacts, or swaps the tools or the role
+        // prompt under the agent.
+        thinking: 'no',
+        jump: 'no',
+        compaction: 'no',
+        tools: 'no',
+        rolePrompt: 'no'
+      }
+    })
+  }
+
+  function seamFacts(miss: DetectedCacheMiss): CacheMissFacts {
+    return {
+      tokensRebilled: miss.missedTokens,
+      dollarsRebilled: round(miss.missedCost),
+      gapMs: miss.gapMs,
+      modelChanged: miss.modelChanged ? 'yes' : 'no',
+      thinkingChanged: 'no',
+      jump: 'no',
+      retention
+    }
+  }
+
+  // The run view renders a node's transcript through the chat's own code, so
+  // the seams have to be in it. Placed the one way Crucible places them: over
+  // the entries, which for a node session that never jumps or compacts is the
+  // path it is showing anyway.
+  function transcriptNow(): readonly TranscriptItem[] {
+    const messages = session.messages as unknown as StoredMessage[]
+    const seams = new Map<number, CacheMissFacts>()
+    for (const [at, miss] of pathSeams(session.sessionManager.getEntries(), messages, cache)) {
+      seams.set(at, seamFacts(miss))
+    }
+    return toTranscript(messages, seams)
+  }
 
   const unsubscribe = session.subscribe((event) => {
+    if (event.type === 'message_end' && event.message.role === 'assistant') {
+      observe(event.message as StoredMessage)
+    }
     const now = liveness(event as Record<string, unknown>, inflight)
     if (now === null) return
     for (const listener of [...activityListeners]) listener(now)
@@ -183,8 +270,7 @@ function wrap(session: AgentSession): NodeSession {
     },
 
     stats(): NodeSessionStats {
-      const transcript = toTranscript(session.messages as unknown as StoredMessage[])
-      const toolCalls = transcript.filter((item) => item.kind === 'tool').length
+      const toolCalls = transcriptNow().filter((item) => item.kind === 'tool').length
       let cost: number | undefined
       let contextPercent: number | undefined
       try {
@@ -208,7 +294,7 @@ function wrap(session: AgentSession): NodeSession {
     },
 
     transcript(): readonly TranscriptItem[] {
-      return toTranscript(session.messages as unknown as StoredMessage[])
+      return transcriptNow()
     },
 
     onActivity(listener: (now: string | undefined) => void): Unsubscribe {

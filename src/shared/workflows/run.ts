@@ -66,6 +66,9 @@ export interface RunNode {
   readonly contextPercent?: number
   /** Billed dollars of the node's session so far. */
   readonly cost?: number
+  // Cache misses observed on this node's turns. What makes a sub-agent's
+  // misses visible while nobody is watching that run.
+  readonly cacheMisses?: number
 }
 
 export interface RunRecord {
@@ -128,6 +131,11 @@ export function runCost(run: RunRecord): number | undefined {
     .filter((cost): cost is number => cost !== undefined)
   if (costs.length === 0) return undefined
   return costs.reduce((sum, cost) => sum + cost, 0)
+}
+
+/** Cache misses across the run's nodes, which is what the chip's mark shows. */
+export function runCacheMisses(run: RunRecord): number {
+  return run.nodes.reduce((sum, node) => sum + (node.cacheMisses ?? 0), 0)
 }
 
 /** The node the chip names: the running one, else the latest that isn't pending. */

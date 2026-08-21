@@ -50,6 +50,8 @@ export interface ScriptedPort extends AgentPort {
   jumpRefusal?: string
   /** Set where a test wants the refusal main gives a failed rebind. */
   worktreeRefusal?: string
+  /** Set where a test wants a session main could not start. */
+  createSessionRefusal?: string
   // Held open where a test wants the rebind still in flight: the change lands
   // when the test says so, the way it lands when main's bind comes back.
   holdWorktree?: boolean
@@ -291,6 +293,9 @@ export function createScriptedPort(initial: Partial<ShellSnapshot> = {}): Script
         op: 'createSession',
         args: options === undefined ? [workspaceId] : [workspaceId, options]
       })
+      if (port.createSessionRefusal !== undefined) {
+        return Promise.reject(new Error(port.createSessionRefusal))
+      }
       const id = `s-${(minted += 1)}`
       snapshot = {
         ...snapshot,

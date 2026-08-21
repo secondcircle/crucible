@@ -16,7 +16,9 @@ import {
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
+import type { ObservedCacheMiss } from '../../shared/agent/adapter'
 import type { SessionId, TranscriptItem } from '../../shared/agent/port'
+import type { CacheRecorder, RecordedCacheMiss } from '../cache/ledger'
 import type { WorkflowDef } from './authoring'
 import { createWorkflowEngine, type WorkflowEngine } from './engine'
 import type {
@@ -61,6 +63,8 @@ function tempRepo(): string {
 interface NodeTools {
   readonly complete: (completion: NodeCompletion) => void
   readonly block: (blocker: NodeBlocker) => void
+  /** A cache miss on this node's turn, as the SDK factory reports one. */
+  readonly cacheMiss: (miss: ObservedCacheMiss) => void
   readonly cwd: string
   // The first prompt of the session, which is the one naming the output
   // paths; later prompts (rejections, blocker answers, shoves) do not.
@@ -100,6 +104,7 @@ function scriptedSessions(
             {
               complete: (completion) => request.onComplete(completion),
               block: (blocker) => request.onBlocker(blocker),
+              cacheMiss: (miss) => request.onCacheMiss?.(miss),
               cwd: request.cwd,
               taskPrompt
             },
@@ -143,6 +148,8 @@ interface Rig {
   readonly stateDir: string
   readonly delivered: { sessionId: SessionId; text: string }[]
   readonly sessions: ReturnType<typeof scriptedSessions>
+  /** Every ledger line the run wrote, in order. */
+  readonly recorded: RecordedCacheMiss[]
 }
 
 function rig(
@@ -152,19 +159,29 @@ function rig(
   const repo = tempRepo()
   const stateDir = tempDir('crucible-engine-state-')
   const delivered: { sessionId: SessionId; text: string }[] = []
+  const recorded: RecordedCacheMiss[] = []
   const sessions = scriptedSessions(scriptFor)
+  // A stand-in for the ledger: what a run writes is checkable without a file.
+  const cache: CacheRecorder = {
+    retention: '5m',
+    ledgerPath: join(stateDir, 'cache-misses.jsonl'),
+    append: async (miss) => {
+      recorded.push(miss)
+    }
+  }
   const engine = createWorkflowEngine({
     loader: loaderOf(defs),
     store: createRunStore(stateDir),
     sessions,
     deliver: (sessionId, text) => delivered.push({ sessionId, text }),
+    cache,
     onChanged: () => {},
     pollMs: 5,
     watchdogMs: 60_000,
     quietAbortMs: 600_000,
     releaseWaitMs: 100
   })
-  return { engine, repo, stateDir, delivered, sessions }
+  return { engine, repo, stateDir, delivered, sessions, recorded }
 }
 
 async function until(what: () => boolean, ms = 4000): Promise<void> {
@@ -297,6 +314,57 @@ describe('the engine end to end', () => {
     expect(
       sessions.prompts.some((prompt) => prompt.includes('Response to your blocker'))
     ).toBe(true)
+  })
+
+  it('records a node\u2019s cache miss against the run, and tells nobody', async () => {
+    const { engine, repo, stateDir, delivered, recorded } = rig({ solo: oneNode }, () => {
+      return (prompt, tools) => {
+        tools.cacheMiss({
+          provider: 'anthropic',
+          model: 'claude-opus-5',
+          thinkingLevel: 'high',
+          tokensRebilled: 118_211,
+          dollarsRebilled: 0.62,
+          gapMs: 28_920_000,
+          changed: {
+            model: 'no',
+            thinking: 'no',
+            jump: 'no',
+            compaction: 'no',
+            tools: 'no',
+            rolePrompt: 'no'
+          }
+        })
+        writeFileSync(outputPath(prompt, 'report.md'), 'the report\n')
+        tools.complete({ summary: 'did the thing' })
+      }
+    })
+    const task = join(repo, 'task.md')
+    writeFileSync(task, 'the task\n')
+    const started = await engine.start(startRequest(repo, 'solo', { prompt: task }))
+
+    await until(() => engine.runs()[0].status === 'complete')
+    const run = engine.runs()[0]
+
+    // One ledger line, sourced to the run, its workflow and the node.
+    expect(recorded).toHaveLength(1)
+    expect(recorded[0].source).toEqual({
+      kind: 'run',
+      runId: started.id,
+      workflow: 'solo',
+      node: 'work',
+      // The workspace the run belongs to, not the worktree it works in.
+      workspace: repo
+    })
+    expect(recorded[0].dollarsRebilled).toBe(0.62)
+
+    // The chip's mark: the run counts it, and the record outlives the engine.
+    expect(run.nodes[0].cacheMisses).toBe(1)
+    expect(createRunStore(stateDir).load()[0].nodes[0].cacheMisses).toBe(1)
+
+    // A miss inside a run never becomes a message to the orchestrator: what
+    // it says is what it always says, and nothing about cache is in it.
+    expect(delivered.every((message) => !message.text.includes('cache'))).toBe(true)
   })
 
   it('parks a workflow check-in the same way and hands back the answer verbatim', async () => {

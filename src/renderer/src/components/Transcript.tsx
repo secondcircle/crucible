@@ -8,7 +8,9 @@ import {
   type ToolChain,
   type ToolItem
 } from '../state/tool-chains'
+import { seamFacts } from '../cache/format'
 import { Markdown } from './Markdown'
+import './cache-strip.css'
 import './transcript.css'
 
 // Follows the stream only while the reader is already at the bottom: scrolling
@@ -16,7 +18,8 @@ import './transcript.css'
 export function Transcript({
   items,
   sessionId,
-  invocations
+  invocations,
+  missJump
 }: {
   readonly items: readonly ViewItem[]
   /** Switching sessions starts the reader at the bottom of the new one again. */
@@ -24,6 +27,9 @@ export function Transcript({
   // The port never learns commands exist, so this mapping lives in the
   // document and nowhere else.
   readonly invocations?: ReadonlyMap<string, string>
+  // The cache badge's jump, as a counter: the request carries nothing but
+  // itself, and two clicks in a row must both move the view.
+  readonly missJump?: number
 }): React.JSX.Element {
   const scroller = useRef<HTMLDivElement>(null)
   const content = useRef<HTMLOListElement>(null)
@@ -57,6 +63,17 @@ export function Transcript({
     if (content.current !== null) observer.observe(content.current)
     return () => observer.disconnect()
   }, [sessionId, empty])
+
+  // The badge's jump lands on the latest seam in the same frame the click
+  // does, and stops the stream-following so the view stays where it was sent.
+  useLayoutEffect(() => {
+    if (missJump === undefined || missJump === 0) return
+    const seams = content.current?.querySelectorAll('.cacheseam')
+    const latest = seams?.[seams.length - 1]
+    if (latest === undefined) return
+    following.current = false
+    latest.scrollIntoView?.({ block: 'center' })
+  }, [missJump])
 
   function onScroll(): void {
     const node = scroller.current
@@ -162,6 +179,19 @@ function Item({
         <div className="summarycard" aria-label="Context summary">
           <div className="sumtag">context summary</div>
           <Markdown markdown={item.text} />
+        </div>
+      )
+
+    // Every miss gets one, the eight-hour resume included: facts, no cause,
+    // and nothing to click — the badge already jumps here and the strip
+    // already opens the view.
+    case 'cacheMiss':
+      return (
+        <div className="cacheseam" aria-label="Cache miss">
+          <span className="cstag">
+            <span aria-hidden="true">⚡</span> Cache miss
+          </span>
+          <span className="csfacts">{seamFacts(item.miss).join(' · ')}</span>
         </div>
       )
 

@@ -1,5 +1,9 @@
 import { basename } from 'node:path'
-import type { Binding, ConversationAdapter } from '../../shared/agent/adapter'
+import type {
+  Binding,
+  ConversationAdapter,
+  ObservedCacheMiss
+} from '../../shared/agent/adapter'
 import type {
   AgentPort,
   AuthMethod,
@@ -28,6 +32,7 @@ import type {
 } from '../../shared/agent/port'
 import { displaySafeMessage } from '../agent/adapter-error'
 import type { Flavor } from '../agent/select-adapter'
+import type { CacheRecorder } from '../cache/ledger'
 import type { PanelModel } from '../panel/model'
 import type { ShellStore, StoredSession } from './store'
 
@@ -51,6 +56,10 @@ export interface ShellOptions {
   readonly pickFolder: () => Promise<string | null>
   // Lets an agent-driven check reach a chattable state without an OS dialog.
   readonly seedWorkspacePath?: string
+  // Where an observed miss is written down. Absent in tests that are not
+  // about recording: with no ledger there is no entry to compose, and no
+  // retention to state, so nothing about a miss crosses the port either.
+  readonly cache?: CacheRecorder
   // A titling pass nobody asked for and nobody is shown: its failure goes to
   // the run log through here and nowhere else.
   readonly onTitlingFailure?: (cause: unknown) => void
@@ -96,6 +105,7 @@ export function createShell({
   panel,
   pickFolder,
   seedWorkspacePath,
+  cache,
   onTitlingFailure = () => {}
 }: ShellOptions): Shell {
   const listeners = new Set<PortEventListener>()
@@ -104,7 +114,12 @@ export function createShell({
   // has genuinely reported it.
   const usage = new Map<
     SessionId,
-    { usedTokens: number; contextWindow: number; cost?: number }
+    {
+      usedTokens: number
+      contextWindow: number
+      cost?: number
+      cacheMisses?: { count: number; dollars: number }
+    }
   >()
   // Folded from `queue_changed` exactly as usage is, so the strip renders from
   // the snapshot and survives both a session switch and a renderer reload.
@@ -155,7 +170,12 @@ export function createShell({
         // Absent in the record means a session past its first message, which
         // is what a record written before the mark existed has to read as.
         fresh: session.fresh === true,
-        ...(reported === undefined ? {} : { usage: withTitlingSpend(session.id, reported) }),
+        ...(reported === undefined
+          ? {}
+          : { usage: withTitlingSpend(session.id, reported) }),
+        // Beside the usage rather than inside it: money and misses are two
+        // counts of the same conversation, and neither vanishes on a jump.
+        ...(reported?.cacheMisses === undefined ? {} : { cacheMisses: reported.cacheMisses }),
         ...(queued(queue) ? { queue } : {}),
         ...(tabs === undefined ? {} : { panel: tabs })
       }
@@ -184,8 +204,54 @@ export function createShell({
     reported: { usedTokens: number; contextWindow: number; cost?: number }
   ): { usedTokens: number; contextWindow: number; cost?: number } {
     const spend = store.session(id)?.titlingSpend ?? 0
-    if (reported.cost === undefined || spend === 0) return reported
-    return { ...reported, cost: reported.cost + spend }
+    // Rebuilt rather than spread, because what is folded in here carries the
+    // conversation's miss totals too and those ride beside the usage, not in it.
+    const { usedTokens, contextWindow, cost } = reported
+    if (cost === undefined) return { usedTokens, contextWindow }
+    return { usedTokens, contextWindow, cost: spend === 0 ? cost : cost + spend }
+  }
+
+  // The ledger entry a session's miss becomes: the adapter's facts, plus the
+  // identity only this shell holds and the retention only the recorder does.
+  // No cause is inferred here or anywhere else.
+  function recordMiss(sessionId: SessionId, turnId: TurnId, miss: ObservedCacheMiss): void {
+    if (cache === undefined) return
+    const session = store.session(sessionId)
+    if (session === undefined) return
+    const workspace = store.workspace(session.workspaceId)
+    void cache.append({
+      at: new Date().toISOString(),
+      source: {
+        kind: 'session',
+        sessionId,
+        ...(session.title === undefined ? {} : { title: session.title }),
+        // The workspace, never the worktree: the pattern being hunted crosses
+        // workspaces. A session always has one; the fallback is there so a
+        // miss is never dropped over a record that disagrees.
+        workspace: workspace?.path ?? ''
+      },
+      provider: miss.provider,
+      model: miss.model,
+      ...(miss.thinkingLevel === undefined ? {} : { thinkingLevel: miss.thinkingLevel }),
+      tokensRebilled: miss.tokensRebilled,
+      dollarsRebilled: miss.dollarsRebilled,
+      gapMs: miss.gapMs,
+      changed: miss.changed
+    })
+    emit({
+      type: 'cache_miss',
+      sessionId,
+      turnId,
+      miss: {
+        tokensRebilled: miss.tokensRebilled,
+        dollarsRebilled: miss.dollarsRebilled,
+        gapMs: miss.gapMs,
+        modelChanged: miss.changed.model,
+        thinkingChanged: miss.changed.thinking,
+        jump: miss.changed.jump,
+        retention: cache.retention
+      }
+    })
   }
 
   function touch(id: SessionId): void {
@@ -644,7 +710,8 @@ export function createShell({
       usage.set(event.sessionId, {
         usedTokens: event.usedTokens,
         contextWindow: event.contextWindow,
-        ...(event.cost === undefined ? {} : { cost: event.cost })
+        ...(event.cost === undefined ? {} : { cost: event.cost }),
+        ...(event.cacheMisses === undefined ? {} : { cacheMisses: event.cacheMisses })
       })
       emitState()
       return
@@ -681,6 +748,13 @@ export function createShell({
     // No adapter should stream before it starts a turn; if one does, the start
     // is still said exactly once and first.
     announceStart(event.sessionId, turn)
+
+    // Recorded before it is forwarded: the ledger is the point, and the
+    // renderer's seam is a view of the same entry.
+    if (event.type === 'cache_miss') {
+      recordMiss(event.sessionId, event.turnId, event.miss)
+      return
+    }
 
     if (event.type === 'turn_ended' || event.type === 'turn_cancelled') {
       endTurn(event.sessionId, turn)

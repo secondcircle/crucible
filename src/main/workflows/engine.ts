@@ -18,6 +18,7 @@ import type {
   RunContext,
   WorkflowDef
 } from './authoring'
+import type { CacheRecorder } from '../cache/ledger'
 import type { WorkflowLoader } from './loader'
 import type { NodeSession, NodeSessionFactory } from './node-session'
 import type { RunStore } from './store'
@@ -75,6 +76,10 @@ export interface EngineOptions {
   readonly sessions: NodeSessionFactory
   /** How a run speaks: a message to its orchestrator session's agent. */
   readonly deliver: (sessionId: SessionId, text: string) => void
+  // Where a node's cache misses are written down. Absent records nothing; the
+  // run's own count lands on the record either way, because that is what the
+  // chip's mark is drawn from.
+  readonly cache?: CacheRecorder
   /** Fired after any record change; the service fans it out. */
   readonly onChanged: () => void
   readonly log?: (event: Record<string, unknown>) => void
@@ -107,6 +112,7 @@ interface LiveNode {
   toolCalls?: number
   contextPercent?: number
   cost?: number
+  cacheMisses?: number
 }
 
 interface LiveRun {
@@ -165,6 +171,7 @@ export function createWorkflowEngine(options: EngineOptions): WorkflowEngine {
     store,
     sessions,
     deliver,
+    cache,
     onChanged,
     log,
     defaultModel = 'anthropic/claude-opus-5:high',
@@ -441,6 +448,31 @@ export function createWorkflowEngine(options: EngineOptions): WorkflowEngine {
         onBlocker(blocker) {
           blockerRaised = blocker
           return 'Blocker recorded. End your turn and wait for a response.'
+        },
+        // A miss inside a run marks the chip and enters the ledger. It never
+        // becomes a message to the orchestrator (ADR 0017): nobody is asked
+        // about it, and the evidence is read later.
+        onCacheMiss(miss) {
+          node.cacheMisses = (node.cacheMisses ?? 0) + 1
+          save(run)
+          void cache?.append({
+            at: nowIso(),
+            source: {
+              kind: 'run',
+              runId: run.id,
+              workflow: run.workflow,
+              node: node.id,
+              // The workspace the run belongs to, not the worktree it works in.
+              workspace: run.workspacePath
+            },
+            provider: miss.provider,
+            model: miss.model,
+            ...(miss.thinkingLevel === undefined ? {} : { thinkingLevel: miss.thinkingLevel }),
+            tokensRebilled: miss.tokensRebilled,
+            dollarsRebilled: miss.dollarsRebilled,
+            gapMs: miss.gapMs,
+            changed: miss.changed
+          })
         }
       })
 

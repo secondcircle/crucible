@@ -1,4 +1,5 @@
 import type {
+  CacheMissFacts,
   ImageAttachment,
   ModelInfo,
   PortEvent,
@@ -46,6 +47,7 @@ export type ViewItem =
       readonly exitCode?: number
     }
   | { readonly kind: 'summary'; readonly text: string }
+  | { readonly kind: 'cacheMiss'; readonly miss: CacheMissFacts }
   | { readonly kind: 'stopped' }
   | { readonly kind: 'error'; readonly message: string }
 
@@ -175,6 +177,7 @@ function restored(item: TranscriptItem): ViewItem {
       }
     case 'bashRun':
     case 'summary':
+    case 'cacheMiss':
     case 'stopped':
     case 'error':
       return item
@@ -345,6 +348,15 @@ function heard(state: ShellState, event: PortEvent, at: number): ShellState {
         }))
       })
 
+    // The detection event arrives after the paying message has streamed, so
+    // the seam is inserted above that message's block rather than appended.
+    // One turn can pay for more than one miss; each gets its own seam.
+    case 'cache_miss':
+      return withView(state, sessionId, {
+        ...view,
+        items: withSeam(view.items, event.miss)
+      })
+
     case 'turn_ended':
       return withView(state, sessionId, {
         ...view,
@@ -394,6 +406,33 @@ function appendThinking(
     ...settle(items, at),
     { kind: 'thinking', text: delta, running: true, startedAt: at }
   ]
+}
+
+// Where the seam goes: at the head of everything the paying message rendered,
+// which is one block however many pieces it came in — thinking, text, and the
+// tool calls it opened, in whatever order it produced them.
+//
+// The walk knows where that block starts because π ends an assistant message
+// before it runs any of that message's tools: agent-loop emits `message_end`,
+// which is where the miss comes from, and only then `tool_execution_start`.
+// So when a miss arrives, every call the paying message opened is still
+// waiting to run, while a tool of an earlier message in the same turn has
+// already reported its result. It had to: that result is why the model got
+// to speak again. A settled tool is the floor of the paying block, and so is
+// anything that was never the model's to write.
+function withSeam(
+  items: readonly ViewItem[],
+  miss: CacheMissFacts
+): readonly ViewItem[] {
+  let at = items.length
+  while (at > 0 && partOfPayingBlock(items[at - 1])) at -= 1
+  return [...items.slice(0, at), { kind: 'cacheMiss', miss }, ...items.slice(at)]
+}
+
+/** Whether this item belongs to the assistant message that just ended. */
+function partOfPayingBlock(item: ViewItem): boolean {
+  if (item.kind === 'tool') return item.running
+  return item.kind === 'assistant' || item.kind === 'thinking'
 }
 
 function settle(items: readonly ViewItem[], at: number): readonly ViewItem[] {

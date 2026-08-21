@@ -91,6 +91,21 @@ function pageWithPreload(
         }),
         onEvent: (): (() => void) => () => {}
       },
+      // A virgin ledger: no misses, and the strip counts from the reset line
+      // its creation wrote.
+      cache: {
+        request: async (): Promise<{ ok: true; value: unknown }> => ({
+          ok: true,
+          value: {
+            count: 0,
+            dollars: 0,
+            since: new Date().toISOString(),
+            ledgerPath: '/tmp/crucible-test/cache-misses.jsonl',
+            retention: '5m'
+          }
+        }),
+        onEvent: (): (() => void) => () => {}
+      },
       // Accepts what the sidebar reports and shows none of it: this launch has
       // no dock icon and no notification centre.
       needsYou: {

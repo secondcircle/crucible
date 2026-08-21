@@ -5,6 +5,7 @@ import type {
   BindRequest,
   Binding,
   ConversationAdapter,
+  ObservedCacheMiss,
   ResumeRequest,
   UsageRequest
 } from './adapter'
@@ -64,6 +65,27 @@ const TURN_COST =
   FAKE_TURN_USAGE.output.cost +
   FAKE_TURN_USAGE.cacheRead.cost +
   FAKE_TURN_USAGE.cacheWrite.cost
+
+// One scripted cache miss, in mock U's own numbers, so a fake-flavor launch
+// puts the seam, the badge, the strip and a real ledger line on screen with
+// one prompt. Fired by a prompt containing "cache" and by nothing else.
+export const FAKE_CACHE_MISS: ObservedCacheMiss = {
+  provider: 'fake',
+  model: 'deterministic',
+  tokensRebilled: 118_211,
+  dollarsRebilled: 0.62,
+  // Eight hours: the idle expiry that decides the retention question, and the
+  // case nothing here is allowed to judge away.
+  gapMs: 8 * 60 * 60 * 1000,
+  changed: {
+    model: 'no',
+    thinking: 'no',
+    jump: 'no',
+    compaction: 'no',
+    tools: 'no',
+    rolePrompt: 'no'
+  }
+}
 
 /** Cents, so a sum of turns is exact rather than a float with a tail. */
 function dollars(cents: number): number {
@@ -305,6 +327,8 @@ interface Conversation {
   // How many turns reported usage in this conversation, every branch of it: a
   // jump abandons a path, never the money spent on it.
   usageMessages: number
+  /** Scripted misses paid for in this conversation, counted the same way. */
+  cacheMisses: number
   /** ISO time of the last thing that happened in it. */
   at: string
   minted: number
@@ -432,7 +456,13 @@ export function createFakeAdapter({
       // for none keeps its dash while its tokens are already on the meter.
       ...(conversation.usageMessages === 0
         ? {}
-        : { cost: dollars(conversation.usageMessages * TURN_COST * 100) })
+        : { cost: dollars(conversation.usageMessages * TURN_COST * 100) }),
+      // Whole-conversation totals, every branch of it, exactly as the money is
+      // counted: a jump abandons a path, never what it cost.
+      cacheMisses: {
+        count: conversation.cacheMisses,
+        dollars: dollars(conversation.cacheMisses * FAKE_CACHE_MISS.dollarsRebilled * 100)
+      }
     })
   }
 
@@ -486,6 +516,7 @@ export function createFakeAdapter({
       leafId: null,
       usedTokens: 0,
       usageMessages: 0,
+      cacheMisses: 0,
       at: new Date().toISOString(),
       minted: 0
     }
@@ -763,6 +794,10 @@ export function createFakeAdapter({
     }
 
     const conversation = bound.conversation
+    // The trigger, in this adapter's own convention: a prompt that says
+    // "cache" is asking to see what a miss looks like.
+    const missPrompted =
+      opening.kind === 'user' && opening.text.toLowerCase().includes('cache')
     // What opened the turn is in the conversation from the moment it was sent,
     // which is what makes it a node of the tree while the turn is still live.
     append(conversation, opening)
@@ -809,6 +844,37 @@ export function createFakeAdapter({
       // The last word: the tokens are settled and the turn's money is now
       // known, which the counts crossing mid-turn could not say.
       reportUsage(sessionId, conversation)
+    }
+
+    // The scripted miss, fired on the message that paid for it: the event
+    // goes out after the reply has streamed, exactly as a detected one does,
+    // and the seam lands above that reply in a restored transcript too.
+    function payForCacheMiss(): void {
+      conversation.cacheMisses += 1
+      pending.splice(Math.max(0, pending.length - 1), 0, {
+        kind: 'cacheMiss',
+        miss: {
+          tokensRebilled: FAKE_CACHE_MISS.tokensRebilled,
+          dollarsRebilled: FAKE_CACHE_MISS.dollarsRebilled,
+          gapMs: FAKE_CACHE_MISS.gapMs,
+          modelChanged: FAKE_CACHE_MISS.changed.model,
+          thinkingChanged: FAKE_CACHE_MISS.changed.thinking,
+          jump: FAKE_CACHE_MISS.changed.jump,
+          // The fake adapter knows no environment; main states the setting in
+          // force on the event it forwards, and this is the seam's own copy.
+          retention: '5m'
+        }
+      })
+      emit({
+        type: 'cache_miss',
+        sessionId,
+        turnId,
+        miss: {
+          ...FAKE_CACHE_MISS,
+          thinkingLevel: bound.thinkingLevel
+        }
+      })
+      reportUsage(sessionId, conversation, estimateTokens(counted))
     }
 
     /** False once the script has been abandoned, which ends every loop. */
@@ -1034,6 +1100,9 @@ export function createFakeAdapter({
       if (!(await call(LONE_CALL, number + 1))) return finish()
       if (!(await boundary())) return finish()
       if (!(await say(REPLY_DELTAS))) return finish()
+      // One prompt drives the whole loop in this flavor: the seam, the badge,
+      // the strip and a real line in the dev ledger.
+      if (missPrompted) payForCacheMiss()
 
       // The session is still running during this last pause, so the queues are
       // read again and only a beat nothing arrived in ends the turn.
