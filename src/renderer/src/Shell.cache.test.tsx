@@ -503,6 +503,34 @@ describe('the transcript seam', () => {
     expect(rows[seamAt + 1].textContent).toContain('here is the answer that paid for it')
   })
 
+  // Review repro, left failing on purpose: the paying message's block is its
+  // text plus the chain it opened, and the spec places the seam above the
+  // whole block (§5.5). π maps `toolcall_start` before `message_end`, so at
+  // the moment the miss event arrives the items already read
+  // [assistant text, tool] — and `withSeam` walks back over the tools but
+  // stops at the text, splitting the paying block in two.
+  it('sits above the paid block when the paying message wrote text then called a tool', async () => {
+    await mount()
+    await send('break the cache')
+
+    await act(async () => {
+      port.text('s1', 'let me look at that file')
+      port.toolStarted('s1', 'c1', 'bash', 'npm test')
+      port.emit({
+        type: 'cache_miss',
+        sessionId: 's1',
+        turnId: port.turnOf('s1') as string,
+        miss: miss()
+      })
+    })
+
+    const [seam] = seams(document.body)
+    const rows = [...(seam.closest('ol')?.children ?? [])]
+    const seamAt = rows.findIndex((row) => row.contains(seam))
+    expect(rows[seamAt + 1].textContent).toContain('let me look at that file')
+    expect(rows[seamAt + 2].querySelector('.chain')).not.toBeNull()
+  })
+
   it('sits above the chain a tool-only message opened', async () => {
     await mount()
     await send('run the thing')
