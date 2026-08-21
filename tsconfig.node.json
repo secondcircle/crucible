@@ -3,12 +3,18 @@
     "electron.vite.config.ts",
     "vitest.config.ts",
     "scripts/**/*.ts",
+    "resources/workflows/**/*.ts",
     "src/shared/**/*.ts",
     "src/main/**/*.ts",
     "src/preload/**/*.ts"
   ],
   "compilerOptions": {
     "composite": true,
+    // What the workflow loader aliases at runtime, resolved for the checker
+    // too, so the shipped workflows are typechecked like everything else.
+    "paths": {
+      "crucible:workflow": ["./resources/workflows/lib/workflow.ts"]
+    },
     "target": "ES2022",
     "lib": ["ES2023"],
     "module": "ESNext",

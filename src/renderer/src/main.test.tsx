@@ -95,6 +95,13 @@ function pageWithPreload(
       // no dock icon and no notification centre.
       needsYou: {
         request: async (): Promise<{ ok: true; value: unknown }> => ({ ok: true, value: null })
+      },
+      workflowRuns: {
+        request: async (): Promise<{ ok: true; value: unknown }> => ({
+          ok: true,
+          value: { runs: [] }
+        }),
+        onEvent: (): (() => void) => () => {}
       }
     },
     configurable: true

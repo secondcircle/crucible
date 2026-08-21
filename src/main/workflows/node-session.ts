@@ -1,0 +1,61 @@
+import type { TranscriptItem, Unsubscribe } from '../../shared/agent/port'
+
+// The engine's one seam onto agents: a node is a fresh session with two
+// injected completion tools, and everything the engine needs of it is here.
+// The SDK factory backs it with π; tests hand in scripted sessions, so the
+// whole node loop — nudges, validation, blockers, revisions — runs against
+// fakes and `npm test` constructs no SDK session at all.
+
+export interface NodeCompletion {
+  readonly summary: string
+  readonly verdict?: unknown
+}
+
+export interface NodeBlocker {
+  readonly reason: string
+  readonly details?: string
+  /** Path of a document the orchestrator should read to decide. */
+  readonly artifact?: string
+}
+
+export interface NodeSessionRequest {
+  /** The run's worktree: where the node's tools work. */
+  readonly cwd: string
+  /** "provider/model-id:thinkingLevel". */
+  readonly model: string
+  /** The node's role text; the factory appends the standing prompt itself. */
+  readonly rolePrompt: string
+  /** Built-in tool names the node gets, complete_node and raise_blocker aside. */
+  readonly tools: readonly string[]
+  /** The agent called complete_node; the return is the tool's answer text. */
+  readonly onComplete: (completion: NodeCompletion) => string
+  /** The agent called raise_blocker; same contract. */
+  readonly onBlocker: (blocker: NodeBlocker) => string
+}
+
+export interface NodeSessionStats {
+  readonly toolCalls: number
+  /** Billed dollars of the session so far. */
+  readonly cost?: number
+  /** Context-window usage, 0–100. */
+  readonly contextPercent?: number
+}
+
+export interface NodeSession {
+  /** One turn: resolves when the turn ends, however it ends. Never rejects
+   *  for model trouble — a failed turn ends quietly and the loop nudges. */
+  prompt(text: string): Promise<void>
+  /** Abort the live turn; the pending prompt() then resolves. */
+  abort(): Promise<void>
+  isStreaming(): boolean
+  stats(): NodeSessionStats
+  /** The session so far, in the chat pane's own shape. */
+  transcript(): readonly TranscriptItem[]
+  /** Streaming liveness: fires on any activity, with a "doing X…" line. */
+  onActivity(listener: (now: string | undefined) => void): Unsubscribe
+  dispose(): void
+}
+
+export interface NodeSessionFactory {
+  start(request: NodeSessionRequest): Promise<NodeSession>
+}

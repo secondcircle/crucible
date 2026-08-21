@@ -142,22 +142,24 @@ describe('what a launch does', () => {
   it('writes the launch records before a window exists', () => {
     expect(events()).toEqual([
       'app_starting',
+      'workflow_run_service_selected',
       'adapter_selected',
       'workspace_service_selected',
       'command_service_selected',
       'quota_service_selected'
     ])
-    expect(records()[1]).toMatchObject({ adapter: 'fake' })
-    // One flavor decision governs every seam: the fake launch reads no
-    // credential and never touches the machine's quota cache.
-    expect(records()[4]).toMatchObject({ event: 'quota_service_selected', service: 'canned' })
+    expect(records()[2]).toMatchObject({ adapter: 'fake' })
+    // One flavor decision governs every seam: the fake launch runs scripted
+    // runs, reads no credential and never touches the machine's quota cache.
+    expect(records()[1]).toMatchObject({ service: 'fake' })
+    expect(records()[5]).toMatchObject({ event: 'quota_service_selected', service: 'canned' })
     expect(harness.windowsCreated).toBe(0)
   })
 
   it('starts though it can read no shipped prompt file, because the fake needs none', () => {
     // Nothing is shipped under this launch's app directory, prompts included.
     expect(existsSync(join(harness.appPath, 'resources'))).toBe(false)
-    expect(records()[1]).toMatchObject({ event: 'adapter_selected', adapter: 'fake' })
+    expect(records()[2]).toMatchObject({ event: 'adapter_selected', adapter: 'fake' })
   })
 
   it('opens one window when Electron is ready and serves the port over it', async () => {
@@ -174,6 +176,7 @@ describe('what a launch does', () => {
     expect(harness.ipcHandlers.has(NEEDS_YOU_REQUEST_CHANNEL)).toBe(true)
     expect(events()).toEqual([
       'app_starting',
+      'workflow_run_service_selected',
       'adapter_selected',
       'workspace_service_selected',
       'command_service_selected',

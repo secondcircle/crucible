@@ -1,9 +1,10 @@
 import { basename, join, sep } from 'node:path'
 import { app, BrowserWindow, dialog, shell as electronShell } from 'electron'
 import { type AgentChannel, serveAgentChannel } from './agent/channel'
+import type { SessionId } from '../shared/agent/port'
 import { type AppUpdateChannel, serveAppUpdateChannel } from './app-update/channel'
 import { createAppUpdateService, stillAppUpdateService } from './app-update/service'
-import { selectAdapter } from './agent/select-adapter'
+import { decideFlavor, selectAdapter } from './agent/select-adapter'
 import { withLogging } from './agent/with-logging'
 import { type CommandChannel, serveCommandChannel } from './commands/channel'
 import { selectCommandService } from './commands/select-service'
@@ -26,6 +27,8 @@ import { createShellStore } from './shell/store'
 import { createMainWindow } from './window'
 import { serveWorkspaceChannel, type WorkspaceChannel } from './workspace/channel'
 import { selectWorkspaceService } from './workspace/select-service'
+import { serveWorkflowRunChannel, type WorkflowRunChannel } from './workflows/channel'
+import { selectWorkflowRunService } from './workflows/select-service'
 
 // Before anything else, because a scheme's privileges are only settable while
 // the app is still starting.
@@ -84,6 +87,28 @@ const store = createShellStore(join(app.getPath('userData'), 'shell-state.json')
 // adapter's three tools and the shell's snapshots read the same tabs.
 const panel = createPanelModel({ persistence: storePanelPersistence(store) })
 
+// The workflow engine exists before the adapter, because the run tools ride
+// every composed agent. A run speaks by messaging its orchestrator session,
+// and the shell that carries the message is built later — the indirection
+// below is that knot untied.
+// Initialized explicitly so the one real assignment below stays an
+// assignment: the closure above it must keep reading this binding late.
+let orchestratorInbox: ((sessionId: SessionId, text: string) => void) | undefined = undefined
+const workflowRuns = selectWorkflowRunService(
+  decideFlavor(process.env.CRUCIBLE_AGENT, app.isPackaged).flavor,
+  log,
+  {
+    appPath: app.getAppPath(),
+    stateDir: app.getPath('userData'),
+    deliver: (sessionId, text) => {
+      if (orchestratorInbox === undefined) {
+        throw new Error('no shell is up to carry a run message yet')
+      }
+      orchestratorInbox(sessionId, text)
+    }
+  }
+)
+
 // Decided once, before any window exists: one adapter for the launch, whichever
 // window is holding it at the time.
 const { adapter, flavor } = selectAdapter(
@@ -98,7 +123,8 @@ const { adapter, flavor } = selectAdapter(
       void electronShell.openExternal(url)
     }
   },
-  app.isPackaged
+  app.isPackaged,
+  workflowRuns.tools
 )
 
 // One flavor decision governs every seam, so a fake-flavor launch reads no
@@ -169,6 +195,19 @@ const shell = withLogging(
   flavor
 )
 
+// A run's message is a follow-up: queued while the orchestrator works,
+// prompted the moment it is idle — never lost, never refused (ADR 0017).
+orchestratorInbox = (sessionId, text) => {
+  void shell.followUp(sessionId, text).catch((cause: unknown) => {
+    log.append({
+      source: 'main',
+      event: 'run_message_undeliverable',
+      sessionId,
+      message: cause instanceof Error ? cause.message : String(cause)
+    })
+  })
+}
+
 let channel: AgentChannel | undefined
 let workspaceChannel: WorkspaceChannel | undefined
 let commandChannel: CommandChannel | undefined
@@ -176,6 +215,7 @@ let appUpdateChannel: AppUpdateChannel | undefined
 let quotaChannel: QuotaChannel | undefined
 let needsYouChannel: NeedsYouChannel | undefined
 let needsYou: LiveNeedsYouService | undefined
+let workflowRunChannel: WorkflowRunChannel | undefined
 
 function openWindow(reason?: 'activate'): void {
   const window = createMainWindow()
@@ -195,6 +235,16 @@ function openWindow(reason?: 'activate'): void {
     void shell.activateSession(sessionId).catch(() => {})
   })
   needsYouChannel = serveNeedsYouChannel(needsYou, window)
+  workflowRunChannel = serveWorkflowRunChannel(workflowRuns, window)
+  // ⌘R is the global runs view (Q15). Taken here, before the menu can spend
+  // it on reload; dev reloads keep ⇧⌘R. On non-mac the chord is Ctrl+R.
+  window.webContents.on('before-input-event', (event, input) => {
+    if (input.type !== 'keyDown' || input.key.toLowerCase() !== 'r') return
+    const chord = process.platform === 'darwin' ? input.meta : input.control
+    if (!chord || input.shift || input.alt) return
+    event.preventDefault()
+    workflowRuns.toggleOverview()
+  })
   log.append(
     reason === undefined
       ? { source: 'main', event: 'window_created' }
@@ -226,6 +276,8 @@ app.on('window-all-closed', () => {
 app.on('will-quit', () => {
   // Whatever was still running is dropped rather than left running unseen.
   channel?.dispose()
+  workflowRunChannel?.dispose()
+  workflowRuns.dispose()
   workspaceChannel?.dispose()
   commandChannel?.dispose()
   appUpdateChannel?.dispose()

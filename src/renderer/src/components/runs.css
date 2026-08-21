@@ -1,0 +1,510 @@
+/* The three run surfaces: the strip above the chat, the full-screen dig, and
+   the global ⌘R view. Visuals follow mock T on the Ember tokens. */
+
+/* ---------- the run strip ---------- */
+
+.runstrip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 14px;
+  border-bottom: 1px solid var(--line);
+  background: var(--bg2);
+  font-size: 12px;
+  overflow-x: auto;
+}
+
+.runstrip .rslabel {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--faint);
+  margin-right: 2px;
+}
+
+.runchip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 3px 11px;
+  background: var(--panel);
+  color: var(--dim);
+  white-space: nowrap;
+}
+
+.runchip b {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.runchip .node {
+  font: 11px var(--mono);
+  color: var(--accent2);
+}
+
+.runchip .age {
+  font: 11px var(--mono);
+  color: var(--faint);
+}
+
+.runchip.parked {
+  border-color: var(--warn);
+}
+
+.runchip.parked .node {
+  color: var(--warn);
+}
+
+.runstrip .rshint {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--faint);
+  white-space: nowrap;
+}
+
+.runstrip kbd,
+.runview kbd {
+  font: 10.5px var(--mono);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 0 4px;
+}
+
+/* The breathing dot every run surface shares. */
+.runchip .dot,
+.runrow .dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--ok);
+  flex-shrink: 0;
+}
+
+.runchip .dot.running,
+.runrow .dot.running {
+  animation: run-breathe 2.2s infinite;
+}
+
+.runchip.parked .dot,
+.runrow.parked .dot,
+.runchip .dot.paused,
+.runrow .dot.paused {
+  background: var(--warn);
+  animation: none;
+}
+
+.runrow.done .dot {
+  background: var(--faint);
+  animation: none;
+}
+
+.runchip .dot.failed,
+.runrow .dot.failed {
+  background: var(--error);
+  animation: none;
+}
+
+@keyframes run-breathe {
+  50% {
+    opacity: 0.35;
+  }
+}
+
+/* ---------- shared overlay bones ---------- */
+
+.runview,
+.runsoverview {
+  position: absolute;
+  inset: 0;
+  z-index: 6;
+  background: var(--bg);
+  display: flex;
+  flex-direction: column;
+}
+
+.runview .btn,
+.runsoverview .btn {
+  font-size: 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--bg2);
+  color: var(--ink);
+  padding: 4px 11px;
+  white-space: nowrap;
+}
+
+.runview .btn.primary,
+.runsoverview .btn.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--on-accent);
+  font-weight: 700;
+}
+
+/* ---------- the full-screen run view ---------- */
+
+.rvtop {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 12px 20px;
+  border-bottom: 1px solid var(--line);
+  flex-wrap: wrap;
+}
+
+.rvtop .wf {
+  font-weight: 700;
+  font-size: 15px;
+}
+
+.rvtop .id {
+  font: 12px var(--mono);
+  color: var(--faint);
+}
+
+.rvtop .stat {
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ok);
+}
+
+.rvtop .stat.paused {
+  color: var(--warn);
+}
+
+.rvtop .stat.failed,
+.rvtop .stat.cancelled {
+  color: var(--error);
+}
+
+.rvtop .where {
+  font: 11.5px var(--mono);
+  color: var(--dim);
+}
+
+.rvtop .where b {
+  color: var(--accent2);
+  font-weight: 600;
+}
+
+.rvtop .spend {
+  margin-left: auto;
+  font: 12px var(--mono);
+  color: var(--dim);
+}
+
+.rvbody {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+}
+
+/* The graph rail: layered top-down, a row per layer, click-through to the
+   node detail. Fit to width inside the rail; scroll as the escape hatch. */
+.runview .graph {
+  width: 300px;
+  border-right: 1px solid var(--line);
+  background: var(--bg2);
+  padding: 16px;
+  overflow-y: auto;
+  flex-shrink: 0;
+}
+
+.glayer {
+  position: relative;
+  display: flex;
+  gap: 8px;
+  margin-bottom: 22px;
+}
+
+/* The spine between layers, in place of drawn edges (v1). */
+.glayer:not(:last-child)::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  bottom: -23px;
+  width: 1px;
+  height: 22px;
+  background: var(--line);
+}
+
+.gnode {
+  flex: 1;
+  min-width: 0;
+  text-align: left;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel);
+  padding: 9px 12px;
+}
+
+.gnode .n {
+  font-size: 13px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gnode .n .s {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--faint);
+  flex-shrink: 0;
+}
+
+.gnode.done .n .s {
+  background: var(--ok);
+}
+
+.gnode.live {
+  border-color: var(--accent);
+}
+
+.gnode.live .n .s {
+  background: var(--accent);
+  animation: run-breathe 2.2s infinite;
+}
+
+.gnode.parked {
+  border-color: var(--warn);
+}
+
+.gnode.parked .n .s {
+  background: var(--warn);
+}
+
+.gnode.bad .n .s {
+  background: var(--error);
+}
+
+.gnode.wait {
+  opacity: 0.55;
+}
+
+.gnode .meta {
+  display: block;
+  font: 11px var(--mono);
+  color: var(--faint);
+  margin-top: 4px;
+  white-space: normal;
+}
+
+.gnode.sel {
+  outline: 2px solid var(--accent2);
+  outline-offset: 1px;
+}
+
+/* Node detail: the chat pane's own rendering inside the run view. */
+.runview .detail {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.runview .dhead {
+  padding: 14px 20px;
+  border-bottom: 1px solid var(--line);
+}
+
+.runview .dhead .n {
+  font-weight: 700;
+}
+
+.runview .dhead .facts {
+  display: flex;
+  gap: 18px;
+  font: 11.5px var(--mono);
+  color: var(--dim);
+  margin-top: 6px;
+  flex-wrap: wrap;
+}
+
+.runview .dhead .facts b {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.runview .dhead .now {
+  margin-top: 8px;
+  font-size: 12.5px;
+  color: var(--accent2);
+}
+
+.runview .dhead .nodeerror {
+  margin-top: 8px;
+  font-size: 12.5px;
+  color: var(--error);
+}
+
+.rvempty,
+.gvempty {
+  padding: 40px;
+  color: var(--faint);
+  text-align: center;
+}
+
+.runview .artifacts {
+  border-top: 1px solid var(--line);
+  padding: 10px 20px;
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  font-size: 12px;
+  color: var(--dim);
+}
+
+.runview .artifacts .a {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 3px 10px;
+  font: 11.5px var(--mono);
+  color: var(--accent2);
+}
+
+.runview .artifacts .anote {
+  margin-left: auto;
+  font: 11px var(--mono);
+  color: var(--faint);
+}
+
+/* The routed check-in banner: what was asked and where it went. No input —
+   the conversation happens in the session (ADR 0017). */
+.routed {
+  border-top: 1px solid var(--warn);
+  background: color-mix(in srgb, var(--warn) 9%, var(--bg));
+  padding: 11px 20px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 12.5px;
+}
+
+.routed b {
+  color: var(--warn);
+  white-space: nowrap;
+}
+
+.routed .q {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.routed .to {
+  color: var(--dim);
+  white-space: nowrap;
+}
+
+.routed .btn {
+  margin-left: auto;
+}
+
+/* ---------- the global runs view ---------- */
+
+.gvtop {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 22px;
+  border-bottom: 1px solid var(--line);
+}
+
+.gvtop .t {
+  font-weight: 700;
+  font-size: 15px;
+}
+
+.gvtop .count {
+  font-size: 12px;
+  color: var(--dim);
+}
+
+.gvtop .x {
+  margin-left: auto;
+}
+
+.gvbody {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px 22px 20px;
+}
+
+.wsgroup {
+  margin-top: 14px;
+}
+
+.wsname {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--faint);
+  padding-bottom: 6px;
+}
+
+.runrow {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel);
+  padding: 10px 14px;
+  margin-bottom: 8px;
+}
+
+.runrow .wf {
+  font-weight: 700;
+  font-size: 13px;
+  width: 70px;
+}
+
+.runrow .id {
+  font: 11.5px var(--mono);
+  color: var(--faint);
+  width: 70px;
+}
+
+.runrow .st {
+  font: 11.5px var(--mono);
+  width: 210px;
+}
+
+.runrow.parked .st {
+  color: var(--warn);
+}
+
+.runrow .sess {
+  font-size: 12.5px;
+  color: var(--dim);
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.runrow .sess em {
+  font-style: normal;
+  color: var(--accent2);
+}
+
+.runrow .sess .un {
+  color: var(--faint);
+  font-style: italic;
+}
+
+.runrow .spend {
+  font: 11.5px var(--mono);
+  color: var(--faint);
+}

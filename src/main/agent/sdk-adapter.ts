@@ -51,6 +51,7 @@ import type {
 import { summarizeActivity } from '../../shared/agent/activity.ts'
 import { TITLE_MODEL } from '../../shared/agent/known-models.ts'
 import { PANEL_TOOLS, type PanelTools } from '../../shared/agent/panel-tools.ts'
+import { RUN_TOOLS, type RunTools } from '../../shared/agent/run-tools.ts'
 import { displaySafeMessage } from './adapter-error.ts'
 import { toProviderState, type AuthFacts, type ProviderFacts } from './providers.ts'
 import { crucibleAgentDir, workspaceSessionDir } from './paths.ts'
@@ -115,12 +116,17 @@ const PREVIEW_LIMIT = 140
 
 export function createSdkAdapter({
   panel,
+  runs,
   systemPrompt,
   openExternal
 }: {
   // The same model the fake's scripts call and the same model the shell reads:
   // the tools registered below are its three behaviors and nothing more.
   readonly panel: PanelTools
+  // The workflow-run behaviors, mounted as custom tools on every composed
+  // agent (Q19: tools, not a bash CLI). Absent — as in `prove:sdk` — means no
+  // run tools are mounted.
+  readonly runs?: RunTools
   // Passed as a full override: every session this adapter opens is told this
   // and nothing π wrote.
   readonly systemPrompt: string
@@ -255,6 +261,64 @@ export function createSdkAdapter({
     })
   }
 
+  // The run behaviors as π tools, one set per session: a call has to reach
+  // the engine with the identity and working directory of the session it
+  // came from, because that is where the default base commit is read.
+  function runCustomTools(sessionId: SessionId, workspacePath: string): ToolDefinition[] {
+    const behaviors = runs
+    if (behaviors === undefined) return []
+    return RUN_TOOLS.map((tool): ToolDefinition => {
+      const parameters = {
+        type: 'object',
+        required: tool.parameters
+          .filter((parameter) => parameter.optional !== true)
+          .map((parameter) => parameter.name),
+        properties: Object.fromEntries(
+          tool.parameters.map((parameter) => [
+            parameter.name,
+            { type: 'string', description: parameter.description }
+          ])
+        )
+      } as unknown as ToolDefinition['parameters']
+
+      return {
+        name: tool.name,
+        label: tool.label,
+        description: tool.description,
+        parameters,
+        async execute(_callId: string, params: unknown) {
+          const given = (params ?? {}) as {
+            workflow?: string
+            inputs?: string
+            base?: string
+            runId?: string
+            message?: string
+          }
+          if (tool.name === 'crucible_workflows') {
+            return said(await behaviors.workflows(workspacePath))
+          }
+          if (tool.name === 'crucible_run') {
+            return said(
+              await behaviors.start(
+                sessionId,
+                workspacePath,
+                given.workflow ?? '',
+                parseInputs(given.inputs),
+                given.base
+              )
+            )
+          }
+          if (tool.name === 'crucible_answer') {
+            return said(
+              await behaviors.answer(sessionId, given.runId ?? '', given.message ?? '')
+            )
+          }
+          return said(await behaviors.list(sessionId))
+        }
+      }
+    })
+  }
+
   async function open(
     sessionId: SessionId,
     workspacePath: string,
@@ -271,7 +335,10 @@ export function createSdkAdapter({
       settingsManager,
       resourceLoader,
       modelRuntime: await runtime(),
-      customTools: panelCustomTools(sessionId, workspacePath)
+      customTools: [
+        ...panelCustomTools(sessionId, workspacePath),
+        ...runCustomTools(sessionId, workspacePath)
+      ]
     }
 
     if (preferred?.model !== undefined) {
@@ -1145,6 +1212,29 @@ function facts(provider: Provider): ProviderFacts {
 // beside it.
 function said(text: string): { content: { type: 'text'; text: string }[]; details: unknown } {
   return { content: [{ type: 'text', text }], details: {} }
+}
+
+// The tool's `inputs` parameter is a JSON object in a string; a malformed one
+// throws exactly the sentence the model should read.
+function parseInputs(raw: string | undefined): Record<string, string> {
+  if (raw === undefined || raw.trim() === '') return {}
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(raw)
+  } catch {
+    throw new Error('`inputs` must be a JSON object mapping input names to file paths.')
+  }
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+    throw new Error('`inputs` must be a JSON object mapping input names to file paths.')
+  }
+  const inputs: Record<string, string> = {}
+  for (const [name, value] of Object.entries(parsed)) {
+    if (typeof value !== 'string') {
+      throw new Error(`The input "${name}" must be a file path string.`)
+    }
+    inputs[name] = value
+  }
+  return inputs
 }
 
 // The wire format, minted once per share: the id is what tells this run's

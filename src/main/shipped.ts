@@ -18,6 +18,15 @@ export function shippedDocsIndexPath(root: string): string {
   return join(root, SHIPPED_DIRECTORY, 'agent-docs', 'index.md')
 }
 
+export function shippedWorkflowsPath(root: string): string {
+  return join(root, SHIPPED_DIRECTORY, 'workflows')
+}
+
+/** The authoring module workflow files import as `crucible:workflow`. */
+export function shippedWorkflowLibPath(root: string): string {
+  return join(root, SHIPPED_DIRECTORY, 'workflows', 'lib', 'workflow.ts')
+}
+
 export function shippedRolePromptPath(root: string): string {
   return join(root, SHIPPED_DIRECTORY, 'prompts', 'role-coding-agent.md')
 }

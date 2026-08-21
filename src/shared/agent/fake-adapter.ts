@@ -9,6 +9,7 @@ import type {
   UsageRequest
 } from './adapter'
 import type { PanelToolName, PanelTools } from './panel-tools'
+import type { RunTools } from './run-tools'
 import type {
   AuthMethod,
   BashRunShare,
@@ -163,12 +164,18 @@ export interface FakePanel {
   readonly exhibits: { readonly buildPlan: string; readonly benchmark: string }
 }
 
-// One call the panel script makes. `answer` is the model's, so the fake never
-// writes a result text of its own.
+// One call a scripted tool turn makes. `answer` is the model's — the panel's
+// or the run service's — so the fake never writes a result text of its own.
 interface PanelCall {
-  readonly name: PanelToolName
+  readonly name: PanelToolName | string
   readonly summary: string
-  readonly answer: () => string
+  readonly answer: () => string | Promise<string>
+}
+
+/** A tool turn instead of the standard script: its calls, then its closing. */
+interface ScriptedToolTurn {
+  readonly calls: readonly PanelCall[]
+  readonly closing: readonly string[]
 }
 
 // Said after a panel turn, so the reply names where the work went rather than
@@ -179,6 +186,34 @@ const PANEL_SHOWN_DELTAS: readonly string[] = [
 
 const PANEL_CLOSED_DELTAS: readonly string[] = [
   'That is what the context panel says now. Nothing was sent anywhere and nothing was paid for it.'
+]
+
+// What the scripted orchestrator says around runs, so the whole journey —
+// kickoff, routed question, answered question, returned work — is walkable
+// without a paid call.
+const RUN_STARTED_DELTAS: readonly string[] = [
+  'The run is under way in its own worktree, branched from our last commit. ',
+  'It reports back here — check-ins, blockers and completion all arrive as messages — ',
+  'so we can keep working. Nothing was sent anywhere and nothing was paid for it.'
+]
+
+const RUN_ANSWERED_DELTAS: readonly string[] = [
+  'I answered the run from context: the scripted ruling is to proceed as proposed. ',
+  'The run resumes from here.'
+]
+
+const RUN_RETURNED_DELTAS: readonly string[] = [
+  'The run finished and its work is committed on its branch. ',
+  'I would pull it in next — in this flavor nothing is merged, and nothing was paid for it.'
+]
+
+const RUN_FAILED_DELTAS: readonly string[] = [
+  'The run failed; its worktree is left as it stands for inspection. ',
+  'Say the word and I dig into it. (Scripted: no cost.)'
+]
+
+const RUN_LIST_DELTAS: readonly string[] = [
+  'That is where every run of this session stands. Nothing was sent anywhere.'
 ]
 
 const REPLY_DELTAS: readonly string[] = [
@@ -350,12 +385,15 @@ function preferredLevel(preferred: ThinkingLevel | undefined): ThinkingLevel {
 
 export function createFakeAdapter({
   pauseMs = DEFAULT_PAUSE_MS,
-  panel
+  panel,
+  runs
 }: {
   /** Zero runs the script on microtasks. */
   readonly pauseMs?: number
   /** Absent leaves the standard script the answer to every prompt. */
   readonly panel?: FakePanel
+  /** Absent leaves every run prompt to the standard script too. */
+  readonly runs?: RunTools
 } = {}): ConversationAdapter {
   const listeners = new Set<AdapterEventListener>()
   const conversations = new Map<string, Conversation>()
@@ -471,6 +509,82 @@ export function createFakeAdapter({
     const bound = sessions.get(sessionId)
     if (bound === undefined) throw new Error('That session is not bound to a conversation.')
     return bound
+  }
+
+  // The scripted orchestrator. Messages a run delivered are recognized by
+  // their own wording; everything else needs the word "workflow" so ordinary
+  // prompts are never hijacked.
+  function runScript(
+    bound: Bound,
+    sessionId: SessionId,
+    text: string
+  ): ScriptedToolTurn | undefined {
+    if (runs === undefined) return undefined
+    const asked = text.toLowerCase()
+    const { workspacePath } = bound.conversation
+
+    if (text.startsWith('⚑ Crucible run')) {
+      const runId = /run (\w+)/.exec(text)?.[1] ?? ''
+      if (asked.includes('checking in') || asked.includes('blocker') || asked.includes('stalled')) {
+        return {
+          calls: [
+            {
+              name: 'crucible_answer',
+              summary: `run ${runId}`,
+              answer: () =>
+                runs.answer(sessionId, runId, 'Proceed as proposed; keep the helper beside its caller.')
+            }
+          ],
+          closing: RUN_ANSWERED_DELTAS
+        }
+      }
+      if (asked.includes('completed')) return { calls: [], closing: RUN_RETURNED_DELTAS }
+      if (asked.includes('failed')) return { calls: [], closing: RUN_FAILED_DELTAS }
+      return { calls: [], closing: RUN_LIST_DELTAS }
+    }
+
+    if (asked.includes('workflow')) {
+      if (asked.includes('list') || asked.includes('which') || asked.includes('what')) {
+        return {
+          calls: [
+            {
+              name: 'crucible_workflows',
+              summary: 'available workflows',
+              answer: () => runs.workflows(workspacePath)
+            }
+          ],
+          closing: RUN_LIST_DELTAS
+        }
+      }
+      if (/kick|start|run|launch/.test(asked)) {
+        const workflow = asked.includes('build') ? 'build' : 'adhoc'
+        return {
+          calls: [
+            {
+              name: 'crucible_run',
+              summary: `${workflow} · from HEAD`,
+              answer: () => runs.start(sessionId, workspacePath, workflow, {})
+            }
+          ],
+          closing: RUN_STARTED_DELTAS
+        }
+      }
+    }
+
+    if (asked.includes('runs') && (asked.includes('list') || asked.includes('standing') || asked.includes('status'))) {
+      return {
+        calls: [
+          {
+            name: 'crucible_runs',
+            summary: 'this session',
+            answer: () => runs.list(sessionId)
+          }
+        ],
+        closing: RUN_LIST_DELTAS
+      }
+    }
+
+    return undefined
   }
 
   // Checked in this order so that `close the panel` is never taken for the
@@ -621,8 +735,8 @@ export function createFakeAdapter({
     sessionId: SessionId,
     turnId: TurnId,
     opening: TranscriptItem,
-    /** A panel turn instead of the standard script, when one was matched. */
-    panelCalls?: readonly PanelCall[]
+    /** A tool turn instead of the standard script, when one was matched. */
+    scripted?: ScriptedToolTurn
   ): Promise<void> {
     let stopped: 'cancelled' | 'disposed' | undefined
     let timer: ReturnType<typeof setTimeout> | undefined
@@ -727,9 +841,9 @@ export function createFakeAdapter({
       return true
     }
 
-    // The panel's tools answer at once and stream nothing, so a call is its
+    // The scripted tools answer at once and stream nothing, so a call is its
     // start and its end, carrying the model's own text as the output.
-    async function panelCall(scripted: PanelCall, number: number): Promise<boolean> {
+    async function scriptedCall(call: PanelCall, number: number): Promise<boolean> {
       settleSpoken()
       const callId = `${turnId}-call-${number}`
       await beat()
@@ -739,8 +853,8 @@ export function createFakeAdapter({
         sessionId,
         turnId,
         callId,
-        name: scripted.name,
-        summary: scripted.summary
+        name: call.name,
+        summary: call.summary
       })
 
       await beat()
@@ -748,7 +862,7 @@ export function createFakeAdapter({
       let ok = true
       let output: string
       try {
-        output = scripted.answer()
+        output = await call.answer()
       } catch (cause) {
         // The failure path is the model's own text, which is what a real
         // failed call would carry.
@@ -757,7 +871,7 @@ export function createFakeAdapter({
       }
       emit({ type: 'tool_ended', sessionId, turnId, callId, ok, output })
       add(output)
-      pending.push({ kind: 'tool', name: scripted.name, summary: scripted.summary, ok, output })
+      pending.push({ kind: 'tool', name: call.name, summary: call.summary, ok, output })
       return true
     }
 
@@ -880,15 +994,14 @@ export function createFakeAdapter({
 
     // Every beat is a cancellation point here too, and each call is followed
     // by the same boundary a steering message lands at.
-    async function panelTurn(calls: readonly PanelCall[]): Promise<void> {
+    async function toolTurn(turn: ScriptedToolTurn): Promise<void> {
       let number = 0
-      for (const scripted of calls) {
+      for (const call of turn.calls) {
         number += 1
-        if (!(await panelCall(scripted, number))) return finish()
+        if (!(await scriptedCall(call, number))) return finish()
         if (!(await boundary())) return finish()
       }
-      const closing = calls.at(-1)?.name === 'panel_close' ? PANEL_CLOSED_DELTAS : PANEL_SHOWN_DELTAS
-      if (!(await say(closing))) return finish()
+      if (!(await say(turn.closing))) return finish()
 
       // The same ending the standard script has: no turn is over while a
       // message is still queued behind it.
@@ -904,7 +1017,7 @@ export function createFakeAdapter({
     async function script(): Promise<void> {
       emit({ type: 'turn_started', sessionId, turnId })
 
-      if (panelCalls !== undefined) return panelTurn(panelCalls)
+      if (scripted !== undefined) return toolTurn(scripted)
 
       if (!(await think())) return finish()
 
@@ -1258,6 +1371,17 @@ export function createFakeAdapter({
       images?: readonly ImageAttachment[]
     ): Promise<void> {
       const bound = requireBound(sessionId)
+      const panelCalls = panelScript(bound, sessionId, text)
+      const scripted: ScriptedToolTurn | undefined =
+        panelCalls !== undefined
+          ? {
+              calls: panelCalls,
+              closing:
+                panelCalls.at(-1)?.name === 'panel_close'
+                  ? PANEL_CLOSED_DELTAS
+                  : PANEL_SHOWN_DELTAS
+            }
+          : runScript(bound, sessionId, text)
       return run(
         bound,
         sessionId,
@@ -1269,7 +1393,7 @@ export function createFakeAdapter({
           // the thumbnails the live one did and no others.
           ...(images === undefined || images.length === 0 ? {} : { images: [...images] })
         },
-        panelScript(bound, sessionId, text)
+        scripted
       )
     },
 

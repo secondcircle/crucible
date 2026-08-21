@@ -8,6 +8,11 @@ import type { QuotaRequest, QuotaResult } from '../../shared/quota/channels'
 import type { QuotaSnapshot } from '../../shared/quota/types'
 import type { WorkspaceRequest, WorkspaceResult } from '../../shared/workspace/channels'
 import type { WorkspaceEvent } from '../../shared/workspace/service'
+import type {
+  WorkflowRunEvent,
+  WorkflowRunRequest,
+  WorkflowRunResult
+} from '../../shared/workflows/channels'
 
 // The one module in the renderer that may name `window.crucible`, so a missing
 // preload is caught in one place instead of surfacing as an absent method.
@@ -45,6 +50,12 @@ export interface CrucibleNeedsYou {
   request(request: NeedsYouRequest): Promise<NeedsYouResult>
 }
 
+/** The workflow-run half, shaped like the others. */
+export interface CrucibleWorkflowRuns {
+  request(request: WorkflowRunRequest): Promise<WorkflowRunResult>
+  onEvent(listener: (event: WorkflowRunEvent) => void): () => void
+}
+
 declare global {
   interface Window {
     crucible?: {
@@ -54,6 +65,7 @@ declare global {
       appUpdate?: CrucibleAppUpdate
       quota?: CrucibleQuota
       needsYou?: CrucibleNeedsYou
+      workflowRuns?: CrucibleWorkflowRuns
     }
   }
 }
@@ -106,4 +118,12 @@ export function needsYouBridge(): CrucibleNeedsYou {
     throw new Error('renderer: window.crucible.needsYou is missing — the preload did not load')
   }
   return needsYou
+}
+
+export function workflowRunsBridge(): CrucibleWorkflowRuns {
+  const workflowRuns = window.crucible?.workflowRuns
+  if (workflowRuns === undefined) {
+    throw new Error('renderer: window.crucible.workflowRuns is missing — the preload did not load')
+  }
+  return workflowRuns
 }

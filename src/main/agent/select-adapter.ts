@@ -1,5 +1,6 @@
 import type { ConversationAdapter } from '../../shared/agent/adapter'
 import { createFakeAdapter, type FakePanel } from '../../shared/agent/fake-adapter'
+import type { RunTools } from '../../shared/agent/run-tools'
 import type { LogSink } from '../log/sink'
 import { createSdkAdapter } from './sdk-adapter'
 
@@ -62,7 +63,10 @@ export function selectAdapter(
   log: LogSink,
   panel: FakePanel,
   sdk: SdkOptions,
-  packaged = false
+  packaged = false,
+  // The run tools ride whichever adapter is selected, so the same flavor
+  // decision governs the engine and the agent that drives it.
+  runs?: RunTools
 ): SelectedAdapter {
   const { flavor, requested, reason } = decideFlavor(process.env.CRUCIBLE_AGENT, packaged)
 
@@ -74,9 +78,10 @@ export function selectAdapter(
       flavor === 'sdk'
         ? createSdkAdapter({
             panel: panel.tools,
+            ...(runs === undefined ? {} : { runs }),
             systemPrompt: sdk.systemPrompt(),
             ...(sdk.openExternal === undefined ? {} : { openExternal: sdk.openExternal })
           })
-        : createFakeAdapter({ panel })
+        : createFakeAdapter({ panel, ...(runs === undefined ? {} : { runs }) })
   }
 }

@@ -27,6 +27,8 @@ import type {
   WorkspaceEvent,
   WorkspaceService
 } from '../../shared/workspace/service'
+import { runIsLive, type RunRecord, type WorkflowRunId } from '../../shared/workflows/run'
+import type { RunsSnapshot, WorkflowRunService } from '../../shared/workflows/service'
 import { useBranchBoards, useIssueBoards } from './board/use-boards'
 import { BashDrawer, type RunView } from './components/BashDrawer'
 import { BranchBoard } from './components/BranchBoard'
@@ -37,8 +39,11 @@ import { ContextPanel, PanelEdge } from './components/ContextPanel'
 import { entriesOf, QueuedStrip } from './components/QueuedStrip'
 import { ResumeOverlay } from './components/ResumeOverlay'
 import { SessionTree } from './components/SessionTree'
+import { RunsOverview } from './components/RunsOverview'
+import { RunStrip } from './components/RunStrip'
 import { Settings, type SettingsTab } from './components/Settings'
 import { Sidebar } from './components/Sidebar'
+import { WorkflowRunView } from './components/WorkflowRunView'
 import { TopBar } from './components/TopBar'
 import { Transcript } from './components/Transcript'
 import { readAttachment, refuse } from './images'
@@ -85,7 +90,8 @@ export function Shell({
   commands,
   appUpdate,
   quota,
-  needsYou: needsYouService
+  needsYou: needsYouService,
+  workflowRuns
 }: {
   readonly port: AgentPort
   readonly workspace: WorkspaceService
@@ -102,6 +108,10 @@ export function Shell({
   // and the Tab walk work exactly as they do with it, and nothing reaches the
   // dock or the notification centre.
   readonly needsYou?: NeedsYouService
+  // Beside the port, never behind it: runs are observed through their own
+  // seam, and the tools that drive them live with the agent. Without this
+  // service no run surface renders at all.
+  readonly workflowRuns?: WorkflowRunService
 }): React.JSX.Element {
   const [state, dispatch] = useReducer(reduce, NOTHING_YET)
   const quotaHold = useQuota(quota)
@@ -212,6 +222,10 @@ export function Shell({
   const windowFocused = useRef(true)
   /** Sessions with a send under way, still waiting on its expansion. */
   const sending = useRef<Set<SessionId>>(new Set())
+  // The engine's records, whole on every event; and the two run overlays.
+  const [runsSnapshot, setRunsSnapshot] = useState<RunsSnapshot | undefined>(undefined)
+  const [openRunId, setOpenRunId] = useState<WorkflowRunId | undefined>(undefined)
+  const [runsOverviewOpen, setRunsOverviewOpen] = useState(false)
   // Restoring a queued message puts the caret back where the words are.
   const box = useRef<HTMLTextAreaElement>(null)
   // Output can arrive before the id of the run it belongs to does.
@@ -261,6 +275,19 @@ export function Shell({
   // Closed unless the caret is in a token the service has already answered for.
   const shownFiles = fileToken !== undefined && files?.of === fileToken ? files.paths : undefined
   const run = activeWorkspaceId === undefined ? undefined : runs[activeWorkspaceId]
+  const allRuns: readonly RunRecord[] = runsSnapshot?.runs ?? []
+  // The strip is session-scoped (Q11/Q18): only the active session's live
+  // runs. Finished ones leave the strip — their news arrived in the chat, and
+  // their records live on in ⌘R.
+  const sessionRuns =
+    activeSessionId === undefined
+      ? []
+      : allRuns.filter(
+          (candidate) => candidate.sessionId === activeSessionId && runIsLive(candidate)
+        )
+  const openRun = openRunId === undefined ? undefined : allRuns.find((r) => r.id === openRunId)
+  // A record can only vanish across a launch; the view must not outlive it.
+  if (openRunId !== undefined && openRun === undefined) setOpenRunId(undefined)
 
   const report = useCallback((cause: unknown): void => {
     setFailure(cause instanceof Error ? cause.message : String(cause))
@@ -419,6 +446,21 @@ export function Shell({
       return { ...current, [sessionId]: draft === '' ? joined : `${joined}\n\n${draft}` }
     })
   }, [])
+
+  // The run seam: one snapshot, then whole snapshots on every change. ⌘R
+  // arrives here too when main intercepted it before the menu could.
+  useEffect(() => {
+    if (workflowRuns === undefined) return
+    const stop = workflowRuns.onEvent((event) => {
+      if (event.type === 'runs') setRunsSnapshot(event.snapshot)
+      if (event.type === 'toggle-overview') setRunsOverviewOpen((open) => !open)
+    })
+    void workflowRuns
+      .snapshot()
+      .then(setRunsSnapshot)
+      .catch(() => {})
+    return stop
+  }, [workflowRuns])
 
   // Subscribed before anything is asked for: events can arrive before the
   // operation that caused them resolves, and there is no backlog to catch up.
@@ -674,6 +716,18 @@ export function Shell({
         setFileToken(undefined)
         return
       }
+      // The run overlays close after the popovers — the view above the
+      // overview, so Esc from an opened run lands back where it was opened.
+      if (openRunId !== undefined) {
+        pressed.preventDefault()
+        setOpenRunId(undefined)
+        return
+      }
+      if (runsOverviewOpen) {
+        pressed.preventDefault()
+        setRunsOverviewOpen(false)
+        return
+      }
       // The boards close after the dialogs, sheets and popovers, and before
       // the session tree. While one is open Escape never cancels a turn.
       if (boardOpen) {
@@ -724,8 +778,27 @@ export function Shell({
     settings.open,
     browsingCommands,
     closeBoard,
-    closeIssues
+    closeIssues,
+    openRunId,
+    runsOverviewOpen
   ])
+
+  // ⌘R is the global runs view (Q15). In the running app main intercepts the
+  // chord before the menu could spend it on reload and announces it as an
+  // event; this fallback covers a window main is not watching, and either
+  // path lands on the same toggle.
+  useEffect(() => {
+    function onKeyDown(pressed: KeyboardEvent): void {
+      if (pressed.key !== 'r' && pressed.key !== 'R') return
+      if (!pressed.metaKey && !pressed.ctrlKey) return
+      if (pressed.shiftKey || pressed.altKey) return
+      if (workflowRuns === undefined) return
+      pressed.preventDefault()
+      setRunsOverviewOpen((open) => !open)
+    }
+    document.addEventListener('keydown', onKeyDown)
+    return () => document.removeEventListener('keydown', onKeyDown)
+  }, [workflowRuns])
 
   const openBoard = useCallback((): void => {
     if (activeWorkspaceId === undefined) return
@@ -1444,6 +1517,37 @@ export function Shell({
       .finally(() => setAligning(undefined))
   }
 
+  const openWorkflowRun = useCallback((id: WorkflowRunId): void => {
+    setOpenRunId(id)
+  }, [])
+
+  // The door out of a run surface: land in the orchestrator's chat.
+  const goToRunSession = useCallback(
+    (sessionId: SessionId): void => {
+      setOpenRunId(undefined)
+      setRunsOverviewOpen(false)
+      activateSession(sessionId)
+    },
+    [activateSession]
+  )
+
+  /** A fresh chat in a session-less run's workspace (the future unattended kind). */
+  const startRunSession = useCallback(
+    (workspaceId: WorkspaceId): void => {
+      setRunsOverviewOpen(false)
+      void port.createSession(workspaceId).catch(report)
+    },
+    [port, report]
+  )
+
+  const runTranscript = useCallback(
+    (nodeId: string) =>
+      workflowRuns === undefined || openRunId === undefined
+        ? Promise.resolve([] as const)
+        : workflowRuns.nodeTranscript(openRunId, nodeId),
+    [workflowRuns, openRunId]
+  )
+
   function answer(): void {
     if (question === undefined) return
     const asked = question
@@ -1515,6 +1619,8 @@ export function Shell({
                 }
           }
         />
+
+        <RunStrip runs={sessionRuns} onOpen={openWorkflowRun} />
 
         {/* The tree overlays this region and nothing else: the composer below
             stays where it is and keeps working. */}
@@ -1633,6 +1739,38 @@ export function Shell({
             onCopy={copyBranchName}
             onAsk={askAboutBranches}
             onClose={closeBoard}
+          />
+        ) : null}
+
+        {runsOverviewOpen ? (
+          <RunsOverview
+            runs={allRuns}
+            workspaces={snapshot.workspaces}
+            sessions={snapshot.sessions}
+            onOpenRun={openWorkflowRun}
+            onGoToSession={goToRunSession}
+            onStartSession={startRunSession}
+            onClose={() => setRunsOverviewOpen(false)}
+          />
+        ) : null}
+
+        {/* Rendered after the overview so an opened run sits above it and Esc
+            unwinds in the order the surfaces were entered. */}
+        {openRun !== undefined && workflowRuns !== undefined ? (
+          <WorkflowRunView
+            run={openRun}
+            canGoToSession={
+              openRun.sessionId !== undefined &&
+              snapshot.sessions.some((candidate) => candidate.id === openRun.sessionId)
+            }
+            transcript={runTranscript}
+            onGoToSession={() => {
+              if (openRun.sessionId !== undefined) goToRunSession(openRun.sessionId)
+            }}
+            onPause={() => void workflowRuns.pause(openRun.id).catch(report)}
+            onResume={() => void workflowRuns.resume(openRun.id).catch(report)}
+            onCancel={() => void workflowRuns.cancel(openRun.id).catch(report)}
+            onClose={() => setOpenRunId(undefined)}
           />
         ) : null}
 

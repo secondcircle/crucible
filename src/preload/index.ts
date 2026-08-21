@@ -37,6 +37,13 @@ import {
   type WorkspaceResult
 } from '../shared/workspace/channels'
 import type { WorkspaceEvent } from '../shared/workspace/service'
+import {
+  WORKFLOW_RUN_EVENT_CHANNEL,
+  WORKFLOW_RUN_REQUEST_CHANNEL,
+  type WorkflowRunEvent,
+  type WorkflowRunRequest,
+  type WorkflowRunResult
+} from '../shared/workflows/channels'
 
 // Never `ipcRenderer.on(channel, listener)`: that hands the caller the Electron
 // event as its first argument.
@@ -94,6 +101,16 @@ contextBridge.exposeInMainWorld('crucible', {
   needsYou: {
     request: (request: NeedsYouRequest): Promise<NeedsYouResult> =>
       ipcRenderer.invoke(NEEDS_YOU_REQUEST_CHANNEL, request)
+  },
+
+  // Workflow runs: the strip, the run view and the global ⌘R view all read
+  // this one seam; run tools never cross it — they live with the agent.
+  workflowRuns: {
+    request: (request: WorkflowRunRequest): Promise<WorkflowRunResult> =>
+      ipcRenderer.invoke(WORKFLOW_RUN_REQUEST_CHANNEL, request),
+
+    onEvent: (listener: (event: WorkflowRunEvent) => void): (() => void) =>
+      forwarder(WORKFLOW_RUN_EVENT_CHANNEL, listener)
   },
 
   // The installed app's update seam: one question, one event, one restart.

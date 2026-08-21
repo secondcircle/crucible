@@ -5,6 +5,7 @@ import { createAppUpdateClient } from './app-update/ipc-client'
 import { createCommandClient } from './commands/ipc-client'
 import { createNeedsYouClient } from './needs-you/ipc-client'
 import { createQuotaClient } from './quota/ipc-client'
+import { createWorkflowRunClient } from './runs/ipc-client'
 import { Shell } from './Shell'
 import { createWorkspaceClient } from './workspace/ipc-client'
 import './styles/base.css'
@@ -24,6 +25,7 @@ function mountApp(): void {
         appUpdate={createAppUpdateClient()}
         quota={createQuotaClient()}
         needsYou={createNeedsYouClient()}
+        workflowRuns={createWorkflowRunClient()}
       />
     </StrictMode>
   )
