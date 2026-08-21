@@ -77,6 +77,15 @@ const tree = (): HTMLElement => screen.getByRole('dialog', { name: 'Session tree
 
 const note = (): string => document.querySelector('.actnote')?.textContent ?? ''
 
+/** The same narration in the composer's slot, which is where it goes with the tree gone. */
+const line = (): string => document.querySelector('.jumpline')?.textContent ?? ''
+
+async function closeTree(): Promise<void> {
+  await act(async () => {
+    fireEvent.click(screen.getByRole('button', { name: 'esc close' }))
+  })
+}
+
 const composer = (): HTMLElement => screen.getByLabelText('Message')
 
 async function openTree(): Promise<void> {
@@ -215,6 +224,40 @@ describe('π retrying, narrated', () => {
   })
 })
 
+describe('a summarize whose tree is not on screen', () => {
+  it('keeps saying it is working, wherever the user goes', async () => {
+    const port = await shell()
+    port.holdJump = true
+    await summarize(A_NODE)
+
+    // The user closed the overlay and went on reading: the call is still
+    // running and still says so.
+    await closeTree()
+    expect(overlay()).toBeNull()
+    expect(line()).toContain('Summarizing the branch you are leaving…')
+
+    await act(async () => {
+      port.summarizeRetry('s1', { attempt: 2, maxAttempts: 3, message: 'Overloaded' })
+    })
+    expect(line()).toContain('Overloaded — retrying (2 of 3)')
+
+    // Not a word of it in the session that is not paying.
+    await switchTo(1)
+    expect(line()).toBe('')
+
+    // Arriving back closed the tree again, and the wait is still said.
+    await switchTo(0)
+    expect(overlay()).toBeNull()
+    expect(line()).toContain('Overloaded — retrying (2 of 3)')
+
+    await act(async () => {
+      port.settleJump('jumped')
+    })
+    await settled()
+    expect(line()).toBe('')
+  })
+})
+
 describe('a summary that failed', () => {
   it('says what failed and that nothing moved, where the jump was attempted', async () => {
     const port = await shell()
@@ -332,15 +375,15 @@ describe('cancelling a summarize', () => {
 
     // The user closed the overlay themselves and went on reading; the summary
     // is still running behind it.
-    await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: 'esc close' }))
-    })
+    await closeTree()
     expect(overlay()).toBeNull()
 
     await act(async () => {
       fireEvent.keyDown(document, { key: 'Escape' })
     })
     expect(port.calls).toContainEqual({ op: 'cancel', args: ['s1'] })
+    // Answered in the keypress frame, with no tree to answer in.
+    expect(line()).toContain('Cancelling…')
 
     await act(async () => {
       port.settleJump('cancelled')
@@ -348,6 +391,7 @@ describe('cancelling a summarize', () => {
     await settled()
 
     // Once, and nothing moved by it.
+    expect(line()).toBe('')
     expect(port.calls.filter((call) => call.op === 'cancel')).toHaveLength(1)
     expect(screen.getByRole('log')).toHaveTextContent('session A speaking')
     expect(composer()).toHaveValue('')

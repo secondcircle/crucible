@@ -286,6 +286,9 @@ export function Shell({
   // This session's jump and no other's: what session A is summarizing puts
   // nothing at all on session B's screen.
   const activeJump = jumpOf(jumps, activeSessionId)
+  // A reopened tree is a loading panel until its fetch lands, so being open is
+  // not the same as being able to carry what the jump has to say.
+  const treeShowing = treeOpen && session !== undefined && tree !== undefined
   const working = session?.working ?? false
   const queue = session?.queue
   // The ring's choice stands in for the snapshot's until the port confirms it,
@@ -1934,14 +1937,22 @@ export function Shell({
           </p>
         )}
 
-        {/* The same failure the tree shows at the node, for whenever the tree
-            is closed: a summary that failed while the user was away is there
-            the moment they arrive, before they reopen anything. */}
-        {activeJump?.kind === 'failed' && !treeOpen ? (
+        {/* What the tree would say about this session's jump, for whenever the
+            tree is not there to say it: a summarize runs for seconds behind a
+            closed overlay and through the arrival that closed it, and a
+            session that looks idle while it pays for a call is a wait nobody
+            can see. The failure outlives the call, so it is read here the
+            moment the user arrives, before they reopen anything. */}
+        {activeJump === undefined || treeShowing ? null : activeJump.kind === 'failed' ? (
           <p className="failure" role="alert">
             {jumpNote(activeJump)}
           </p>
-        ) : null}
+        ) : (
+          <p className="jumpline" role="status">
+            <span className="spin" aria-hidden="true" />
+            {jumpNote(activeJump)}
+          </p>
+        )}
 
         {queue === undefined ? null : <QueuedStrip queue={queue} onDequeue={dequeue} />}
 
