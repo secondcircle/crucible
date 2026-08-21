@@ -508,7 +508,7 @@ export function Shell({
 
   // Arriving at a session means seeing that session: everything that covers
   // or crowds the chat goes, in the same frame as the click and without
-  // waiting for any round trip (ADR 0010). `landing` is the session being
+  // waiting for any round trip. `landing` is the session being
   // arrived at where it is already known, so a failure or a toast that
   // belongs there is not wiped on the way in.
   //
@@ -1588,11 +1588,10 @@ export function Shell({
     })
   }
 
-  // What an arrival does to the drawer: a command still running in it is
-  // stopped first, exactly as the Stop button stops it, and then the drawer
-  // goes. The drawer offers no close while running and no reopen after close,
-  // so closing without stopping would leave a process running with no surface
-  // that knows about it. Nothing enters any conversation.
+  // The drawer offers no close while running and no reopen after close, so a
+  // drawer that went with a live command in it would leave a process running
+  // with no surface that knows about it: the command is stopped first, exactly
+  // as the Stop button stops it, and nothing enters any conversation.
   //
   // Every drawer, not only the one on screen: an arrival may cross into
   // another workspace, and the drawer left behind is exactly the one nobody

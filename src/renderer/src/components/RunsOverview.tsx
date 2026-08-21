@@ -5,8 +5,8 @@ import { bandsOf, runsHeadline } from '../runs/bands'
 import { money, shortAge, since } from '../runs/format'
 import './runs.css'
 
-// Every run across every workspace, in three bands: running, needs you, done
-// (mock W). A run with an orchestrator gets Go to session; a session-less run
+// Every run across every workspace, in three bands: running, needs you, done.
+// A run with an orchestrator gets Go to session; a session-less run
 // gets Start session — a fresh chat in the run's workspace — and the record
 // outlives the run, so finished work is reachable here too.
 export function RunsOverview({
