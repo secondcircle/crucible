@@ -493,6 +493,26 @@ describe('a login', () => {
     expect(screen.getByRole('dialog', { name: 'Session tree' })).toBeInTheDocument()
   })
 
+  // Which of the two readings the shell took: the flow is cancelled, the same
+  // cancel the dialog's own Close does, rather than kept alive for a reopen.
+  // An abandoned OAuth exchange is a flow nobody can finish or stop.
+  it('cancels the flow at the port when Settings leaves the region', async () => {
+    const port = await started()
+    expect(port.calls.map((call) => call.op)).not.toContain('cancelLogin')
+
+    // Another overlay taking the region over, not just a close: the rule is
+    // about the card leaving, however it leaves.
+    await click('Resume session…')
+
+    expect(screen.getByRole('dialog', { name: 'Resume session' })).toBeInTheDocument()
+    expect(card()).toBeNull()
+    expect(port.calls.map((call) => call.op)).toContain('cancelLogin')
+    // Reopening Settings shows Providers, not a dialog resumed from nowhere.
+    await click('Settings')
+    expect(screen.queryByRole('dialog', { name: 'Log in to OpenRouter' })).toBeNull()
+    expect(header()).toContain('Providers')
+  })
+
   it('refuses a second flow while one is live', async () => {
     const port = await started()
     const started_ = port.calls.filter((call) => call.op === 'login').length

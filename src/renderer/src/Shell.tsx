@@ -713,6 +713,18 @@ export function Shell({
     if (settingsOpen && settingsSection === 'providers') refreshProviders()
   }, [settingsOpen, settingsSection, refreshProviders])
 
+  // The login flow lives exactly as long as the Settings card that draws its
+  // dialog. Any way the card leaves the region (a sidebar click landing under
+  // it, another overlay taking the region over, a removal, Esc) cancels the
+  // flow, because a flow that outlived its dialog would be live behind an
+  // empty screen: Escape would go on closing a dialog nobody can see, the
+  // model ring and the Tab walk would stay suppressed for it, and a real OAuth
+  // exchange would be abandoned instead of cancelled. The rule lives here,
+  // once, rather than as a closeLogin() every opener has to remember.
+  useEffect(() => {
+    if (liveLogin !== undefined && !settingsOpen) closeLogin()
+  }, [liveLogin, settingsOpen, closeLogin])
+
   const cancel = useCallback((): void => {
     if (activeSessionId === undefined || !working) return
     void port.cancel(activeSessionId).catch(report)
