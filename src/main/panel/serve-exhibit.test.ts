@@ -189,7 +189,11 @@ describe('the shared URL format', () => {
     const url = exhibitUrl('session/one two', 'tab #3')
 
     expect(url).toBe('exhibit://panel/session%2Fone%20two/tab%20%233')
-    expect(parseExhibitUrl(url)).toEqual({ sessionId: 'session/one two', tabId: 'tab #3' })
+    expect(parseExhibitUrl(url)).toEqual({
+      kind: 'panel',
+      sessionId: 'session/one two',
+      tabId: 'tab #3'
+    })
   })
 
   it('refuses every shape that is not exactly the contract', () => {

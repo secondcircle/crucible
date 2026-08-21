@@ -74,6 +74,10 @@ export async function invoke(service: WorkflowRunService, request: unknown): Pro
       return service.cancel(text(0))
     case 'nodeTranscript':
       return service.nodeTranscript(text(0), text(1))
+    case 'artifact':
+      return service.artifact(text(0), text(1))
+    case 'revealArtifact':
+      return service.revealArtifact(text(0), text(1))
     default:
       throw new Error('Crucible was asked for something its run service does not do.')
   }

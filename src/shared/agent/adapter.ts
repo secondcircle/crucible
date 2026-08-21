@@ -143,6 +143,20 @@ export type AdapterEvent =
       readonly ok: boolean
       readonly output: string
     }
+  // π scheduled another attempt at the branch summary a jump is waiting on.
+  // Session-scoped like `usage`: a jump is not a turn, so there is no turn id
+  // to carry. Emitted only while a summarizing jump is in flight for that
+  // session, so a compaction retry inside a turn is never mistaken for one.
+  | {
+      readonly type: 'summarize_retry'
+      readonly sessionId: SessionId
+      /** 1-based, of π's own budget. */
+      readonly attempt: number
+      readonly maxAttempts: number
+      readonly delayMs: number
+      /** Display-safe; the provider's own payload went to the run log. */
+      readonly message: string
+    }
   | { readonly type: 'turn_ended'; readonly sessionId: SessionId; readonly turnId: TurnId }
   | { readonly type: 'turn_cancelled'; readonly sessionId: SessionId; readonly turnId: TurnId }
   | {
@@ -226,12 +240,14 @@ export interface ConversationAdapter {
   /** The conversation's full branching history, current position included. */
   sessionTree(sessionId: SessionId): Promise<SessionTree>
   // Moves the conversation to the moment before `ref` was sent, in place: the
-  // abandoned path stays in the tree and stays reachable.
+  // abandoned path stays in the tree and stays reachable. A rejection means
+  // the jump failed and the leaf did not move; a cancelled summary resolves
+  // saying so, because the user asked for it.
   jump(
     sessionId: SessionId,
     ref: string,
     summarize: boolean
-  ): Promise<{ readonly editorText?: string }>
+  ): Promise<{ readonly cancelled: boolean; readonly editorText?: string }>
   /** Persisted with the conversation; an absent or empty label clears it. */
   setLabel(sessionId: SessionId, ref: string, label?: string): Promise<void>
 
@@ -298,7 +314,8 @@ export interface ConversationAdapter {
   /** Removes the first entry of that kind whose text matches. */
   dequeue(sessionId: SessionId, kind: QueuedKind, text: string): Promise<boolean>
 
-  /** Harmless when the session has no live turn. */
+  // Stops what the session is doing: its live turn, and the branch summary a
+  // summarizing jump is waiting on. Harmless when there is neither.
   cancel(sessionId: SessionId): Promise<void>
 
   onEvent(listener: AdapterEventListener): Unsubscribe

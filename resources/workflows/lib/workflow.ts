@@ -149,6 +149,12 @@ export interface PlannedNode {
   model?: string
   /** Planned parent node ids (graph shape for display). */
   parents?: string[]
+  /**
+   * Declared outputs of the node, for display before it starts: file names
+   * resolve under the run's artifact directory, as NodeSpec.outputs do. The
+   * node's own spec wins the moment it starts.
+   */
+  outputs?: Record<string, OutputSpec>
 }
 
 export interface WorkflowDef {

@@ -65,7 +65,7 @@ import {
 } from './cache-miss.ts'
 import { toProviderState, type AuthFacts, type ProviderFacts } from './providers.ts'
 import { crucibleAgentDir, workspaceSessionDir } from './paths.ts'
-import { createEventMapper } from './sdk-events.ts'
+import { createEventMapper, jumpOutcome, summarizeRetryOf } from './sdk-events.ts'
 import { sanitizeTitle, TITLE_INSTRUCTION, titleInput } from './sdk-titler.ts'
 import {
   BASH_RUN_TYPE,
@@ -88,6 +88,9 @@ interface Bound {
   readonly workspacePath: string
   token: string
   running?: RunningTurn
+  // True while a summarizing jump waits on π's summary. A summary is not a
+  // turn, so this is what `cancel` reads to know there is something to abort.
+  summarizing?: boolean
   /** Bash runs waiting for the boundary that delivers them, oldest first. */
   readonly shares: PendingShare[]
   /** The last numbers reported for this conversation, so a still count is not re-sent. */
@@ -497,6 +500,21 @@ export function createSdkAdapter({
     ]
     if (messages.length === 0) return
     emit({ type: 'queue_flushed', sessionId, messages })
+  }
+
+  // π's retries of a branch summary, for as long as the jump that asked for
+  // one is in flight. The returned call stops watching and is what makes the
+  // session cancellable only while there is genuinely a summary to abort.
+  function watchSummary(bound: Bound, sessionId: SessionId): () => void {
+    bound.summarizing = true
+    const unsubscribe = bound.session.subscribe((event) => {
+      const retry = summarizeRetryOf(event, sessionId)
+      if (retry !== undefined) emit(retry)
+    })
+    return () => {
+      bound.summarizing = false
+      unsubscribe()
+    }
   }
 
   // A typed prompt and a shared bash run differ only in what `deliver` sends,
@@ -1023,17 +1041,27 @@ export function createSdkAdapter({
       sessionId: SessionId,
       ref: string,
       summarize: boolean
-    ): Promise<{ editorText?: string }> {
+    ): Promise<{ cancelled: boolean; editorText?: string }> {
       const bound = requireBound(sessionId)
-      const navigated = await bound.session.navigateTree(ref, { summarize })
-      if (navigated.cancelled) throw new Error('That jump did not happen.')
+      // Watched only for the call that pays for a summary, so a compaction
+      // retry inside somebody's turn is never narrated as this jump's.
+      const watching = summarize ? watchSummary(bound, sessionId) : undefined
+      let navigated
+      try {
+        navigated = await bound.session.navigateTree(ref, { summarize })
+      } finally {
+        watching?.()
+      }
+      const outcome = jumpOutcome(navigated)
+      // Nothing moved, so nothing about the conversation changed either.
+      if (outcome.cancelled) return outcome
       // The branch under the session changed, so whatever was last reported
       // counted messages that are no longer on the path. π compares straight
       // across a jump, so the comparison is not reset — it is recorded as a
       // fact about the span instead.
       bound.reported = undefined
       bound.jumped = true
-      return navigated.editorText === undefined ? {} : { editorText: navigated.editorText }
+      return outcome
     },
 
     // Labels live with the conversation, which is π's own label API and not a
@@ -1311,9 +1339,14 @@ export function createSdkAdapter({
       return at !== -1
     },
 
+    // Stop what this session is doing, whatever that is. A summarizing jump
+    // is not a turn, so it is stopped by its own abort — π drops out of the
+    // backoff sleep at once rather than waiting the delay out.
     async cancel(sessionId: SessionId): Promise<void> {
       const bound = sessions.get(sessionId)
-      if (bound?.running === undefined) return
+      if (bound === undefined) return
+      if (bound.summarizing === true) bound.session.abortBranchSummary()
+      if (bound.running === undefined) return
       // Cleared before the abort, so nothing queued and no shared run can fire
       // at a plan the user just killed.
       flushQueue(bound, sessionId)

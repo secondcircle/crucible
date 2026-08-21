@@ -234,6 +234,12 @@ The bar above a session's chat pane where runs appear, one chip each —
 workflow, current node, age, spend.
 _Avoid_: run bar, pill row, status bar.
 
+**Run activity**:
+The sidebar state of a session that has a live run of its own — a teal counter
+of the run's age over teal dots in the row's end slot, where a live turn shows
+green. Teal is the run color everywhere, chips and ⌘R rows included.
+_Avoid_: run indicator, running badge, run status.
+
 **Run artifact**:
 A file a node of a run declares as an output and writes into the run's own
 directory, outside the repo. The files handed in at kickoff are shown beside

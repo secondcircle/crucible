@@ -120,6 +120,9 @@ const workflowRuns = selectWorkflowRunService(
     appPath: app.getAppPath(),
     stateDir: app.getPath('userData'),
     cache,
+    // The renderer gets no path-opening capability of its own; Reveal in the
+    // artifact reader asks the service, which asks this.
+    reveal: (path: string) => electronShell.showItemInFolder(path),
     deliver: (sessionId, text) => {
       if (orchestratorInbox === undefined) {
         throw new Error('no shell is up to carry a run message yet')
@@ -278,9 +281,10 @@ function openWindow(reason?: 'activate'): void {
 void app.whenReady().then(() => {
   log.append({ source: 'main', event: 'app_ready' })
 
-  // The handler answers out of the same panel model the tools write to, so a
-  // file is servable exactly while a tab shows it.
-  serveExhibitScheme(panel)
+  // The handler answers out of the same panel model the tools write to and the
+  // same run service the view reads, so a file is servable exactly while a tab
+  // shows it or a run's record names it.
+  serveExhibitScheme(panel, workflowRuns)
 
   openWindow()
 

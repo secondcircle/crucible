@@ -4,9 +4,12 @@ import {
   currentNode,
   runCost,
   runIsLive,
+  type RunArtifact,
   type RunNode,
   type RunRecord
 } from '../../../shared/workflows/run'
+import { artifactName } from '../../../shared/workflows/artifacts'
+import type { ArtifactView } from '../../../shared/workflows/service'
 import {
   money,
   nodeDuration,
@@ -17,7 +20,10 @@ import {
   toViewItems
 } from '../runs/format'
 import { layerNodes } from '../runs/graph'
+import { railOf, rowFor, type RailModel } from '../runs/rail'
 import { relativeTime } from '../labels'
+import { ArtifactRail } from './ArtifactRail'
+import { ArtifactReader } from './ArtifactReader'
 import { Transcript } from './Transcript'
 import './runs.css'
 
@@ -31,6 +37,11 @@ export function WorkflowRunView({
   run,
   canGoToSession,
   transcript,
+  artifact,
+  openArtifact,
+  onOpenArtifact,
+  onRevealArtifact,
+  onCopyPath,
   onGoToSession,
   onPause,
   onResume,
@@ -41,6 +52,14 @@ export function WorkflowRunView({
   readonly canGoToSession: boolean
   /** Reads one node's transcript; called again as the node moves. */
   readonly transcript: (nodeId: string) => Promise<readonly TranscriptItem[]>
+  /** Reads one artifact of this run, gated on its record. */
+  readonly artifact: (path: string) => Promise<ArtifactView>
+  // The artifact the reader is showing, by path, and the way to change it.
+  // Held above this view because Escape unwinds the reader before the view.
+  readonly openArtifact: string | undefined
+  readonly onOpenArtifact: (path: string | undefined) => void
+  readonly onRevealArtifact: (path: string) => void
+  readonly onCopyPath: (path: string) => void
   readonly onGoToSession: () => void
   readonly onPause: () => void
   readonly onResume: () => void
@@ -83,8 +102,16 @@ export function WorkflowRunView({
 
   const live = runIsLive(run)
   const layers = useMemo(() => layerNodes(run.nodes), [run.nodes])
+  const rail = usePlacedRail(run)
+  // The reader shows what the record still names: an artifact whose row leaves
+  // the record (a pruned ghost's) puts the node's transcript back by itself.
+  const openRow = openArtifact === undefined ? undefined : rowFor(rail, openArtifact)
   const cost = money(runCost(run))
   const question = run.question
+  const selected =
+    openArtifact !== undefined
+      ? [openArtifact]
+      : (shown?.artifacts ?? []).map((declared) => declared.path)
 
   return (
     <section className="runview" aria-label={`Run ${run.id}`}>
@@ -140,7 +167,12 @@ export function WorkflowRunView({
                 <button
                   key={node.id}
                   className={`gnode ${nodeClass(node)}${shown?.id === node.id ? ' sel' : ''}`}
-                  onClick={() => setPicked(node.id)}
+                  onClick={() => {
+                    // Picking a node in the graph is also a way out of the
+                    // reader: that node's transcript is what it asks for.
+                    onOpenArtifact(undefined)
+                    setPicked(node.id)
+                  }}
                 >
                   <span className="n">
                     <span className="s" />
@@ -154,7 +186,16 @@ export function WorkflowRunView({
         </div>
 
         <div className="detail">
-          {shown === undefined ? (
+          {openRow !== undefined ? (
+            <ArtifactReader
+              runId={run.id}
+              row={openRow}
+              read={artifact}
+              onReveal={onRevealArtifact}
+              onCopyPath={onCopyPath}
+              onClose={() => onOpenArtifact(undefined)}
+            />
+          ) : shown === undefined ? (
             <p className="rvempty">This run recorded no nodes.</p>
           ) : (
             <>
@@ -198,17 +239,7 @@ export function WorkflowRunView({
                 sessionId={`run-${run.id}-${shown.id}`}
               />
 
-              {shown.artifacts.length === 0 ? null : (
-                <div className="artifacts">
-                  Artifacts
-                  {shown.artifacts.map((artifact) => (
-                    <span className="a" key={artifact.name} title={artifact.path}>
-                      {artifact.name}
-                    </span>
-                  ))}
-                  <span className="anote">run artifacts live in the run's dir, not the repo</span>
-                </div>
-              )}
+              <NodeStrip run={run} node={shown} onOpen={onOpenArtifact} />
             </>
           )}
 
@@ -227,8 +258,95 @@ export function WorkflowRunView({
             </div>
           )}
         </div>
+
+        <ArtifactRail rail={rail} selected={selected} onOpen={onOpenArtifact} />
       </div>
     </section>
+  )
+}
+
+// The rail's placement memory. Each snapshot is derived against the order the
+// last one produced, so a path a later node's start drops into the middle of
+// the record joins the list at the end instead of pushing its neighbors down.
+// The memory lives as long as the view. A run reopened later starts from
+// record order again, which is the most first appearance any record can be
+// asked for.
+function usePlacedRail(run: RunRecord): RailModel {
+  const [placed, setPlaced] = useState<{
+    readonly runId: string
+    readonly order: readonly string[]
+  }>({ runId: run.id, order: NO_ORDER })
+
+  const remembered = placed.runId === run.id ? placed.order : NO_ORDER
+  const rail = useMemo(() => railOf(run, remembered), [run, remembered])
+  const order = rail.produced.map((row) => row.path)
+  // Adjusting state during render, the way React prescribes for state that
+  // depends on its own last value. Deriving a snapshot against the order it
+  // just produced gives that order back, so the second pass settles.
+  if (placed.runId !== run.id || !sameOrder(placed.order, order)) {
+    setPlaced({ runId: run.id, order })
+  }
+  return rail
+}
+
+const NO_ORDER: readonly string[] = []
+
+function sameOrder(held: readonly string[], next: readonly string[]): boolean {
+  return held.length === next.length && held.every((path, at) => path === next[at])
+}
+
+// Took these, made these: the node's own dataflow, one clickable chip per
+// file. `making` while the node is still at it, `made` once it has settled.
+function NodeStrip({
+  run,
+  node,
+  onOpen
+}: {
+  readonly run: RunRecord
+  readonly node: RunNode
+  readonly onOpen: (path: string) => void
+}): React.JSX.Element | null {
+  if (node.reads.length === 0 && node.artifacts.length === 0) return null
+  const inputs = new Set(Object.values(run.inputs))
+  const settled = node.status === 'complete' || node.status === 'failed'
+
+  function chip(artifact: RunArtifact, list: string, extra: string): React.JSX.Element {
+    return (
+      <button
+        key={`${list}:${artifact.path}`}
+        className={`a${extra === '' ? '' : ` ${extra}`}`}
+        title={artifact.path}
+        onClick={() => onOpen(artifact.path)}
+      >
+        {artifactName(artifact.path)}
+      </button>
+    )
+  }
+
+  return (
+    <div className="inout">
+      {node.reads.length === 0 ? null : (
+        <>
+          <span className="lbl">took</span>
+          {node.reads.map((read) =>
+            chip(read, 'took', inputs.has(read.path) ? 'in' : '')
+          )}
+        </>
+      )}
+      {node.reads.length > 0 && node.artifacts.length > 0 ? <span className="sep" /> : null}
+      {node.artifacts.length === 0 ? null : (
+        <>
+          <span className="lbl">{settled ? 'made' : 'making'}</span>
+          {node.artifacts.map((made) =>
+            chip(
+              made,
+              'made',
+              made.writtenAt === undefined && node.status !== 'complete' ? 'unwritten' : ''
+            )
+          )}
+        </>
+      )}
+    </div>
   )
 }
 

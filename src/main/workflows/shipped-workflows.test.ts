@@ -49,7 +49,17 @@ describe('the workflows Crucible ships', () => {
     const loader = shippedLoader()
 
     const adhoc = await loader.resolve(APP, 'adhoc')
-    expect(adhoc.def.plan?.({ prompt: '/tmp/task.md' })).toEqual([{ id: 'work' }])
+    expect(adhoc.def.plan?.({ prompt: '/tmp/task.md' })).toEqual([
+      {
+        id: 'work',
+        outputs: {
+          report: {
+            file: 'report.html',
+            desc: "the node's report of what it did and why, for the human"
+          }
+        }
+      }
+    ])
 
     // The plan is what the run view draws as pending ghosts, so its parents
     // have to name nodes the plan itself declares.
@@ -74,6 +84,23 @@ describe('the workflows Crucible ships', () => {
     for (const conditional of ['gate-fixer-1', 'gate-alignment-2', 'fixer-1', 'review-2']) {
       expect(ids.has(conditional), 'a conditional node must not haunt the preview').toBe(false)
     }
+
+    // The artifact rail draws expected rows from the plan, so a planned output
+    // has to name the file the node's spec will actually write.
+    const files = Object.fromEntries(
+      planned.map((node) => [
+        node.id,
+        Object.values(node.outputs ?? {}).map((output) => output.file)
+      ])
+    )
+    expect(files).toEqual({
+      planner: ['spec.md'],
+      builder: [],
+      'review-1': ['review-1.md'],
+      'gate-alignment-1': [],
+      'gate-comments-1': [],
+      'gate-verdict-1': []
+    })
   })
 
   it('says which workflow a name misses', async () => {

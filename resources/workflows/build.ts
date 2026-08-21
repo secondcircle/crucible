@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process'
-import { workflow } from 'crucible:workflow'
+import { workflow, type PlannedNode } from 'crucible:workflow'
 
 // Ported from the legacy system: take an intent document to built code — a
 // Spec, a fresh-context builder, a review loop, and the merge gate that was
@@ -635,10 +635,23 @@ export default workflow({
   },
   // The workflow commits per actor below, so the engine's end-of-run commit
   // would only sweep up stray droppings; still on, as the belt to the braces.
-  plan: () => [
-    { id: 'planner', model: DOCUMENT_MODEL },
+  plan: (): PlannedNode[] => [
+    {
+      id: 'planner',
+      model: DOCUMENT_MODEL,
+      outputs: {
+        spec: { file: 'spec.md', desc: 'the Spec: what to build, derived from the intent document' }
+      }
+    },
     { id: 'builder', model: CODE_MODEL, parents: ['planner'] },
-    { id: 'review-1', model: DOCUMENT_MODEL, parents: ['builder'] },
+    {
+      id: 'review-1',
+      model: DOCUMENT_MODEL,
+      parents: ['builder'],
+      outputs: {
+        review: { file: 'review-1.md', desc: 'the branch judged at interior-module level' }
+      }
+    },
     { id: 'gate-alignment-1', model: DOCUMENT_MODEL, parents: ['review-1'] },
     { id: 'gate-comments-1', model: DOCUMENT_MODEL, parents: ['gate-alignment-1'] },
     {

@@ -127,6 +127,7 @@ interface LiveRun {
   baseCommit?: string
   finalCommit?: string
   inputs: Record<string, string>
+  inputDescs?: Record<string, string>
   question?: {
     reason: string
     nodeId?: string
@@ -305,6 +306,7 @@ export function createWorkflowEngine(options: EngineOptions): WorkflowEngine {
       base: request.base,
       ...(chain.branch === undefined ? {} : { branch: chain.branch })
     })
+    const artifactDir = store.artifactDir(id)
 
     const run: LiveRun = {
       id,
@@ -317,6 +319,7 @@ export function createWorkflowEngine(options: EngineOptions): WorkflowEngine {
       branch: worktree.branch,
       baseCommit: worktree.baseCommit,
       inputs,
+      inputDescs: { ...def.inputs },
       nodes: planned.map(
         (plan): LiveNode => ({
           id: plan.id,
@@ -324,7 +327,13 @@ export function createWorkflowEngine(options: EngineOptions): WorkflowEngine {
           parents: plan.parents ?? [],
           model: plan.model ?? defaultModel,
           reads: [],
-          artifacts: []
+          // A ghost carries what the plan says it will write, so the rail has
+          // the whole shape of the run from the first minute.
+          artifacts: Object.entries(plan.outputs ?? {}).map(([name, output]) => ({
+            name,
+            path: join(artifactDir, output.file),
+            desc: output.desc
+          }))
         })
       ),
       ...(chain.after === undefined ? {} : { after: chain.after }),
@@ -401,6 +410,14 @@ export function createWorkflowEngine(options: EngineOptions): WorkflowEngine {
         outputPaths[name] = join(artifacts, output.file)
       }
 
+      /** What the node says it will write, before it has written any of it. */
+      const declaredArtifacts = (): RunArtifact[] =>
+        Object.entries(spec.outputs ?? {}).map(([name, output]) => ({
+          name,
+          path: outputPaths[name],
+          desc: output.desc
+        }))
+
       // Dataflow edges: parents are the producers of what this node reads.
       const parents = [
         ...new Set(
@@ -422,7 +439,7 @@ export function createWorkflowEngine(options: EngineOptions): WorkflowEngine {
           path,
           desc: 'input'
         })),
-        artifacts: [],
+        artifacts: declaredArtifacts(),
         startedAt: nowIso()
       }
       const ghost = run.nodes.findIndex(
@@ -486,7 +503,17 @@ export function createWorkflowEngine(options: EngineOptions): WorkflowEngine {
       let statBase = { toolCalls: 0, cost: 0 }
       let sessionStats = { toolCalls: 0, cost: 0 }
 
+      // The first observation, never the last write: a stamp is set once and
+      // never removed, so a file deleted after the fact does not un-write it.
+      const stampWritten = (): void => {
+        for (const [at, artifact] of node.artifacts.entries()) {
+          if (artifact.writtenAt !== undefined) continue
+          if (onDisk(artifact.path)) node.artifacts[at] = { ...artifact, writtenAt: nowIso() }
+        }
+      }
+
       const captureStats = (): void => {
+        stampWritten()
         const stats = session.stats()
         sessionStats = { toolCalls: stats.toolCalls, cost: stats.cost ?? 0 }
         node.toolCalls = Math.max(0, sessionStats.toolCalls - statBase.toolCalls)
@@ -529,7 +556,9 @@ export function createWorkflowEngine(options: EngineOptions): WorkflowEngine {
           parents: revisionParents,
           ...(previous.model === undefined ? {} : { model: previous.model }),
           reads: [...previous.reads],
-          artifacts: [],
+          // The same paths again, unwritten: a revision writes them afresh, and
+          // the rail shows one row per path backed by the furthest copy.
+          artifacts: declaredArtifacts(),
           startedAt: nowIso(),
           lastActivityAt: nowIso()
         }
@@ -647,6 +676,7 @@ export function createWorkflowEngine(options: EngineOptions): WorkflowEngine {
             problems.push(`required output "${name}" is missing or empty: ${path}`)
           }
         }
+        stampWritten()
         if (spec.check !== undefined) {
           try {
             problems.push(...spec.check(outputPaths))
@@ -719,11 +749,6 @@ export function createWorkflowEngine(options: EngineOptions): WorkflowEngine {
             if (problems.length === 0) {
               node.verdict = completion.verdict
               node.summary = completion.summary
-              node.artifacts = Object.entries(spec.outputs ?? {}).map(([name, output]) => ({
-                name,
-                path: outputPaths[name],
-                desc: output.desc
-              }))
               for (const path of Object.values(outputPaths)) {
                 producerByArtifact.set(path, node.id)
               }
@@ -1146,4 +1171,13 @@ function composeTaskPrompt(spec: NodeSpec, outputs: Record<string, string>): str
 
 function round4(value: number): number {
   return Math.round(value * 10_000) / 10_000
+}
+
+/** A file that exists and holds something, which is what "written" means here. */
+function onDisk(path: string): boolean {
+  try {
+    return existsSync(path) && statSync(path).size > 0
+  } catch {
+    return false
+  }
 }

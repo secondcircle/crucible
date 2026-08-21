@@ -205,6 +205,9 @@ function heard(state: ShellState, event: PortEvent, at: number): ShellState {
   ) {
     return state
   }
+  // A jump is not a turn and writes nothing into the transcript: what π's
+  // retry says is narrated by the owning session's jump state instead.
+  if (event.type === 'summarize_retry') return state
 
   const { sessionId } = event
   const view = state.views[sessionId] ?? EMPTY_VIEW

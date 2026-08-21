@@ -48,6 +48,23 @@ export interface ScriptedPort extends AgentPort {
   jumpText?: string
   /** Set where a test wants the refusal main gives a working session. */
   jumpRefusal?: string
+  /** Set where a test wants the jump to answer as the user's own cancellation. */
+  jumpCancelled?: boolean
+  // Held open where a test wants a jump still in flight — a summarize takes
+  // real seconds, and everything about owning one happens during them.
+  holdJump?: boolean
+  /** Settles a held jump, the way π settles one. */
+  settleJump(outcome: 'jumped' | 'cancelled' | { readonly failure: string }): void
+  /** π's own retry of a branch summary, exactly as main announces one. */
+  summarizeRetry(
+    sessionId: SessionId,
+    retry: {
+      readonly attempt: number
+      readonly maxAttempts: number
+      readonly delayMs?: number
+      readonly message: string
+    }
+  ): void
   /** Set where a test wants the refusal main gives a failed rebind. */
   worktreeRefusal?: string
   /** Set where a test wants a session main could not start. */
@@ -219,7 +236,20 @@ export function createScriptedPort(initial: Partial<ShellSnapshot> = {}): Script
     return Promise.resolve()
   }
 
+  /** What a jump that genuinely happened answers with. */
+  function jumped(): { cancelled: boolean; editorText?: string } {
+    return port.jumpText === undefined
+      ? { cancelled: false }
+      : { cancelled: false, editorText: port.jumpText }
+  }
+
   let held: ((outcome: 'delivered' | 'dropped') => void) | undefined
+  let heldJump:
+    | {
+        resolve: (outcome: { cancelled: boolean; editorText?: string }) => void
+        reject: (cause: Error) => void
+      }
+    | undefined
   let heldWorktree: (() => void) | undefined
   let login: { resolve: () => void; reject: (cause: Error) => void } | undefined
 
@@ -448,10 +478,34 @@ export function createScriptedPort(initial: Partial<ShellSnapshot> = {}): Script
 
     jump(id: SessionId, ref: string, options: { readonly summarize: boolean }) {
       calls.push({ op: 'jump', args: [id, ref, options] })
+      if (port.holdJump === true) {
+        return new Promise<{ cancelled: boolean; editorText?: string }>((resolve, reject) => {
+          heldJump = { resolve, reject }
+        })
+      }
       if (port.jumpRefusal !== undefined) return Promise.reject(new Error(port.jumpRefusal))
-      return Promise.resolve(
-        port.jumpText === undefined ? {} : { editorText: port.jumpText }
-      )
+      if (port.jumpCancelled === true) return Promise.resolve({ cancelled: true })
+      return Promise.resolve(jumped())
+    },
+
+    settleJump(outcome): void {
+      const held = heldJump
+      heldJump = undefined
+      if (held === undefined) return
+      if (outcome === 'jumped') held.resolve(jumped())
+      else if (outcome === 'cancelled') held.resolve({ cancelled: true })
+      else held.reject(new Error(outcome.failure))
+    },
+
+    summarizeRetry(sessionId, retry): void {
+      emit({
+        type: 'summarize_retry',
+        sessionId,
+        attempt: retry.attempt,
+        maxAttempts: retry.maxAttempts,
+        delayMs: retry.delayMs ?? 2000,
+        message: retry.message
+      })
     },
 
     setLabel(id: SessionId, ref: string, label?: string): Promise<void> {

@@ -683,7 +683,13 @@ export function createShell({
   // bind resolves; until the adapter runs it there is nothing there to cancel.
   async function stop(id: SessionId): Promise<void> {
     const turn = live.get(id)
-    if (turn === undefined) return
+    // No live turn is not the same as nothing to stop: a summarizing jump
+    // pays for an LLM call outside any turn, and the adapter is the only one
+    // that knows whether one is running.
+    if (turn === undefined) {
+      await adapter.cancel(id)
+      return
+    }
     turn.cancelled = true
     if (!turn.dispatched) {
       endAsCancelled(id, turn)
@@ -714,6 +720,14 @@ export function createShell({
         ...(event.cacheMisses === undefined ? {} : { cacheMisses: event.cacheMisses })
       })
       emitState()
+      return
+    }
+
+    // A jump is not a turn, so its narration is session-scoped like usage:
+    // there is no turn id to correlate it with.
+    if (event.type === 'summarize_retry') {
+      if (store.session(event.sessionId) === undefined) return
+      emit(event)
       return
     }
 
@@ -1024,7 +1038,7 @@ export function createShell({
       id: SessionId,
       ref: string,
       options: { readonly summarize: boolean }
-    ): Promise<{ editorText?: string }> {
+    ): Promise<{ cancelled: boolean; editorText?: string }> {
       requireSession(id)
       // Read again after the bind, because a turn can start while a first-time
       // bind is in flight.
@@ -1032,6 +1046,9 @@ export function createShell({
       await ensureBound(id)
       if (live.has(id)) refuse('That session is working. Stop it first.')
       const jumped = await adapter.jump(id, ref, options.summarize)
+      // A cancelled jump moved nothing, so nothing about the session changed
+      // either.
+      if (jumped.cancelled) return jumped
       // The conversation behind the identity moved; the sidebar entry did not.
       usage.delete(id)
       emitState()

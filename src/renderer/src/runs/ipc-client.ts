@@ -1,5 +1,5 @@
 import type { TranscriptItem, Unsubscribe } from '../../../shared/agent/port'
-import type { RunsSnapshot } from '../../../shared/workflows/service'
+import type { ArtifactView, RunsSnapshot } from '../../../shared/workflows/service'
 import type {
   WorkflowRunListener,
   WorkflowRunService
@@ -37,6 +37,9 @@ export function createWorkflowRunClient(): WorkflowRunService {
     resume: (runId: string) => call<void>('resume', runId),
     cancel: (runId: string) => call<void>('cancel', runId),
     nodeTranscript: (runId: string, nodeId: string) =>
-      call<readonly TranscriptItem[]>('nodeTranscript', runId, nodeId)
+      call<readonly TranscriptItem[]>('nodeTranscript', runId, nodeId),
+    artifact: (runId: string, path: string) => call<ArtifactView>('artifact', runId, path),
+    revealArtifact: (runId: string, path: string) =>
+      call<void>('revealArtifact', runId, path)
   }
 }

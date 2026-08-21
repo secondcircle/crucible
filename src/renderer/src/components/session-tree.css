@@ -270,6 +270,11 @@
   color: var(--accent2);
 }
 
+/* the summary failed and the conversation did not move; the retry is a key */
+.actnote.failed {
+  color: var(--error);
+}
+
 .nonodes {
   color: var(--faint);
   font-size: 12.5px;

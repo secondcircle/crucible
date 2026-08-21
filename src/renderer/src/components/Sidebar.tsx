@@ -3,6 +3,8 @@ import type { SessionId, ShellSnapshot, WorkspaceId } from '../../../shared/agen
 // Titles are the model's now, so the row shows a title and a relative time;
 // sessionLabel is gone.
 import { elapsedTime, relativeTime, UNTITLED } from '../labels'
+import type { RunActivity } from '../runs/activity'
+import { shortAge } from '../runs/format'
 import type { Marks } from '../state/needs-you'
 import type { CacheHealth } from '../../../shared/cache/service'
 import type { QuotaView } from '../quota/use-quota'
@@ -32,12 +34,18 @@ const WORKING_TICK_MS = 1_000
 // alone: the dots are the eye's version, the name is everybody else's. Needing
 // you and being in a worktree say so the same way, mark and name together.
 //
+// A run working in a session's name gets the same block in the run color: the
+// run's age over dots that blink while it runs and hold still while it is
+// paused. Green and teal are two different waits — one you watch, the other
+// you come back to.
+//
 // Every workspace lists its sessions, active or not, because work in one
 // workspace keeps running while another is in front. Only the human removes a
 // session from the list. A workspace with no sessions still gets its row.
 export function Sidebar({
   snapshot,
   needsYou,
+  runActivity,
   boardNeedYou,
   onNewSession,
   onAddWorkspace,
@@ -55,6 +63,9 @@ export function Sidebar({
   // Sessions whose turn ended while nobody was looking. In-memory only, and
   // the document above decides what goes in and what comes out.
   readonly needsYou: Marks
+  // Sessions with a live run of their own, derived from the runs snapshot by
+  // the shell. Absent for a session with none.
+  readonly runActivity: Readonly<Record<SessionId, RunActivity>>
   // A different count on the same row: the board's branches and pull requests,
   // and nothing for a workspace whose board has not answered.
   readonly boardNeedYou: Readonly<Record<WorkspaceId, number>>
@@ -98,7 +109,12 @@ export function Sidebar({
         {workspaces.map((workspace) => {
           const own = sessions.filter((session) => session.workspaceId === workspace.id)
           const active = workspace.id === activeWorkspaceId
-          const working = own.some((session) => session.working)
+          // The dot is the coarse mark, "something in here is working", so a
+          // live run lights it exactly as a live turn does. A collapsed
+          // workspace must not go dark over a run going on inside it.
+          const working = own.some(
+            (session) => session.working || runActivity[session.id] !== undefined
+          )
           // The roll-up, so a collapsed or scrolled-past workspace still says
           // how many of its sessions are waiting.
           const asking = own.filter((session) => needsYou.has(session.id)).length
@@ -148,17 +164,29 @@ export function Sidebar({
                     const title = session.title ?? UNTITLED
                     const viewing = session.id === activeSessionId
                     const asks = needsYou.has(session.id)
+                    const activity = runActivity[session.id]
+                    const turnSince = session.working ? session.workingSince : undefined
+                    // One slot, one owner: needs-you over the turn over the
+                    // run. The row wears the run color only where the run
+                    // actually owns the slot, so nothing repaints the green
+                    // counter of a turn from under it.
+                    const runSlot = asks || turnSince !== undefined ? undefined : activity
                     // Knowing *that* a session is in a worktree is the whole
                     // signal here; which worktree lives in the composer chip.
+                    // A run working is named even when it lost the slot: the
+                    // name is the whole row for anyone not reading the dots.
                     const marks = [
                       session.worktree === undefined ? undefined : 'worktree',
                       session.working ? 'working' : undefined,
+                      activity === undefined ? undefined : 'run working',
                       asks ? 'needs you' : undefined
                     ].filter((mark): mark is string => mark !== undefined)
                     return (
                       <li
                         key={session.id}
-                        className={`sessrow${viewing ? ' viewing' : ''}${asks ? ' asking' : ''}`}
+                        className={`sessrow${viewing ? ' viewing' : ''}${asks ? ' asking' : ''}${
+                          runSlot === undefined ? '' : runSlot.moving ? ' run' : ' run held'
+                        }`}
                       >
                         <button
                           className={rowClass(viewing, session.title)}
@@ -189,13 +217,27 @@ export function Sidebar({
                           {/* Static: the pip sits where the dots sit while
                               working, because the eye already looks there. */}
                           {asks ? <span className="pip" aria-hidden="true" /> : null}
-                          {session.working && session.workingSince !== undefined ? (
+                          {turnSince !== undefined ? (
                             <>
                               <span className="elapsed" aria-hidden="true">
-                                {elapsedTime(session.workingSince, now)}
+                                {elapsedTime(turnSince, now)}
                               </span>
                               {/* Three dots, blinking in sequence: the only
                                   animation a row is allowed. */}
+                              <span className="typing" aria-hidden="true">
+                                <i />
+                                <i />
+                                <i />
+                              </span>
+                            </>
+                          ) : runSlot !== undefined ? (
+                            <>
+                              {/* The run's age in the chips' own units, from
+                                  the chips' own function: the rail and the
+                                  chip cannot report one run two ways. */}
+                              <span className="elapsed" aria-hidden="true">
+                                {shortAge(runSlot.since, now)}
+                              </span>
                               <span className="typing" aria-hidden="true">
                                 <i />
                                 <i />

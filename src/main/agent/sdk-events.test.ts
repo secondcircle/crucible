@@ -4,7 +4,13 @@
 // a paid call.
 import { describe, expect, it } from 'vitest'
 import type { AgentSessionEvent } from '@earendil-works/pi-coding-agent'
-import { createEventMapper, renderToolOutput, summarizeToolArgs } from './sdk-events'
+import {
+  createEventMapper,
+  jumpOutcome,
+  renderToolOutput,
+  summarizeRetryOf,
+  summarizeToolArgs
+} from './sdk-events'
 
 const TARGET = { sessionId: 's1', turnId: 't-1' }
 
@@ -327,5 +333,89 @@ describe('failures', () => {
   it('leaves a normal message_end alone', () => {
     expect(map({ type: 'message_end', message: { role: 'assistant', stopReason: 'stop' } })).toBeUndefined()
     expect(map({ type: 'message_end', message: { role: 'toolResult' } })).toBeUndefined()
+  })
+})
+
+// A jump is not a turn: what π says about the summary it is writing crosses
+// the port on its own, and only while a summarizing jump is in flight.
+describe('a summarizing jump', () => {
+  it('becomes a session-scoped retry event, in π’s own count', () => {
+    expect(
+      summarizeRetryOf(
+        sdk({
+          type: 'summarization_retry_scheduled',
+          attempt: 2,
+          maxAttempts: 3,
+          delayMs: 4000,
+          errorMessage: 'Overloaded'
+        }),
+        's1'
+      )
+    ).toEqual({
+      type: 'summarize_retry',
+      sessionId: 's1',
+      attempt: 2,
+      maxAttempts: 3,
+      delayMs: 4000,
+      message: 'Overloaded'
+    })
+  })
+
+  it('carries display-safe text, with the payload left in the run log', () => {
+    expect(
+      summarizeRetryOf(
+        sdk({
+          type: 'summarization_retry_scheduled',
+          attempt: 1,
+          maxAttempts: 3,
+          delayMs: 2000,
+          errorMessage:
+            '529 {"type":"error","error":{"message":"Overloaded"},"request_id":"req_014"}'
+        }),
+        's1'
+      )
+    ).toMatchObject({ message: 'Overloaded' })
+  })
+
+  it('is the only event it answers for', () => {
+    expect(summarizeRetryOf(sdk({ type: 'compaction_start', reason: 'threshold' }), 's1'))
+      .toBeUndefined()
+    expect(
+      summarizeRetryOf(sdk({ type: 'summarization_retry_finished' }), 's1')
+    ).toBeUndefined()
+  })
+
+  // π's own retry events are raised for compaction inside a turn too, so the
+  // turn mapper must stay silent about them: a compaction retry is not a jump.
+  it('is never mistaken for something a turn said', () => {
+    expect(
+      map({
+        type: 'summarization_retry_scheduled',
+        attempt: 2,
+        maxAttempts: 3,
+        delayMs: 4000,
+        errorMessage: 'Overloaded'
+      })
+    ).toBeUndefined()
+  })
+})
+
+describe('what navigateTree answered', () => {
+  it('is a jump that happened, with the message it handed back', () => {
+    expect(jumpOutcome({ cancelled: false, editorText: 'Hook it up' })).toEqual({
+      cancelled: false,
+      editorText: 'Hook it up'
+    })
+    expect(jumpOutcome({ cancelled: false })).toEqual({ cancelled: false })
+  })
+
+  // Cancelled and aborted are the same fact: π stopped before moving the leaf,
+  // and the user asked it to. Neither is a failure.
+  it('is a cancellation that moved nothing, never a rejection', () => {
+    expect(jumpOutcome({ cancelled: true })).toEqual({ cancelled: true })
+    expect(jumpOutcome({ cancelled: false, aborted: true })).toEqual({ cancelled: true })
+    expect(jumpOutcome({ cancelled: true, editorText: 'Hook it up' })).toEqual({
+      cancelled: true
+    })
   })
 })

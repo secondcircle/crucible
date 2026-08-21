@@ -299,6 +299,28 @@
   }
 }
 
+/* A run working in this session's name: the same slot, the same geometry and
+   the same rhythm as a live turn, in the run color. The two waits differ by
+   color alone because at 3.5px nothing else reads. Full opacity where the
+   turn's counter sits at .85; the difference is deliberate. */
+.sessrow.run .elapsed {
+  color: var(--run);
+  opacity: 1;
+}
+
+.sessrow.run .typing i {
+  background: var(--run);
+}
+
+/* Paused: the mark stays, because a run forgotten in a worktree is the
+   expensive failure, but nothing moves — motion is reserved for work actually
+   moving. Dimmer than the running dots, and it outranks the reduced-motion
+   rule above on specificity, so paused and running still differ there. */
+.sessrow.run.held .typing i {
+  animation: none;
+  opacity: 0.55;
+}
+
 /* The workspace row works the same way: the × covers the count rather than
    standing beside it, so the count keeps the gutter every other number ends
    on and the name keeps the width. */

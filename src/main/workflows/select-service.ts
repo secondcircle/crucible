@@ -1,7 +1,11 @@
+import { mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import type { SessionId } from '../../shared/agent/port'
-import { createFakeWorkflowRunService } from '../../shared/workflows/fake-service'
+import {
+  createFakeWorkflowRunService,
+  type FakeArtifactFiles
+} from '../../shared/workflows/fake-service'
 import type { MainWorkflowRunService } from '../../shared/workflows/service'
 import type { CacheRecorder } from '../cache/ledger'
 import type { Flavor } from '../agent/select-adapter'
@@ -26,6 +30,43 @@ export interface WorkflowRunWiring {
   readonly deliver: (sessionId: SessionId, text: string) => void
   /** The cache ledger every observed miss is appended to, sessions and runs alike. */
   readonly cache?: CacheRecorder
+  /** Shows a file in the OS file manager, for the artifact reader's Reveal. */
+  readonly reveal?: (path: string) => void
+}
+
+// The fake service is compiled into the renderer bundle too, so its file
+// access is handed in from here: the same `<stateDir>/workflow-runs/<runId>/
+// artifacts/` layout the live store uses, and nothing outside it.
+function scriptedArtifactFiles(root: string): FakeArtifactFiles {
+  return {
+    dir(runId: string): string {
+      const dir = join(root, runId, 'artifacts')
+      mkdirSync(dir, { recursive: true })
+      return dir
+    },
+    write(path: string, body: string): void {
+      try {
+        writeFileSync(path, body, 'utf8')
+      } catch {
+        // A scripted artifact that cannot be written leaves the record saying
+        // what it would have written and the reader honest about the file.
+      }
+    },
+    read(path: string): string | undefined {
+      try {
+        return readFileSync(path, 'utf8')
+      } catch {
+        return undefined
+      }
+    },
+    size(path: string): number | undefined {
+      try {
+        return statSync(path).size
+      } catch {
+        return undefined
+      }
+    }
+  }
 }
 
 // One flavor decision governs all seams: a fake-flavor launch runs scripted
@@ -38,7 +79,11 @@ export function selectWorkflowRunService(
   log.append({ source: 'main', event: 'workflow_run_service_selected', service: flavor })
 
   if (flavor !== 'sdk') {
-    return createFakeWorkflowRunService({ deliver: wiring.deliver })
+    return createFakeWorkflowRunService({
+      deliver: wiring.deliver,
+      files: scriptedArtifactFiles(join(wiring.stateDir, 'workflow-runs')),
+      ...(wiring.reveal === undefined ? {} : { reveal: wiring.reveal })
+    })
   }
 
   const loader = createWorkflowLoader({
@@ -90,6 +135,7 @@ export function selectWorkflowRunService(
       subscribe(listener: () => void): void {
         changeListeners.add(listener)
       }
-    }
+    },
+    ...(wiring.reveal === undefined ? {} : { reveal: wiring.reveal })
   })
 }
