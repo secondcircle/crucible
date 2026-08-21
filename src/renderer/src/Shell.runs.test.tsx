@@ -568,6 +568,8 @@ describe('clearing a run that needs you', () => {
       await settled()
     })
 
+    // The refusal is said out loud, where every other refusal is said.
+    expect(screen.getByRole('alert')).toHaveTextContent('The run "paus" is not live.')
     // The cancel was refused, so nothing about this run was cleared: its
     // Dismiss must still be a button, not a control dead until ⌘R reopens.
     const dismiss = screen.getByRole('button', { name: 'Dismiss' }) as HTMLButtonElement
@@ -577,6 +579,33 @@ describe('clearing a run that needs you', () => {
       await settled()
     })
     expect(workflowRuns.calls).toContainEqual({ op: 'dismiss', args: ['paus'] })
+  })
+
+  // A dismiss can fail on transport, and the engine refuses a live one with a
+  // sentence. Either way the row says so and hands the button back: the run
+  // is still sitting in Needs you, still asking.
+  it('reports a refused dismiss and gives the button back', async () => {
+    const { workflowRuns } = mount([
+      runOf({ id: 'fail', status: 'failed', endedAt: '2026-08-20T11:00:00.000Z' })
+    ])
+    workflowRuns.dismiss = async () => {
+      throw new Error('The runs service is not answering.')
+    }
+    await act(settled)
+    await act(async () => {
+      fireEvent.keyDown(document, { key: 'r', metaKey: true })
+      await settled()
+    })
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Dismiss' }))
+      await settled()
+    })
+
+    expect(screen.getByRole('alert')).toHaveTextContent('The runs service is not answering.')
+    const dismiss = screen.getByRole('button', { name: 'Dismiss' }) as HTMLButtonElement
+    expect(dismiss.disabled).toBe(false)
+    expect(rowsOf('Needs you')).toEqual(['fail'])
   })
 
   it('asks before cancelling, in the pinned words, and does nothing when declined', async () => {
@@ -591,6 +620,11 @@ describe('clearing a run that needs you', () => {
       fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
       await settled()
     })
+    // The confirm is the click's acknowledgment, and the button behind it is
+    // dead for the flight, so no second click can raise a second confirm.
+    expect((screen.getByRole('button', { name: 'Cancel' }) as HTMLButtonElement).disabled).toBe(
+      true
+    )
     const dialog = screen.getByRole('dialog', { name: 'Cancel this run?' })
     expect(dialog).toHaveTextContent('Its agents stop where they stand')
     expect(dialog).toHaveTextContent('The worktree, branch and artifacts all stay.')

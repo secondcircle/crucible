@@ -45,7 +45,7 @@ import { ContextPanel, PanelEdge } from './components/ContextPanel'
 import { entriesOf, QueuedStrip } from './components/QueuedStrip'
 import { ResumeOverlay } from './components/ResumeOverlay'
 import { SessionTree } from './components/SessionTree'
-import { RunsOverview } from './components/RunsOverview'
+import { RunsOverview, type RunActOutcome } from './components/RunsOverview'
 import { RunStrip } from './components/RunStrip'
 import { Settings, type SettingsSection } from './components/Settings'
 import { Sidebar } from './components/Sidebar'
@@ -1861,28 +1861,48 @@ export function Shell({
 
   // Clearing a settled run that is asking for attention it no longer
   // deserves. No confirm: nothing on disk moves, and the record stays
-  // openable in ⌘R.
+  // openable in ⌘R. A refusal is reported like every other service failure
+  // and answered `kept`, so the row that asked gets its button back.
   const dismissRun = useCallback(
-    async (runId: WorkflowRunId): Promise<void> => {
-      if (workflowRuns === undefined) return
-      await workflowRuns.dismiss(runId)
+    async (runId: WorkflowRunId): Promise<RunActOutcome> => {
+      if (workflowRuns === undefined) return 'kept'
+      try {
+        await workflowRuns.dismiss(runId)
+        return 'cleared'
+      } catch (cause) {
+        report(cause)
+        return 'kept'
+      }
     },
-    [workflowRuns]
+    [workflowRuns, report]
   )
 
-  // Stopping a run always asks first. The confirm stacks above whatever holds
-  // the region, and the caller learns what the user chose so its button can
-  // go dead for the wait.
-  const askToCancelRun = useCallback(
-    (runId: WorkflowRunId): Promise<'cancelled' | 'kept'> =>
-      new Promise((resolve) => {
+  // Stopping a run always asks first, then does the stopping: the caller is
+  // answered by the cancel's outcome, never by the click alone. The confirm
+  // stacks above whatever holds the region; a decline and a refusal from the
+  // service — a run that settled while the confirm was up throws — both come
+  // back as `kept`, because the run is still there either way.
+  const cancelRun = useCallback(
+    async (runId: WorkflowRunId): Promise<RunActOutcome> => {
+      const chose = await new Promise<'cancelled' | 'kept'>((resolve) => {
         // A confirm already up is answered before anything else, so the
         // previous asker is told its run is untouched.
         cancelChoice.current?.('kept')
         cancelChoice.current = resolve
         setQuestion({ kind: 'cancelRun', runId })
-      }),
-    []
+      })
+      if (chose === 'kept' || workflowRuns === undefined) return 'kept'
+      try {
+        // Cancel's own semantics are untouched: if the run settled between
+        // the click and the confirm, the refusal surfaces where refusals do.
+        await workflowRuns.cancel(runId)
+        return 'cleared'
+      } catch (cause) {
+        report(cause)
+        return 'kept'
+      }
+    },
+    [workflowRuns, report]
   )
 
   // The app starts the investigation: a fresh session in the run's workspace,
@@ -1961,13 +1981,11 @@ export function Shell({
     const asked = question
     if (asked.kind === 'cancelRun') {
       // Answered before the question comes off screen, so the effect below
-      // does not read it as a decline.
+      // does not read it as a decline. Issuing the cancel belongs to the
+      // asker, so its outcome reaches the button that raised this.
       cancelChoice.current?.('cancelled')
       cancelChoice.current = undefined
       setQuestion(undefined)
-      // Cancel's own semantics are untouched: if the run settled between the
-      // click and the confirm, the refusal surfaces where refusals do.
-      if (workflowRuns !== undefined) void workflowRuns.cancel(asked.runId).catch(report)
       return
     }
     setQuestion(undefined)
@@ -2233,7 +2251,7 @@ export function Shell({
                 onOpenRun={openWorkflowRun}
                 onGoToSession={goToRunSession}
                 onDismiss={dismissRun}
-                onCancel={askToCancelRun}
+                onCancel={cancelRun}
                 onInvestigate={investigateRun}
                 onClose={closeRegion}
               />
@@ -2264,7 +2282,7 @@ export function Shell({
                 }}
                 onPause={() => void workflowRuns.pause(openRun.id).catch(report)}
                 onResume={() => void workflowRuns.resume(openRun.id).catch(report)}
-                onCancel={() => void askToCancelRun(openRun.id)}
+                onCancel={() => void cancelRun(openRun.id)}
                 onInvestigate={() => investigateRun(openRun.id)}
                 onClose={closeTopOfRegion}
               />

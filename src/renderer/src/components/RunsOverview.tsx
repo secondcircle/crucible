@@ -17,6 +17,13 @@ import './runs.css'
 // deserves. Investigate is on every row in every band — it starts a session
 // that already knows the run, and takes the session-less row's primary slot,
 // where a blank fresh chat used to sit.
+
+// How a clearing act ended, as far as the row is concerned: the run is on its
+// way out of this band and the snapshot will take the button with it, or the
+// run is still here — declined, refused, failed — and its button must come
+// back. A refusal reports itself before it answers `kept`.
+export type RunActOutcome = 'cleared' | 'kept'
+
 export function RunsOverview({
   runs,
   workspaces,
@@ -34,22 +41,36 @@ export function RunsOverview({
   readonly onOpenRun: (runId: string) => void
   readonly onGoToSession: (sessionId: string) => void
   /** Clears a settled run. No confirm: nothing is destroyed by it. */
-  readonly onDismiss: (runId: string) => Promise<void>
-  // Raises the app's confirm and answers with what the user chose, so the
-  // button knows whether the run is on its way out or still working.
-  readonly onCancel: (runId: string) => Promise<'cancelled' | 'kept'>
+  readonly onDismiss: (runId: string) => Promise<RunActOutcome>
+  // Raises the app's confirm and then does the cancelling, answering with
+  // what became of the run — not with what the user clicked.
+  readonly onCancel: (runId: string) => Promise<RunActOutcome>
   readonly onInvestigate: (runId: string) => Promise<void>
   readonly onClose: () => void
 }): React.JSX.Element {
   const bands = bandsOf(runs)
-  // Rows whose Dismiss or Cancel is done being clicked: the button is dead
-  // from that frame until the snapshot re-bands the row out of Needs you and
-  // takes the button with it (ADR 0010).
+  // Rows with a clearing act in flight: the button is dead from the frame it
+  // is clicked until the snapshot re-bands the row out of Needs you and takes
+  // the button with it (ADR 0010). The mark is tied to what became of the
+  // run, so a declined confirm, a refused cancel and a failed dismiss all
+  // hand the button back rather than leaving a dead control on a row that
+  // still needs clearing.
+  //
+  // Cancel's flight starts at the click, not at the confirm: the confirm
+  // covers the row for as long as it is up, so the user loses nothing, and
+  // the button underneath cannot raise a second confirm behind the first.
   const [acting, setActing] = useState<readonly string[]>([])
   const clearing = (runId: string): boolean => acting.includes(runId)
-  const markActing = (runId: string): void => setActing((current) => [...current, runId])
-  const unmarkActing = (runId: string): void =>
-    setActing((current) => current.filter((held) => held !== runId))
+  const act = (runId: string, run: (runId: string) => Promise<RunActOutcome>): void => {
+    setActing((current) => (current.includes(runId) ? current : [...current, runId]))
+    void run(runId)
+      // A handler that breaks instead of answering leaves the run where it
+      // was, which is a kept run by any other name.
+      .catch((): RunActOutcome => 'kept')
+      .then((outcome) => {
+        if (outcome === 'kept') setActing((current) => current.filter((held) => held !== runId))
+      })
+  }
 
   return (
     <section className="runsoverview" aria-label="All runs">
@@ -128,11 +149,7 @@ export function RunsOverview({
                       <button
                         className="btn"
                         disabled={clearing(run.id)}
-                        onClick={() => {
-                          void onCancel(run.id).then((chose) => {
-                            if (chose === 'cancelled') markActing(run.id)
-                          })
-                        }}
+                        onClick={() => act(run.id, onCancel)}
                       >
                         Cancel
                       </button>
@@ -140,10 +157,7 @@ export function RunsOverview({
                       <button
                         className="btn"
                         disabled={clearing(run.id)}
-                        onClick={() => {
-                          markActing(run.id)
-                          void onDismiss(run.id).catch(() => unmarkActing(run.id))
-                        }}
+                        onClick={() => act(run.id, onDismiss)}
                       >
                         Dismiss
                       </button>
