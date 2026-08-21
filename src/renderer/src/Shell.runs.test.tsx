@@ -529,6 +529,56 @@ describe('clearing a run that needs you', () => {
     expect(count()).toBe('nothing running')
   })
 
+  // The race the spec names: the run settles between the Cancel click and
+  // the confirm. The cancel is refused and reported, and the row — now a
+  // failed one offering Dismiss — must still be clearable: the disabled mark
+  // set on confirm belongs to a cancel that never happened.
+  it('leaves the row clearable when the run settled before the confirm', async () => {
+    const { workflowRuns } = mount([
+      runOf({
+        id: 'paus',
+        status: 'paused',
+        endedAt: undefined
+      })
+    ])
+    // The live engine refuses a cancel on a settled run with this sentence.
+    workflowRuns.cancel = async () => {
+      throw new Error('The run "paus" is not live.')
+    }
+    await act(settled)
+    await act(async () => {
+      fireEvent.keyDown(document, { key: 'r', metaKey: true })
+      await settled()
+    })
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+      await settled()
+    })
+    // While the confirm is up, the run fails: the snapshot re-bands the row
+    // as a failed one, whose button is Dismiss.
+    await act(async () => {
+      workflowRuns.setRuns([
+        runOf({ id: 'paus', status: 'failed', endedAt: '2026-08-20T11:00:00.000Z' })
+      ])
+      await settled()
+    })
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Cancel the run' }))
+      await settled()
+    })
+
+    // The cancel was refused, so nothing about this run was cleared: its
+    // Dismiss must still be a button, not a control dead until ⌘R reopens.
+    const dismiss = screen.getByRole('button', { name: 'Dismiss' }) as HTMLButtonElement
+    expect(dismiss.disabled).toBe(false)
+    await act(async () => {
+      fireEvent.click(dismiss)
+      await settled()
+    })
+    expect(workflowRuns.calls).toContainEqual({ op: 'dismiss', args: ['paus'] })
+  })
+
   it('asks before cancelling, in the pinned words, and does nothing when declined', async () => {
     const { workflowRuns } = mount([runOf({ id: 'paus', status: 'paused' })])
     await act(settled)
