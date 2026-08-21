@@ -1,12 +1,13 @@
+/* The framing layer the palette, the confirm dialogs and the cache view sit
+   in: centred in the overlay region, over the region's one backdrop, and
+   still the click target that dismisses them. */
 .overlaybg {
-  position: fixed;
+  position: absolute;
   inset: 0;
   z-index: 10;
-  background: rgb(0 0 0 / 45%);
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: center;
-  padding-top: 12vh;
 }
 
 .overlay {

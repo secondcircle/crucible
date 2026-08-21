@@ -13,15 +13,54 @@
   padding: 12px 14px 10px;
 }
 
-.cbox textarea {
+/* The text area and the mirror that measures it, in one box of their own so
+   both are exactly as wide as each other. */
+.boxwrap {
+  position: relative;
+}
+
+/* Everything that decides where the text wraps is set on both. */
+.cbox textarea,
+.cbox .boxmirror {
   width: 100%;
-  background: none;
+  padding: 0;
   border: none;
+  font: 14px/1.5 var(--font);
+  letter-spacing: normal;
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+  box-sizing: border-box;
+}
+
+.cbox textarea {
+  display: block;
+  background: none;
   resize: none;
   outline: none;
+  /* The resting height, which is also what the sizing clamp floors at. The
+     inline height the composer sets tracks the draft from there, up to the
+     300px ceiling; past it this box scrolls. */
   height: 46px;
-  font: 14px/1.5 var(--font);
+  max-height: 300px;
+  overflow-y: auto;
   color: var(--ink);
+  transition: height 120ms ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cbox textarea {
+    transition: none;
+  }
+}
+
+.cbox .boxmirror {
+  position: absolute;
+  top: 0;
+  left: 0;
+  visibility: hidden;
+  pointer-events: none;
+  height: auto;
+  color: transparent;
 }
 
 .cbox textarea::placeholder {
@@ -289,8 +328,12 @@ kbd {
   background: var(--code);
 }
 
-.cbox.bash textarea {
+.cbox.bash textarea,
+.cbox.bash .boxmirror {
   font: 13px/1.5 var(--mono);
+}
+
+.cbox.bash textarea {
   color: var(--code-ink);
 }
 

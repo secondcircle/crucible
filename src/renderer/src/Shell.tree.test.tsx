@@ -73,18 +73,26 @@ async function shell(
   return port
 }
 
-const treeButton = (): HTMLElement => screen.getByRole('button', { name: 'Session tree' })
-
-async function open(): Promise<void> {
-  await act(async () => {
-    fireEvent.click(treeButton())
-  })
-}
-
 async function escape(): Promise<void> {
   await act(async () => {
     fireEvent.keyDown(document, { key: 'Escape' })
   })
+}
+
+// Double-Esc is the only way in: the top bar's tree button was removed with
+// no replacement affordance.
+async function open(): Promise<void> {
+  await escape()
+  await escape()
+}
+
+// The tree cannot be opened mid-turn any more — Esc means stop while a
+// session works — so a turn that the tree has to survive is started under it.
+async function working(port: ScriptedPort): Promise<void> {
+  await act(async () => {
+    await port.prompt('s1', 'go')
+  })
+  await settled()
 }
 
 const overlay = (): HTMLElement | null => screen.queryByRole('dialog', { name: 'Session tree' })
@@ -97,14 +105,29 @@ const nodes = (): string[] =>
 const search = (): HTMLElement => screen.getByLabelText('Search this session')
 
 describe('opening and closing the tree', () => {
-  it('opens from the button in the session header, which says how else to', async () => {
+  it('has no button in the top bar: double-Esc opens it and nothing else does', async () => {
     const port = await shell()
 
-    expect(treeButton()).toHaveTextContent('esc esc')
+    expect(screen.queryByRole('button', { name: 'Session tree' })).toBeNull()
     await open()
 
     expect(overlay()).not.toBeNull()
     expect(port.calls).toContainEqual({ op: 'sessionTree', args: ['s1'] })
+  })
+
+  it('renders in the overlay region, over the composer and the panel', async () => {
+    await shell()
+
+    await open()
+
+    // Not in the chat column any more: the region spans the chat column and
+    // the context panel together, and the composer is under it.
+    expect(overlay()?.closest('.region')).not.toBeNull()
+    expect(document.querySelector('.region .composer')).toBeNull()
+    // The sidebar and the top bar are outside it and still there.
+    expect(document.querySelector('.region nav.side')).toBeNull()
+    expect(document.querySelector('.region .top')).toBeNull()
+    expect(screen.getByRole('banner')).toBeInTheDocument()
   })
 
   it('opens on a second Escape and closes on the next one', async () => {
@@ -129,14 +152,10 @@ describe('opening and closing the tree', () => {
     expect(port.calls.map((call) => call.op)).toContain('cancel')
   })
 
-  it('lets the button open it mid-turn without touching the turn', async () => {
-    const port = await shell({ working: true })
-
-    await open()
-
-    expect(overlay()).not.toBeNull()
-    expect(port.calls.map((call) => call.op)).not.toContain('cancel')
-  })
+  // There is deliberately no test that the tree opens mid-turn. That
+  // capability went with the top-bar button, by ruling: while a session works
+  // Esc means stop, so the accelerator cannot fire and nothing else opens the
+  // tree. It was removed, not lost.
 
   it('closes the model picker before it closes itself', async () => {
     await shell()
@@ -189,8 +208,9 @@ describe('what the rail shows', () => {
   })
 
   it('says the session is still working after the last point on the path', async () => {
-    await shell({ working: true })
+    const port = await shell()
     await open()
+    await working(port)
 
     expect(screen.getByText('assistant · 1 edit · working…')).toBeInTheDocument()
   })
@@ -271,8 +291,9 @@ describe('the action card', () => {
   })
 
   it('refuses to continue while the session works, and says why', async () => {
-    await shell({ working: true })
+    const port = await shell()
     await open()
+    await working(port)
     await select('Hook the overlay up to ⌘O.')
 
     expect(screen.getByRole('button', { name: /Continue from here/ })).toBeDisabled()

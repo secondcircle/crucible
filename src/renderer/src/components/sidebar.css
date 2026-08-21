@@ -404,8 +404,17 @@
   color: var(--accent2);
 }
 
-.addws {
+/* Add workspace and the gear share the foot. Add workspace gives up width
+   only; the gear is a fixed square that takes what it needs and no more. */
+.sidefoot {
+  display: flex;
+  gap: 8px;
   margin: 8px 12px 14px;
+}
+
+.addws {
+  flex: 1;
+  min-width: 0;
   padding: 7px;
   border: 1px dashed var(--line);
   border-radius: var(--radius);
@@ -416,6 +425,23 @@
 }
 
 .addws:hover {
+  color: var(--accent2);
+  border-color: var(--accent2);
+}
+
+.gearbtn {
+  flex: none;
+  width: 34px;
+  border: 1px dashed var(--line);
+  border-radius: var(--radius);
+  background: none;
+  color: var(--faint);
+  font-size: 14px;
+  line-height: 1;
+}
+
+.gearbtn:hover,
+.gearbtn.on {
   color: var(--accent2);
   border-color: var(--accent2);
 }

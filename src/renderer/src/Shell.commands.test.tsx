@@ -369,9 +369,9 @@ describe('the command row in the transcript', () => {
     port.transcripts.set('s1', [
       { kind: 'user', text: 'Interview me about the command system until we agree.' }
     ])
-    await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: 'Session tree' }))
-    })
+    // Double-Esc, the tree's only way in.
+    await press('Escape')
+    await press('Escape')
     await settled()
     await act(async () => {
       fireEvent.click(screen.getByText('Interview me about the command system until we agree.'))
