@@ -421,10 +421,9 @@ export function createWorkflowEngine(options: EngineOptions): WorkflowEngine {
       const ghost = run.nodes.findIndex(
         (candidate) => candidate.id === id && candidate.status === 'pending'
       )
-      // A node states what it follows. The spec's own declaration wins the
-      // moment the node starts; failing that the plan's forecast stands,
-      // because a fresh record built from inference alone would erase edges
-      // the workflow had already got right.
+      // The spec's own declaration wins the moment the node starts; failing
+      // that the plan's forecast stands, because a record rebuilt from
+      // inference alone would erase edges the workflow already got right.
       const forecast = ghost >= 0 ? run.nodes[ghost].parents : []
       const declared = spec.from === undefined ? forecast : keptParents(run, id, spec.from)
       // Reading an artifact may reveal an edge nobody declared; it never

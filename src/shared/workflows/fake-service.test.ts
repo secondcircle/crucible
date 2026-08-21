@@ -163,8 +163,6 @@ describe('the fake flavor\u2019s artifacts', () => {
     await service.tools.answer('s1', runId, 'carry on')
     await until(() => latest(runId)?.status === 'complete')
     const done = latest(runId)
-    // The names tests already knew are where they were; the nodes the script
-    // grew extend the list rather than renaming anything.
     expect(
       done?.nodes.map((node) => node.artifacts.map((one) => one.path.split('/').at(-1)))
     ).toEqual([

@@ -47,7 +47,7 @@ const WIDTH_KEY = 'crucible.run-graph-width'
 const HIDDEN: React.CSSProperties = { display: 'none' }
 
 // The full-screen dig: read-only observability plus the mechanical Pause and
-// Cancel (ADR 0017). A node's transcript renders through the chat pane's own
+// Cancel. A node's transcript renders through the chat pane's own
 // component, tool chains collapsed; the routed banner shows what was asked
 // and where it went — never an input box. Talking happens in the session; Go
 // to session is the door.

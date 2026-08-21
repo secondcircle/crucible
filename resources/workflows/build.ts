@@ -667,9 +667,8 @@ export default workflow({
     const target = localDefaultBranch(ctx.cwd)
     const intent = ctx.inputs.intent
 
-    // Every node below states what it follows. The planner is the exception
-    // and the point of one: it takes only the kickoff input, so it is a root
-    // and declaring anything would be an invented edge.
+    // The planner takes only the kickoff input: a root, so declaring
+    // anything to follow would be an invented edge.
     const planner = await ctx.node('planner', {
       prompt: plannerPrompt(intent),
       reads: [intent],
@@ -699,8 +698,6 @@ export default workflow({
     for (let round = 1; ; round++) {
       const review = await ctx.node(`review-${round}`, {
         prompt: reviewerPrompt(target, intent, spec, corrections),
-        // The first review follows the builder; every later one follows the
-        // fixer that answered the round before it.
         from: [round === 1 ? 'builder' : `fixer-${round - 1}`],
         reads: [intent, spec, ...reviews],
         outputs: {
@@ -761,8 +758,6 @@ export default workflow({
       // rather than one the police has already edited.
       const alignment = await ctx.node(`gate-alignment-${round}`, {
         prompt: gateAlignmentPrompt(target, intent, gateCorrections),
-        // The gate opens on the review that approved the branch, and every
-        // later round on the fixer that answered the verdict before it.
         from: [round === 1 ? approvedBy : `gate-fixer-${round - 1}`],
         reads: [intent, ...coverageReports],
         outputs: {

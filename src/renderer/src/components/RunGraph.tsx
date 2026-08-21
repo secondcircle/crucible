@@ -4,9 +4,8 @@ import { cardFace, edgeState, graphCount, layOutGraph } from '../runs/graph'
 import './runs.css'
 
 // The run graph, drawn: one card per node, one line per edge, layered
-// top-down from the record alone. Read-only like the rest of the run view
-// (ADR 0017) — a click selects a node and nothing here runs, re-runs or
-// edits anything.
+// top-down from the record alone. Read-only like the rest of the run view —
+// a click selects a node and nothing here runs, re-runs or edits anything.
 
 /** Mirrors the horizontal padding `.gscroll` draws around the canvas. */
 const CANVAS_PAD = 26
