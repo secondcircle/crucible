@@ -464,6 +464,35 @@ describe('a login', () => {
     expect(screen.queryByRole('dialog', { name: 'Log in to OpenRouter' })).toBeNull()
   })
 
+  // The sidebar stays clickable under Settings (Q2), so a session click can
+  // close the card while a login flow is live. The flow must not outlive its
+  // dialog invisibly: today it does, and the next Escape press is spent on the
+  // unseen login instead of counting toward double-Esc (section 8, step 7).
+  it('does not stay live and invisible after a sidebar click closes Settings', async () => {
+    const port = await shell({
+      ...TWO_SESSIONS,
+      sessions: TWO_SESSIONS.sessions.map((session) =>
+        session.id === 's2' ? { ...session, title: 'the other session' } : session
+      )
+    })
+    await click('Settings')
+    await click('Add provider')
+    await click(/OpenRouter/)
+    await click('Sign in with OAuth')
+    expect(screen.getByRole('dialog', { name: 'Log in to OpenRouter' })).toBeInTheDocument()
+
+    // The click lands and the occupant closes, the login's rendering with it.
+    await click('the other session')
+    expect(card()).toBeNull()
+    expect(screen.queryByRole('dialog', { name: 'Log in to OpenRouter' })).toBeNull()
+    expect(port.calls).toContainEqual({ op: 'activateSession', args: ['s2'] })
+
+    // Nothing is visibly up, so both presses fall through and open the tree.
+    await escape()
+    await escape()
+    expect(screen.getByRole('dialog', { name: 'Session tree' })).toBeInTheDocument()
+  })
+
   it('refuses a second flow while one is live', async () => {
     const port = await started()
     const started_ = port.calls.filter((call) => call.op === 'login').length
