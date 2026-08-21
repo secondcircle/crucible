@@ -357,6 +357,34 @@ describe('the sidebar under an open overlay (Q2)', () => {
     expect(port.calls).toContainEqual({ op: 'removeSession', args: ['s1'] })
   })
 
+  // Q2's promise is "you end up where you clicked, on that session's chat".
+  // A confirm raised over the old session must not survive the navigation:
+  // left up, its copy ("Reset this session?") reads as being about the session
+  // now on screen while its confirm button still acts on the one navigated
+  // away from. Before this branch the state was unreachable — the confirm's
+  // veil covered the sidebar — so the click's arrival is what makes the
+  // dialog's lifetime this shell's problem, exactly as it was for the login.
+  it('does not leave a confirm dialog up over the session a click landed on', async () => {
+    const { port } = await shell({ conversation: true })
+    await click('Session menu')
+    await act(async () => {
+      fireEvent.click(screen.getByRole('menuitem', { name: 'Reset session' }))
+    })
+    await settled()
+    expect(screen.getByRole('dialog', { name: 'Reset this session?' })).toBeInTheDocument()
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'composer growth' }))
+    })
+    await settled()
+
+    // The click landed…
+    expect(port.calls).toContainEqual({ op: 'activateSession', args: ['s2'] })
+    // …and nothing modal about the previous session is still up over its chat.
+    expect(screen.queryByRole('dialog', { name: 'Reset this session?' })).toBeNull()
+    expect(region()).toBeNull()
+  })
+
   it('leaves the occupant alone when the removal is of another session', async () => {
     await shell()
     await click('Branch board')
