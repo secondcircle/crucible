@@ -178,6 +178,70 @@ describe('the artifact rail', () => {
     expect(rail()).toHaveTextContent("artifacts live in the run's own directory, never in the repo")
   })
 
+  // Spec §3: run-written rows sit "in order of first appearance in the record
+  // (plan order for ghosts, then start order for the rest). A row never moves
+  // once placed." The shipped build plan declares outputs for planner and
+  // review-1 but none for builder, so review-1.md is placed at kickoff — and
+  // must not move when the builder starts and declares changes.md.
+  it('keeps a row in place when a later node starts and declares a new output', async () => {
+    const kickoff = runOf({
+      nodes: [
+        nodeOf({
+          id: 'planner',
+          artifacts: [{ name: 'spec', path: SPEC, desc: 'the approved implementation spec' }]
+        }),
+        nodeOf({ id: 'builder', parents: ['planner'] }),
+        nodeOf({
+          id: 'review-1',
+          parents: ['builder'],
+          artifacts: [{ name: 'review', path: REVIEW, desc: "the reviewer's verdict" }]
+        })
+      ]
+    })
+    const { workflowRuns } = await openRun([kickoff])
+
+    const placedAt = rows().findIndex((row) => row.textContent?.includes('review.md'))
+    expect(placedAt).toBeGreaterThan(-1)
+
+    // The builder starts; its NodeSpec declares changes.md, unwritten.
+    await act(async () => {
+      workflowRuns.setRuns([
+        runOf({
+          nodes: [
+            nodeOf({
+              id: 'planner',
+              status: 'complete',
+              artifacts: [
+                {
+                  name: 'spec',
+                  path: SPEC,
+                  desc: 'the approved implementation spec',
+                  writtenAt: '2026-08-20T10:04:00.000Z'
+                }
+              ]
+            }),
+            nodeOf({
+              id: 'builder',
+              status: 'running',
+              parents: ['planner'],
+              artifacts: [
+                { name: 'changes', path: CHANGES, desc: 'every file the builder touched' }
+              ]
+            }),
+            nodeOf({
+              id: 'review-1',
+              parents: ['builder'],
+              artifacts: [{ name: 'review', path: REVIEW, desc: "the reviewer's verdict" }]
+            })
+          ]
+        })
+      ])
+      await settled()
+    })
+
+    expect(rows()[placedAt]).toHaveTextContent('review.md')
+  })
+
   it('draws the four states from the record alone', async () => {
     await openRun([runOf()])
 
