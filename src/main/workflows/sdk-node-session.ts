@@ -140,7 +140,9 @@ export function createSdkNodeSessionFactory({
         thinkingLevel,
         modelRuntime: models,
         resourceLoader,
-        tools: [...request.tools] as never,
+        // π's allowlist covers custom tools too, so a node that lists only file
+        // tools loses the two it completes through.
+        tools: [...request.tools, ...customTools.map((tool) => tool.name)] as never,
         customTools,
         sessionManager: pi.SessionManager.inMemory(request.cwd),
         settingsManager: pi.SettingsManager.inMemory()
