@@ -1,16 +1,11 @@
 import { runCost, type RunRecord } from '../../../shared/workflows/run'
 
-// What Investigate sends. The app starts the investigation rather than
-// telling the user where to look, so this text carries the whole of what the
-// record knows: the run's identity, where its work went, what went wrong,
-// what it is waiting on, and the directory an agent can read the rest from.
-// The first reply the user sees is meant to be the status readout, so that is
-// what the closing ask names.
-//
+// What Investigate sends: the whole of what the record knows, because the
+// app starts the investigation rather than telling the user where to look.
 // Built from the `RunRecord` alone — the renderer never guesses at storage
-// layout — and every fact is omitted whole when the record lacks it rather
-// than printed blank. It is ordinary user text: it must never open with the
-// run-message prefix, which marks a run talking to its orchestrator.
+// layout — with a fact the record lacks omitted whole rather than printed
+// blank. It is ordinary user text: it must never open with the run-message
+// prefix, which marks a run talking to its orchestrator.
 
 export function investigationPrompt(run: RunRecord): string {
   const lines: string[] = [

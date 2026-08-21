@@ -22,8 +22,8 @@ describe('the fake workflow run service', () => {
     service.dispose()
   })
 
-  // The screenshot state, shipped: a failed run whose orchestrator session is
-  // gone, so the row has no Go to session and nothing that can end it.
+  // A failed run whose orchestrator session is gone, so the row has no
+  // Go to session and nothing that can end it.
   it('seeds a failed run whose session no longer exists, and dismissing it re-bands the row', async () => {
     const service = createFakeWorkflowRunService({ beatMs: 0 })
     const failed = (await service.snapshot()).runs.find((run) => run.id === 'b1n7')

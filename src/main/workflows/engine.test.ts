@@ -701,7 +701,7 @@ describe('what the record says about artifacts', () => {
 // Clearing a run and handing it to another session: the two acts ⌘R offers
 // on a run that is asking for attention nobody is left to give.
 describe('dismissing and adopting a run', () => {
-  /** A run taken to completion, which is the only kind that can be dismissed. */
+  /** A run taken to completion: settled, so dismissable. */
   async function finishedRun(): Promise<Rig> {
     const built = rig({ solo: oneNode }, () => {
       return (prompt, tools) => {

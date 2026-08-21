@@ -1859,10 +1859,9 @@ export function Shell({
     [activateSession]
   )
 
-  // Clearing a settled run that is asking for attention it no longer
-  // deserves. No confirm: nothing on disk moves, and the record stays
-  // openable in ⌘R. A refusal is reported like every other service failure
-  // and answered `kept`, so the row that asked gets its button back.
+  // No confirm to dismiss: nothing on disk moves, and the record stays
+  // openable in ⌘R. A refusal is reported and answered `kept`, so the row
+  // that asked gets its button back.
   const dismissRun = useCallback(
     async (runId: WorkflowRunId): Promise<RunActOutcome> => {
       if (workflowRuns === undefined) return 'kept'
@@ -1877,11 +1876,10 @@ export function Shell({
     [workflowRuns, report]
   )
 
-  // Stopping a run always asks first, then does the stopping: the caller is
-  // answered by the cancel's outcome, never by the click alone. The confirm
-  // stacks above whatever holds the region; a decline and a refusal from the
-  // service — a run that settled while the confirm was up throws — both come
-  // back as `kept`, because the run is still there either way.
+  // Asks first, then stops: the caller is answered by the cancel's outcome,
+  // never by the click alone. A decline and a service refusal — a run that
+  // settled while the confirm was up throws — both come back as `kept`,
+  // because the run is still there either way.
   const cancelRun = useCallback(
     async (runId: WorkflowRunId): Promise<RunActOutcome> => {
       const chose = await new Promise<'cancelled' | 'kept'>((resolve) => {
@@ -1905,9 +1903,9 @@ export function Shell({
     [workflowRuns, report]
   )
 
-  // The app starts the investigation: a fresh session in the run's workspace,
-  // made the run's orchestrator before it is prompted, with the opening
-  // prompt already sent. From there it is an ordinary conversation.
+  // The whole investigation is started for the user — session, adoption,
+  // opening prompt — so what they land in is an ordinary conversation that
+  // already knows the run.
   const investigateRun = useCallback(
     async (runId: WorkflowRunId): Promise<void> => {
       if (workflowRuns === undefined) return

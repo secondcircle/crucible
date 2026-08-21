@@ -216,8 +216,8 @@ describe('the scripted cache miss', () => {
 // session a run that parked with nobody to ask, and the user's own words are
 // what unblocks it. Nothing here is paid for, which is the point.
 describe('the scripted orchestrator on an investigated run', () => {
-  // The opening and the waiting line the renderer's runs/prompt.ts writes; the
-  // script recognizes the prompt by them.
+  // The opening and the waiting line of the app's own Investigate prompt,
+  // which are what the script recognizes it by.
   const investigation = (runId: string): string =>
     [
       `Investigate Crucible run ${runId}, a run of the "build" workflow.`,

@@ -29,9 +29,8 @@ import { Transcript } from './Transcript'
 import './runs.css'
 
 // The full-screen dig: read-only observability plus the mechanical Pause and
-// Cancel, with Investigate beside them (ADR 0017). The graph is layered
-// top-down (Q14); a node's
-// transcript renders through the chat pane's own component, tool chains
+// Cancel, with Investigate beside them. The graph is layered top-down; a
+// node's transcript renders through the chat pane's own component, tool chains
 // collapsed; the routed banner shows what was asked and where it went —
 // never an input box. Talking happens in the session; Go to session is the
 // door.

@@ -148,9 +148,8 @@
   white-space: nowrap;
 }
 
-/* A button that cannot act says so rather than looking clickable: the one
-   waiting on its own flight, and Investigate where the run's workspace is not
-   in the sidebar (ADR 0010). Its title carries the reason. */
+/* A button that cannot act says so rather than looking clickable; its title
+   carries the reason. */
 .runview .btn:disabled,
 .runsoverview .btn:disabled {
   opacity: 0.45;
@@ -806,9 +805,9 @@
   width: 52px;
 }
 
-/* 186px is the mock's column, and every state it drew still sits in it. A
-   dismissed row says one word more — "failed · dismissed · 5h ago" — and
-   takes the width it needs rather than clipping the age off the end. */
+/* Min-width, not width: a dismissed row says one word more — "failed ·
+   dismissed · 5h ago" — and takes what it needs rather than clipping the
+   age off the end. */
 .runrow .st {
   font: 11.5px var(--mono);
   flex: 0 0 auto;

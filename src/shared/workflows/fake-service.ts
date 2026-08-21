@@ -35,11 +35,9 @@ export interface CannedWorkspace {
   readonly name: string
 }
 
-// Only a fallback, and only for tests: Investigate on a canned row needs the
-// run's workspace to be open in the sidebar, and a made-up path can never be.
-// A launch hands in a directory that exists — an open workspace, the
-// CRUCIBLE_WORKSPACE seed, or the checkout itself — so the canned rows are
-// walkable rather than disabled forever. See main/workflows/select-service.ts.
+// Only a fallback, and only for tests: Investigate needs the run's workspace
+// open in the sidebar, and a made-up path never can be. A launch hands in a
+// real directory instead, so the canned rows stay investigable.
 const FALLBACK_WORKSPACE: CannedWorkspace = { path: '/fake/resume-site', name: 'resume-site' }
 
 /** The parked-with-no-one-to-ask run, named because its answer path is wired. */
@@ -840,10 +838,9 @@ function cannedFinished(
   }
 }
 
-// The screenshot state: a failed build whose orchestrator session has been
-// removed from the sidebar, so the row has no Go to session and nothing that
-// can end it. Dismiss clears it into Done; Investigate adopts it and asks
-// what happened.
+// A failed build whose orchestrator session has been removed from the
+// sidebar, so the row has no Go to session and nothing that can end it.
+// Dismiss clears it into Done; Investigate adopts it and asks what happened.
 function cannedFailed(
   workspace: CannedWorkspace,
   artifactDir: (runId: WorkflowRunId) => string,

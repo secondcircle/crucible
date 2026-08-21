@@ -93,8 +93,8 @@ const seededWorkspace = seedWorkspacePath()
 
 // Where the fake flavor's canned runs say they ran. It has to be a real
 // directory the sidebar can hold, or Investigate on those rows is disabled
-// forever: a workspace already open (so the walk needs no setup at all), else
-// the seed, else — in select-service — this checkout, which the user can add.
+// forever: a workspace already open, else the seed, else the fallback of
+// this checkout, which the user can add.
 const cannedWorkspacePath = ((): string | undefined => {
   const { workspaces, activeWorkspaceId } = store.state
   const active = workspaces.find((workspace) => workspace.id === activeWorkspaceId)

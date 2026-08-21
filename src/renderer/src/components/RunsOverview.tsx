@@ -10,18 +10,10 @@ import './runs.css'
 // Every run across every workspace, in three bands: running, needs you, done.
 // A run with an orchestrator gets Go to session, and the record outlives the
 // run, so finished work is reachable here too.
-//
-// Two acts clear a row without opening anything. One button, two states, on
-// the Needs-you rows: Cancel stops a live or paused run after a confirm,
-// Dismiss clears a settled one that is asking for attention it no longer
-// deserves. Investigate is on every row in every band — it starts a session
-// that already knows the run, and takes the session-less row's primary slot,
-// where a blank fresh chat used to sit.
 
-// How a clearing act ended, as far as the row is concerned: the run is on its
-// way out of this band and the snapshot will take the button with it, or the
-// run is still here — declined, refused, failed — and its button must come
-// back. A refusal reports itself before it answers `kept`.
+// How a clearing act ended: `cleared` means the snapshot will re-band the row
+// and take its button away; `kept` — declined, refused or failed, reported by
+// the handler — means the run is still here and the button must come back.
 export type RunActOutcome = 'cleared' | 'kept'
 
 export function RunsOverview({
@@ -49,16 +41,10 @@ export function RunsOverview({
   readonly onClose: () => void
 }): React.JSX.Element {
   const bands = bandsOf(runs)
-  // Rows with a clearing act in flight: the button is dead from the frame it
-  // is clicked until the snapshot re-bands the row out of Needs you and takes
-  // the button with it (ADR 0010). The mark is tied to what became of the
-  // run, so a declined confirm, a refused cancel and a failed dismiss all
-  // hand the button back rather than leaving a dead control on a row that
-  // still needs clearing.
-  //
-  // Cancel's flight starts at the click, not at the confirm: the confirm
-  // covers the row for as long as it is up, so the user loses nothing, and
-  // the button underneath cannot raise a second confirm behind the first.
+  // Rows with a clearing act in flight. Tied to the outcome, not the click:
+  // a declined, refused or failed act hands the button back rather than
+  // leaving it dead on a row that still needs clearing. Counted from the
+  // click, so the button under a raised confirm cannot raise a second one.
   const [acting, setActing] = useState<readonly string[]>([])
   const clearing = (runId: string): boolean => acting.includes(runId)
   const act = (runId: string, run: (runId: string) => Promise<RunActOutcome>): void => {

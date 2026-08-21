@@ -529,8 +529,8 @@ describe('clearing a run that needs you', () => {
     expect(count()).toBe('nothing running')
   })
 
-  // The race the spec names: the run settles between the Cancel click and
-  // the confirm. The cancel is refused and reported, and the row — now a
+  // The race: the run settles between the Cancel click and the confirm.
+  // The cancel is refused and reported, and the row — now a
   // failed one offering Dismiss — must still be clearable: the disabled mark
   // set on confirm belongs to a cancel that never happened.
   it('leaves the row clearable when the run settled before the confirm', async () => {

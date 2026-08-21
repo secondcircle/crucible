@@ -33,10 +33,9 @@ export interface WorkflowRunWiring {
   /** Shows a file in the OS file manager, for the artifact reader's Reveal. */
   readonly reveal?: (path: string) => void
   // Fake flavor only: the workspace the canned runs claim. Investigate needs
-  // the run's workspace open in the sidebar to make a session in, so a canned
-  // run in an invented directory can never be investigated. Main hands in a
-  // directory that is open, or seeded, or at worst addable; the fallback below
-  // is this checkout, which is all three the moment the user adds it.
+  // that workspace open in the sidebar, so an invented directory would leave
+  // the canned rows uninvestigable; the fallback below is this checkout,
+  // which the user can add.
   readonly cannedWorkspacePath?: string
 }
 

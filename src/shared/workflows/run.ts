@@ -117,9 +117,8 @@ export interface RunRecord {
   // never cleared, never set twice — the first stamp stands.
   readonly dismissedAt?: string
   // The run's own directory, holding run.json, artifacts/ and transcripts/.
-  // It exists so a prompt can tell an agent where to read this run without
-  // the renderer guessing at storage layout; the store backfills it at load,
-  // because the store is what knows its own layout.
+  // Carried on the record so a prompt can name it without the renderer
+  // guessing at storage layout; the store backfills it at load.
   readonly dir?: string
 }
 

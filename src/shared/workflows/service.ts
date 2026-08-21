@@ -44,17 +44,15 @@ export interface WorkflowRunService {
   resume(runId: WorkflowRunId): Promise<void>
   cancel(runId: WorkflowRunId): Promise<void>
 
-  // Clearing a run that asks for attention it no longer deserves. It changes
-  // where the run sits and nothing else: no worktree, no branch, no artifact,
-  // no other field of the record. Refuses a live run with a sentence, and
-  // dismissing an already-dismissed run is a quiet no-op.
+  // Clears a run that asks for attention it no longer deserves: it changes
+  // where the run sits and no other field of the record. Refuses a live run
+  // with a sentence; dismissing twice is a quiet no-op.
   dismiss(runId: WorkflowRunId): Promise<void>
 
-  // Investigate's first act: the session about to ask what happened becomes
-  // the run's orchestrator, live or settled, so every later message arrives
-  // there and crucible_runs lists the run for it. ADR 0017 is untouched —
-  // this changes which session the orchestrator is, not that questions travel
-  // through one. Refuses an unknown run with a sentence.
+  // Makes a session the run's orchestrator, live or settled: every later
+  // message arrives there and crucible_runs lists the run for it. This moves
+  // the orchestrator's seat, never the rule that messages travel through one.
+  // Refuses an unknown run with a sentence.
   adopt(runId: WorkflowRunId, sessionId: SessionId): Promise<void>
 
   // A node's transcript in the chat pane's own shape, read at call time:

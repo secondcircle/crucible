@@ -1,15 +1,10 @@
 import { useState } from 'react'
 import type { RunRecord } from '../../../shared/workflows/run'
 
-// Investigate, wherever it is offered: every run row in ⌘R and the run view's
-// header. One component so the two places cannot drift on what the button
-// does while it is working or what it says when it cannot act.
-//
-// Both states are ADR 0010: the click disables the button for the whole
-// flight — session creation through prompt send — which is also what stops a
-// double-click minting two sessions; and with no workspace open to make a
-// session in, the button renders disabled saying why rather than taking a
-// dead click.
+// One component for every place Investigate is offered — the ⌘R rows and the
+// run view header — so the two cannot drift on what the button does while it
+// is working or says when it cannot act. Disabled spans the whole flight, so
+// a double-click cannot mint two sessions.
 
 export function InvestigateButton({
   run,

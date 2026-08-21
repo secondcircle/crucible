@@ -600,10 +600,7 @@ export function createFakeAdapter({
       return { calls: [], closing: RUN_LIST_DELTAS }
     }
 
-    // The app's own Investigate prompt (the renderer's runs/prompt.ts), which
-    // no one typed: the script lists the run it was just handed, and where the
-    // run is parked it says how to hand it an answer, since the scripted agent
-    // will not invent a ruling the user has not given. Recognized by its
+    // The app's own Investigate prompt, which no one typed. Recognized by its
     // opening, the way a run's own messages are; reworded, it falls back to
     // the standard reply and nothing breaks.
     const investigated = /^investigate crucible run ([a-z0-9]+)/i.exec(text)
@@ -622,12 +619,10 @@ export function createFakeAdapter({
       }
     }
 
-    // Answering a run by hand, the last step of the unstick walk: a run that
-    // parked before anyone was listening sends no check-in to the session that
-    // later adopts it, so the user types the answer and the script relays
-    // their words rather than inventing a ruling of its own. The prompt has to
-    // open with it, and the id has to carry a digit the way a run id does, so
-    // no message that merely mentions answering a run is taken for this one.
+    // Answering a run by hand: a run that parked before anyone was listening
+    // sent no check-in the adopting session can reply to, so the user types
+    // the answer and the script relays their words. The opening word and the
+    // digit-bearing id keep prompts that merely mention answering a run out.
     const relayed = /^\s*answer\s+(?:the\s+)?(?:run\s+)?(?=[a-z0-9]*\d)([a-z0-9]{3,})\b[\s:,-]*([\s\S]*)$/i.exec(
       text
     )
