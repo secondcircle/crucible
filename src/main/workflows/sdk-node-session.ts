@@ -13,7 +13,7 @@ import {
 } from '../agent/cache-miss.ts'
 import {
   entriesToScan,
-  messagesToScan,
+  pathSeams,
   toCacheMessage,
   toTranscript,
   type StoredMessage
@@ -227,14 +227,16 @@ function wrap(session: AgentSession, cache: CacheWatch): NodeSession {
   }
 
   // The run view renders a node's transcript through the chat's own code, so
-  // the seams have to be in it.
+  // the seams have to be in it. Placed the one way Crucible places them: over
+  // the entries, which for a node session that never jumps or compacts is the
+  // path it is showing anyway.
   function transcriptNow(): readonly TranscriptItem[] {
     const messages = session.messages as unknown as StoredMessage[]
-    const scan = scanCacheMisses(messagesToScan(messages), cache)
-    return toTranscript(
-      messages,
-      new Map(scan.misses.map(({ at, miss }) => [at, seamFacts(miss)]))
-    )
+    const seams = new Map<number, CacheMissFacts>()
+    for (const [at, miss] of pathSeams(session.sessionManager.getEntries(), messages, cache)) {
+      seams.set(at, seamFacts(miss))
+    }
+    return toTranscript(messages, seams)
   }
 
   const unsubscribe = session.subscribe((event) => {

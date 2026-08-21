@@ -71,7 +71,7 @@ import {
   BASH_RUN_TYPE,
   deliveredBashRunId,
   entriesToScan,
-  messagesToScan,
+  pathSeams,
   toCacheMessage,
   toTranscript,
   userTextOf,
@@ -758,10 +758,20 @@ export function createSdkAdapter({
     }
   }
 
-  /** The seams of a conversation's current path, by the message that paid. */
-  function seamsOf(messages: readonly StoredMessage[]): Map<number, CacheMissFacts> {
-    const scan = scanCacheMisses(messagesToScan(messages), pricing)
-    return new Map(scan.misses.map(({ at, miss }) => [at, restoredFacts(miss)]))
+  // The seams of a conversation's current path, by the message that paid.
+  // Rebuilt from the whole entry sequence, exactly as π rebuilds its notices
+  // on resume and exactly as the ledger and the badge counted them, so a
+  // conversation reopens showing the seams it showed live — across jumps
+  // included.
+  function seamsOf(
+    manager: SessionManager,
+    messages: readonly StoredMessage[]
+  ): Map<number, CacheMissFacts> {
+    const seams = new Map<number, CacheMissFacts>()
+    for (const [at, miss] of pathSeams(manager.getEntries(), messages, pricing)) {
+      seams.set(at, restoredFacts(miss))
+    }
+    return seams
   }
 
   /** Every branch of the conversation, exactly as the money is counted. */
@@ -953,9 +963,10 @@ export function createSdkAdapter({
     },
 
     async transcript(sessionId: SessionId): Promise<readonly TranscriptItem[]> {
-      const { messages } = requireBound(sessionId).session
+      const { session } = requireBound(sessionId)
+      const { messages } = session
       // Seams in place: a reopened conversation shows where it paid twice.
-      return toTranscript(messages, seamsOf(messages))
+      return toTranscript(messages, seamsOf(session.sessionManager, messages))
     },
 
     release(sessionId: SessionId): void {

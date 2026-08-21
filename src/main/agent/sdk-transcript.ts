@@ -7,7 +7,13 @@ import type {
 } from '../../shared/agent/port'
 // Spelled with its extension so this module can also be loaded by plain Node.
 import { displaySafeMessage } from './adapter-error.ts'
-import type { CacheMessage, CacheScanEntry } from './cache-miss.ts'
+import {
+  scanCacheMisses,
+  type CacheMessage,
+  type CacheMissTrackerOptions,
+  type CacheScanEntry,
+  type DetectedCacheMiss
+} from './cache-miss.ts'
 import { renderToolOutput, summarizeToolArgs } from './sdk-events.ts'
 
 // Stored messages produce the same item kinds a live turn does, so history
@@ -122,27 +128,14 @@ export function toTranscript(
   return items
 }
 
-// π's own shapes read as the mirror reads them. Both sequences below stay
-// index-aligned with what they were built from, so a miss can be put back
-// beside the message that paid for it.
+// π's own shapes read as the mirror reads them. The sequence below stays
+// index-aligned with what it was built from, so a miss can be put back beside
+// the message that paid for it.
 
 /** One entry of a π session file, as much of it as the mirror needs. */
 interface StoredEntry {
   readonly type?: unknown
   readonly message?: unknown
-}
-
-/** The current path's messages: what a transcript is built from. */
-export function messagesToScan(messages: readonly StoredMessage[]): CacheScanEntry[] {
-  return messages.map((message): CacheScanEntry => {
-    // π writes these when a branch is left with a summary or the context is
-    // compacted: the next prompt is new content, not re-billed content.
-    if (message.role === 'branchSummary' || message.role === 'compactionSummary') {
-      return { kind: 'contextReset' }
-    }
-    const scanned = message.role === 'assistant' ? toCacheMessage(message) : undefined
-    return scanned === undefined ? { kind: 'other' } : { kind: 'assistant', message: scanned }
-  })
 }
 
 // Every entry of the conversation, every branch of it: what the whole-session
@@ -159,6 +152,47 @@ export function entriesToScan(entries: readonly unknown[]): CacheScanEntry[] {
     const scanned = toCacheMessage(message)
     return scanned === undefined ? { kind: 'other' } : { kind: 'assistant', message: scanned }
   })
+}
+
+// Where a conversation's misses land on the path it is currently showing,
+// keyed by the path message that paid for each one.
+//
+// The scan is over every entry, never over the path alone, because that is
+// what π does on resume and what live detection here does: the request a
+// message is compared against is the one that was really billed before it,
+// which after a jump is not the message above it on the path. Scanning the
+// path instead would answer one conversation's question two ways — a seam
+// live and in the ledger, none on reopen — with the badge still counting it.
+// Each miss then goes back beside its own message, by identity: π hands the
+// same message object to the entry and to the agent's state, so a path
+// message and its entry are the same object. π does copy the one shape it
+// repairs on load — a message stored with null content — and a copy is a
+// different object, so the message's own usage object is keyed as well: the
+// copy is shallow and carries the same one, and a miss exists only for a
+// message that has usage.
+export function pathSeams(
+  entries: readonly unknown[],
+  messages: readonly StoredMessage[],
+  options?: CacheMissTrackerOptions
+): Map<number, DetectedCacheMiss> {
+  const scan = scanCacheMisses(entriesToScan(entries), options)
+  if (scan.misses.length === 0) return new Map()
+
+  const paid = new Map<unknown, DetectedCacheMiss>()
+  for (const { at, miss } of scan.misses) {
+    const message = ((entries[at] ?? {}) as StoredEntry).message
+    if (message === undefined) continue
+    paid.set(message, miss)
+    const { usage } = message as { usage?: unknown }
+    if (typeof usage === 'object' && usage !== null) paid.set(usage, miss)
+  }
+
+  const seams = new Map<number, DetectedCacheMiss>()
+  messages.forEach((message, index) => {
+    const miss = paid.get(message) ?? paid.get((message as { usage?: unknown }).usage)
+    if (miss !== undefined) seams.set(index, miss)
+  })
+  return seams
 }
 
 // An assistant message that carries no usage carries no arithmetic either,

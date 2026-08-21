@@ -408,21 +408,31 @@ function appendThinking(
   ]
 }
 
-// Where the seam goes: immediately above the block the paying message
-// produced — its assistant text, or the chain it opened when it rendered no
-// text at all — with any thinking that message did counted as part of it.
+// Where the seam goes: at the head of everything the paying message rendered,
+// which is one block however many pieces it came in — thinking, text, and the
+// tool calls it opened, in whatever order it produced them.
+//
+// The walk knows where that block starts because π ends an assistant message
+// before it runs any of that message's tools: agent-loop emits `message_end`,
+// which is where the miss comes from, and only then `tool_execution_start`.
+// So when a miss arrives, every call the paying message opened is still
+// waiting to run, while a tool of an earlier message in the same turn has
+// already reported its result. It had to: that result is why the model got
+// to speak again. A settled tool is the floor of the paying block, and so is
+// anything that was never the model's to write.
 function withSeam(
   items: readonly ViewItem[],
   miss: CacheMissFacts
 ): readonly ViewItem[] {
   let at = items.length
-  const last = items[at - 1]
-  if (last?.kind === 'assistant') at -= 1
-  else if (last?.kind === 'tool') {
-    while (items[at - 1]?.kind === 'tool') at -= 1
-  }
-  while (items[at - 1]?.kind === 'thinking') at -= 1
+  while (at > 0 && partOfPayingBlock(items[at - 1])) at -= 1
   return [...items.slice(0, at), { kind: 'cacheMiss', miss }, ...items.slice(at)]
+}
+
+/** Whether this item belongs to the assistant message that just ended. */
+function partOfPayingBlock(item: ViewItem): boolean {
+  if (item.kind === 'tool') return item.running
+  return item.kind === 'assistant' || item.kind === 'thinking'
 }
 
 function settle(items: readonly ViewItem[], at: number): readonly ViewItem[] {

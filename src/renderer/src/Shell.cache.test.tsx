@@ -503,12 +503,10 @@ describe('the transcript seam', () => {
     expect(rows[seamAt + 1].textContent).toContain('here is the answer that paid for it')
   })
 
-  // Review repro, left failing on purpose: the paying message's block is its
-  // text plus the chain it opened, and the spec places the seam above the
-  // whole block (§5.5). π maps `toolcall_start` before `message_end`, so at
-  // the moment the miss event arrives the items already read
-  // [assistant text, tool] — and `withSeam` walks back over the tools but
-  // stops at the text, splitting the paying block in two.
+  // The paying message's block is its text plus the chain it opened, and the
+  // spec places the seam above the whole block (§5.5). π maps `toolcall_start`
+  // before `message_end`, so at the moment the miss event arrives the items
+  // already read [assistant text, tool].
   it('sits above the paid block when the paying message wrote text then called a tool', async () => {
     await mount()
     await send('break the cache')
@@ -531,13 +529,43 @@ describe('the transcript seam', () => {
     expect(rows[seamAt + 2].querySelector('.chain')).not.toBeNull()
   })
 
+  // π ends the message before it runs the message's tools, so the miss lands
+  // while the call it opened is still waiting: that is the order scripted
+  // here, and the order every case below relies on.
   it('sits above the chain a tool-only message opened', async () => {
     await mount()
     await send('run the thing')
 
     await act(async () => {
       port.toolStarted('s1', 'c1', 'bash', 'npm test')
+      port.emit({
+        type: 'cache_miss',
+        sessionId: 's1',
+        turnId: port.turnOf('s1') as string,
+        miss: miss()
+      })
       port.toolEnded('s1', 'c1', true, 'ok')
+    })
+
+    const [seam] = seams(document.body)
+    const rows = [...(seam.closest('ol')?.children ?? [])]
+    const seamAt = rows.findIndex((row) => row.contains(seam))
+    expect(rows[seamAt - 1].textContent).toContain('run the thing')
+    expect(rows[seamAt + 1].querySelector('.chain')).not.toBeNull()
+  })
+
+  // The second message of a turn pays too, and it is the only one the seam
+  // belongs to: the text above it was a different message, already billed.
+  it('leaves an earlier message of the same turn above the seam', async () => {
+    await mount()
+    await send('keep going')
+
+    await act(async () => {
+      port.text('s1', 'first I will read the file')
+      port.toolStarted('s1', 'c1', 'read', 'shell.ts')
+      port.toolEnded('s1', 'c1', true, 'the file')
+      // A new assistant message, this one all tool call and no text.
+      port.toolStarted('s1', 'c2', 'bash', 'npm test')
       port.emit({
         type: 'cache_miss',
         sessionId: 's1',
@@ -549,7 +577,11 @@ describe('the transcript seam', () => {
     const [seam] = seams(document.body)
     const rows = [...(seam.closest('ol')?.children ?? [])]
     const seamAt = rows.findIndex((row) => row.contains(seam))
-    expect(rows[seamAt + 1].querySelector('.chain')).not.toBeNull()
+    // The finished chain of the earlier message stays above the seam, with
+    // that message's text above it; only the new call is below.
+    expect(rows[seamAt - 2].textContent).toContain('first I will read the file')
+    expect(rows[seamAt - 1].textContent).toContain('read')
+    expect(rows[seamAt + 1].textContent).toContain('npm test')
   })
 
   it('says nothing about a fact Crucible does not know', async () => {
