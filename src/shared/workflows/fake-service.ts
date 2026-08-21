@@ -29,7 +29,18 @@ import type {
 // so the artifact rail, the reader and the exhibit-run route are all
 // exercised under `npm run dev`.
 
-const CANNED_WORKSPACE = { path: '/fake/resume-site', name: 'resume-site' }
+/** The workspace the canned records claim to have run in. */
+export interface CannedWorkspace {
+  readonly path: string
+  readonly name: string
+}
+
+// Only a fallback, and only for tests: Investigate on a canned row needs the
+// run's workspace to be open in the sidebar, and a made-up path can never be.
+// A launch hands in a directory that exists — an open workspace, the
+// CRUCIBLE_WORKSPACE seed, or the checkout itself — so the canned rows are
+// walkable rather than disabled forever. See main/workflows/select-service.ts.
+const FALLBACK_WORKSPACE: CannedWorkspace = { path: '/fake/resume-site', name: 'resume-site' }
 
 /** The parked-with-no-one-to-ask run, named because its answer path is wired. */
 const CANNED_UNATTENDED_ID = 'g8x2'
@@ -275,6 +286,10 @@ export interface FakeWorkflowRunOptions {
   // Where scripted artifacts are written and read. Absent keeps the records
   // right and leaves `artifact()` with nothing to answer from.
   readonly files?: FakeArtifactFiles
+  // The workspace the three canned records sit in. It must be a directory the
+  // user can have open, since that is what Investigate needs to make a session
+  // in; absent leaves the canned rows with a path no sidebar can match.
+  readonly workspace?: CannedWorkspace
   /** Shows a file in the OS file manager; absent leaves Reveal unable to act. */
   readonly reveal?: (path: string) => void
 }
@@ -283,6 +298,7 @@ export function createFakeWorkflowRunService({
   beatMs = DEFAULT_BEAT_MS,
   deliver,
   files,
+  workspace = FALLBACK_WORKSPACE,
   reveal
 }: FakeWorkflowRunOptions = {}): MainWorkflowRunService {
   const listeners = new Set<WorkflowRunListener>()
@@ -303,9 +319,9 @@ export function createFakeWorkflowRunService({
     artifactDir(runId).replace(/[\\/]artifacts$/, '')
 
   const records: LiveRun[] = [
-    cannedUnattended(artifactDir, runDir),
-    cannedFailed(artifactDir, runDir),
-    cannedFinished(artifactDir, runDir)
+    cannedUnattended(workspace, artifactDir, runDir),
+    cannedFailed(workspace, artifactDir, runDir),
+    cannedFinished(workspace, artifactDir, runDir)
   ]
   // The canned runs' files exist from the moment the service does, so opening
   // one in the reader shows real content without anything having been started.
@@ -708,13 +724,14 @@ function hoursAgo(hours: number): string {
   return new Date(Date.now() - hours * 3_600_000).toISOString()
 }
 
-/** A finished run in another workspace, so the global view has grouping. */
+/** A run that finished hours ago: the Done band, with nothing left to ask. */
 function cannedFinished(
+  workspace: CannedWorkspace,
   artifactDir: (runId: WorkflowRunId) => string,
   runDir: (runId: WorkflowRunId) => string
 ): LiveRun {
   const dir = artifactDir('d3p8')
-  const intent = `${CANNED_WORKSPACE.path}/docs/intent/og-images.md`
+  const intent = `${workspace.path}/docs/intent/og-images.md`
   const read = (path: string): RunArtifact => ({ name: artifactName(path), path, desc: 'input' })
   const spec = `${dir}/spec.md`
   const changes = `${dir}/changes.md`
@@ -724,9 +741,9 @@ function cannedFinished(
     id: 'd3p8',
     workflow: 'build',
     status: 'complete',
-    workspacePath: CANNED_WORKSPACE.path,
-    workspaceName: CANNED_WORKSPACE.name,
-    worktreePath: `${CANNED_WORKSPACE.path}/.crucible/worktrees/run-d3p8`,
+    workspacePath: workspace.path,
+    workspaceName: workspace.name,
+    worktreePath: `${workspace.path}/.crucible/worktrees/run-d3p8`,
     branch: 'crucible/run-d3p8',
     baseCommit: 'a11ce0fake',
     finalCommit: 'b0bfake',
@@ -828,21 +845,22 @@ function cannedFinished(
 // can end it. Dismiss clears it into Done; Investigate adopts it and asks
 // what happened.
 function cannedFailed(
+  workspace: CannedWorkspace,
   artifactDir: (runId: WorkflowRunId) => string,
   runDir: (runId: WorkflowRunId) => string
 ): LiveRun {
   const dir = artifactDir('b1n7')
-  const intent = `${CANNED_WORKSPACE.path}/docs/intent/og-images.md`
+  const intent = `${workspace.path}/docs/intent/og-images.md`
   const spec = `${dir}/spec.md`
   return {
     id: 'b1n7',
     workflow: 'build',
     status: 'failed',
-    workspacePath: CANNED_WORKSPACE.path,
-    workspaceName: CANNED_WORKSPACE.name,
+    workspacePath: workspace.path,
+    workspaceName: workspace.name,
     // A session that is not in the sidebar and never will be again.
     sessionId: 'fake-removed-session',
-    worktreePath: `${CANNED_WORKSPACE.path}/.crucible/worktrees/run-b1n7`,
+    worktreePath: `${workspace.path}/.crucible/worktrees/run-b1n7`,
     branch: 'crucible/run-b1n7',
     baseCommit: 'd00d1efake',
     inputs: { intent },
@@ -904,19 +922,20 @@ function cannedFailed(
 /** A session-less parked run: the unattended kind, parked with no one to ask
  *  until a session investigates it and adopts it. */
 function cannedUnattended(
+  workspace: CannedWorkspace,
   artifactDir: (runId: WorkflowRunId) => string,
   runDir: (runId: WorkflowRunId) => string
 ): LiveRun {
   const dir = artifactDir(CANNED_UNATTENDED_ID)
-  const intent = `${CANNED_WORKSPACE.path}/docs/intent/quota-flicker.md`
+  const intent = `${workspace.path}/docs/intent/quota-flicker.md`
   const spec = `${dir}/spec.md`
   return {
     id: CANNED_UNATTENDED_ID,
     workflow: 'build',
     status: 'running',
-    workspacePath: CANNED_WORKSPACE.path,
-    workspaceName: CANNED_WORKSPACE.name,
-    worktreePath: `${CANNED_WORKSPACE.path}/.crucible/worktrees/run-g8x2`,
+    workspacePath: workspace.path,
+    workspaceName: workspace.name,
+    worktreePath: `${workspace.path}/.crucible/worktrees/run-g8x2`,
     branch: 'crucible/run-g8x2',
     baseCommit: 'c4rl0fake',
     inputs: { intent },

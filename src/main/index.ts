@@ -86,6 +86,21 @@ const store = createShellStore(join(app.getPath('userData'), 'shell-state.json')
   })
 })
 
+// The folder a CRUCIBLE_WORKSPACE launch opens, read once: the shell adds it
+// on creation, and the fake flavor's canned runs claim it so their Investigate
+// has an open workspace to make a session in.
+const seededWorkspace = seedWorkspacePath()
+
+// Where the fake flavor's canned runs say they ran. It has to be a real
+// directory the sidebar can hold, or Investigate on those rows is disabled
+// forever: a workspace already open (so the walk needs no setup at all), else
+// the seed, else — in select-service — this checkout, which the user can add.
+const cannedWorkspacePath = ((): string | undefined => {
+  const { workspaces, activeWorkspaceId } = store.state
+  const active = workspaces.find((workspace) => workspace.id === activeWorkspaceId)
+  return (active ?? workspaces[0])?.path ?? seededWorkspace
+})()
+
 // One context panel for the launch, persisting inside the same store: the
 // adapter's three tools and the shell's snapshots read the same tabs.
 const panel = createPanelModel({ persistence: storePanelPersistence(store) })
@@ -120,6 +135,7 @@ const workflowRuns = selectWorkflowRunService(
     appPath: app.getAppPath(),
     stateDir: app.getPath('userData'),
     cache,
+    ...(cannedWorkspacePath === undefined ? {} : { cannedWorkspacePath }),
     // The renderer gets no path-opening capability of its own; Reveal in the
     // artifact reader asks the service, which asks this.
     reveal: (path: string) => electronShell.showItemInFolder(path),
@@ -202,7 +218,7 @@ const shell = withLogging(
     flavor,
     panel,
     pickFolder,
-    seedWorkspacePath: seedWorkspacePath(),
+    seedWorkspacePath: seededWorkspace,
     cache,
     // Nobody asked for a title, so nobody is told it failed: the run log is
     // the whole of the report.

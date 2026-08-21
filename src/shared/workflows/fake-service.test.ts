@@ -86,6 +86,29 @@ describe('the fake workflow run service', () => {
     service.dispose()
   })
 
+  // Investigate makes a session in the run's own workspace, so a canned run
+  // in a workspace nobody can open is a row whose Investigate never acts. The
+  // launch hands in a directory that exists; every canned record takes it.
+  it('puts its canned records in the workspace it was given', async () => {
+    const service = createFakeWorkflowRunService({
+      beatMs: 0,
+      workspace: { path: '/repos/crucible', name: 'crucible' }
+    })
+
+    const { runs } = await service.snapshot()
+    const canned = runs.filter((run) => ['g8x2', 'b1n7', 'd3p8'].includes(run.id))
+    expect(canned).toHaveLength(3)
+    for (const run of canned) {
+      expect(run.workspacePath, run.id).toBe('/repos/crucible')
+      expect(run.workspaceName, run.id).toBe('crucible')
+      // The rest of the run's story follows the same workspace: a worktree
+      // somewhere else would read as another repo's run.
+      expect(run.worktreePath, run.id).toBe(`/repos/crucible/.crucible/worktrees/run-${run.id}`)
+      expect(Object.values(run.inputs).join(' '), run.id).toContain('/repos/crucible/')
+    }
+    service.dispose()
+  })
+
   it('carries the run directory on every record it hands out', async () => {
     const files = memoryArtifactFiles()
     const service = createFakeWorkflowRunService({ beatMs: 0, files })

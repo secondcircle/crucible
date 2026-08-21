@@ -225,6 +225,31 @@ const RUN_ANSWERED_DELTAS: readonly string[] = [
   'The run resumes from here.'
 ]
 
+// What the script says when it was handed a run to investigate. The parked
+// case spells the words that hand the run an answer, so the unstick walk needs
+// nothing memorized and no paid model to demonstrate.
+const INVESTIGATED_DELTAS: readonly string[] = [
+  'That is the run as it stands, and it reports here from now on. ',
+  'Its record, artifacts and node transcripts are where the prompt says. ',
+  '(Scripted: nothing was read and nothing was paid for it.)'
+]
+
+function parkedInvestigationDeltas(runId: string): readonly string[] {
+  return [
+    'That is the run as it stands: parked on a question with nobody to ask, until now. ',
+    `Tell me what to answer — say \`answer ${runId}: <your ruling>\` — and I pass it to the `,
+    'run, which resumes from there. (Scripted: nothing was paid for it.)'
+  ]
+}
+
+// Said when the answer was the user's, not the script's: after investigating a
+// run that parked with no one to ask, telling this session to answer it is how
+// the run gets unstuck.
+const RUN_RELAYED_DELTAS: readonly string[] = [
+  'Passed that to the run as its answer, so it resumes from here. ',
+  'Its check-ins and its completion arrive in this session now. (Scripted: no cost.)'
+]
+
 const RUN_RETURNED_DELTAS: readonly string[] = [
   'The run finished and its work is committed on its branch. ',
   'I would pull it in next — in this flavor nothing is merged, and nothing was paid for it.'
@@ -544,8 +569,8 @@ export function createFakeAdapter({
   }
 
   // The scripted orchestrator. Messages a run delivered are recognized by
-  // their own wording; everything else needs the word "workflow" so ordinary
-  // prompts are never hijacked.
+  // their own wording; everything else needs the word "workflow", or a run id
+  // said with "answer", so ordinary prompts are never hijacked.
   function runScript(
     bound: Bound,
     sessionId: SessionId,
@@ -573,6 +598,53 @@ export function createFakeAdapter({
       if (asked.includes('completed')) return { calls: [], closing: RUN_RETURNED_DELTAS }
       if (asked.includes('failed')) return { calls: [], closing: RUN_FAILED_DELTAS }
       return { calls: [], closing: RUN_LIST_DELTAS }
+    }
+
+    // The app's own Investigate prompt (the renderer's runs/prompt.ts), which
+    // no one typed: the script lists the run it was just handed, and where the
+    // run is parked it says how to hand it an answer, since the scripted agent
+    // will not invent a ruling the user has not given. Recognized by its
+    // opening, the way a run's own messages are; reworded, it falls back to
+    // the standard reply and nothing breaks.
+    const investigated = /^investigate crucible run ([a-z0-9]+)/i.exec(text)
+    if (investigated !== null) {
+      return {
+        calls: [
+          {
+            name: 'crucible_runs',
+            summary: 'this session',
+            answer: () => runs.list(sessionId)
+          }
+        ],
+        closing: asked.includes('waiting on an answer')
+          ? parkedInvestigationDeltas(investigated[1])
+          : INVESTIGATED_DELTAS
+      }
+    }
+
+    // Answering a run by hand, the last step of the unstick walk: a run that
+    // parked before anyone was listening sends no check-in to the session that
+    // later adopts it, so the user types the answer and the script relays
+    // their words rather than inventing a ruling of its own. The prompt has to
+    // open with it, and the id has to carry a digit the way a run id does, so
+    // no message that merely mentions answering a run is taken for this one.
+    const relayed = /^\s*answer\s+(?:the\s+)?(?:run\s+)?(?=[a-z0-9]*\d)([a-z0-9]{3,})\b[\s:,-]*([\s\S]*)$/i.exec(
+      text
+    )
+    if (relayed !== null) {
+      const runId = relayed[1]
+      const said = relayed[2].trim()
+      return {
+        calls: [
+          {
+            name: 'crucible_answer',
+            summary: `run ${runId}`,
+            answer: () =>
+              runs.answer(sessionId, runId, said === '' ? 'Proceed as proposed.' : said)
+          }
+        ],
+        closing: RUN_RELAYED_DELTAS
+      }
     }
 
     if (asked.includes('workflow')) {

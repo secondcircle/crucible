@@ -1,6 +1,6 @@
 import { mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { join } from 'node:path'
+import { basename, join } from 'node:path'
 import type { SessionId } from '../../shared/agent/port'
 import {
   createFakeWorkflowRunService,
@@ -32,6 +32,12 @@ export interface WorkflowRunWiring {
   readonly cache?: CacheRecorder
   /** Shows a file in the OS file manager, for the artifact reader's Reveal. */
   readonly reveal?: (path: string) => void
+  // Fake flavor only: the workspace the canned runs claim. Investigate needs
+  // the run's workspace open in the sidebar to make a session in, so a canned
+  // run in an invented directory can never be investigated. Main hands in a
+  // directory that is open, or seeded, or at worst addable; the fallback below
+  // is this checkout, which is all three the moment the user adds it.
+  readonly cannedWorkspacePath?: string
 }
 
 // The fake service is compiled into the renderer bundle too, so its file
@@ -79,9 +85,11 @@ export function selectWorkflowRunService(
   log.append({ source: 'main', event: 'workflow_run_service_selected', service: flavor })
 
   if (flavor !== 'sdk') {
+    const path = wiring.cannedWorkspacePath ?? process.cwd()
     return createFakeWorkflowRunService({
       deliver: wiring.deliver,
       files: scriptedArtifactFiles(join(wiring.stateDir, 'workflow-runs')),
+      workspace: { path, name: basename(path) },
       ...(wiring.reveal === undefined ? {} : { reveal: wiring.reveal })
     })
   }

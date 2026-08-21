@@ -4,6 +4,7 @@
 // on is pinned here.
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { AdapterEvent } from './adapter'
+import { createFakeWorkflowRunService } from '../workflows/fake-service'
 import { createFakeAdapter, FAKE_CACHE_MISS, FAKE_MODEL, FAKE_TURN_USAGE } from './fake-adapter'
 
 const WORKSPACE = '/workspaces/crucible'
@@ -208,6 +209,86 @@ describe('the scripted cache miss', () => {
     expect(totals).toEqual(
       expect.objectContaining({ cacheMisses: { count: 1, dollars: 0.62 } })
     )
+  })
+})
+
+// The unstick walk of `npm run dev`, in one place: Investigate hands this
+// session a run that parked with nobody to ask, and the user's own words are
+// what unblocks it. Nothing here is paid for, which is the point.
+describe('the scripted orchestrator on an investigated run', () => {
+  // The opening and the waiting line the renderer's runs/prompt.ts writes; the
+  // script recognizes the prompt by them.
+  const investigation = (runId: string): string =>
+    [
+      `Investigate Crucible run ${runId}, a run of the "build" workflow.`,
+      '',
+      '- status: running',
+      '',
+      'This run is waiting on an answer: check-in: no one to ask',
+      `Answer it with the crucible_answer tool (runId "${runId}"); the run resumes from there.`
+    ].join('\n')
+
+  const said = (events: readonly AdapterEvent[]): string =>
+    events
+      .filter((event) => event.type === 'text_delta')
+      .map((event) => (event as { delta: string }).delta)
+      .join('')
+
+  it('answers a parked run with the words the user gives it, and says how to give them', async () => {
+    const delivered: { sessionId: string; text: string }[] = []
+    const runs = createFakeWorkflowRunService({
+      beatMs: 0,
+      deliver: (sessionId, text) => delivered.push({ sessionId, text })
+    })
+    const adapter = createFakeAdapter({ pauseMs: 0, runs: runs.tools })
+    await adapter.bind({ sessionId: 's1', workspacePath: WORKSPACE })
+    const events: AdapterEvent[] = []
+    adapter.onEvent((event) => events.push(event))
+
+    // What Investigate does before it sends the prompt.
+    await runs.adopt('g8x2', 's1')
+    await adapter.prompt('s1', 't1', investigation('g8x2'))
+
+    // It lists the run it was handed, and names the words that answer it: the
+    // walk needs nothing memorized.
+    expect(
+      events.filter((event) => event.type === 'tool_started').map((event) => event.name)
+    ).toEqual(['crucible_runs'])
+    expect(said(events)).toContain('answer g8x2:')
+
+    events.length = 0
+    await adapter.prompt('s1', 't2', 'answer g8x2: put the merge helper in the merge module')
+
+    expect(
+      events.filter((event) => event.type === 'tool_started').map((event) => event.name)
+    ).toEqual(['crucible_answer'])
+    // From there the script walks the rest of the run on its beat timer.
+    const deadline = Date.now() + 4000
+    while (!delivered.some((message) => message.text.includes('completed'))) {
+      if (Date.now() > deadline) throw new Error('the answered run never completed')
+      await new Promise((resolve) => setTimeout(resolve, 5))
+    }
+    const run = (await runs.snapshot()).runs.find((candidate) => candidate.id === 'g8x2')
+    expect(run?.question?.answer).toBe('put the merge helper in the merge module')
+    expect(run?.status).toBe('complete')
+    expect(delivered.every((message) => message.sessionId === 's1')).toBe(true)
+    runs.dispose()
+  })
+
+  it('leaves prompts that merely talk about answering a run to the standard script', async () => {
+    const runs = createFakeWorkflowRunService({ beatMs: 0 })
+    const adapter = createFakeAdapter({ pauseMs: 0, runs: runs.tools })
+    await adapter.bind({ sessionId: 's1', workspacePath: WORKSPACE })
+    const events: AdapterEvent[] = []
+    adapter.onEvent((event) => events.push(event))
+
+    await adapter.prompt('s1', 't1', 'answer the question about where the merge helper lives')
+
+    expect(
+      events.filter((event) => event.type === 'tool_started').map((event) => event.name)
+    ).not.toContain('crucible_answer')
+    expect((await runs.snapshot()).runs.find((run) => run.id === 'g8x2')?.waiting).toBe(true)
+    runs.dispose()
   })
 })
 
