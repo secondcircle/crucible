@@ -28,6 +28,7 @@ export const PANEL_TOOLS: readonly PanelToolDefinition[] = [
     label: 'Show in Context Panel',
     description:
       "Show an HTML or markdown file as a tab in the user's context panel. Re-showing the same file replaces its tab and refreshes the view.\n\n" +
+      'Reach for this tool whenever a document is pertinent to what the user is doing. Naming a path and waiting to be asked to open it leaves them with nothing to read. Show the file, then say plainly that it is in the panel.\n\n' +
       "The context panel is the user's primary display; they may not notice messages in the chat. Content shown there is what the user relies on to follow the work.\n\n" +
       "The panel's value comes from curation, not accumulation: it should reflect only what is relevant to the current conversation. Stale tabs actively obscure what matters now — close them once they have served their purpose (e.g. a plan that has been accepted).\n\n" +
       'Ephemeral artifacts (plans, diagrams, reports) belong in a temp directory, not the project tree.',
