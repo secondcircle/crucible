@@ -13,8 +13,8 @@ export interface NeedsYouDesk {
   onFocusChanged(listener: (focused: boolean) => void): () => void
   /** Zero means no badge at all, not a badge reading "0". */
   badge(count: number): void
-  /** No sound, ever. `onOpen` is the click. */
-  notify(session: WaitingSession, onOpen: () => void): void
+  /** `sound` is the burst guard's verdict; the desk only carries it out. */
+  notify(session: WaitingSession, sound: boolean, onOpen: () => void): void
   /** Brings the window forward on that session. */
   open(sessionId: SessionId): void
 }
@@ -23,12 +23,24 @@ export interface LiveNeedsYouService extends NeedsYouService {
   dispose(): void
 }
 
-export function createNeedsYouService(desk: NeedsYouDesk): LiveNeedsYouService {
+// Sessions that finish inside this window of each other are one burst, and a
+// burst is worth one chime. Four finishes over a lunch break are four banners
+// and one sound.
+export const BURST_WINDOW_MS = 5_000
+
+export function createNeedsYouService(
+  desk: NeedsYouDesk,
+  // Injectable so the burst guard is provable without waiting on a real clock.
+  now: () => number = Date.now
+): LiveNeedsYouService {
   // The last count the renderer reported, whether or not it was shown. The
   // badge is re-applied from it the moment the window loses focus, so leaving
   // Crucible reveals what was already waiting.
   let waitingCount = 0
   let alive = true
+  // When the last banner that sounded was posted, or undefined while nothing
+  // has sounded this launch.
+  let lastSoundedAt: number | undefined
 
   const unsubscribe = desk.onFocusChanged((focused) => {
     if (!alive) return
@@ -46,9 +58,14 @@ export function createNeedsYouService(desk: NeedsYouDesk): LiveNeedsYouService {
     },
 
     async announce(session: WaitingSession): Promise<void> {
-      // Nothing leaves a window the user is looking at.
+      // Nothing leaves a window the user is looking at, so a focused finish
+      // never consults the burst guard either.
       if (desk.focused()) return
-      desk.notify(session, () => desk.open(session.sessionId))
+      const at = now()
+      const sound = lastSoundedAt === undefined || at - lastSoundedAt >= BURST_WINDOW_MS
+      // The guard silences; it never suppresses. Every finish gets its banner.
+      if (sound) lastSoundedAt = at
+      desk.notify(session, sound, () => desk.open(session.sessionId))
     },
 
     dispose(): void {

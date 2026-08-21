@@ -32,7 +32,10 @@ export function selectNeedsYouService(
 }
 
 // The whole of what this feature touches of the OS: a number on the dock icon,
-// and a banner with no sound.
+// and a banner that plays macOS's default notification sound unless the burst
+// guard has already spent the chime on a banner just before it. Non-silent
+// hands the sound to macOS, so System Settings › Notifications › Crucible is
+// what turns it off.
 function electronDesk(window: BrowserWindow, open: (sessionId: SessionId) => void): NeedsYouDesk {
   return {
     focused: () => window.isFocused(),
@@ -53,12 +56,12 @@ function electronDesk(window: BrowserWindow, open: (sessionId: SessionId) => voi
       app.setBadgeCount(count)
     },
 
-    notify(session, onOpen) {
+    notify(session, sound, onOpen) {
       if (!Notification.isSupported()) return
       const banner = new Notification({
         title: `${session.workspace} · finished`,
         body: session.title,
-        silent: true
+        silent: !sound
       })
       banner.on('click', onOpen)
       banner.show()

@@ -20,6 +20,9 @@ export interface WaitingSession {
 export interface NeedsYouService {
   /** How many sessions are waiting on the user now. Zero clears the badge. */
   waiting(count: number): Promise<void>
-  /** One session finished. At most one banner comes of it, and no sound. */
+  /**
+   * One session finished. At most one banner comes of it, sounding unless a
+   * banner just before it already did.
+   */
   announce(session: WaitingSession): Promise<void>
 }
