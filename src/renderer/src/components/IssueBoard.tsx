@@ -392,7 +392,7 @@ function NotConfigured({ missing }: { readonly missing: readonly MissingPiece[] 
         ))}
       </dl>
       <p>
-        A session here can do this for you: the setup is in Crucible’s agent docs, as
+        A session here can do this for you: the setup is in Crucible’s agent docs, as{' '}
         <code>jira.md</code>. Open this board again and it checks the files afresh.
       </p>
     </div>

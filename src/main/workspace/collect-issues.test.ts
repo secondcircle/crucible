@@ -278,6 +278,21 @@ describe('a Jira that is intended here and not finished', () => {
     expect(missing(answer)).toEqual(['JIRA_BASE_URL', 'JIRA_EMAIL', 'JIRA_API_TOKEN'])
   })
 
+  it('lists the base URL where it is there but cannot address a request', async () => {
+    const wire = jiraWire()
+    const { answer } = await collect(BITBUCKET, '/repos/ek-app', {
+      readFile: files({
+        '.crucible/jira.json': '{"projectKey":"EK"}',
+        '.env.local': `${ENV}\nJIRA_BASE_URL=secondcircle.atlassian.net`
+      }),
+      fetchImpl: wire.impl
+    })
+
+    expect(missing(answer)).toEqual(['JIRA_BASE_URL'])
+    // And no request is attempted on a URL that cannot be built.
+    expect(wire.urls).toEqual([])
+  })
+
   it('lists the pointer file where it is there but names no project', async () => {
     const { answer } = await collect(BITBUCKET, '/repos/ek-app', {
       readFile: files({ '.crucible/jira.json': 'not json', '.env.local': ENV })

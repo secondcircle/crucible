@@ -53,6 +53,30 @@ export function parseEnvFile(text: string): Readonly<Record<string, string>> {
   return values
 }
 
+/**
+ * The site to send requests to, with any trailing slash gone, or `undefined`
+ * where the value cannot form a request. A hostname with the scheme dropped
+ * (`secondcircle.atlassian.net`) is what a person copying the site out of a
+ * browser writes, and it is not a URL: it has to be caught here, where the
+ * board can say which key to fix, rather than at the first request.
+ */
+export function parseJiraBaseUrl(value: string | undefined): string | undefined {
+  if (value === undefined) return undefined
+  const trimmed = value.trim().replace(/\/+$/, '')
+  if (trimmed === '') return undefined
+  let parsed: URL
+  try {
+    parsed = new URL(trimmed)
+  } catch {
+    return undefined
+  }
+  // `mailto:ike@example.com` parses, so the scheme is checked too: a Jira site
+  // answers on http or https and nothing else.
+  if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') return undefined
+  if (parsed.hostname === '') return undefined
+  return trimmed
+}
+
 /** The project key the pointer names, or `undefined` where it names none. */
 export function parseJiraPointer(text: string | undefined): string | undefined {
   if (text === undefined) return undefined
@@ -89,11 +113,20 @@ export function readJiraSetup(files: {
 }): JiraSetup {
   const values = files.env === undefined ? {} : parseEnvFile(files.env)
   const projectKey = parseJiraPointer(files.pointer)
+  const baseUrl = parseJiraBaseUrl(values[JIRA_BASE_URL])
 
   const missing: MissingPiece[] = []
   for (const key of JIRA_CREDENTIAL_KEYS) {
     const value = values[key]
-    if (value === undefined || value === '') missing.push(missingPiece(key))
+    if (value === undefined || value === '') {
+      missing.push(missingPiece(key))
+      continue
+    }
+    // A base URL that cannot form a request is as unusable as one that is not
+    // there, so it is listed the same way, exactly as an unparseable pointer
+    // file counts as a missing pointer. The sentence beside it shows the shape,
+    // scheme and all, which is the part a bad value is usually missing.
+    if (key === JIRA_BASE_URL && baseUrl === undefined) missing.push(missingPiece(key))
   }
   // The pointer is listed last: a person reading this fixes the file they can
   // commit after the ones they cannot.
@@ -103,7 +136,8 @@ export function readJiraSetup(files: {
   return {
     kind: 'ready',
     config: {
-      baseUrl: (values[JIRA_BASE_URL] ?? '').replace(/\/+$/, ''),
+      // Usable by here: an absent or unparseable one was listed above.
+      baseUrl: baseUrl as string,
       email: values[JIRA_EMAIL] ?? '',
       token: values[JIRA_API_TOKEN] ?? '',
       projectKey: projectKey as string

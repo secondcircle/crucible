@@ -7,6 +7,7 @@ import {
   chooseIssueHost,
   hasJiraCredentialKey,
   parseEnvFile,
+  parseJiraBaseUrl,
   parseJiraPointer,
   readJiraSetup
 } from './jira-config'
@@ -63,6 +64,37 @@ describe('reading .env.local', () => {
     expect(hasJiraCredentialKey('JIRA_EMAIL=ike@example.com')).toBe(true)
     // Named but empty still counts as intent: the board then says it is empty.
     expect(hasJiraCredentialKey('JIRA_API_TOKEN=')).toBe(true)
+  })
+})
+
+describe('reading the base URL', () => {
+  it('takes a site URL and drops the trailing slash the request supplies', () => {
+    expect(parseJiraBaseUrl('https://secondcircle.atlassian.net')).toBe(
+      'https://secondcircle.atlassian.net'
+    )
+    expect(parseJiraBaseUrl('https://secondcircle.atlassian.net///')).toBe(
+      'https://secondcircle.atlassian.net'
+    )
+    // A path prefix survives: not every Jira lives at the root of its host.
+    expect(parseJiraBaseUrl('  http://jira.internal:8080/jira/  ')).toBe(
+      'http://jira.internal:8080/jira'
+    )
+  })
+
+  it('takes nothing that cannot address a request', () => {
+    for (const value of [
+      undefined,
+      '',
+      '   ',
+      // The scheme dropped, which is what copying a hostname out of a browser
+      // gives you, and the value that used to throw at the first request.
+      'secondcircle.atlassian.net',
+      'https://',
+      'mailto:ike@example.com',
+      'your Jira site'
+    ]) {
+      expect(parseJiraBaseUrl(value)).toBeUndefined()
+    }
   })
 })
 
@@ -131,6 +163,21 @@ describe('the two files together', () => {
     // Each sentence names the file the piece belongs in.
     expect(setup.missing[0]?.where).toContain('.env.local')
     expect(setup.missing[2]?.where).toContain('projectKey')
+  })
+
+  it('counts a base URL that cannot address a request as missing', () => {
+    // Never ready with it: a request built on this throws, and the board says
+    // which key to fix instead of going quiet.
+    const setup = readJiraSetup({
+      pointer: POINTER,
+      env: `${ENV}\nJIRA_BASE_URL=secondcircle.atlassian.net`
+    })
+
+    expect(setup.kind === 'incomplete' && setup.missing.map((piece) => piece.name)).toEqual([
+      'JIRA_BASE_URL'
+    ])
+    // And the sentence beside it shows the shape, scheme included.
+    expect(setup.kind === 'incomplete' && setup.missing[0]?.where).toContain('https://')
   })
 
   it('counts a key present but empty as missing', () => {

@@ -55,6 +55,8 @@ JIRA_API_TOKEN=ATATT...
 ```
 
 - `JIRA_BASE_URL` is the site, with no trailing path. A trailing slash is fine.
+  Keep the `https://`: a bare hostname cannot address a request, and the board
+  lists `JIRA_BASE_URL` as missing until it has a scheme.
 - `JIRA_EMAIL` is the Atlassian account the token belongs to.
 - `JIRA_API_TOKEN` is an API token, not a password. Two ways to get one:
   - copy the values from a sibling repository that already talks to the same
@@ -125,6 +127,10 @@ The board says so, in the pane where it would otherwise show a ticket: a
 heading that Jira is not set up in this workspace yet, then every missing piece
 by its exact name with a sentence saying where it goes. Missing keys and a
 missing pointer file are listed together, so one look is enough.
+
+A key whose value cannot be used counts as missing too: an empty value, a
+pointer file that will not parse, a `JIRA_BASE_URL` without its scheme. The
+sentence beside the name shows the shape it wants.
 
 Fix the files and press ⌘I again. Opening the board re-reads them; there is
 nothing to restart and no setting to flip.

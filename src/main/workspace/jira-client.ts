@@ -68,12 +68,17 @@ export function createJiraClient({
     const ms = Math.min(REQUEST_MS, remaining())
     if (ms <= 0) return { ok: false, failure: { kind: 'timedOut' } }
 
-    const url = new URL(`${config.baseUrl}/rest/api/3${path}`)
-    for (const [name, value] of Object.entries(query)) url.searchParams.set(name, value)
-
     let body: string
     let status: number
     try {
+      // The URL is built in here on purpose. `new URL` throws on a base URL
+      // that is only a hostname, and a request that cannot even be addressed is
+      // a failure of the same kind as one that never arrives: this function
+      // answers every caller, so nothing can throw out of a collection and
+      // leave the board reading forever.
+      const url = new URL(`${config.baseUrl}/rest/api/3${path}`)
+      for (const [name, value] of Object.entries(query)) url.searchParams.set(name, value)
+
       const res = await doFetch(url.toString(), {
         method: 'GET',
         headers: { authorization, accept: 'application/json' },
