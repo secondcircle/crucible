@@ -70,7 +70,7 @@ export function createIpcClient(): AgentPort {
 
     sessionTree: (id: SessionId) => call<SessionTree>('sessionTree', id),
     jump: (id: SessionId, ref: string, options: { readonly summarize: boolean }) =>
-      call<{ editorText?: string }>('jump', id, ref, options),
+      call<{ cancelled: boolean; editorText?: string }>('jump', id, ref, options),
     // Nothing optional is sent as an absent argument: the wire carries what
     // there is, so a request reads as what was asked for.
     setLabel: (id: SessionId, ref: string, label?: string) =>

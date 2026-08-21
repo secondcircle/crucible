@@ -17,6 +17,38 @@ export interface EventMapper {
   map(event: AgentSessionEvent, target: TurnTarget): AdapterEvent | undefined
 }
 
+// What π's `navigateTree` answered, in the port's words. π reports a
+// cancelled or aborted navigation without moving the leaf, so it is an
+// outcome rather than a failure.
+export function jumpOutcome(navigated: {
+  readonly editorText?: string
+  readonly cancelled: boolean
+  readonly aborted?: boolean
+}): { readonly cancelled: boolean; readonly editorText?: string } {
+  if (navigated.cancelled || navigated.aborted === true) return { cancelled: true }
+  return navigated.editorText === undefined
+    ? { cancelled: false }
+    : { cancelled: false, editorText: navigated.editorText }
+}
+
+// π's own retry of a branch summary, narrated across the port. Session-scoped
+// and turn-less: the caller decides whether a summarizing jump is in flight,
+// because π raises this event for compaction retries inside turns too.
+export function summarizeRetryOf(
+  event: AgentSessionEvent,
+  sessionId: SessionId
+): AdapterEvent | undefined {
+  if (event.type !== 'summarization_retry_scheduled') return undefined
+  return {
+    type: 'summarize_retry',
+    sessionId,
+    attempt: event.attempt,
+    maxAttempts: event.maxAttempts,
+    delayMs: event.delayMs,
+    message: displaySafeMessage(event.errorMessage, 'The summary could not be written.')
+  }
+}
+
 const OUTPUT_LIMIT = 20_000
 
 const SUMMARY_LIMIT = 160

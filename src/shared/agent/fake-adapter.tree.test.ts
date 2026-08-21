@@ -80,7 +80,7 @@ describe('a jump', () => {
 
     const jumped = await adapter.jump('s1', second?.ref ?? '', false)
 
-    expect(jumped).toEqual({ editorText: 'second' })
+    expect(jumped).toEqual({ cancelled: false, editorText: 'second' })
     const items = await adapter.transcript('s1')
     expect(items.filter((item) => item.kind === 'user')).toEqual([
       { kind: 'user', text: 'first' }

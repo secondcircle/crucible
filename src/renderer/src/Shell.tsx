@@ -60,6 +60,14 @@ import { useQuota } from './quota/use-quota'
 import { runActivity } from './runs/activity'
 import { useAuth } from './settings/use-auth'
 import {
+  jumpCancellable,
+  jumpNote,
+  jumpOf,
+  withJump,
+  withoutJump,
+  type Jumps
+} from './state/jumps'
+import {
   askingCount,
   finishedUnwatched,
   forgetGone,
@@ -164,7 +172,12 @@ export function Shell({
     { readonly sessionId: SessionId; readonly model: ModelId } | undefined
   >(undefined)
   const [drafts, setDrafts] = useState<Readonly<Record<SessionId, string>>>({})
-  const [failure, setFailure] = useState<string | undefined>(undefined)
+  // A failure belongs to the session whose action raised it and renders
+  // nowhere else. An absent session is the window with no session on screen,
+  // which is the only place such a failure can be shown.
+  const [failure, setFailure] = useState<
+    { readonly sessionId: SessionId | undefined; readonly message: string } | undefined
+  >(undefined)
   // Chips belong to the session's draft and last as long as the draft does.
   const [attachments, setAttachments] = useState<
     Readonly<Record<SessionId, readonly Attachment[]>>
@@ -172,9 +185,14 @@ export function Shell({
   const [veil, setVeil] = useState(false)
   const [tree, setTree] = useState<Tree | undefined>(undefined)
   const [treeOpen, setTreeOpen] = useState(false)
-  // A summarizing jump pays for an LLM call, so the tree says it is working.
-  const [jumping, setJumping] = useState<'jump' | 'summarize' | undefined>(undefined)
-  const [toast, setToast] = useState<string | undefined>(undefined)
+  // A summarizing jump pays for an LLM call, so the tree says it is working —
+  // in the session that is paying, and in no other. A failure outlives the
+  // call; every other kind clears when the jump settles.
+  const [jumps, setJumps] = useState<Jumps>({})
+  /** The session whose action produced it; it renders while that one is active. */
+  const [toast, setToast] = useState<
+    { readonly sessionId: SessionId | undefined; readonly text: string } | undefined
+  >(undefined)
   // The whole of the board's open state: only the chip and ⌘B put a workspace
   // here, and everything that closes the board takes it back out.
   const [boardFor, setBoardFor] = useState<WorkspaceId | undefined>(undefined)
@@ -232,9 +250,14 @@ export function Shell({
   // Read by a creation that outlived the click: what the sidebar holds now,
   // rather than what it held when the flip started.
   const sessionsNow = useRef<readonly SessionState[]>([])
+  // The bash drawers as they stand, for an arrival that has to stop a running
+  // command before it closes the drawer holding it.
+  const runsNow = useRef<Readonly<Record<WorkspaceId, RunView>>>({})
   // The same trick for the port's subscription, which is set up once and must
   // not be torn down and rebuilt every time the sidebar changes.
   const railNow = useRef<ShellSnapshot>(NOTHING_YET.snapshot)
+  /** Whether a login flow is running, which is what the sheet stays open for. */
+  const loginNow = useRef(false)
   // Whether this window has focus, which is what "not looking" is measured
   // against. Seeded true and corrected by the events rather than read from
   // `document.hasFocus()`: at mount the window has not been shown yet, and a
@@ -268,6 +291,12 @@ export function Shell({
   // Known to hold nothing, which is what lets a guard skip its question.
   const emptyConversation = knownEmpty(view)
   const flipInFlight = activeSessionId !== undefined && flipping.includes(activeSessionId)
+  // This session's jump and no other's: what session A is summarizing puts
+  // nothing at all on session B's screen.
+  const activeJump = jumpOf(jumps, activeSessionId)
+  // A reopened tree is a loading panel until its fetch lands, so being open is
+  // not the same as being able to carry what the jump has to say.
+  const treeShowing = treeOpen && session !== undefined && tree !== undefined
   const working = session?.working ?? false
   const queue = session?.queue
   // The ring's choice stands in for the snapshot's until the port confirms it,
@@ -315,8 +344,26 @@ export function Shell({
   // A record can only vanish across a launch; the view must not outlive it.
   if (openRunId !== undefined && openRun === undefined) setOpenRunId(undefined)
 
-  const report = useCallback((cause: unknown): void => {
-    setFailure(cause instanceof Error ? cause.message : String(cause))
+  // Owned by the session that asked for whatever failed. A call site that
+  // knows the session names it; one that does not gets the session that was
+  // active when the failure arrived.
+  const report = useCallback((cause: unknown, owner?: SessionId): void => {
+    setFailure({
+      sessionId: owner ?? railNow.current.activeSessionId,
+      message: messageOf(cause)
+    })
+  }, [])
+
+  /** Acting in a session clears what that session's last action had to say. */
+  const clearFailure = useCallback((sessionId: SessionId | undefined): void => {
+    setFailure((current) =>
+      current === undefined || current.sessionId === sessionId ? undefined : current
+    )
+  }, [])
+
+  /** A confirmation belongs to the session it was earned in, and to no other. */
+  const announce = useCallback((text: string, owner?: SessionId): void => {
+    setToast({ sessionId: owner ?? railNow.current.activeSessionId, text })
   }, [])
 
   // A turn ended in a session nobody was watching, so that session needs the
@@ -473,6 +520,53 @@ export function Shell({
     })
   }, [])
 
+  // Arriving at a session means seeing that session: everything that covers
+  // or crowds the chat goes, in the same frame as the click and without
+  // waiting for any round trip. `landing` is the session being
+  // arrived at where it is already known, so a failure or a toast that
+  // belongs there is not wiped on the way in.
+  //
+  // The live login dialog is exempt: credentials are global, the flow is
+  // modal, and it is not session state.
+  const arrive = useCallback(
+    (landing?: SessionId): void => {
+      setPopover('none')
+      setTreeOpen(false)
+      setBoardFor(undefined)
+      setIssuesFor(undefined)
+      setRunsOverviewOpen(false)
+      setOpenRunId(undefined)
+      // The sheet closes, except while it is holding a live login: that
+      // dialog is modal, its flow is running in main, and closing the sheet
+      // under it would orphan both.
+      setSettings((current) =>
+        current.open && !loginNow.current ? { ...current, open: false } : current
+      )
+      setCacheOpen(false)
+      setQuestion(undefined)
+      setFileToken(undefined)
+      // The composer's own popovers: the command list closes until the next
+      // edit reopens it, exactly as Escape closes it.
+      setCommandPopoverClosed(true)
+      // A failed worktree creation belongs to the moment it was read in:
+      // arriving somewhere is the user done with it.
+      setWorktreeOutput(undefined)
+      const owned = (sessionId: SessionId | undefined): boolean =>
+        landing !== undefined && sessionId === landing
+      setFailure((current) =>
+        current !== undefined && owned(current.sessionId) ? current : undefined
+      )
+      setToast((current) =>
+        current !== undefined && owned(current.sessionId) ? current : undefined
+      )
+      closeBash()
+    },
+    // `closeBash` is defined below and closes over nothing that changes
+    // between renders.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    []
+  )
+
   // The run seam: one snapshot, then whole snapshots on every change. ⌘R
   // arrives here too when main intercepted it before the menu could.
   useEffect(() => {
@@ -495,6 +589,35 @@ export function Shell({
       // The clock is read here rather than in the reducer, which stays pure so
       // React may replay it under StrictMode.
       dispatch({ type: 'event', event, at: Date.now() })
+      // Every arrival main decides for itself lands here: a created session,
+      // an activated workspace landing on its remembered session, the session
+      // that becomes active when the active one is removed. The wipe happens
+      // in the frame the snapshot does, batched with it.
+      if (
+        event.type === 'state' &&
+        event.snapshot.activeSessionId !== railNow.current.activeSessionId
+      ) {
+        arrive(event.snapshot.activeSessionId)
+      }
+      // π's own retry of a summary, narrated in the session paying for it.
+      // A failure or a cancellation that already landed stands: this event
+      // may still be in flight behind either.
+      if (event.type === 'summarize_retry') {
+        const retry = event
+        setJumps((current) => {
+          const held = current[retry.sessionId]
+          if (held === undefined || held.kind === 'failed' || held.kind === 'cancelling') {
+            return current
+          }
+          return withJump(current, retry.sessionId, {
+            kind: 'retrying',
+            ref: held.ref,
+            attempt: retry.attempt,
+            maxAttempts: retry.maxAttempts,
+            message: retry.message
+          })
+        })
+      }
       // Queued messages the port handed back rather than delivered go to the
       // composer of the session they were queued in, active or not.
       if (event.type === 'queue_flushed') {
@@ -535,12 +658,20 @@ export function Shell({
       .then((listed) => dispatch({ type: 'models', models: listed }))
       .catch(report)
     return stop
-  }, [port, report, restore, refreshQuota, finished])
+  }, [port, report, restore, refreshQuota, finished, arrive])
 
   useEffect(() => {
     sessionsNow.current = snapshot.sessions
     railNow.current = snapshot
   }, [snapshot])
+
+  useEffect(() => {
+    runsNow.current = runs
+  }, [runs])
+
+  useEffect(() => {
+    loginNow.current = liveLogin !== undefined
+  }, [liveLogin])
 
   // Not looking is per window, so a turn that ended behind another app marked
   // even the session on screen. Coming back is genuinely looking at it, and
@@ -678,18 +809,15 @@ export function Shell({
     void port.cancel(activeSessionId).catch(report)
   }, [activeSessionId, working, port, report])
 
-  // Landing on a session, however it was reached: a click in the rail, or Tab
-  // walking to the next one asking.
+  // Landing on a session, however it was reached: a click in the rail, the
+  // Tab walk, Go to session, or the issue board. Clicking the session already
+  // on screen is an arrival too.
   const activateSession = useCallback(
     (id: SessionId): void => {
-      setPopover('none')
-      setTreeOpen(false)
-      // A failed creation belongs to the moment it was read in: switching
-      // sessions is the user done with it.
-      setWorktreeOutput(undefined)
+      arrive(id)
       void port.activateSession(id).catch(report)
     },
-    [port, report]
+    [arrive, port, report]
   )
 
   const openTree = useCallback((): void => {
@@ -772,6 +900,23 @@ export function Shell({
         closeIssues()
         return
       }
+      // A summarize is this session's own work and Escape stops it, whether
+      // or not the tree that started it is still open. Only the active
+      // session's: a background session's summarize is untouchable from here.
+      if (
+        activeSessionId !== undefined &&
+        activeJump !== undefined &&
+        jumpCancellable(activeJump)
+      ) {
+        pressed.preventDefault()
+        const cancelling = activeSessionId
+        // Acknowledged in this frame; the port answers `cancelled` after it.
+        setJumps((current) =>
+          withJump(current, cancelling, { kind: 'cancelling', ref: activeJump.ref })
+        )
+        void port.cancel(cancelling).catch((cause: unknown) => report(cause, cancelling))
+        return
+      }
       if (treeOpen) {
         pressed.preventDefault()
         setTreeOpen(false)
@@ -803,11 +948,14 @@ export function Shell({
     issuesOpen,
     treeOpen,
     activeSessionId,
+    activeJump,
     working,
     cancel,
     openTree,
     liveLogin,
     closeLogin,
+    port,
+    report,
     settings.open,
     browsingCommands,
     closeBoard,
@@ -1044,7 +1192,7 @@ export function Shell({
     // Editing reopens a popover Escape closed, and clears whatever the last
     // send or expansion had to say.
     setCommandPopoverClosed(false)
-    setFailure(undefined)
+    clearFailure(activeSessionId)
     setDrafts((current) => ({ ...current, [activeSessionId]: text }))
   }
 
@@ -1053,7 +1201,7 @@ export function Shell({
       const refused = refuse(file)
       if (refused !== undefined) {
         // Loud, inline, and naming the file: nothing is dropped silently.
-        setFailure(refused)
+        setFailure({ sessionId, message: refused })
         continue
       }
       try {
@@ -1126,7 +1274,7 @@ export function Shell({
     if (working && chips.length > 0) return
     expanded(id, text, (delivered) => {
       setDrafts((current) => ({ ...current, [id]: '' }))
-      setFailure(undefined)
+      clearFailure(id)
       if (working) {
         // Nothing is echoed into the transcript: a queued message appears only
         // in the strip until the port says it was delivered.
@@ -1155,7 +1303,7 @@ export function Shell({
     if (text === '') return
     expanded(id, text, (delivered) => {
       setDrafts((current) => ({ ...current, [id]: '' }))
-      setFailure(undefined)
+      clearFailure(id)
       void port.followUp(id, delivered).catch(report)
     })
   }
@@ -1183,8 +1331,11 @@ export function Shell({
     dequeue(last.kind, last.text)
   }
 
+  // The full arrival wipe in the frame the button is pressed, and the empty
+  // composer of the new session as soon as the snapshot carries it.
   function newSession(): void {
     if (activeWorkspaceId === undefined) return
+    arrive()
     void port.createSession(activeWorkspaceId).catch(report)
   }
 
@@ -1192,8 +1343,10 @@ export function Shell({
     void port.addWorkspace().catch(report)
   }
 
+  // Activating a workspace lands on its remembered active session, which is
+  // an arrival like any other.
   function activateWorkspace(id: WorkspaceId): void {
-    setPopover('none')
+    arrive()
     void port.activateWorkspace(id).catch(report)
   }
 
@@ -1255,6 +1408,11 @@ export function Shell({
   function removeSession(id: SessionId): void {
     setPopover('none')
     fetched.current.delete(id)
+    // The session is going: what its last jump had to say goes with it.
+    setJumps((current) => withoutJump(current, id))
+    // Removing the session on screen lands on whichever becomes active next,
+    // and landing anywhere is an arrival.
+    if (id === activeSessionId) arrive()
     void port.removeSession(id).catch(report)
   }
 
@@ -1276,7 +1434,9 @@ export function Shell({
       .resetSession(id)
       .then(() => {
         // The conversation behind the identity is new, so what this document
-        // held of the old one goes with it.
+        // held of the old one goes with it — a failed jump into a branch that
+        // no longer exists included.
+        setJumps((current) => withoutJump(current, id))
         dispatch({ type: 'reset', sessionId: id })
       })
       .catch(report)
@@ -1318,25 +1478,59 @@ export function Shell({
   }
 
   // In place: same session, same sidebar identity, and no cache guard, because
-  // invalidating the cache is the point of the action.
+  // invalidating the cache is the point of the action. The whole of it is
+  // owned by the session that asked for it, which is free to run in the
+  // background while the user works somewhere else.
   function jump(ref: string, summarize: boolean): void {
     const id = activeSessionId
     if (id === undefined) return
-    setFailure(undefined)
-    setJumping(summarize ? 'summarize' : 'jump')
+    clearFailure(id)
+    // A fresh attempt is the last failure gone: what it said is about a jump
+    // the user has moved past.
+    setJumps((current) =>
+      withJump(current, id, { kind: summarize ? 'summarizing' : 'jumping', ref })
+    )
     void port
       .jump(id, ref, { summarize })
-      .then(async ({ editorText }) => {
-        setTreeOpen(false)
-        setToast(summarize ? JUMPED_WITH_SUMMARY : JUMPED)
-        if (editorText !== undefined) restore(id, editorText)
+      .then(async (outcome) => {
+        // The user stopped it themselves: the leaf did not move, so the
+        // transcript, the composer and the tree stand exactly as they were.
+        if (outcome.cancelled) return
+        // The overlay belongs to whoever is on screen: a jump that landed
+        // while the user was elsewhere closes nothing where they are now.
+        if (railNow.current.activeSessionId === id) setTreeOpen(false)
+        announce(summarize ? JUMPED_WITH_SUMMARY : JUMPED, id)
+        if (outcome.editorText !== undefined) restore(id, outcome.editorText)
         // The conversation stands somewhere else now, so the whole view is
-        // replaced by the path it stands on.
-        const path = await port.transcript(id)
-        dispatch({ type: 'jumped', sessionId: id, items: path })
+        // replaced by the path it stands on — in its own session, active or
+        // not.
+        try {
+          const path = await port.transcript(id)
+          dispatch({ type: 'jumped', sessionId: id, items: path })
+        } catch (cause) {
+          report(cause, id)
+        }
       })
-      .catch(report)
-      .finally(() => setJumping(undefined))
+      .catch((cause: unknown) => {
+        // π's retries are spent and nothing moved. The summary's
+        // failure stays with its session until the next attempt clears it;
+        // a plain jump has no narration to leave behind and reports as any
+        // other refusal does.
+        if (summarize) {
+          setJumps((current) =>
+            withJump(current, id, { kind: 'failed', ref, message: messageOf(cause) })
+          )
+          return
+        }
+        report(cause, id)
+      })
+      .finally(() => {
+        // A failure outlives the call it came from; every other kind is over
+        // when the jump settles.
+        setJumps((current) =>
+          current[id]?.kind === 'failed' ? current : withoutJump(current, id)
+        )
+      })
   }
 
   function label(ref: string, text?: string): void {
@@ -1364,7 +1558,7 @@ export function Shell({
       return
     }
     setDraft('')
-    setFailure(undefined)
+    clearFailure(activeSessionId)
     setRuns((current) => ({
       ...current,
       [workspaceId]: { command, output: '', state: 'running', sharing: false }
@@ -1408,6 +1602,24 @@ export function Shell({
       delete rest[workspaceId]
       return rest
     })
+  }
+
+  // The drawer offers no close while running and no reopen after close, so a
+  // drawer that went with a live command in it would leave a process running
+  // with no surface that knows about it: the command is stopped first, exactly
+  // as the Stop button stops it, and nothing enters any conversation.
+  //
+  // Every drawer, not only the one on screen: an arrival may cross into
+  // another workspace, and the drawer left behind is exactly the one nobody
+  // would ever see again.
+  function closeBash(): void {
+    const open = runsNow.current
+    runsNow.current = {}
+    for (const view of Object.values(open)) {
+      if (view.state !== 'running' || view.runId === undefined) continue
+      void service.stopRun(view.runId).catch(() => {})
+    }
+    setRuns((current) => (Object.keys(current).length === 0 ? current : {}))
   }
 
   // The only way a run reaches the model, and always a choice made after the
@@ -1468,12 +1680,12 @@ export function Shell({
   function openPullRequest(row: BoardRow): void {
     const pr = row.pr
     if (pr === undefined) return
-    setToast(`Opening #${pr.number} in your browser`)
+    announce(`Opening #${pr.number} in your browser`)
     void service.openUrl(pr.url).catch(report)
   }
 
   function copyBranchName(name: string): void {
-    setToast(`Copied ${name}`)
+    announce(`Copied ${name}`)
     void navigator.clipboard?.writeText(name).catch(report)
   }
 
@@ -1496,12 +1708,12 @@ export function Shell({
   // a session of the user's own.
 
   function openIssue(row: IssueRow): void {
-    setToast(`Opening ${row.reference} in your browser`)
+    announce(`Opening ${row.reference} in your browser`)
     void service.openUrl(row.url).catch(report)
   }
 
   function copyReference(reference: string): void {
-    setToast(`Copied ${reference}`)
+    announce(`Copied ${reference}`)
     void navigator.clipboard?.writeText(reference).catch(report)
   }
 
@@ -1514,7 +1726,7 @@ export function Shell({
     if (workspaceId === undefined || workspace === undefined || aligning !== undefined) return
 
     setAligning(row.reference)
-    setFailure(undefined)
+    clearFailure(activeSessionId)
     setWorktreeOutput(undefined)
     closeIssues()
 
@@ -1560,11 +1772,10 @@ export function Shell({
     setOpenArtifactPath(undefined)
   }, [])
 
-  // The door out of a run surface: land in the orchestrator's chat.
+  // The door out of a run surface: land in the orchestrator's chat, which
+  // closes the run surfaces with everything else the arrival closes.
   const goToRunSession = useCallback(
     (sessionId: SessionId): void => {
-      setOpenRunId(undefined)
-      setRunsOverviewOpen(false)
       activateSession(sessionId)
     },
     [activateSession]
@@ -1573,10 +1784,10 @@ export function Shell({
   /** A fresh chat in a session-less run's workspace (the future unattended kind). */
   const startRunSession = useCallback(
     (workspaceId: WorkspaceId): void => {
-      setRunsOverviewOpen(false)
+      arrive()
       void port.createSession(workspaceId).catch(report)
     },
-    [port, report]
+    [arrive, port, report]
   )
 
   const runTranscript = useCallback(
@@ -1729,7 +1940,7 @@ export function Shell({
               <SessionTree
                 tree={tree}
                 working={working}
-                busy={jumping}
+                jump={activeJump}
                 onJump={jump}
                 onLabel={label}
                 onClose={() => setTreeOpen(false)}
@@ -1737,16 +1948,31 @@ export function Shell({
             )
           ) : null}
 
-          {toast === undefined ? null : (
+          {toast === undefined || toast.sessionId !== activeSessionId ? null : (
             <p className="toast" role="status">
-              {toast}
+              {toast.text}
             </p>
           )}
         </div>
 
-        {failure === undefined ? null : (
+        {failure === undefined || failure.sessionId !== activeSessionId ? null : (
           <p className="failure" role="alert">
-            {failure}
+            {failure.message}
+          </p>
+        )}
+
+        {/* A summarize keeps running behind a closed overlay, and a session
+            that looks idle while it pays for a call is a wait nobody can see.
+            The failure outlives the call, so it is read the moment the user
+            arrives, before they reopen anything. */}
+        {activeJump === undefined || treeShowing ? null : activeJump.kind === 'failed' ? (
+          <p className="failure" role="alert">
+            {jumpNote(activeJump)}
+          </p>
+        ) : (
+          <p className="jumpline" role="status">
+            <span className="spin" aria-hidden="true" />
+            {jumpNote(activeJump)}
           </p>
         )}
 
@@ -1957,6 +2183,11 @@ export function Shell({
       )}
     </div>
   )
+}
+
+/** Display-safe text of a refusal, which is all a banner ever shows. */
+function messageOf(cause: unknown): string {
+  return cause instanceof Error ? cause.message : String(cause)
 }
 
 // Pure, because React may replay a state update: what a chunk or an ending

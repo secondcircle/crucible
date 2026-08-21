@@ -19,8 +19,8 @@ import type {
 // tool call starts a run that walks its nodes on a timer, parks once when
 // the workflow is `build` (so the routed-question surfaces are exercisable),
 // and completes with the same message-to-the-orchestrator the engine sends.
-// Two canned records seed the global view, so ⌘R shows cross-workspace
-// grouping without anything having been started.
+// Two canned records seed the global view — one waiting on a person, one
+// finished — so ⌘R shows its bands without anything having been started.
 //
 // Scripted nodes declare the artifacts they will write and then write them,
 // so the artifact rail, the reader and the exhibit-run route are all

@@ -31,6 +31,8 @@
      this session's own turn */
   --run: #5fa89c;
   --error: #d96a5a;
+  /* a border for something that failed, dark enough not to shout */
+  --error-line: #5a3540;
   --warn: #d9a441;
   --thinking: #b08cc9;
   --absent-ink: #4a3f47;

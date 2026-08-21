@@ -53,6 +53,21 @@
   font-size: 12.5px;
 }
 
+/* A jump saying what it is doing where a refusal would be said, for the whole
+   time the tree that started it is not on screen. Same slot, the working tone
+   rather than the error one. */
+.jumpline {
+  max-width: var(--column);
+  width: 100%;
+  margin: 0 auto;
+  padding: 8px 24px;
+  color: var(--accent2);
+  font-size: 12.5px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 /* The transcript region, and the only thing the session tree overlays. */
 .stage {
   position: relative;

@@ -185,23 +185,29 @@ describe('the drawer', () => {
     expect(screen.getByText(/already running here/)).toBeInTheDocument()
   })
 
-  it('keeps the run with its workspace when the workspace changes', async () => {
+  // Arriving at a session means seeing that session, and the drawer is one of
+  // the surfaces that goes. The run in it is stopped on the way out: the
+  // drawer offers no close while running and no reopen after close, so a
+  // drawer that vanished with a live process in it would be a process nothing
+  // on screen knows about.
+  it('stops the run and closes the drawer when the arrival is somewhere else', async () => {
     const { port, workspace } = await shell(TWO_WORKSPACES)
     await run('tail -f log', workspace)
+    const started = workspace.lastRun()
 
     await act(async () => {
       await port.activateWorkspace('w2')
     })
-    expect(drawer()).toBeNull()
 
-    // Switching away stops nothing: the run is still going, and comes back
-    // with its workspace.
+    expect(drawer()).toBeNull()
+    expect(workspace.calls).toContainEqual({ op: 'stopRun', args: [started] })
+
+    // And it does not come back with its workspace: it was stopped, not
+    // parked.
     await act(async () => {
-      workspace.output(workspace.lastRun(), 'still running\n')
       await port.activateWorkspace('w1')
     })
-    expect(output()).toBe('still running\n')
-    expect(workspace.calls.map((call) => call.op)).not.toContain('stopRun')
+    expect(drawer()).toBeNull()
   })
 })
 

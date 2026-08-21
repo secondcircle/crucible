@@ -1,16 +1,12 @@
 import type { SessionState, WorkspaceState } from '../../../shared/agent/port'
-import {
-  currentNode,
-  runCost,
-  runIsLive,
-  type RunRecord
-} from '../../../shared/workflows/run'
+import { currentNode, runIsLive, runCost, type RunRecord } from '../../../shared/workflows/run'
 import { UNTITLED } from '../labels'
+import { bandsOf, runsHeadline } from '../runs/bands'
 import { money, shortAge, since } from '../runs/format'
 import './runs.css'
 
-// Every run across every workspace, grouped by workspace, sessions named
-// (Q15). A run with an orchestrator gets Go to session; a session-less run
+// Every run across every workspace, in three bands: running, needs you, done.
+// A run with an orchestrator gets Go to session; a session-less run
 // gets Start session — a fresh chat in the run's workspace — and the record
 // outlives the run, so finished work is reachable here too.
 export function RunsOverview({
@@ -30,33 +26,32 @@ export function RunsOverview({
   readonly onStartSession: (workspaceId: string) => void
   readonly onClose: () => void
 }): React.JSX.Element {
-  const groups = groupByWorkspace(runs)
-  const running = runs.filter((run) => run.status === 'running' && run.waiting !== true).length
-  const waiting = runs.filter((run) => runIsLive(run) && run.waiting === true).length
-  const finished = finishedToday(runs)
+  const bands = bandsOf(runs)
 
   return (
     <section className="runsoverview" aria-label="All runs">
       <header className="gvtop">
         <span className="t">Runs</span>
-        <span className="count">
-          {running} running · {waiting} waiting · {finished} finished today
-        </span>
+        <span className="count">{runsHeadline(runs)}</span>
         <button className="btn x" onClick={onClose}>
           esc
         </button>
       </header>
       <div className="gvbody">
-        {groups.length === 0 ? (
+        {runs.length === 0 ? (
           <p className="gvempty">
             No runs yet. An agent starts one with the crucible_run tool; ask for a workflow in
             any session.
           </p>
         ) : (
-          groups.map((group) => (
-            <div className="wsgroup" key={group.name}>
-              <div className="wsname">{group.name}</div>
-              {group.runs.map((run) => {
+          bands.map((band) => (
+            <div className="band" key={band.band}>
+              <div className="bandhead">
+                <span className={`n${band.band === 'needsYou' ? ' hot' : ''}`}>{band.name}</span>
+                <span className="rule" />
+                <span className="k">{band.runs.length}</span>
+              </div>
+              {band.runs.map((run) => {
                 const session =
                   run.sessionId === undefined
                     ? undefined
@@ -65,14 +60,20 @@ export function RunsOverview({
                   (candidate) => candidate.path === run.workspacePath
                 )
                 const parked = runIsLive(run) && run.waiting === true
-                const done = !runIsLive(run)
+                // A failed run has its own treatment and is never dimmed:
+                // done is complete and cancelled.
+                const failed = run.status === 'failed'
+                const done = run.status === 'complete' || run.status === 'cancelled'
                 return (
                   <div
-                    className={`runrow${parked ? ' parked' : ''}${done ? ' done' : ''}`}
+                    className={`runrow${parked ? ' parked' : ''}${failed ? ' failed' : ''}${
+                      done ? ' done' : ''
+                    }`}
                     key={run.id}
                   >
                     <span className={`dot ${run.status}`} />
                     <span className="wf">{run.workflow}</span>
+                    <span className="ws">{run.workspaceName}</span>
                     <span className="id">{run.id}</span>
                     <span className="st">{statusText(run)}</span>
                     <span className="sess">
@@ -122,28 +123,4 @@ function statusText(run: RunRecord): string {
     return `▸ ${node?.id ?? '…'} · ${shortAge(run.startedAt)}`
   }
   return `${run.status} · ${since(run.endedAt)}`
-}
-
-function finishedToday(runs: readonly RunRecord[], now = Date.now()): number {
-  return runs.filter(
-    (run) =>
-      !runIsLive(run) &&
-      run.endedAt !== undefined &&
-      now - new Date(run.endedAt).getTime() < 24 * 3_600_000
-  ).length
-}
-
-interface Group {
-  readonly name: string
-  readonly runs: readonly RunRecord[]
-}
-
-function groupByWorkspace(runs: readonly RunRecord[]): readonly Group[] {
-  const groups = new Map<string, RunRecord[]>()
-  for (const run of runs) {
-    const held = groups.get(run.workspaceName)
-    if (held === undefined) groups.set(run.workspaceName, [run])
-    else held.push(run)
-  }
-  return [...groups.entries()].map(([name, grouped]) => ({ name, runs: grouped }))
 }

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { SessionTree as Tree, TreeNode } from '../../../shared/agent/port'
 import { clockTime } from '../labels'
+import { jumpBusy, jumpNote, type JumpState } from '../state/jumps'
 import './session-tree.css'
 
 // A `ref` is never interpreted here: what a node is called on the other side
@@ -30,7 +31,7 @@ type Row =
 export function SessionTree({
   tree,
   working,
-  busy,
+  jump: state,
   onJump,
   onLabel,
   onClose
@@ -38,15 +39,23 @@ export function SessionTree({
   readonly tree: Tree
   /** Continuing is refused while the session works; browsing never is. */
   readonly working: boolean
-  /** A jump already in flight: summarizing takes real seconds and says so. */
-  readonly busy?: 'jump' | 'summarize'
+  // This session's jump and nothing else's: what is in flight, what π is
+  // retrying, or the failure that outlived the attempt.
+  readonly jump?: JumpState
   readonly onJump: (ref: string, summarize: boolean) => void
   /** An absent label clears it. */
   readonly onLabel: (ref: string, label?: string) => void
   readonly onClose: () => void
 }): React.JSX.Element {
+  const busy = jumpBusy(state)
+  const failedRef = state?.kind === 'failed' ? state.ref : undefined
+  // The node this session's jump was attempted from. Its card is open for as
+  // long as the jump has anything to say, so a tree reopened mid-summarize —
+  // or after a failure — shows the line where the jump was asked for rather
+  // than somewhere to be hunted for.
+  const jumpRef = state?.ref
   const [query, setQuery] = useState('')
-  const [selected, setSelected] = useState<string | undefined>(undefined)
+  const [selected, setSelected] = useState<string | undefined>(jumpRef)
   const [labelling, setLabelling] = useState<string | undefined>(undefined)
   const [draft, setDraft] = useState('')
   const search = useRef<HTMLInputElement>(null)
@@ -77,7 +86,7 @@ export function SessionTree({
   }
 
   function jump(ref: string | undefined, summarize: boolean): void {
-    if (ref === undefined || working || busy !== undefined) return
+    if (ref === undefined || working || busy) return
     onJump(ref, summarize)
   }
 
@@ -191,7 +200,10 @@ export function SessionTree({
             }
 
             const { node } = row
-            const open = selected === node.ref
+            const open = selected === node.ref || jumpRef === node.ref
+            // The jump's own node: within the tree, the narration and the
+            // failure belong at the point the jump was attempted from.
+            const mine = jumpRef === node.ref
             return (
               <div
                 className={`node ${row.onPath ? 'onpath' : 'offpath'}${open ? ' selected' : ''}`}
@@ -214,14 +226,14 @@ export function SessionTree({
                     <div className="row">
                       <button
                         className="act"
-                        disabled={working || busy !== undefined}
+                        disabled={working || busy}
                         onClick={() => jump(node.ref, false)}
                       >
                         Continue from here <span className="k">⏎</span>
                       </button>
                       <button
                         className="act"
-                        disabled={working || busy !== undefined}
+                        disabled={working || busy}
                         onClick={() => jump(node.ref, true)}
                       >
                         Continue with summary <span className="k">s</span>
@@ -251,19 +263,27 @@ export function SessionTree({
                       </div>
                     ) : null}
 
-                    <div className={`actnote${busy === undefined ? '' : ' busy'}`}>
-                      {busy !== undefined ? (
+                    <div
+                      className={`actnote${busy && mine ? ' busy' : ''}${
+                        failedRef === node.ref ? ' failed' : ''
+                      }`}
+                    >
+                      {busy && mine && state !== undefined ? (
                         <>
                           <span className="spin" aria-hidden="true" />
-                          {busy === 'summarize'
-                            ? 'Summarizing the branch you are leaving…'
-                            : 'Jumping…'}
+                          {jumpNote(state)}
                         </>
-                      ) : working
-                        ? 'This session is working — stop the agent first to continue from a point.'
-                        : row.onPath
-                          ? 'Continuing from a user message puts it back in the composer, unsent — the conversation stands at the moment before you pressed enter.'
-                          : 'This leaves the current path and continues the abandoned branch. Nothing is lost — the tree keeps every path.'}
+                      ) : failedRef === node.ref && state !== undefined ? (
+                        // Where the jump was attempted, saying what failed and
+                        // that the conversation did not move.
+                        jumpNote(state)
+                      ) : working ? (
+                        'This session is working — stop the agent first to continue from a point.'
+                      ) : row.onPath ? (
+                        'Continuing from a user message puts it back in the composer, unsent — the conversation stands at the moment before you pressed enter.'
+                      ) : (
+                        'This leaves the current path and continues the abandoned branch. Nothing is lost — the tree keeps every path.'
+                      )}
                     </div>
                   </div>
                 ) : null}
