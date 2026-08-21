@@ -206,8 +206,11 @@ export function Shell({
   const [files, setFiles] = useState<
     { readonly of: string; readonly paths: readonly string[] } | undefined
   >(undefined)
-  // A run belongs to the workspace it was started in, not to a session.
-  const [runs, setRuns] = useState<Readonly<Record<WorkspaceId, RunView>>>({})
+  // A run belongs to the session it was started in: the command was typed in
+  // that composer, against that session's directory, and it is that session's
+  // conversation the output can be shared into. Arriving somewhere else shows
+  // that session's drawer, which for a new session is none, and stops nothing.
+  const [runs, setRuns] = useState<Readonly<Record<SessionId, RunView>>>({})
   // The context panel's collapse is per session and its width is one value for
   // the window. Both are this document's memory and neither outlives it.
   const [collapsed, setCollapsed] = useState<Readonly<Record<SessionId, boolean>>>({})
@@ -250,9 +253,6 @@ export function Shell({
   // Read by a creation that outlived the click: what the sidebar holds now,
   // rather than what it held when the flip started.
   const sessionsNow = useRef<readonly SessionState[]>([])
-  // The bash drawers as they stand, for an arrival that has to stop a running
-  // command before it closes the drawer holding it.
-  const runsNow = useRef<Readonly<Record<WorkspaceId, RunView>>>({})
   // The same trick for the port's subscription, which is set up once and must
   // not be torn down and rebuilt every time the sidebar changes.
   const railNow = useRef<ShellSnapshot>(NOTHING_YET.snapshot)
@@ -275,7 +275,7 @@ export function Shell({
   // Restoring a queued message puts the caret back where the words are.
   const box = useRef<HTMLTextAreaElement>(null)
   // Output can arrive before the id of the run it belongs to does.
-  const owners = useRef<Record<RunId, WorkspaceId>>({})
+  const owners = useRef<Record<RunId, SessionId>>({})
   /** Where the caret goes once seeded composer text has rendered. */
   const seedCaret = useRef<number | undefined>(undefined)
   const orphans = useRef<Map<RunId, WorkspaceEvent[]>>(new Map())
@@ -326,7 +326,7 @@ export function Shell({
   const panelCollapsed = activeSessionId !== undefined && collapsed[activeSessionId] === true
   // Closed unless the caret is in a token the service has already answered for.
   const shownFiles = fileToken !== undefined && files?.of === fileToken ? files.paths : undefined
-  const run = activeWorkspaceId === undefined ? undefined : runs[activeWorkspaceId]
+  const run = activeSessionId === undefined ? undefined : runs[activeSessionId]
   const allRuns: readonly RunRecord[] = useMemo(() => runsSnapshot?.runs ?? [], [runsSnapshot])
   // Every workspace's runs count, because the rail lists every workspace's
   // sessions.
@@ -559,11 +559,10 @@ export function Shell({
       setToast((current) =>
         current !== undefined && owned(current.sessionId) ? current : undefined
       )
-      closeBash()
+      // The bash drawer is not in this list. It is keyed by session, so the
+      // session arrived at shows its own drawer or none, and the one left
+      // behind keeps its command running until its own session comes back.
     },
-    // `closeBash` is defined below and closes over nothing that changes
-    // between renders.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
     []
   )
 
@@ -666,10 +665,6 @@ export function Shell({
   }, [snapshot])
 
   useEffect(() => {
-    runsNow.current = runs
-  }, [runs])
-
-  useEffect(() => {
     loginNow.current = liveLogin !== undefined
   }, [liveLogin])
 
@@ -732,16 +727,16 @@ export function Shell({
   }, [activeSessionId, port, report])
 
   // A run's output is routed by the id the service minted for it, which is the
-  // only thing that ties a chunk to the workspace it came from.
+  // only thing that ties a chunk to the session it came from.
   useEffect(() => {
     return service.onEvent((event) => {
-      const workspaceId = owners.current[event.runId]
-      if (workspaceId === undefined) {
+      const sessionId = owners.current[event.runId]
+      if (sessionId === undefined) {
         // The id has not come back from `startRun` yet; nothing is thrown away.
         orphans.current.set(event.runId, [...(orphans.current.get(event.runId) ?? []), event])
         return
       }
-      setRuns((current) => applyRunEvent(current, workspaceId, event))
+      setRuns((current) => applyRunEvent(current, sessionId, event))
     })
   }, [service])
 
@@ -1410,6 +1405,20 @@ export function Shell({
     fetched.current.delete(id)
     // The session is going: what its last jump had to say goes with it.
     setJumps((current) => withoutJump(current, id))
+    // And so does its drawer. This is the one moment a command is stopped for
+    // the user: the session that owns it will not exist to come back to, so a
+    // command left running would be one nothing on screen could ever reach.
+    // Switching away is not this moment — that session is still there.
+    setRuns((current) => {
+      const going = current[id]
+      if (going === undefined) return current
+      if (going.state === 'running' && going.runId !== undefined) {
+        void service.stopRun(going.runId).catch(() => {})
+      }
+      const rest = { ...current }
+      delete rest[id]
+      return rest
+    })
     // Removing the session on screen lands on whichever becomes active next,
     // and landing anywhere is an arrival.
     if (id === activeSessionId) arrive()
@@ -1546,43 +1555,43 @@ export function Shell({
   }
 
   function runBash(command: string): void {
-    const workspaceId = activeWorkspaceId
-    if (workspaceId === undefined || sessionDirectory === undefined) return
-    const live = runs[workspaceId]
+    const sessionId = activeSessionId
+    if (sessionId === undefined || sessionDirectory === undefined) return
+    const live = runs[sessionId]
     if (live?.state === 'running') {
       // No hidden processes and no implicit kill: the drawer says what to do.
       setRuns((current) => ({
         ...current,
-        [workspaceId]: { ...live, note: 'A command is already running here — stop it first.' }
+        [sessionId]: { ...live, note: 'A command is already running here — stop it first.' }
       }))
       return
     }
     setDraft('')
-    clearFailure(activeSessionId)
+    clearFailure(sessionId)
     setRuns((current) => ({
       ...current,
-      [workspaceId]: { command, output: '', state: 'running', sharing: false }
+      [sessionId]: { command, output: '', state: 'running', sharing: false }
     }))
     void service
       .startRun(sessionDirectory, command)
       .then((runId) => {
-        owners.current[runId] = workspaceId
+        owners.current[runId] = sessionId
         const waiting = orphans.current.get(runId) ?? []
         orphans.current.delete(runId)
         setRuns((current) => {
-          const started = current[workspaceId]
+          const started = current[sessionId]
           if (started === undefined) return current
-          let next = { ...current, [workspaceId]: { ...started, runId } }
-          for (const event of waiting) next = applyRunEvent(next, workspaceId, event)
+          let next = { ...current, [sessionId]: { ...started, runId } }
+          for (const event of waiting) next = applyRunEvent(next, sessionId, event)
           return next
         })
       })
       .catch((cause: unknown) => {
         setRuns((current) => {
-          const failed = current[workspaceId]
+          const failed = current[sessionId]
           return failed === undefined
             ? current
-            : { ...current, [workspaceId]: { ...failed, state: 'stopped', sharing: false } }
+            : { ...current, [sessionId]: { ...failed, state: 'stopped', sharing: false } }
         })
         report(cause)
       })
@@ -1595,46 +1604,27 @@ export function Shell({
   }
 
   function closeRun(): void {
-    const workspaceId = activeWorkspaceId
-    if (workspaceId === undefined) return
+    const sessionId = activeSessionId
+    if (sessionId === undefined) return
     setRuns((current) => {
       const rest = { ...current }
-      delete rest[workspaceId]
+      delete rest[sessionId]
       return rest
     })
-  }
-
-  // The drawer offers no close while running and no reopen after close, so a
-  // drawer that went with a live command in it would leave a process running
-  // with no surface that knows about it: the command is stopped first, exactly
-  // as the Stop button stops it, and nothing enters any conversation.
-  //
-  // Every drawer, not only the one on screen: an arrival may cross into
-  // another workspace, and the drawer left behind is exactly the one nobody
-  // would ever see again.
-  function closeBash(): void {
-    const open = runsNow.current
-    runsNow.current = {}
-    for (const view of Object.values(open)) {
-      if (view.state !== 'running' || view.runId === undefined) continue
-      void service.stopRun(view.runId).catch(() => {})
-    }
-    setRuns((current) => (Object.keys(current).length === 0 ? current : {}))
   }
 
   // The only way a run reaches the model, and always a choice made after the
   // output was seen.
   function shareRun(): void {
-    const workspaceId = activeWorkspaceId
     const id = activeSessionId
-    const sharing = workspaceId === undefined ? undefined : runs[workspaceId]
-    if (workspaceId === undefined || id === undefined || sharing === undefined) return
+    const sharing = id === undefined ? undefined : runs[id]
+    if (id === undefined || sharing === undefined) return
 
     setRuns((current) => {
-      const found = current[workspaceId]
+      const found = current[id]
       return found === undefined
         ? current
-        : { ...current, [workspaceId]: { ...found, sharing: true, note: undefined } }
+        : { ...current, [id]: { ...found, sharing: true, note: undefined } }
     })
 
     void port
@@ -1645,18 +1635,18 @@ export function Shell({
       })
       .then((outcome) => {
         setRuns((current) => {
-          const found = current[workspaceId]
+          const found = current[id]
           if (found === undefined) return current
           // Delivered: the row is already in the transcript, put there by the
           // event at its true delivery point.
           if (outcome === 'delivered') {
             const rest = { ...current }
-            delete rest[workspaceId]
+            delete rest[id]
             return rest
           }
           return {
             ...current,
-            [workspaceId]: {
+            [id]: {
               ...found,
               sharing: false,
               note: 'The turn stopped first — this run is still local.'
@@ -1666,10 +1656,10 @@ export function Shell({
       })
       .catch((cause: unknown) => {
         setRuns((current) => {
-          const found = current[workspaceId]
+          const found = current[id]
           return found === undefined
             ? current
-            : { ...current, [workspaceId]: { ...found, sharing: false } }
+            : { ...current, [id]: { ...found, sharing: false } }
         })
         report(cause)
       })
@@ -2193,18 +2183,18 @@ function messageOf(cause: unknown): string {
 // Pure, because React may replay a state update: what a chunk or an ending
 // does to a run is decided from the run itself and nothing else.
 function applyRunEvent(
-  runs: Readonly<Record<WorkspaceId, RunView>>,
-  workspaceId: WorkspaceId,
+  runs: Readonly<Record<SessionId, RunView>>,
+  sessionId: SessionId,
   event: WorkspaceEvent
-): Readonly<Record<WorkspaceId, RunView>> {
-  const found = runs[workspaceId]
+): Readonly<Record<SessionId, RunView>> {
+  const found = runs[sessionId]
   if (found === undefined || found.runId !== event.runId) return runs
   if (event.type === 'run_output') {
-    return { ...runs, [workspaceId]: { ...found, output: found.output + event.chunk } }
+    return { ...runs, [sessionId]: { ...found, output: found.output + event.chunk } }
   }
   return {
     ...runs,
-    [workspaceId]: {
+    [sessionId]: {
       ...found,
       // No exit code means it was stopped rather than having exited, and
       // nothing is invented for it.

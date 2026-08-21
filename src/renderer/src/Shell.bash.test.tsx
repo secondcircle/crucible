@@ -25,6 +25,30 @@ const TWO_WORKSPACES: ShellSnapshot = {
   activeSessionId: 's1'
 }
 
+const TWO_IN_ONE_WORKSPACE: ShellSnapshot = {
+  workspaces: [{ id: 'w1', name: 'crucible', path: '/repos/crucible' }],
+  activeWorkspaceId: 'w1',
+  sessions: [
+    {
+      id: 's1',
+      workspaceId: 'w1',
+      title: 'tailing the log',
+      createdAt: '2026-08-19T14:14:00.000Z',
+      working: false,
+      fresh: false
+    },
+    {
+      id: 's2',
+      workspaceId: 'w1',
+      title: 'reading the spec',
+      createdAt: '2026-08-19T15:20:00.000Z',
+      working: false,
+      fresh: false
+    }
+  ],
+  activeSessionId: 's1'
+}
+
 async function shell(
   snapshot: Partial<ShellSnapshot> = oneSession()
 ): Promise<{ port: ScriptedPort; workspace: ScriptedWorkspace }> {
@@ -185,29 +209,60 @@ describe('the drawer', () => {
     expect(screen.getByText(/already running here/)).toBeInTheDocument()
   })
 
-  // Arriving at a session means seeing that session, and the drawer is one of
-  // the surfaces that goes. The run in it is stopped on the way out: the
-  // drawer offers no close while running and no reopen after close, so a
-  // drawer that vanished with a live process in it would be a process nothing
-  // on screen knows about.
-  it('stops the run and closes the drawer when the arrival is somewhere else', async () => {
+  // Arriving at a session means seeing that session. The drawer belongs to the
+  // session that started the command, so arriving elsewhere takes it off screen
+  // by showing the session you arrived at — not by killing anything.
+  it('keeps the run with its session when the workspace changes', async () => {
     const { port, workspace } = await shell(TWO_WORKSPACES)
     await run('tail -f log', workspace)
-    const started = workspace.lastRun()
 
     await act(async () => {
       await port.activateWorkspace('w2')
     })
-
     expect(drawer()).toBeNull()
-    expect(workspace.calls).toContainEqual({ op: 'stopRun', args: [started] })
 
-    // And it does not come back with its workspace: it was stopped, not
-    // parked.
+    // Switching away stops nothing: the run is still going, and comes back
+    // with its session.
     await act(async () => {
+      workspace.output(workspace.lastRun(), 'still running\n')
       await port.activateWorkspace('w1')
     })
+    expect(output()).toBe('still running\n')
+    expect(workspace.calls.map((call) => call.op)).not.toContain('stopRun')
+  })
+
+  // The defect this keying fixes: two sessions in one workspace used to share
+  // a single drawer, so arriving at the second one still showed the first
+  // one's command.
+  it('does not show one session\u2019s drawer to another in the same workspace', async () => {
+    const { port, workspace } = await shell(TWO_IN_ONE_WORKSPACE)
+    await run('tail -f log', workspace)
+
+    await act(async () => {
+      await port.activateSession('s2')
+    })
     expect(drawer()).toBeNull()
+    expect(workspace.calls.map((call) => call.op)).not.toContain('stopRun')
+
+    await act(async () => {
+      workspace.output(workspace.lastRun(), 'still running\n')
+      await port.activateSession('s1')
+    })
+    expect(output()).toBe('still running\n')
+  })
+
+  // The one moment a command is stopped for the user: its session is being
+  // deleted, so there is nowhere left to come back to it from.
+  it('stops the run when the session that owns it is removed', async () => {
+    const { workspace } = await shell(TWO_IN_ONE_WORKSPACE)
+    await run('tail -f log', workspace)
+    const started = workspace.lastRun()
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Remove tailing the log' }))
+    })
+
+    expect(workspace.calls).toContainEqual({ op: 'stopRun', args: [started] })
   })
 })
 
