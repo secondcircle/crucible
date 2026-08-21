@@ -49,6 +49,7 @@ import { Transcript } from './components/Transcript'
 import { readAttachment, refuse } from './images'
 import { contextPercent, UNTITLED } from './labels'
 import { useQuota } from './quota/use-quota'
+import { runActivity } from './runs/activity'
 import { useAuth } from './settings/use-auth'
 import {
   askingCount,
@@ -275,7 +276,10 @@ export function Shell({
   // Closed unless the caret is in a token the service has already answered for.
   const shownFiles = fileToken !== undefined && files?.of === fileToken ? files.paths : undefined
   const run = activeWorkspaceId === undefined ? undefined : runs[activeWorkspaceId]
-  const allRuns: readonly RunRecord[] = runsSnapshot?.runs ?? []
+  const allRuns: readonly RunRecord[] = useMemo(() => runsSnapshot?.runs ?? [], [runsSnapshot])
+  // What the rail marks a session with a live run by. Every workspace's runs
+  // count, because the rail lists every workspace's sessions.
+  const railRuns = useMemo(() => runActivity(allRuns), [allRuns])
   // The strip is session-scoped (Q11/Q18): only the active session's live
   // runs. Finished ones leave the strip — their news arrived in the chat, and
   // their records live on in ⌘R.
@@ -1570,6 +1574,7 @@ export function Shell({
       <Sidebar
         snapshot={snapshot}
         needsYou={asking}
+        runActivity={railRuns}
         boardNeedYou={boardNeedYou}
         onNewSession={newSession}
         onAddWorkspace={addWorkspace}

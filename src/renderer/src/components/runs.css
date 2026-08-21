@@ -72,13 +72,15 @@
   padding: 0 4px;
 }
 
-/* The breathing dot every run surface shares. */
+/* The breathing dot every run surface shares. Teal, because it means a run is
+   live; green means a session's own turn and nothing else. Parked, failed and
+   done keep their own colors below. */
 .runchip .dot,
 .runrow .dot {
   width: 7px;
   height: 7px;
   border-radius: 50%;
-  background: var(--ok);
+  background: var(--run);
   flex-shrink: 0;
 }
 
@@ -164,11 +166,17 @@
   color: var(--faint);
 }
 
+/* Green here is success: a complete run. A running one is teal, like its dot
+   and like its session's row in the rail. */
 .rvtop .stat {
   font-size: 11px;
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--ok);
+}
+
+.rvtop .stat.running {
+  color: var(--run);
 }
 
 .rvtop .stat.paused {

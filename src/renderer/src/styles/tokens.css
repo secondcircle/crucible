@@ -27,6 +27,9 @@
   --accent2: #f0a37c;
   --ok: #7fb069;
   --ok-line: #47603a;
+  /* a live run's mark: the rail, the chips, ⌘R. Green stays one thing only,
+     this session's own turn */
+  --run: #5fa89c;
   --error: #d96a5a;
   --warn: #d9a441;
   --thinking: #b08cc9;
