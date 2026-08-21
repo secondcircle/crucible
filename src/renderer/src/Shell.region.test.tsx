@@ -385,6 +385,43 @@ describe('the sidebar under an open overlay (Q2)', () => {
     expect(region()).toBeNull()
   })
 
+  // The same rule reached by the other navigation: a workspace switch changes
+  // the active session too, so the confirm goes with the chat it was about.
+  it('drops a confirm when a workspace switch takes its session off screen', async () => {
+    const { port } = await shell({ conversation: true })
+    await click('Session menu')
+    await act(async () => {
+      fireEvent.click(screen.getByRole('menuitem', { name: 'Reset session' }))
+    })
+    await settled()
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'resume-site' }))
+    })
+    await settled()
+
+    expect(port.calls).toContainEqual({ op: 'activateWorkspace', args: ['w2'] })
+    expect(screen.queryByRole('dialog', { name: 'Reset this session?' })).toBeNull()
+    expect(region()).toBeNull()
+  })
+
+  // The other side of that rule. ⌘B under a live confirm swaps the occupant
+  // beneath it and navigates nowhere, so the confirm is still about the
+  // session on screen and section 4's stacking holds.
+  it('keeps a confirm up when an overlay opens beneath it', async () => {
+    await shell({ conversation: true })
+    await click('Session menu')
+    await act(async () => {
+      fireEvent.click(screen.getByRole('menuitem', { name: 'Reset session' }))
+    })
+    await settled()
+
+    await press('b', { metaKey: true })
+
+    expect(screen.getByRole('dialog', { name: 'Branch board' })).toBeInTheDocument()
+    expect(screen.getByRole('dialog', { name: 'Reset this session?' })).toBeInTheDocument()
+  })
+
   it('leaves the occupant alone when the removal is of another session', async () => {
     await shell()
     await click('Branch board')

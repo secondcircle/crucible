@@ -472,6 +472,18 @@ export function Shell({
   if (occupant?.kind === 'issues' && !issuesOpen) setRegion([])
   if (occupant?.kind === 'tree' && session === undefined) setRegion([])
 
+  // A confirm names the session it acts on, and both are raised on the session
+  // that was active. Land on another one and the question is about a session
+  // you can no longer see: "Reset this session?" would read as being about the
+  // chat now on screen while "Reset anyway" still reset the old one. Q2 is what
+  // makes that reachable, the sidebar being live under every modal surface now,
+  // so the render that lands the activation drops the question — one rule for
+  // the sidebar click, the workspace switch, New session, the Tab walk and a
+  // removal alike. It reads the active session and not the region because
+  // ⌘B/⌘I/⌘R only swap the occupant beneath a confirm, which section 4
+  // sanctions: that confirm is still about the session on screen.
+  if (question !== undefined && question.sessionId !== activeSessionId) setQuestion(undefined)
+
   // What the region actually renders. Nothing is backed by less than real
   // state, so an occupant whose data has not arrived shows no region at all
   // rather than a dim over an empty frame.
