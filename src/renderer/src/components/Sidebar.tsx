@@ -35,8 +35,7 @@ const WORKING_TICK_MS = 1_000
 // A run working in a session's name gets the same block in the run color: the
 // run's age over dots that blink while it runs and hold still while it is
 // paused. Green and teal are two different waits — one you watch, the other
-// you come back to — and the slot has one owner, so the turn wins it when
-// both are true and needs-you wins it over either.
+// you come back to.
 //
 // Every workspace lists its sessions, active or not, because work in one
 // workspace keeps running while another is in front. Only the human removes a

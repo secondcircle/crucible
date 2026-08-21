@@ -1,11 +1,9 @@
 import type { SessionId } from '../../../shared/agent/port'
 import { runIsLive, type RunRecord } from '../../../shared/workflows/run'
 
-// What the rail knows about runs, and the whole of it. A session whose own
-// turn ended can still have a run burning money in a worktree in its name, so
-// the row says so; this is the fact the row is drawn from. Pure, because the
-// rail's arithmetic — which run is oldest, whether anything is still moving —
-// is the part worth testing without a DOM.
+// What the rail knows about runs, and the whole of it: a session whose own
+// turn ended can still have a run burning money in a worktree in its name.
+// Pure, because the arithmetic is the part worth testing without a DOM.
 
 /** The rail's view of one session's live runs; absent when it has none. */
 export interface RunActivity {

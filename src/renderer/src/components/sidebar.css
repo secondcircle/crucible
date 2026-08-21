@@ -302,7 +302,7 @@
 /* A run working in this session's name: the same slot, the same geometry and
    the same rhythm as a live turn, in the run color. The two waits differ by
    color alone because at 3.5px nothing else reads. Full opacity where the
-   turn's counter sits at .85, per the mock. */
+   turn's counter sits at .85; the difference is deliberate. */
 .sessrow.run .elapsed {
   color: var(--run);
   opacity: 1;

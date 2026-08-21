@@ -277,8 +277,8 @@ export function Shell({
   const shownFiles = fileToken !== undefined && files?.of === fileToken ? files.paths : undefined
   const run = activeWorkspaceId === undefined ? undefined : runs[activeWorkspaceId]
   const allRuns: readonly RunRecord[] = useMemo(() => runsSnapshot?.runs ?? [], [runsSnapshot])
-  // What the rail marks a session with a live run by. Every workspace's runs
-  // count, because the rail lists every workspace's sessions.
+  // Every workspace's runs count, because the rail lists every workspace's
+  // sessions.
   const railRuns = useMemo(() => runActivity(allRuns), [allRuns])
   // The strip is session-scoped (Q11/Q18): only the active session's live
   // runs. Finished ones leave the strip — their news arrived in the chat, and
