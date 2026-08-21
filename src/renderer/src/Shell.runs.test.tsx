@@ -88,6 +88,34 @@ function runOf(overrides: Partial<RunRecord>): RunRecord {
   }
 }
 
+const bands = (): string[] =>
+  [...document.querySelectorAll('.band .bandhead .n')].map((head) => head.textContent ?? '')
+
+const count = (): string => document.querySelector('.gvtop .count')?.textContent ?? ''
+
+const row = (id: string): HTMLElement | null =>
+  [...document.querySelectorAll<HTMLElement>('.runrow')].find(
+    (found) => found.querySelector('.id')?.textContent === id
+  ) ?? null
+
+/** The run ids in one band, in the order the band renders them. */
+function rowsOf(band: string): string[] {
+  const held = [...document.querySelectorAll('.band')].find(
+    (found) => found.querySelector('.bandhead .n')?.textContent === band
+  )
+  return [...(held?.querySelectorAll('.runrow .id') ?? [])].map((cell) => cell.textContent ?? '')
+}
+
+/** ⌘R, opened, with the runs the test wrote. */
+async function open(runs: readonly RunRecord[]): Promise<void> {
+  mount(runs)
+  await act(settled)
+  await act(async () => {
+    fireEvent.keyDown(document, { key: 'r', metaKey: true })
+    await settled()
+  })
+}
+
 function mount(runs: readonly RunRecord[]) {
   const port = createScriptedPort(SNAPSHOT)
   const workflowRuns = createScriptedWorkflowRuns(runs)
@@ -222,9 +250,16 @@ describe('the run view', () => {
 })
 
 describe('the global runs view', () => {
-  it('opens on ⌘R, groups every run by workspace, and closes on Esc', async () => {
+  it('opens on ⌘R, bands every run by what it wants from you, and closes on Esc', async () => {
     mount([
       runOf({}),
+      runOf({
+        id: 'f7k1',
+        workflow: 'adhoc',
+        waiting: true,
+        sessionId: 's2',
+        question: { reason: 'which way?', raisedAt: '2026-08-20T10:10:00.000Z' }
+      }),
       runOf({
         id: 'd3p8',
         workflow: 'adhoc',
@@ -243,8 +278,11 @@ describe('the global runs view', () => {
     })
 
     const view = screen.getByLabelText('All runs')
-    expect(view).toHaveTextContent('crucible')
-    expect(view).toHaveTextContent('resume-site')
+    expect(bands()).toEqual(['Running', 'Needs you', 'Done'])
+    expect(rowsOf('Running')).toEqual(['en42'])
+    expect(rowsOf('Needs you')).toEqual(['f7k1'])
+    expect(rowsOf('Done')).toEqual(['d3p8'])
+    // The row is what it always was: session, spend and its buttons.
     expect(view).toHaveTextContent('from panel handoff build')
     expect(view).toHaveTextContent('unattended')
 
@@ -253,6 +291,92 @@ describe('the global runs view', () => {
       await settled()
     })
     expect(screen.queryByLabelText('All runs')).toBeNull()
+  })
+
+  it('shows the workspace as a column on the row, with no grouping left', async () => {
+    await open([
+      runOf({}),
+      runOf({
+        id: 'k2m9',
+        workspacePath: '/repos/resume-site',
+        workspaceName: 'resume-site',
+        sessionId: 's2'
+      })
+    ])
+
+    expect(
+      [...document.querySelectorAll('.runrow .ws')].map((column) => column.textContent)
+    ).toEqual(['crucible', 'resume-site'])
+    // The workspace heading of the old view is gone entirely.
+    expect(screen.getByLabelText('All runs').querySelector('.wsgroup')).toBeNull()
+  })
+
+  it('leaves an empty band out rather than heading nothing', async () => {
+    await open([runOf({ status: 'cancelled', endedAt: '2026-08-20T11:00:00.000Z' })])
+
+    expect(bands()).toEqual(['Done'])
+  })
+
+  it('keeps the no-runs message when there are none at all', async () => {
+    await open([])
+
+    expect(bands()).toEqual([])
+    expect(screen.getByLabelText('All runs')).toHaveTextContent('No runs yet')
+  })
+
+  it('puts the newest first inside a band', async () => {
+    await open([
+      runOf({ id: 'older', createdAt: '2026-08-20T09:00:00.000Z' }),
+      runOf({ id: 'newer', createdAt: '2026-08-20T13:00:00.000Z' })
+    ])
+
+    expect(rowsOf('Running')).toEqual(['newer', 'older'])
+  })
+
+  // A failed run is the one most likely to need a human: it is in Needs you,
+  // in the bad tone, and never dimmed.
+  it('gives a failed run its own treatment, undimmed', async () => {
+    await open([
+      runOf({ id: 'b1n7', status: 'failed', endedAt: '2026-08-20T11:00:00.000Z' }),
+      runOf({ id: 'd3p8', status: 'complete', endedAt: '2026-08-20T11:00:00.000Z' })
+    ])
+
+    expect(rowsOf('Needs you')).toEqual(['b1n7'])
+    const failed = row('b1n7')
+    expect(failed?.className).toContain('failed')
+    expect(failed?.className).not.toContain('done')
+    expect(failed).toHaveTextContent('failed · ')
+    expect(row('d3p8')?.className).toContain('done')
+  })
+
+  it('counts in the bands own words, and drops the segments that are zero', async () => {
+    const { workflowRuns } = mount([
+      runOf({}),
+      runOf({ id: 'zz11' }),
+      runOf({ id: 'n1', waiting: true }),
+      runOf({ id: 'n2', status: 'paused' }),
+      runOf({ id: 'n3', status: 'failed', endedAt: new Date().toISOString() }),
+      runOf({ id: 'd1', status: 'complete', endedAt: new Date().toISOString() })
+    ])
+    await act(settled)
+    await act(async () => {
+      fireEvent.keyDown(document, { key: 'r', metaKey: true })
+      await settled()
+    })
+
+    expect(count()).toBe('2 running · 3 need you · 1 finished today')
+
+    await act(async () => {
+      workflowRuns.setRuns([runOf({ id: 'd1', status: 'complete', endedAt: new Date().toISOString() })])
+      await settled()
+    })
+    expect(count()).toBe('nothing running · 1 finished today')
+
+    await act(async () => {
+      workflowRuns.setRuns([runOf({ id: 'n3', status: 'failed' })])
+      await settled()
+    })
+    expect(count()).toBe('nothing running · 1 needs you')
   })
 
   it('opens when main announces the intercepted chord as an event', async () => {

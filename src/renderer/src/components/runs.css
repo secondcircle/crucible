@@ -100,6 +100,15 @@
   animation: none;
 }
 
+/* A failed run is not dimmed: it is the one most likely to need a person. */
+.runrow.failed {
+  border-color: var(--error-line);
+}
+
+.runrow.failed .st {
+  color: var(--error);
+}
+
 .runchip .dot.failed,
 .runrow .dot.failed {
   background: var(--error);
@@ -440,16 +449,43 @@
   padding: 8px 22px 20px;
 }
 
-.wsgroup {
-  margin-top: 14px;
+/* The three bands. An empty one is not rendered at all, so a divider always
+   has rows under it. */
+.band {
+  margin-top: 16px;
 }
 
-.wsname {
+.band:first-child {
+  margin-top: 6px;
+}
+
+.bandhead {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding-bottom: 8px;
+}
+
+.bandhead .n {
   font-size: 11px;
   text-transform: uppercase;
   letter-spacing: 0.12em;
   color: var(--faint);
-  padding-bottom: 6px;
+}
+
+.bandhead .n.hot {
+  color: var(--warn);
+}
+
+.bandhead .rule {
+  flex: 1;
+  height: 1px;
+  background: var(--line);
+}
+
+.bandhead .k {
+  font: 11px var(--mono);
+  color: var(--faint);
 }
 
 .runrow {
@@ -466,22 +502,42 @@
 .runrow .wf {
   font-weight: 700;
   font-size: 13px;
-  width: 70px;
+  width: 64px;
+}
+
+/* Where the workspace lives now that the bands do the grouping. */
+.runrow .ws {
+  font: 11.5px var(--mono);
+  color: var(--accent2);
+  width: 104px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .runrow .id {
   font: 11.5px var(--mono);
   color: var(--faint);
-  width: 70px;
+  width: 52px;
 }
 
 .runrow .st {
   font: 11.5px var(--mono);
-  width: 210px;
+  width: 186px;
+}
+
+.runrow.parked {
+  border-color: var(--warn);
 }
 
 .runrow.parked .st {
   color: var(--warn);
+}
+
+/* Only complete and cancelled dim: the work is over. */
+.runrow.done {
+  opacity: 0.72;
+  background: var(--bg2);
 }
 
 .runrow .sess {

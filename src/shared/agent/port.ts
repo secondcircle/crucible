@@ -375,6 +375,19 @@ export type PortEvent =
       readonly turnId: TurnId
       readonly miss: CacheMissFacts
     }
+  // π scheduled another attempt at a branch summary a jump is waiting on.
+  // Session-scoped like `usage`, with no turn id, because a jump is not a
+  // turn.
+  | {
+      readonly type: 'summarize_retry'
+      readonly sessionId: SessionId
+      /** 1-based, of π's own budget; Crucible adds no retries of its own. */
+      readonly attempt: number
+      readonly maxAttempts: number
+      readonly delayMs: number
+      /** Display-safe provider text; the detail went to the run log. */
+      readonly message: string
+    }
   | { readonly type: 'turn_ended'; readonly sessionId: SessionId; readonly turnId: TurnId }
   | { readonly type: 'turn_cancelled'; readonly sessionId: SessionId; readonly turnId: TurnId }
   | {
@@ -436,11 +449,19 @@ export interface AgentPort {
   sessionTree(id: SessionId): Promise<SessionTree>
   // A jump: continue in place from the moment before `ref` was sent. Refused
   // while the session works. `editorText` comes back to the composer unsent.
+  //
+  // A rejection means one thing only: the jump failed and the leaf did not
+  // move. A user's cancellation is not a failure, so it resolves saying so.
   jump(
     id: SessionId,
     ref: string,
     options: { readonly summarize: boolean }
-  ): Promise<{ readonly editorText?: string }>
+  ): Promise<{
+    /** True: the user cancelled it, and the leaf did not move. */
+    readonly cancelled: boolean
+    /** Present only on a real jump. */
+    readonly editorText?: string
+  }>
   /** Free-text label on a node; absent or empty clears it. Allowed anytime. */
   setLabel(id: SessionId, ref: string, label?: string): Promise<void>
 
@@ -494,6 +515,7 @@ export interface AgentPort {
   // renderer knows a tab by its id and by nothing else.
   exhibit(sessionId: SessionId, tabId: TabId): Promise<{ readonly body: string }>
 
-  /** Harmless when there is nothing to stop. */
+  // Stop what this session is doing: the live turn, and a summarizing jump
+  // waiting on π's summary. Harmless when there is nothing to stop.
   cancel(sessionId: SessionId): Promise<void>
 }

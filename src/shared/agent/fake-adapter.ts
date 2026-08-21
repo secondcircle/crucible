@@ -1261,7 +1261,7 @@ export function createFakeAdapter({
       sessionId: SessionId,
       ref: string,
       summarize: boolean
-    ): Promise<{ editorText?: string }> {
+    ): Promise<{ cancelled: boolean; editorText?: string }> {
       const bound = requireBound(sessionId)
       const { conversation } = bound
       const entry = entryOf(conversation, ref)
@@ -1274,7 +1274,11 @@ export function createFakeAdapter({
         append(conversation, { kind: 'summary', text: FAKE_BRANCH_SUMMARY })
       }
       conversation.at = new Date().toISOString()
-      return entry.item.kind === 'user' ? { editorText: entry.item.text } : {}
+      // Canned replies never fail and never take long enough to cancel, so
+      // this jump always genuinely happened.
+      return entry.item.kind === 'user'
+        ? { cancelled: false, editorText: entry.item.text }
+        : { cancelled: false }
     },
 
     async setLabel(sessionId: SessionId, ref: string, label?: string): Promise<void> {
@@ -1523,6 +1527,8 @@ export function createFakeAdapter({
       return true
     },
 
+    // There is no summary to abort here: the canned one is written in the
+    // same tick the jump is asked for.
     async cancel(sessionId: SessionId): Promise<void> {
       sessions.get(sessionId)?.running?.abandon('cancelled')
     },

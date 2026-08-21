@@ -97,6 +97,7 @@ describe('a jump', () => {
 
     await shell.cancel(sessionId)
     await expect(shell.jump(sessionId, ref, { summarize: false })).resolves.toEqual({
+      cancelled: false,
       editorText: 'first'
     })
   })

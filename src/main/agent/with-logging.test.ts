@@ -21,6 +21,10 @@ function stubShell(): { shell: Shell; emit: (event: PortEvent) => void } {
       if (text === 'refuse me') throw new Error('That session is already working.')
       return `t-for-${sessionId}`
     },
+    jump: async (_sessionId: string, ref: string) => {
+      if (ref === 'n7') throw new Error('Opus is overloaded')
+      return { cancelled: false }
+    },
     createSession: async () => 'session-1',
     cancel: async () => undefined,
     dispose: () => undefined
@@ -79,6 +83,49 @@ describe('what the run log holds', () => {
       message: 'That session is already working.'
     })
     expect(String(refused?.stack)).toContain('with-logging.test')
+  })
+
+  // A summarize failure has to be reconstructible from the log alone: the
+  // session, the ref, the provider's own words, and which attempt it was.
+  it('is which retry π was on, because the event itself crossed the port', async () => {
+    const sink = createMemorySink()
+    const { shell, emit } = stubShell()
+
+    withLogging(shell, sink, 'sdk')
+    emit({
+      type: 'summarize_retry',
+      sessionId: 's1',
+      attempt: 2,
+      maxAttempts: 3,
+      delayMs: 4000,
+      message: 'Overloaded'
+    })
+
+    expect(records(sink.lines)).toEqual([
+      expect.objectContaining({
+        event: 'summarize_retry',
+        adapter: 'sdk',
+        sessionId: 's1',
+        attempt: 2,
+        maxAttempts: 3,
+        delayMs: 4000,
+        message: 'Overloaded'
+      })
+    ])
+  })
+
+  it('is a failed jump, with the session and the ref it was asked for', async () => {
+    const sink = createMemorySink()
+    const { shell } = stubShell()
+
+    const logged = withLogging(shell, sink, 'sdk')
+    await expect(logged.jump('s1', 'n7', { summarize: true })).rejects.toThrow(/overloaded/i)
+
+    expect(records(sink.lines).at(-1)).toMatchObject({
+      event: 'jump_refused',
+      args: ['s1', 'n7', { summarize: true }],
+      message: 'Opus is overloaded'
+    })
   })
 
   it('leaves the snapshot unlogged: the state records already say it', async () => {
