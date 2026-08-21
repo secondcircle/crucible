@@ -260,7 +260,15 @@ describe('the shipped role prompt', () => {
 
   it('carries the two stock guidelines, in their own words', () => {
     expect(role()).toContain('- Be concise in your responses')
-    expect(role()).toContain('- Show file paths clearly when working with files')
+    expect(role()).toContain('- Name file paths accurately when working with files')
+  })
+
+  it('makes the panel the place a pertinent document lands, not a path in chat', () => {
+    const text = role()
+    expect(text).toMatch(/Open a document there whenever it is pertinent/)
+    expect(text).toMatch(/say in\s+chat that you did/)
+    expect(text).toMatch(/Close documents the conversation has moved past/)
+    expect(text).toMatch(/renders markdown and HTML/)
   })
 
   it('points at the docs index by placeholder, and only when the user asks', () => {

@@ -8,6 +8,7 @@ import { PANEL_TOOLS, panelTool } from './panel-tools'
 // Pinned word for word, because a drift here changes what every session is
 // told about the panel.
 const CURATION = [
+  'Reach for this tool whenever a document is pertinent to what the user is doing. Naming a path and waiting to be asked to open it leaves them with nothing to read. Show the file, then say plainly that it is in the panel.',
   "The context panel is the user's primary display; they may not notice messages in the chat. Content shown there is what the user relies on to follow the work.",
   "The panel's value comes from curation, not accumulation: it should reflect only what is relevant to the current conversation. Stale tabs actively obscure what matters now \u2014 close them once they have served their purpose (e.g. a plan that has been accepted).",
   'Ephemeral artifacts (plans, diagrams, reports) belong in a temp directory, not the project tree.'
@@ -49,7 +50,7 @@ describe('the three context panel tools', () => {
     })
   })
 
-  it('teach the curation the panel lives by, in the three sentences that do it', () => {
+  it('teach the curation the panel lives by, in the paragraphs that do it', () => {
     const { description } = panelTool('panel_show')
 
     for (const sentence of CURATION) expect(description).toContain(sentence)
