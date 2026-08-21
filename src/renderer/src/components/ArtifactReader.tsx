@@ -11,10 +11,9 @@ import './runs.css'
 /** How long "Copied" stands before the button says what it does again. */
 const COPIED_MS = 1400
 
-// One artifact, rendered in place of the node transcript while the graph and
-// the rail stay put. Markdown renders as markdown, HTML as the page it is
-// under an origin of its own, everything else as text. Read-only: the two
-// header actions are about the file, never about the run.
+// Read-only, like the rest of the run view: the two header actions are about
+// the file, never about the run. HTML renders under an origin of its own and
+// never enters this document as a string.
 export function ArtifactReader({
   runId,
   row,

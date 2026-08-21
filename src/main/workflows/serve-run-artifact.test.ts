@@ -2,8 +2,8 @@
 //
 // The whole decision, over real files: only Electron's translation into a
 // `Response` sits above what is exercised here. A run artifact that is HTML
-// gets an origin of its own (ADR 0009), and it gets it only because the run's
-// record names the file — which is the question the service answers, and the
+// gets an origin of its own, and it gets it only because the run's record
+// names the file — which is the question the service answers, and the
 // stand-in below answers the same way its two implementations do.
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'

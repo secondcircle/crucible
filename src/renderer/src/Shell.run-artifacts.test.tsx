@@ -181,11 +181,11 @@ describe('the artifact rail', () => {
     expect(rail()).toHaveTextContent("artifacts live in the run's own directory, never in the repo")
   })
 
-  // Spec §3: run-written rows sit "in order of first appearance in the record
-  // (plan order for ghosts, then start order for the rest). A row never moves
-  // once placed." The shipped build plan declares outputs for planner and
-  // review-1 but none for builder, so review-1.md is placed at kickoff — and
-  // must not move when the builder starts and declares changes.md.
+  // Run-written rows sit in order of first appearance — plan order for
+  // ghosts, then start order — and a row never moves once placed. This plan
+  // declares outputs for planner and review-1 but none for builder, so the
+  // review row is placed at kickoff and must not move when the builder starts
+  // and declares changes.md.
   it('keeps a row in place when a later node starts and declares a new output', async () => {
     const kickoff = runOf({
       nodes: [

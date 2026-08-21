@@ -244,9 +244,8 @@ export function Shell({
   // The engine's records, whole on every event; and the two run overlays.
   const [runsSnapshot, setRunsSnapshot] = useState<RunsSnapshot | undefined>(undefined)
   const [openRunId, setOpenRunId] = useState<WorkflowRunId | undefined>(undefined)
-  // The artifact the run view's reader is showing, by path. It lives here
-  // because Escape unwinds one surface at a time and this is where that ladder
-  // is: the reader is a step of it, above the run view itself.
+  // Lives here rather than in the run view because Escape unwinds one surface
+  // at a time and this is where that ladder is; the reader is a step of it.
   const [openArtifactPath, setOpenArtifactPath] = useState<string | undefined>(undefined)
   const [runsOverviewOpen, setRunsOverviewOpen] = useState(false)
   // Restoring a queued message puts the caret back where the words are.

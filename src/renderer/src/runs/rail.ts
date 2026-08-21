@@ -38,7 +38,7 @@ export interface RailModel {
  * The record alone cannot say when a row first appeared. A node's declared
  * outputs read the same whether the plan placed them at kickoff or the node
  * declared them when it started, so the caller carries the placement order
- * forward and passes it back (spec §3, "a row never moves once placed").
+ * forward and passes it back: a row never moves once placed.
  * Pass nothing and the record's own node order decides, which is all a rail
  * opened mid-flight can honor.
  */

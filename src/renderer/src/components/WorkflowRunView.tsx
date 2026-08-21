@@ -108,8 +108,6 @@ export function WorkflowRunView({
   const openRow = openArtifact === undefined ? undefined : rowFor(rail, openArtifact)
   const cost = money(runCost(run))
   const question = run.question
-  // While the reader is open it is what the rail highlights; otherwise the
-  // rail lights up what the shown node is making.
   const selected =
     openArtifact !== undefined
       ? [openArtifact]
@@ -269,10 +267,10 @@ export function WorkflowRunView({
 
 // The rail's placement memory. Each snapshot is derived against the order the
 // last one produced, so a path a later node's start drops into the middle of
-// the record joins the list at the end instead of pushing its neighbors down
-// (spec §3). The memory lives as long as the view. A run reopened later starts
-// from record order again, which is the most first appearance any record can
-// be asked for.
+// the record joins the list at the end instead of pushing its neighbors down.
+// The memory lives as long as the view. A run reopened later starts from
+// record order again, which is the most first appearance any record can be
+// asked for.
 function usePlacedRail(run: RunRecord): RailModel {
   const [placed, setPlaced] = useState<{
     readonly runId: string

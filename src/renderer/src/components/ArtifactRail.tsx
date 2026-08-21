@@ -1,10 +1,9 @@
 import type { RailModel, RailRow } from '../runs/rail'
 import './runs.css'
 
-// The run view's third column: every artifact the run has touched, inputs
-// first and then what it wrote, in the order it appeared. The graph says which
-// node ran when; this says what moved between them. Nothing here acts on the
-// run — a row opens the artifact reader and does nothing else.
+// The graph says which node ran when; this column says what moved between
+// them. Nothing here acts on the run — a row opens the artifact reader and
+// does nothing else.
 export function ArtifactRail({
   rail,
   selected,
