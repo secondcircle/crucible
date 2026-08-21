@@ -199,8 +199,9 @@ _Avoid_: window (the payload's word, ambiguous beside the context window),
 bar, gauge.
 
 **Pace tick**:
-The hairline on a weekly quota meter marking where an even burn would have put
-you by now. Fill past the tick means spending faster than the window elapses.
+The hairline on a windowed quota meter — weekly or monthly — marking where an
+even burn would have put you by now. Fill past the tick means spending faster
+than the window elapses.
 _Avoid_: velocity, burn rate, forecast, projection line.
 
 **Needs you**:
