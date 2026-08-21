@@ -2,16 +2,46 @@ import { spawnSync } from 'node:child_process'
 import { workflow } from 'crucible:workflow'
 
 // Ported from the legacy system: take an intent document to built code — a
-// Spec, a fresh-context builder, and a review loop whose verdict gates a
-// merge only the orchestrator's judgment makes. Venue machinery is gone
-// (every run works in its own worktree, ADR 0016); check-ins go to the
-// orchestrator, never to a dashboard (ADR 0017).
+// Spec, a fresh-context builder, a review loop, and the merge gate that was
+// once a workflow of its own. What a run leaves is a branch; pulling it in is
+// the orchestrator's judgment and merging it the human's act. Venue machinery
+// is gone (every run works in its own worktree, ADR 0016); check-ins go to
+// the orchestrator, never to a dashboard (ADR 0017).
 
 const DOCUMENT_MODEL = 'anthropic/claude-fable-5:high'
 const CODE_MODEL = 'anthropic/claude-opus-5:high'
 
 /** Three rounds of the same argument is where a loop stops being worth trusting. */
 const REVIEWS_PER_CHECK_IN = 3
+
+/**
+ * Shipped inside the workflow rather than read from beside it: a workspace
+ * that disagrees with the doctrine shadows this file, and one act has to
+ * replace both.
+ */
+const COMMENT_DOCTRINE = `\
+# Comment doctrine
+
+A comment that survives review tells a reader one thing: why something
+non-obvious was done. Nothing else earns the space.
+
+Why this matters: code already says what it does, so a comment restating it is
+noise at best and, the moment the code moves on, a lie. The comments a review
+lets through become the codebase's permanent voice — every one of them is a
+claim some future reader will trust.
+
+The constraints:
+
+- A comment never describes what the code does or how; that is the code's
+  job. It exists only to explain a decision a reader would otherwise find
+  strange.
+- A line or two at most. A why that needs more was a real trade-off and
+  belongs in an ADR — and once recorded there, the code should read as
+  unsurprising on its own.
+- A comment references nothing outside the code: no file paths, no documents,
+  no ADR numbers, no artifacts of the code's creation. A reference to
+  something ephemeral rots; a reference to something durable means the
+  explanation lives in the wrong place.`
 
 /** A machine-readable conclusion the loop branches on, as plain JSON schema. */
 const VERDICT = {
@@ -23,9 +53,13 @@ const VERDICT = {
   }
 }
 
-function git(args: string[], cwd: string): { ok: boolean; out: string } {
+function git(args: string[], cwd: string): { ok: boolean; status: number | null; out: string } {
   const ran = spawnSync('git', args, { cwd, encoding: 'utf8', timeout: 120_000 })
-  return { ok: ran.status === 0, out: `${ran.stdout ?? ''}${ran.stderr ?? ''}`.trim() }
+  return {
+    ok: ran.status === 0,
+    status: ran.status,
+    out: `${ran.stdout ?? ''}${ran.stderr ?? ''}`.trim()
+  }
 }
 
 /** The branch the run is building on, as the check-in must name it. */
@@ -59,6 +93,40 @@ function commit(cwd: string, message: string): void {
   if (anything.ok) return
   const done = git(['commit', '-m', message], cwd)
   if (!done.ok) throw new Error(`build: git commit failed: ${done.out}`)
+}
+
+/** What the run reports about merging, having merged nothing. */
+type MergeCheck =
+  | { result: 'clean' }
+  | { result: 'conflicts'; files: string[] }
+  | { result: 'untested'; why: string }
+
+/**
+ * merge-tree answers the question by writing loose objects and nothing else,
+ * where a merge followed by --abort would rewrite the worktree the run is
+ * forbidden to touch. A branch that cannot be tested is still a branch the
+ * gate approved, so failure here is reported, never fatal.
+ */
+function mergeCheck(cwd: string, target: string): MergeCheck {
+  const tried = git(['merge-tree', '--write-tree', '--name-only', target, 'HEAD'], cwd)
+  if (tried.status === 0) return { result: 'clean' }
+  if (tried.status === 1) {
+    const files: string[] = []
+    // The written tree's id, then the conflicted paths, then a blank line.
+    for (const line of tried.out.split('\n').slice(1)) {
+      if (line.trim() === '') break
+      files.push(line.trim())
+    }
+    return { result: 'conflicts', files }
+  }
+  const how = tried.status === null ? 'without an exit status' : `with exit ${tried.status}`
+  const said = tried.out.split('\n')[0] ?? ''
+  return {
+    result: 'untested',
+    why:
+      `\`git merge-tree --write-tree\` ended ${how}, so whether this branch still merges ` +
+      `cleanly with ${target} was not tested${said === '' ? '' : `: ${said}`}`
+  }
 }
 
 export const plannerPrompt = (intent: string): string => `\
@@ -319,10 +387,249 @@ call, and so is killing the run — that is Cancel on the run, never an answer.
 produced come with this check-in; the arc across the reviews is what shows
 whether the loop is converging. The branch itself carries the work.`
 
+export const gateAlignmentPrompt = (
+  target: string,
+  intent: string,
+  corrections: string[] = []
+): string => `\
+# Alignment check
+
+**Goal**: judge the whole of this branch against the intent document that
+authorized it, and write the report the human reads before they merge: did
+this work do what was asked — all of it, and only it — and does what it added
+hold up where a user meets it.
+
+**Why it matters**: the human authorized this work by the intent document,
+and you are what keeps that authorization meaningful. Every review before
+yours judged the branch against a Spec, so drift between the Spec and what
+was actually agreed was invisible to them by construction, and unasked-for
+work accumulated across rounds with nobody looking for it. What lands is what
+was agreed, nothing less and nothing more, and this is the only pass that can
+say so.
+
+**The work under review**: everything this branch has built. In your working
+directory, \`git diff ${target}...HEAD\` is exactly that work — the whole
+branch against the commit it was born from, however many agents contributed
+to it.
+
+**The standard**: the intent document at \`${intent}\`. Read it in full before
+you judge anything, and work from the document itself rather than a guess at
+what it probably says. It is the sole standard: a requirement it never states
+is not a shortfall, however desirable, and work it explicitly rules in is
+never creep.
+
+**What your report must answer**:
+
+1. **Coverage** — does the branch accomplish everything the intent document
+   asked for? Where it falls short, show exactly what is missing or partial.
+2. **Unasked work** — what did the branch do that the intent document never
+   asked for? Split it honestly into two tiers that never blur:
+   - **Scope creep**: work serving no requirement in the intent document and
+     not incidental to executing one. Argue for reverting it.
+   - **Incidental extras**: unrequested work that was incidental to the asked
+     work — a bug fixed in passing, a rename the work forced. Note it for the
+     human's information; it is never held against the branch.
+   The tiers stay separate because a gate that flags every drive-by fix
+   teaches its reader to ignore flags, and the scope-creep tier has to stay
+   trustworthy enough to act on. Where it is genuinely ambiguous whether
+   something was asked, say so rather than forcing it into a tier.
+3. **Mock fidelity** — every new user-visible control the diff adds or
+   changes, walked against the mocks the intent document cites. A control
+   that appears in no cited mock and was not explicitly ruled is flagged by
+   name: whatever ruling its existence traces to, its *visual form* was never
+   approved. This is how silent inventions reach the human.
+4. **Acknowledgment** — every user input the diff adds or changes, and the
+   immediate feedback it produces. This repository has ruled it
+   (\`docs/adr/0010\`): every input acknowledges in the same frame it lands,
+   and work taking real time shows a waiting state for its whole duration. An
+   input whose feedback you cannot name is a defect on par with wrong data,
+   never a note.
+
+A diff that adds no user-visible control and no user input still gets both
+walks and both headings: an empty walk is a result, and a silent omission
+reads as one.
+
+**Constraints on you**:
+
+- Review only — change no files besides your report.
+- Earlier rounds of this same check may be listed among your inputs. Read
+  them first: a finding that persists has to read as persisting, and one
+  already fixed must not be rediscovered cold.
+- Your report is for a human reader: a dark-mode HTML document, using what
+  HTML offers over markdown to convey coverage and creep intuitively.
+
+**Context**: you are in a worktree of this repository, on the branch under
+judgment. The repository's glossary is \`CONTEXT.md\` at the root — use its
+terms exactly; its decisions live in \`docs/adr/\`.${standingCorrections(corrections)}`
+
+export const gateCommentsPrompt = (target: string, corrections: string[] = []): string => `\
+# Comment police
+
+**Goal**: bring every comment this branch added or edited into compliance with
+the comment doctrine below — by editing the files directly — and write a
+report of what you changed and why, so a human can spot-check your judgment
+cheaply instead of redoing the work.
+
+**Why it matters**: comments are the one channel code has for explaining
+itself to a future reader, and a bad one actively misleads. You fix rather
+than flag because the fixes are cheap and the human's attention is the scarce
+resource; the report is the audit trail that keeps them able to see each
+change and overrule it at a glance.
+
+**The work under review**: everything this branch has built. In your working
+directory, \`git diff ${target}...HEAD\` is exactly that work.
+
+**The comment doctrine**:
+
+${COMMENT_DOCTRINE}
+
+**Constraints on you**:
+
+- Edit comments only. No change to code behavior, identifiers, structure, or
+  formatting beyond what editing or removing a comment forces.
+- Only comments this branch added or edited. Untouched comments are not yours
+  to police, however bad they are.
+- You write no ADRs and no documents besides your report. Where a comment
+  carries a why too big for a comment to hold, do not let the knowledge
+  vanish silently: preserve it in the report and say where it belongs.
+- Finding nothing to change is a legitimate outcome — say so in the report
+  and edit nothing. Churn for its own sake reads to the next reader as work
+  somebody asked for.
+- Your report is for a human reader: a dark-mode HTML document, using what
+  HTML offers over markdown to convey — for each change — what was there,
+  what is there now, and why, intuitively.
+
+**Context**: you are in a worktree of this repository, on the branch under
+judgment. The repository's glossary is \`CONTEXT.md\` at the root — use its
+terms exactly; its decisions live in \`docs/adr/\`.${standingCorrections(corrections)}`
+
+export const gateVerdictPrompt = (
+  target: string,
+  intent: string,
+  corrections: string[] = []
+): string => `\
+# The verdict on this branch
+
+**Goal**: weigh the two reports listed among your inputs — the branch's
+coverage and unasked work, and the comment changes made to it — against the
+intent document, and deliver one verdict through complete_node: \`approved\`
+when nothing must happen before a human decides this branch's fate,
+\`changes-required\` when something must.
+
+**Why it matters**: this is the last judgment the run makes. The human merges
+on it and their attention is the scarce resource — a verdict that hides a
+problem burns trust in every future run, and one that cries wolf teaches them
+to stop reading. \`changes-required\` dispatches a fresh agent to work the
+findings and puts the whole branch through this check again, so your verdict
+is read as an instruction rather than an opinion.
+
+**The standard**: the intent document at \`${intent}\` is what this work was
+agreed to be. The branch itself is \`git diff ${target}...HEAD\` in your
+working directory.
+
+**Constraints on you**:
+
+- \`approved\` only when nothing in the reports demands action before the
+  merge. Anything a report left ambiguous or reserved for the human belongs
+  in your reason, never silently resolved.
+- The reports are your evidence, but verify a claim against the tree when
+  that claim alone would decide the verdict.
+- Your reason reaches the human in chat as the result of this whole run: it
+  has to be actionable without rereading the reports.
+- You change no files. Your product is the verdict and its reason.
+
+**Context**: you are in a worktree of this repository, on the branch under
+judgment. The repository's glossary is \`CONTEXT.md\` at the root — use its
+terms exactly; its decisions live in \`docs/adr/\`.${standingCorrections(corrections)}`
+
+export const gateFixerPrompt = (
+  target: string,
+  intent: string,
+  spec: string,
+  coverageReport: string,
+  commentReport: string,
+  corrections: string[] = []
+): string => `\
+# Fix what the gate found
+
+**Goal**: resolve what this branch's final check found, so the next pass can
+approve it. The standing judgment is the pair of reports from the round that
+just refused the branch — coverage and unasked work at \`${coverageReport}\`,
+the comment changes at \`${commentReport}\`. Earlier rounds among your inputs
+show what has already been asked and what may have been missed twice.
+
+**Why you**: you arrive with a fresh context because the agents who wrote this
+code could not see what the check saw. The branch itself is the only record of
+what they did — there is no session to inherit, no conversation, no handoff
+note. A finding that survives your round comes back as the same argument one
+round later, so what you resolve, resolve properly.
+
+**The work so far**: in your working directory, \`git diff ${target}...HEAD\`
+is everything this branch has built.
+
+**The standard**: the intent document at \`${intent}\` is what this work was
+agreed to be, and it is the only thing that licenses work.
+
+**Constraints**:
+
+- Work the findings and nothing else. Neither the findings nor the comment
+  doctrine license work the intent document never agreed to; a report that
+  argues for reverting something is asking for exactly that and no more.
+- The Spec at \`${spec}\` records the decisions this build already settled,
+  and the reviews that settled them are closed. Read it so you contradict
+  nothing it decided — it licenses no new work of its own, and the findings
+  are not an opening to reopen it.
+- Fix causes, not symptoms — no quick-and-dirty plugs. Where a finding's
+  cause is structural, step back and change the structure.
+- Where you judge a finding mistaken, leave the code as it is and say why in
+  your completion summary. A finding silently dropped costs the loop a round.
+- The work stays in this worktree; nothing is merged or pushed anywhere.
+
+**Context**: you are in a worktree of this repository, on the branch under
+judgment. The repository's glossary is \`CONTEXT.md\` at the root — use its
+terms exactly; its decisions live in \`docs/adr/\`. Your product is the
+worktree: the changes you leave behind are what the run commits on this
+branch, and your completion summary is what the graph shows of your
+work.${standingCorrections(corrections)}`
+
+export const gateCheckInPrompt = (branch: string, refusals: number): string => `\
+# Check-in: is this final check on task?
+
+**Goal**: rule on the last phase of the run building \`${branch}\`, where
+${refusals} verdicts in a row have now come back \`changes-required\`. This
+phase judges the finished branch at map level — coverage against the intent
+document, scope creep against incidental extras, mock fidelity, input
+acknowledgment, and the comments the branch left behind. The question is
+whether its findings are real, whether it is holding the branch to what the
+intent document actually agreed, and whether the fixers are resolving causes
+or trading one patch for the next. Your answer resumes the run: continue, or
+continue with a correction — a standing judgment carried into every agent of
+this phase that follows.
+
+**Why you are asked**: you hold the human's intent for this work, while the
+agents here hold only the documents and each of them sees one round. A loop
+that is circling looks from the inside exactly like a loop that is progressing
+— a check flagging what nobody agreed to care about, a fixer patching symptoms
+while the cause survives, findings that are not real. Nothing else in the run
+can tell those apart, and nothing else will end it: there is no cap, and the
+branch is not done until a verdict approves it.
+
+**Constraints on your ruling**: a correction retargets the judgment — what it
+weighs, what it stops flagging, what it must not let past. It never adds scope
+the intent document did not agree to: changing *what* is being built is the
+human's call, and so is killing the run — that is Cancel on the run, never an
+answer.
+
+**Context**: the intent document and every report this phase has produced come
+with this check-in; the arc across them is what shows whether it is
+converging. The branch itself carries the work, already reviewed against its
+Spec at interior level — what is in question here is the map-level judgment on
+top of that.`
+
 export default workflow({
   description:
-    'take an intent document to built code: a Spec, a fresh-context builder, and a review loop ' +
-    'whose verdict gates a merge only the orchestrator makes',
+    'take an intent document to built code: a Spec, a fresh-context builder, a review loop, and ' +
+    'a merge gate — a run ends with a gated branch ready for the human to merge',
   inputs: {
     intent: 'The intent document: what the work this run builds is supposed to accomplish.'
   },
@@ -331,7 +638,14 @@ export default workflow({
   plan: () => [
     { id: 'planner', model: DOCUMENT_MODEL },
     { id: 'builder', model: CODE_MODEL, parents: ['planner'] },
-    { id: 'review-1', model: DOCUMENT_MODEL, parents: ['builder'] }
+    { id: 'review-1', model: DOCUMENT_MODEL, parents: ['builder'] },
+    { id: 'gate-alignment-1', model: DOCUMENT_MODEL, parents: ['review-1'] },
+    { id: 'gate-comments-1', model: DOCUMENT_MODEL, parents: ['gate-alignment-1'] },
+    {
+      id: 'gate-verdict-1',
+      model: DOCUMENT_MODEL,
+      parents: ['gate-alignment-1', 'gate-comments-1']
+    }
   ],
   run: async (ctx) => {
     // Resolved before any node runs: a repository with no local default
@@ -379,8 +693,10 @@ export default workflow({
       // A review's repro tests are findings made runnable: they land on the
       // branch like any actor's work. A review that added none commits nothing.
       commit(ctx.cwd, `build: review ${round}`)
-      const { verdict, reason } = review.verdict as { verdict: string; reason: string }
-      if (verdict === 'approved') return { verdict, reason }
+      const { verdict } = review.verdict as { verdict: string; reason: string }
+      // Approval ends the interior loop, not the run: nothing has yet judged
+      // the branch against what was agreed.
+      if (verdict === 'approved') break
 
       // Between the review and the fixer it dispatches, so a correction
       // reaches the agent it was written for.
@@ -405,6 +721,96 @@ export default workflow({
         model: CODE_MODEL
       })
       commit(ctx.cwd, `build: fixer ${round}`)
+    }
+
+    // The gate keeps corrections of its own: interior rulings were scoped to
+    // method against the Spec, and this phase answers to the intent document.
+    const coverageReports: string[] = []
+    const commentReports: string[] = []
+    const gateCorrections: string[] = []
+    let sinceGateCheckIn = 0
+    for (let round = 1; ; round++) {
+      // First in the round, so it judges the diff the branch's agents left
+      // rather than one the police has already edited.
+      const alignment = await ctx.node(`gate-alignment-${round}`, {
+        prompt: gateAlignmentPrompt(target, intent, gateCorrections),
+        reads: [intent, ...coverageReports],
+        outputs: {
+          report: {
+            file: `gate-alignment-${round}.html`,
+            desc: 'coverage and unasked work, judged against the intent document'
+          }
+        },
+        model: DOCUMENT_MODEL
+      })
+      coverageReports.push(alignment.outputs.report)
+
+      const police = await ctx.node(`gate-comments-${round}`, {
+        prompt: gateCommentsPrompt(target, gateCorrections),
+        outputs: {
+          report: {
+            file: `gate-comments-${round}.html`,
+            desc: 'every comment change made on the branch, with the why'
+          }
+        },
+        model: DOCUMENT_MODEL
+      })
+      commentReports.push(police.outputs.report)
+      // Landed before the verdict judges the tree, so the fixes already read
+      // as part of the branch. A round that changed nothing commits nothing.
+      commit(ctx.cwd, `build: comment police ${round}`)
+
+      const gate = await ctx.node(`gate-verdict-${round}`, {
+        prompt: gateVerdictPrompt(target, intent, gateCorrections),
+        reads: [intent, alignment.outputs.report, police.outputs.report],
+        verdict: VERDICT,
+        model: DOCUMENT_MODEL
+      })
+      const { verdict, reason } = gate.verdict as { verdict: string; reason: string }
+      if (verdict === 'approved') {
+        return {
+          verdict,
+          reason,
+          // Earlier coverage rounds judged a branch that no longer exists,
+          // while every comment report documents edits still on this one.
+          coverageReport: alignment.outputs.report,
+          commentReports: [...commentReports],
+          merge: mergeCheck(ctx.cwd, target)
+        }
+      }
+
+      sinceGateCheckIn += 1
+      if (sinceGateCheckIn === REVIEWS_PER_CHECK_IN) {
+        gateCorrections.push(
+          await ctx.ask({
+            reason: gateCheckInPrompt(currentBranch(ctx.cwd), round),
+            artifacts: {
+              intent,
+              ...Object.fromEntries(
+                coverageReports.map((path, at) => [`gate-alignment-${at + 1}`, path])
+              ),
+              ...Object.fromEntries(
+                commentReports.map((path, at) => [`gate-comments-${at + 1}`, path])
+              )
+            }
+          })
+        )
+        sinceGateCheckIn = 0
+      }
+
+      await ctx.node(`gate-fixer-${round}`, {
+        prompt: gateFixerPrompt(
+          target,
+          intent,
+          spec,
+          alignment.outputs.report,
+          police.outputs.report,
+          gateCorrections
+        ),
+        reads: [intent, spec, ...coverageReports, ...commentReports],
+        model: CODE_MODEL
+      })
+      commit(ctx.cwd, `build: gate fixer ${round}`)
     }
   }
 })
