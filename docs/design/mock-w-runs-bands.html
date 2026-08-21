@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>⌘R — runs, banded</title>
+<style>
+  :root{
+    --bg:#191419; --bg2:#211a20; --panel:#241c23; --line:#3a2e38;
+    --ink:#e8dfe2; --dim:#9b8a94; --faint:#6b5d66;
+    --accent:#e07a4f; --accent2:#f0a37c; --ok:#7fb069; --warn:#d9a441; --bad:#c96f6f;
+    --mono:ui-monospace,'SF Mono',Menlo,monospace;
+  }
+  *{box-sizing:border-box;margin:0}
+  body{background:#0f0c0f;color:var(--ink);font:14px/1.55 -apple-system,'Segoe UI',sans-serif;padding:32px 24px 64px}
+  h1{font-size:16px;letter-spacing:.04em;margin:0 auto 4px;max-width:980px}
+  h1 em{color:var(--accent);font-style:normal}
+  .lede{color:var(--dim);font-size:13px;max-width:980px;margin:0 auto 28px}
+  section{max-width:980px;margin:0 auto 40px}
+  h2{font-size:13px;text-transform:uppercase;letter-spacing:.12em;color:var(--faint);margin-bottom:12px}
+  .cap{border-left:3px solid var(--accent);background:var(--bg2);padding:10px 14px;font-size:12.5px;color:var(--dim);border-radius:0 8px 8px 0;margin:14px 0 0}
+  .cap b{color:var(--ink)}
+  .frame{border:1px solid var(--line);border-radius:12px;overflow:hidden;background:var(--bg)}
+  .btn{font-size:12px;border:1px solid var(--line);border-radius:8px;background:var(--bg2);color:var(--ink);padding:4px 11px;cursor:pointer}
+  .btn.primary{background:var(--accent);border-color:var(--accent);color:#1c120c;font-weight:700}
+
+  .globalview{height:560px;display:flex;flex-direction:column}
+  .gvtop{display:flex;align-items:center;gap:12px;padding:14px 22px;border-bottom:1px solid var(--line)}
+  .gvtop .t{font-weight:700;font-size:15px}
+  .gvtop .count{font-size:12px;color:var(--dim)}
+  .gvtop .esc{margin-left:auto;font-size:11px;color:var(--faint)}
+  .gvtop .esc kbd{font:10.5px var(--mono);border:1px solid var(--line);border-radius:4px;padding:0 4px}
+  .gvbody{flex:1;overflow-y:auto;padding:8px 22px 20px}
+
+  /* the three bands */
+  .band{margin-top:16px}
+  .band:first-child{margin-top:6px}
+  .bandhead{display:flex;align-items:center;gap:10px;padding-bottom:8px}
+  .bandhead .n{font-size:11px;text-transform:uppercase;letter-spacing:.12em;color:var(--faint)}
+  .bandhead .n.hot{color:var(--warn)}
+  .bandhead .rule{flex:1;height:1px;background:var(--line)}
+  .bandhead .k{font:11px var(--mono);color:var(--faint)}
+
+  .runrow{display:flex;align-items:center;gap:14px;border:1px solid var(--line);border-radius:10px;background:var(--panel);padding:10px 14px;margin-bottom:8px}
+  .runrow .dot{width:8px;height:8px;border-radius:50%;background:var(--ok);animation:breathe 2.2s infinite;flex-shrink:0}
+  @keyframes breathe{50%{opacity:.35}}
+  .runrow.parked{border-color:var(--warn)}
+  .runrow.parked .dot{background:var(--warn);animation:none}
+  .runrow.failed{border-color:#5a3540}
+  .runrow.failed .dot{background:var(--bad);animation:none}
+  .runrow.done .dot{background:var(--faint);animation:none}
+  .runrow.done{opacity:.72;background:var(--bg2)}
+  .runrow .wf{font-weight:700;font-size:13px;width:64px}
+  .runrow .ws{font:11.5px var(--mono);color:var(--accent2);width:104px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .runrow .id{font:11.5px var(--mono);color:var(--faint);width:52px}
+  .runrow .st{font:11.5px var(--mono);width:186px}
+  .runrow .st .hot{color:var(--warn)}
+  .runrow .st .bad{color:var(--bad)}
+  .runrow .sess{font-size:12.5px;color:var(--dim);flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .runrow .sess em{font-style:normal;color:var(--accent2)}
+  .runrow .sess .un{color:var(--faint);font-style:italic}
+  .runrow .spend{font:11.5px var(--mono);color:var(--faint)}
+  .empty{font-size:12.5px;color:var(--faint);padding:2px 2px 6px}
+</style></head><body>
+
+<h1><em>⌘R</em> — runs, banded by what they want from you</h1>
+<p class="lede">Replaces the workspace grouping in <code>mock-t-workflow-runs.html</code> view 5.
+Same row, same buttons, same Ember. The workspace moves onto the row as a column so the bands can
+do the grouping.</p>
+
+<section>
+  <h2>The whole view</h2>
+  <div class="frame"><div class="globalview">
+    <div class="gvtop"><span class="t">Runs</span><span class="count">2 running · 3 need you · 1 finished today</span><span class="esc"><kbd>esc</kbd> close</span></div>
+    <div class="gvbody">
+
+      <div class="band">
+        <div class="bandhead"><span class="n">Running</span><span class="rule"></span><span class="k">2</span></div>
+        <div class="runrow"><span class="dot"></span><span class="wf">build</span><span class="ws">crucible</span><span class="id">en42</span><span class="st">▸ code review · 18m</span><span class="sess">from <em>panel handoff build</em></span><span class="spend">$4.10</span><button class="btn">Open run</button><button class="btn">Go to session</button></div>
+        <div class="runrow"><span class="dot"></span><span class="wf">adhoc</span><span class="ws">resume-site</span><span class="id">k2m9</span><span class="st">▸ work · 3m</span><span class="sess">from <em>copy refresh</em></span><span class="spend">$0.12</span><button class="btn">Open run</button><button class="btn">Go to session</button></div>
+      </div>
+
+      <div class="band">
+        <div class="bandhead"><span class="n hot">Needs you</span><span class="rule"></span><span class="k">3</span></div>
+        <div class="runrow parked"><span class="dot"></span><span class="wf">adhoc</span><span class="ws">crucible</span><span class="id">f7k1</span><span class="st"><span class="hot">⚑ waiting on its agent · 6m</span></span><span class="sess">from <em>quota strip polish</em></span><span class="spend">$0.44</span><button class="btn">Open run</button><button class="btn">Go to session</button></div>
+        <div class="runrow parked"><span class="dot"></span><span class="wf">build</span><span class="ws">crucible</span><span class="id">g8x2</span><span class="st"><span class="hot">⚑ check-in · no one to ask · 41m</span></span><span class="sess"><span class="un">unattended — issue #14 · quota meter flicker</span></span><span class="spend">$2.05</span><button class="btn">Open run</button><button class="btn primary">Start session</button></div>
+        <div class="runrow failed"><span class="dot"></span><span class="wf">build</span><span class="ws">resume-site</span><span class="id">b1n7</span><span class="st"><span class="bad">failed · 40m ago</span></span><span class="sess">from <em>og image pipeline</em></span><span class="spend">$1.88</span><button class="btn">Open run</button><button class="btn">Go to session</button></div>
+      </div>
+
+      <div class="band">
+        <div class="bandhead"><span class="n">Done</span><span class="rule"></span><span class="k">2</span></div>
+        <div class="runrow done"><span class="dot"></span><span class="wf">build</span><span class="ws">resume-site</span><span class="id">d3p8</span><span class="st">complete · 2h ago</span><span class="sess">from <em>og image pipeline</em></span><span class="spend">$5.90</span><button class="btn">Open run</button><button class="btn">Go to session</button></div>
+        <div class="runrow done"><span class="dot"></span><span class="wf">adhoc</span><span class="ws">crucible</span><span class="id">c9v2</span><span class="st">cancelled · yesterday</span><span class="sess">from <em>sidebar marks</em></span><span class="spend">$0.31</span><button class="btn">Open run</button><button class="btn">Go to session</button></div>
+      </div>
+
+    </div>
+  </div></div>
+  <div class="cap"><b>Three bands, hairline dividers, newest first inside each.</b> Running is what
+  is burning money right now. Needs you is anything stopped that only you can move: a run waiting on
+  an answer, a paused run, a failed one. Done is complete and cancelled, dimmed, still openable
+  because the record outlives the run. Empty bands disappear rather than showing a stub.</div>
+</section>
+
+<section>
+  <h2>Quiet day — bands that are empty are gone</h2>
+  <div class="frame"><div class="globalview" style="height:230px">
+    <div class="gvtop"><span class="t">Runs</span><span class="count">nothing running · 1 finished today</span><span class="esc"><kbd>esc</kbd> close</span></div>
+    <div class="gvbody">
+      <div class="band">
+        <div class="bandhead"><span class="n">Done</span><span class="rule"></span><span class="k">1</span></div>
+        <div class="runrow done"><span class="dot"></span><span class="wf">build</span><span class="ws">crucible</span><span class="id">d3p8</span><span class="st">complete · 2h ago</span><span class="sess">from <em>og image pipeline</em></span><span class="spend">$5.90</span><button class="btn">Open run</button><button class="btn">Go to session</button></div>
+      </div>
+    </div>
+  </div></div>
+  <div class="cap"><b>No band headers with nothing under them.</b> One band left means one divider,
+  which reads as a label rather than as a grid.</div>
+</section>
+
+</body></html>
