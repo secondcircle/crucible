@@ -4,7 +4,12 @@
 // paid call.
 import { describe, expect, it } from 'vitest'
 import type { AgentSessionEvent } from '@earendil-works/pi-coding-agent'
-import { deliveredBashRunId, toTranscript, type StoredMessage } from './sdk-transcript'
+import {
+  deliveredBashRunId,
+  pathSeams,
+  toTranscript,
+  type StoredMessage
+} from './sdk-transcript'
 
 function messages(...stored: unknown[]): StoredMessage[] {
   return stored as StoredMessage[]
@@ -184,5 +189,110 @@ describe('the delivery point of a shared run', () => {
         message: { role: 'custom', customType: 'crucible.bashRun' }
       })
     ).toBeUndefined()
+  })
+})
+
+// The numbers below are the review's own demonstration, run through the same
+// mirror: A1 caches 10k, A2 (a branch later abandoned) reads it back, and A3
+// re-bills 2k on the path the user jumped to. π compares A3 against A2 — the
+// request that was really billed before it — not against A1, which is what a
+// path-only scan would compare it against.
+const A1 = {
+  role: 'assistant',
+  provider: 'anthropic',
+  model: 'opus',
+  timestamp: 1000,
+  stopReason: 'stop',
+  content: [{ type: 'text', text: 'the first answer' }],
+  usage: {
+    input: 200,
+    cacheRead: 0,
+    cacheWrite: 10_000,
+    cost: { input: 0.01, cacheRead: 0, cacheWrite: 0.05 }
+  }
+}
+
+const A2 = {
+  role: 'assistant',
+  provider: 'anthropic',
+  model: 'opus',
+  timestamp: 2000,
+  stopReason: 'stop',
+  content: [{ type: 'text', text: 'the answer on the branch that was left' }],
+  usage: {
+    input: 200,
+    cacheRead: 10_000,
+    cacheWrite: 20_000,
+    cost: { input: 0.01, cacheRead: 0.003, cacheWrite: 0.1 }
+  }
+}
+
+const A3 = {
+  role: 'assistant',
+  provider: 'anthropic',
+  model: 'opus',
+  timestamp: 3000,
+  stopReason: 'stop',
+  content: [{ type: 'text', text: 'the answer after the jump' }],
+  usage: {
+    input: 2000,
+    cacheRead: 10_000,
+    cacheWrite: 0,
+    cost: { input: 0.03, cacheRead: 0.003, cacheWrite: 0 }
+  }
+}
+
+const asked = (text: string): unknown => ({ role: 'user', content: text })
+
+function entriesOf(...messages: readonly unknown[]): unknown[] {
+  return messages.map((message) => ({ type: 'message', message }))
+}
+
+describe('the seams of a restored path', () => {
+  it('compares each message against the request that was really billed before it', () => {
+    const path = messages(asked('again'), A1, asked('and again'), A3)
+    const seams = pathSeams(entriesOf(asked('again'), A1, asked('and again'), A2, A3), path)
+
+    // A3 is the fourth item of the path, and it paid: 2000 tokens re-billed,
+    // exactly what the live turn announced and the ledger recorded.
+    expect([...seams.keys()]).toEqual([3])
+    expect(seams.get(3)?.missedTokens).toBe(2000)
+  })
+
+  it('leaves the abandoned branch\u2019s own seams off the path it is not on', () => {
+    const path = messages(A1, A2)
+    const seams = pathSeams(entriesOf(A1, A2, A3), path)
+
+    // A2 paid for nothing; A3's miss belongs to a message this path does not
+    // show, so nothing is placed for it.
+    expect([...seams.keys()]).toEqual([])
+  })
+
+  it('starts the comparison over at a compaction, wherever it sits', () => {
+    const path = messages(A1, A3)
+    const seams = pathSeams(
+      [
+        ...entriesOf(A1, A2),
+        { type: 'compaction', summary: 'the story so far' },
+        ...entriesOf(A3)
+      ],
+      path
+    )
+
+    expect([...seams.keys()]).toEqual([])
+  })
+})
+
+describe('a path message \u03c0 repaired on load', () => {
+  it('still carries the seam of the entry it was copied from', () => {
+    // π normalizes a message stored with null content into a shallow copy, so
+    // the path holds a different object than the entry does — but the same
+    // usage, which is what the miss was computed from.
+    const stored = { ...A3, content: null }
+    const repaired = { ...stored, content: [] }
+    const seams = pathSeams(entriesOf(asked('again'), A1, A2, stored), messages(A1, repaired))
+
+    expect([...seams.keys()]).toEqual([1])
+    expect(seams.get(1)?.missedTokens).toBe(2000)
   })
 })

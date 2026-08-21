@@ -3,6 +3,9 @@ import { app, BrowserWindow, dialog, shell as electronShell } from 'electron'
 import { type AgentChannel, serveAgentChannel } from './agent/channel'
 import type { SessionId } from '../shared/agent/port'
 import { type AppUpdateChannel, serveAppUpdateChannel } from './app-update/channel'
+import { type CacheChannel, serveCacheChannel } from './cache/channel'
+import { createCacheLedger } from './cache/ledger'
+import { useCacheLedgerDir } from './cache/paths'
 import { createAppUpdateService, stillAppUpdateService } from './app-update/service'
 import { decideFlavor, selectAdapter } from './agent/select-adapter'
 import { withLogging } from './agent/with-logging'
@@ -87,6 +90,22 @@ const store = createShellStore(join(app.getPath('userData'), 'shell-state.json')
 // adapter's three tools and the shell's snapshots read the same tabs.
 const panel = createPanelModel({ persistence: storePanelPersistence(store) })
 
+// The cache ledger, before anything that could observe a miss: one file per
+// installation, directly under Crucible's own state directory, flavor-scoped
+// like everything there and never pruned (ADR 0015, ADR 0019). A fake-flavor
+// launch writes to the dev ledger, which is what makes the whole loop
+// drivable by an agent.
+useCacheLedgerDir(app.getPath('userData'))
+const cache = createCacheLedger({
+  onFailure: (cause) => {
+    log.append({
+      source: 'main',
+      event: 'cache_ledger_write_failed',
+      message: cause instanceof Error ? cause.message : String(cause)
+    })
+  }
+})
+
 // The workflow engine exists before the adapter, because the run tools ride
 // every composed agent. A run speaks by messaging its orchestrator session,
 // and the shell that carries the message is built later — the indirection
@@ -100,6 +119,7 @@ const workflowRuns = selectWorkflowRunService(
   {
     appPath: app.getAppPath(),
     stateDir: app.getPath('userData'),
+    cache,
     deliver: (sessionId, text) => {
       if (orchestratorInbox === undefined) {
         throw new Error('no shell is up to carry a run message yet')
@@ -180,6 +200,7 @@ const shell = withLogging(
     panel,
     pickFolder,
     seedWorkspacePath: seedWorkspacePath(),
+    cache,
     // Nobody asked for a title, so nobody is told it failed: the run log is
     // the whole of the report.
     onTitlingFailure: (cause) => {
@@ -213,6 +234,7 @@ let workspaceChannel: WorkspaceChannel | undefined
 let commandChannel: CommandChannel | undefined
 let appUpdateChannel: AppUpdateChannel | undefined
 let quotaChannel: QuotaChannel | undefined
+let cacheChannel: CacheChannel | undefined
 let needsYouChannel: NeedsYouChannel | undefined
 let needsYou: LiveNeedsYouService | undefined
 let workflowRunChannel: WorkflowRunChannel | undefined
@@ -227,6 +249,7 @@ function openWindow(reason?: 'activate'): void {
   commandChannel = serveCommandChannel(commands, window)
   appUpdateChannel = serveAppUpdateChannel(appUpdate, window)
   quotaChannel = serveQuotaChannel(quota, window)
+  cacheChannel = serveCacheChannel(cache, window)
   // Per window, because the dock badge and the banners follow that window's
   // focus. A clicked banner is served here rather than in the renderer: the
   // session is activated on the shell, and the sidebar hears about it as the
@@ -282,6 +305,7 @@ app.on('will-quit', () => {
   commandChannel?.dispose()
   appUpdateChannel?.dispose()
   quotaChannel?.dispose()
+  cacheChannel?.dispose()
   needsYouChannel?.dispose()
   needsYou?.dispose()
   appUpdate.dispose()

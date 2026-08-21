@@ -6,7 +6,9 @@ import { elapsedTime, relativeTime, UNTITLED } from '../labels'
 import type { RunActivity } from '../runs/activity'
 import { shortAge } from '../runs/format'
 import type { Marks } from '../state/needs-you'
+import type { CacheHealth } from '../../../shared/cache/service'
 import type { QuotaView } from '../quota/use-quota'
+import { CacheStrip } from './CacheStrip'
 import { QuotaStrip } from './QuotaStrip'
 import './sidebar.css'
 
@@ -52,6 +54,7 @@ export function Sidebar({
   onActivateSession,
   onRemoveSession,
   onResume,
+  cache,
   quota
 }: {
   readonly snapshot: ShellSnapshot
@@ -71,6 +74,9 @@ export function Sidebar({
   readonly onActivateSession: (id: SessionId) => void
   readonly onRemoveSession: (id: SessionId) => void
   readonly onResume: () => void
+  // The cache strip's data and its one action. Absent without a cache
+  // service, and then no strip renders at all.
+  readonly cache?: { readonly health?: CacheHealth; readonly onOpen: () => void }
   // The quota strip's data. Absent without a quota service, and then no strip
   // renders at all.
   readonly quota?: QuotaView
@@ -263,8 +269,11 @@ export function Sidebar({
         })}
       </ul>
 
-      {/* Pinned at the foot: the workspace list above scrolls, this and Add
-          workspace stay put. */}
+      {/* Pinned at the foot: the workspace list above scrolls, these and Add
+          workspace stay put. The cache strip sits above the quota block, as
+          its own component rather than a quota row: one of them is clickable
+          and the other never is. */}
+      {cache === undefined ? null : <CacheStrip health={cache.health} onOpen={cache.onOpen} />}
       {quota === undefined ? null : <QuotaStrip snapshot={quota.snapshot} now={quota.now} />}
 
       <button className="addws" onClick={onAddWorkspace}>

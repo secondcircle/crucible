@@ -1,0 +1,3090 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Mock U — cache misses in place</title>
+
+<!-- Everything already built renders here from the app's own stylesheets,
+     copied in verbatim below so the file opens anywhere. Sources, in order:
+     styles/tokens.css, components/{sidebar,quota-strip,topbar,transcript,
+     composer,overlay,runs}.css and shell.css. The only hand-written CSS on
+     this page is the new work, in one block at the end, ready to lift into
+     components/cache-strip.css. -->
+<style>
+
+/* ==== src/renderer/src/styles/tokens.css ==== */
+/* The one place a color or a font stack is written down: a literal hex value in
+   a component stylesheet is a bug you can grep for. */
+:root {
+  --bg: #191419;
+  --bg2: #211a20;
+  --panel: #241c23;
+  --panel2: #2e242d;
+  --line: #3a2e38;
+  --code: #120e12;
+  --code-deep: #0d0a0d;
+  --user: #2c2230;
+  --think-bg: #161018;
+  --error-bg: #1d1113;
+  /* what an overlay dims the window behind it to */
+  --overlay: rgb(15 11 15 / 86%);
+  /* a pill for something the branch is not: present, but off */
+  --absent-line: #2f262d;
+
+  --ink: #e8dfe2;
+  --dim: #9b8a94;
+  --faint: #6b5d66;
+  --code-ink: #d7c9b8;
+  --output-ink: #cbbfa4;
+  --on-accent: #1c120c;
+
+  --accent: #e07a4f;
+  --accent2: #f0a37c;
+  --ok: #7fb069;
+  --ok-line: #47603a;
+  --error: #d96a5a;
+  --warn: #d9a441;
+  --thinking: #b08cc9;
+  --absent-ink: #4a3f47;
+  /* merged is its own color: neither running, nor failing, nor open */
+  --merged: #c9a2f0;
+  --merged-line: #5c3f75;
+  /* the chip's lit border, which is the only thing that says "look here" */
+  --lit: #5c4436;
+
+  --font: -apple-system, 'Segoe UI', system-ui, sans-serif;
+  --mono: ui-monospace, 'SF Mono', Menlo, monospace;
+
+  --bar-h: 50px;
+
+  --radius: 8px;
+  --radius-lg: 12px;
+  --column: 680px;
+}
+
+/* ==== src/renderer/src/components/sidebar.css ==== */
+/* The list scrolls inside the sidebar rather than the sidebar scrolling, so
+   the quota strip and Add workspace stay at the foot however long the list
+   grows. */
+.side {
+  /* One right edge for the whole rail: times, counters, quota numbers and
+     both × buttons stop here, so nothing in the column looks loose. */
+  --gutter: 14px;
+  width: 248px;
+  flex: none;
+  background: var(--bg2);
+  border-right: 1px solid var(--line);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.side .brand {
+  padding: 16px 16px 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  font-size: 15px;
+}
+
+.side .brand .mark {
+  color: var(--accent);
+}
+
+.newsession {
+  margin: 6px 12px 14px;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+  color: var(--ink);
+  text-align: center;
+  font-size: 13px;
+}
+
+.newsession:disabled {
+  color: var(--faint);
+  cursor: default;
+}
+
+.wslabel {
+  padding: 4px 16px;
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--faint);
+}
+
+.wslist {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.ws {
+  position: relative;
+  display: flex;
+  align-items: center;
+  padding-right: var(--gutter);
+}
+
+.ws .wsname {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 8px 7px 16px;
+  font-size: 13px;
+  color: var(--dim);
+  background: none;
+  border: none;
+  text-align: left;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ws.active {
+  background: var(--panel);
+}
+
+/* The board's count of branches and pull requests, absent at zero. Outlined,
+   because the filled pill beside it means sessions. */
+.ws .n {
+  font: 10px var(--mono);
+  color: var(--accent2);
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  padding: 0 5px;
+  flex: none;
+}
+
+/* How many sessions in that workspace are waiting on you. Filled, so a
+   collapsed or scrolled-past workspace carries the same weight the pips in its
+   rows would have. */
+.ws .wsn {
+  font: 10px var(--mono);
+  font-weight: 600;
+  color: var(--bg);
+  background: var(--accent2);
+  border-radius: 9px;
+  padding: 0 5px;
+  flex: none;
+}
+
+.ws.active .wsname {
+  color: var(--ink);
+}
+
+.dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--faint);
+  flex: none;
+}
+
+.ws.active .dot {
+  background: var(--accent);
+  box-shadow: 0 0 6px var(--accent);
+}
+
+/* The workspace dot is the only mark a collapsed workspace has, so it stays;
+   it does not pulse, because a workspace is not the thing that works. */
+.ws.working .dot {
+  background: var(--ok);
+}
+
+/* A 20px square, big enough to hit and the same square on every row. The glyph
+   is right-aligned inside it rather than centered, so the × lands on the same
+   edge as the time it covers. */
+.rowaction {
+  flex: none;
+  width: 20px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  border: none;
+  background: none;
+  color: transparent;
+  padding: 0;
+  font-size: 15px;
+  line-height: 1;
+}
+
+.ws:hover .rowaction,
+.sessrow:hover .rowaction,
+.rowaction:focus-visible {
+  color: var(--faint);
+}
+
+.rowaction:hover {
+  color: var(--error);
+}
+
+.sessions {
+  list-style: none;
+  margin: 2px 0 10px 22px;
+  padding: 0;
+  border-left: 1px solid var(--line);
+}
+
+.sessrow {
+  position: relative;
+  display: flex;
+  /* Centered, so a two-line title and its clock read as one object rather
+     than as a clock nailed to the first line. */
+  align-items: center;
+  padding-left: 3px;
+}
+
+/* The slab: the row being looked at is a filled block with a lit edge. It is
+   the one cue that survives a rail full of working sessions, because it is
+   made of matter and position rather than of a color to find. */
+.sessrow.viewing {
+  background: var(--panel2);
+}
+
+.sessrow.viewing::before {
+  content: '';
+  position: absolute;
+  left: -1px;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  background: var(--accent);
+  box-shadow: 0 0 8px rgba(224, 122, 79, 0.55);
+}
+
+/* Two lines of title, then it clips. Never three: the row is scanned, not
+   read. The clamp is on .sesstext and the padding is here, because overflow
+   clips at the padding edge: a padded clamp box shows the tops of the third
+   line's glyphs through the padding as a row of stray dots.
+
+   No status glyph precedes the title, so every title in the rail starts on one
+   left edge and the two-line clamp gets those 13px of text instead. */
+.sess {
+  flex: 1;
+  min-width: 0;
+  padding: 6px 8px 6px 12px;
+  font-size: 12.5px;
+  line-height: 1.35;
+  color: var(--dim);
+  background: none;
+  border: none;
+  text-align: left;
+}
+
+.sesstext {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* One slot, stacked: the time or the counter on top, the dots under it, and
+   the × over both on hover. Right-aligned and centered, so the block never
+   moves the title and never rides high on a two-line row. */
+.rowend {
+  flex: none;
+  align-self: center;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  justify-content: center;
+  gap: 4px;
+  min-width: 34px;
+  padding: 0 var(--gutter) 0 6px;
+}
+
+.rowend small {
+  color: var(--faint);
+  font-size: 10.5px;
+  white-space: nowrap;
+}
+
+/* Mono and tabular: a counter that ticks must not change width as it does.
+   It replaces the relative time rather than joining it — during a turn, "4m
+   ago" and "0:43" are two answers to one question and one of them is wrong. */
+.elapsed {
+  font-family: var(--mono);
+  font-size: 10.5px;
+  line-height: 1;
+  color: var(--ok);
+  opacity: 0.85;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+}
+
+.typing {
+  display: flex;
+  align-items: center;
+  gap: 3.5px;
+  height: 4px;
+}
+
+.typing i {
+  width: 3.5px;
+  height: 3.5px;
+  border-radius: 50%;
+  background: var(--ok);
+  animation: blink 1.3s infinite;
+}
+
+.typing i:nth-child(2) {
+  animation-delay: 0.18s;
+}
+
+.typing i:nth-child(3) {
+  animation-delay: 0.36s;
+}
+
+@keyframes blink {
+  0%,
+  80%,
+  100% {
+    opacity: 0.22;
+  }
+  40% {
+    opacity: 1;
+  }
+}
+
+/* Held still rather than hidden: the dots are still a badge when they do not
+   blink, and the counter still says the turn is running. */
+@media (prefers-reduced-motion: reduce) {
+  .typing i {
+    animation: none;
+    opacity: 1;
+  }
+}
+
+/* The workspace row works the same way: the × covers the count rather than
+   standing beside it, so the count keeps the gutter every other number ends
+   on and the name keeps the width. */
+.ws .rowaction {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  right: var(--gutter);
+  height: auto;
+}
+
+.ws:hover .n,
+.ws:focus-within .n,
+.ws:hover .wsn,
+.ws:focus-within .wsn {
+  visibility: hidden;
+}
+
+/* Over the time rather than beside it, on the gutter and as tall as the row,
+   so hovering swaps the two without moving the title and the target is the
+   whole height of what the cursor is already on. */
+.sessrow .rowaction {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  right: var(--gutter);
+  height: auto;
+}
+
+.sessrow:hover .rowend small,
+.sessrow:focus-within .rowend small,
+.sessrow:hover .elapsed,
+.sessrow:focus-within .elapsed,
+.sessrow:hover .typing,
+.sessrow:focus-within .typing,
+.sessrow:hover .pip,
+.sessrow:focus-within .pip {
+  visibility: hidden;
+}
+
+/* The third row state: the turn ended and nobody saw it. Three cues at once
+   and not one of them is motion — the pip, the title out of dim into full ink,
+   and the time in amber. The slab and the blinking dots are spoken for, so
+   this state borrows neither.
+
+   Centered against the block rather than flushed to the rail's right edge: the
+   pip is 6px and the time under it is about 24px, so a shared right edge left
+   the dot hanging off the end of the number. */
+.pip {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent2);
+  box-shadow: 0 0 7px rgba(240, 163, 124, 0.75);
+  flex: none;
+  align-self: center;
+}
+
+.sessrow.asking .sess {
+  color: var(--ink);
+}
+
+.sessrow.asking .rowend small {
+  color: var(--accent2);
+}
+
+/* The slab carries being-looked-at; the title only gains weight and full ink,
+   which is what makes it legible against the filled row. */
+.sess.active {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+/* the whole of the at-a-glance worktree signal: inline at the head of the
+   title, inside the clamp box. Upright even on an italic untitled row, and a
+   shade larger than the title so the fork reads as a fork rather than a
+   speck; the gap keeps the first glyph of the title off its tines. */
+.sess .wt {
+  color: var(--faint);
+  font-size: 13.5px;
+  font-style: normal;
+  margin-right: 4px;
+}
+
+.sess.active .wt {
+  color: var(--accent2);
+}
+
+.sess.untitled {
+  color: var(--faint);
+  font-style: italic;
+}
+
+.more {
+  padding: 4px 12px;
+  font-size: 11.5px;
+  color: var(--faint);
+  background: none;
+  border: none;
+}
+
+.more:hover {
+  color: var(--accent2);
+}
+
+.addws {
+  margin: 8px 12px 14px;
+  padding: 7px;
+  border: 1px dashed var(--line);
+  border-radius: var(--radius);
+  background: none;
+  color: var(--faint);
+  text-align: center;
+  font-size: 12px;
+}
+
+.addws:hover {
+  color: var(--accent2);
+  border-color: var(--accent2);
+}
+
+/* ==== src/renderer/src/components/quota-strip.css ==== */
+/* Every color is a token: a literal hex here would be a bug you can grep for.
+   Nothing animates, because whatever the numbers say this is never an alarm.
+
+   The `q` prefix on every class is deliberate: short general names like `bar`
+   and `num` collide with rules other components already own. */
+
+.quota {
+  border-top: 1px solid var(--line);
+  /* The rail's own right edge, so the percentages line up with the times and
+     the × buttons above them. */
+  padding: 9px var(--gutter, 14px) 6px;
+}
+
+.qlabel {
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--faint);
+  margin-bottom: 7px;
+}
+
+.qrow {
+  margin-bottom: 9px;
+}
+
+.qrow:last-child {
+  margin-bottom: 2px;
+}
+
+/* Dimmed as one block, so no meter of a distrusted reading reads as current. */
+.qrow.qstale {
+  opacity: 0.5;
+}
+
+.qline {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  font-size: 11.5px;
+  color: var(--dim);
+}
+
+.qreset {
+  font: 10.5px var(--mono);
+  color: var(--faint);
+}
+
+.qreset .qout {
+  color: var(--accent);
+}
+
+.qmeter {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font: 11px var(--mono);
+  font-variant-numeric: tabular-nums;
+  margin-top: 3px;
+}
+
+.qmeter .qlbl {
+  color: var(--faint);
+  width: 36px;
+  flex: none;
+  overflow: hidden;
+}
+
+.qmeter .qbar {
+  flex: 1;
+  height: 5px;
+  border-radius: 3px;
+  background: var(--panel2);
+  overflow: hidden;
+  position: relative;
+}
+
+.qmeter .qbar i {
+  display: block;
+  height: 100%;
+  background: linear-gradient(90deg, var(--accent), var(--accent2));
+}
+
+.qmeter .qbar i.warn {
+  background: var(--accent);
+}
+
+.qmeter .qbar i.crit {
+  background: var(--error);
+}
+
+/* The pace tick: fill past it means spending faster than the window elapses. */
+.qmeter .qbar u {
+  position: absolute;
+  top: -1px;
+  bottom: -1px;
+  width: 1px;
+  background: color-mix(in srgb, var(--ink) 62%, transparent);
+}
+
+.qmeter .qnum {
+  width: 32px;
+  text-align: right;
+  color: var(--dim);
+}
+
+.qmeter .qnum.warn {
+  color: var(--accent);
+}
+
+.qmeter .qnum.crit {
+  color: var(--error);
+  font-weight: 600;
+}
+
+/* Past an hour a reading stops being evidence, so the row shows a dash. */
+.qdash {
+  color: var(--faint);
+  font: 11px var(--mono);
+  margin-top: 3px;
+  display: block;
+}
+
+/* ==== src/renderer/src/components/topbar.css ==== */
+.top {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 20px;
+  height: var(--bar-h);
+  box-sizing: border-box;
+  border-bottom: 1px solid var(--line);
+  font-size: 12.5px;
+  color: var(--dim);
+  flex: none;
+}
+
+.top .spacer {
+  flex: 1;
+}
+
+/* The pill is quiet accent, not alarm: an update waits, nothing is wrong. */
+.top .update {
+  background: none;
+  border: 1px solid var(--accent);
+  color: var(--accent2);
+  border-radius: 6px;
+  padding: 2px 9px;
+  font-size: 12px;
+}
+
+.top .update:hover {
+  color: var(--ink);
+  border-color: var(--accent2);
+}
+
+/* The branch board's whole resting surface: two numbers, one click. */
+.top .tchip {
+  display: flex;
+  gap: 7px;
+  align-items: center;
+  font-size: 12px;
+  color: var(--dim);
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 3px 10px;
+}
+
+.top .tchip:hover {
+  color: var(--ink);
+  border-color: var(--accent);
+}
+
+.top .tchip .g {
+  color: var(--accent);
+}
+
+.top .tchip b {
+  color: var(--dim);
+  font-weight: 600;
+}
+
+.top .tchip u {
+  color: var(--accent2);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.top .tchip.lit {
+  border-color: var(--lit);
+}
+
+/* Cost only: the context meter beside it keeps the percentage. */
+.top .cost {
+  font: 12px var(--mono);
+  color: var(--dim);
+  background: none;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 2px 9px;
+}
+
+.top .cost:hover,
+.top .gear:hover {
+  color: var(--ink);
+  border-color: var(--dim);
+}
+
+.top .gear {
+  background: none;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--dim);
+  padding: 2px 9px;
+  font-size: 13px;
+}
+
+.meter {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.meter .bar {
+  width: 110px;
+  height: 5px;
+  border-radius: 3px;
+  background: var(--panel);
+  overflow: hidden;
+}
+
+.meter .bar i {
+  display: block;
+  height: 100%;
+  background: linear-gradient(90deg, var(--accent), var(--accent2));
+}
+
+.meter .counts,
+.meter .empty {
+  color: var(--faint);
+}
+
+.sessionmenu {
+  position: relative;
+}
+
+.sessionmenu > button {
+  border: 1px solid var(--line);
+  background: var(--panel);
+  color: var(--dim);
+  border-radius: var(--radius);
+  padding: 2px 9px;
+  line-height: 1.3;
+}
+
+.sessionmenu .menu {
+  position: absolute;
+  right: 0;
+  top: 30px;
+  z-index: 3;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: 0 14px 34px rgb(0 0 0 / 50%);
+  min-width: 160px;
+  padding: 4px;
+}
+
+.sessionmenu .menu button {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 7px 10px;
+  border: none;
+  background: none;
+  color: var(--ink);
+  font-size: 12.5px;
+  border-radius: 6px;
+}
+
+.sessionmenu .menu button:hover {
+  background: var(--panel2);
+}
+
+.treebtn {
+  display: flex;
+  gap: 7px;
+  align-items: center;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  padding: 4px 10px;
+  font-size: 12.5px;
+  color: var(--dim);
+}
+
+.treebtn:hover {
+  color: var(--ink);
+  border-color: var(--dim);
+}
+
+.treebtn.active {
+  color: var(--accent2);
+  border-color: var(--accent);
+}
+
+.treebtn .hint {
+  color: var(--faint);
+  font-size: 10.5px;
+}
+
+/* ==== src/renderer/src/components/transcript.css ==== */
+.chat {
+  flex: 1;
+  overflow-y: auto;
+  padding: 28px 0;
+  min-height: 0;
+}
+
+.chat.empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.emptynote {
+  color: var(--faint);
+  font-size: 12.5px;
+}
+
+.items {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.msg {
+  max-width: var(--column);
+  margin: 0 auto 20px;
+  padding: 0 24px;
+}
+
+.msg .who {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--faint);
+  margin-bottom: 6px;
+}
+
+.msg.agent .who {
+  color: var(--accent);
+}
+
+.msg.user .bubble {
+  background: var(--user);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 10px 14px;
+  white-space: pre-wrap;
+}
+
+.cursor {
+  display: inline-block;
+  width: 7px;
+  height: 15px;
+  background: var(--accent);
+  vertical-align: text-bottom;
+  animation: breathe 1s infinite;
+}
+
+.think {
+  max-width: var(--column);
+  margin: 0 auto 10px;
+  padding: 0 24px;
+}
+
+.thinkhead {
+  width: 100%;
+  text-align: left;
+  border: none;
+  border-left: 3px solid var(--thinking);
+  background: var(--think-bg);
+  color: var(--faint);
+  font-size: 12px;
+  font-style: italic;
+  border-radius: 6px;
+  padding: 7px 12px;
+}
+
+.thinkbody {
+  border-left: 3px solid var(--thinking);
+  background: var(--think-bg);
+  color: var(--dim);
+  font-size: 12px;
+  padding: 8px 12px;
+  margin-top: 2px;
+  border-radius: 6px;
+  max-height: 220px;
+  overflow: auto;
+  white-space: pre-wrap;
+}
+
+.chain {
+  max-width: var(--column);
+  margin: 0 auto 10px;
+  padding: 0 24px;
+}
+
+.chainhead {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  width: 100%;
+  font: 12px var(--mono);
+  color: var(--dim);
+  background: var(--code);
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--ok);
+  border-radius: 6px;
+  padding: 7px 12px;
+  text-align: left;
+}
+
+.chain.running > .chainhead {
+  border-left-color: var(--accent);
+}
+
+.chain.failed > .chainhead {
+  border-left-color: var(--error);
+}
+
+/* A chain holding a call that was cut off with its turn claims no outcome. */
+.chain.stopped > .chainhead {
+  border-left-color: var(--faint);
+}
+
+.chainhead .disc {
+  color: var(--faint);
+  flex: none;
+  width: 10px;
+}
+
+.counts {
+  color: var(--ink);
+  white-space: nowrap;
+  flex: none;
+}
+
+.counts .n {
+  color: var(--accent2);
+}
+
+/* A count that just went up pulses once, so a landing call is visible from the
+   collapsed row. A settled chain has nothing left to announce. */
+.counts .n.tick {
+  display: inline-block;
+  animation: tick 0.45s ease-out;
+}
+
+@keyframes tick {
+  0% {
+    color: var(--ink);
+    transform: scale(1.35);
+  }
+
+  100% {
+    color: var(--accent2);
+    transform: scale(1);
+  }
+}
+
+.live {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--dim);
+  font-style: italic;
+}
+
+.chainstate {
+  margin-left: auto;
+  color: var(--faint);
+  flex: none;
+}
+
+/* A failure is unmissable from the collapsed row, running or not. */
+.chain.failed .chainstate {
+  color: var(--error);
+}
+
+.calls {
+  margin: 2px 0 0 14px;
+}
+
+.tool {
+  margin-bottom: 2px;
+}
+
+.toolhead {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  width: 100%;
+  font: 12px var(--mono);
+  color: var(--dim);
+  background: var(--code);
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--ok);
+  border-radius: 6px;
+  padding: 6px 12px;
+  text-align: left;
+}
+
+.tool.running .toolhead {
+  border-left-color: var(--accent);
+}
+
+.tool.failed .toolhead {
+  border-left-color: var(--error);
+}
+
+/* A call cut off with its turn never said how it went, so neither does the
+   chip. */
+.tool.stopped .toolhead {
+  border-left-color: var(--faint);
+}
+
+.toolname {
+  color: var(--ink);
+  flex: none;
+}
+
+.toolsummary {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.toolstate {
+  margin-left: auto;
+  color: var(--faint);
+  flex: none;
+}
+
+.tool.failed .toolstate {
+  color: var(--error);
+}
+
+.toolout {
+  background: var(--code-deep);
+  border: 1px solid var(--line);
+  border-top: none;
+  border-radius: 0 0 6px 6px;
+  padding: 10px 14px;
+  font: 11.5px/1.5 var(--mono);
+  color: var(--output-ink);
+  margin: 0;
+  max-height: 140px;
+  overflow: auto;
+  white-space: pre-wrap;
+}
+
+.spin {
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  border: 2px solid var(--line);
+  border-top-color: var(--accent);
+  animation: rot 0.8s linear infinite;
+  display: inline-block;
+  flex: none;
+}
+
+@keyframes rot {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.stopped {
+  max-width: var(--column);
+  margin: 0 auto 16px;
+  padding: 0 24px;
+  color: var(--faint);
+  font-size: 11.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+}
+
+/* the context a jump or compaction carried forward: a card, read like meta */
+.summarycard {
+  max-width: var(--column);
+  margin: 0 auto 16px;
+  padding: 10px 14px;
+  border: 1px solid color-mix(in srgb, var(--thinking) 45%, transparent);
+  border-radius: var(--radius);
+  background: var(--think-bg);
+  font-size: 12.5px;
+  color: var(--dim);
+}
+
+.summarycard .sumtag {
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--thinking);
+  margin-bottom: 6px;
+}
+
+/* errors are cards in the transcript, never toasts */
+.errcard {
+  max-width: var(--column);
+  margin: 0 auto 16px;
+  padding: 10px 14px;
+  border: 1px solid var(--error);
+  border-radius: var(--radius);
+  background: var(--error-bg);
+  font-size: 12.5px;
+  color: var(--ink);
+}
+
+.errcard b {
+  color: var(--error);
+}
+
+.msg .thumbs {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+  flex-wrap: wrap;
+  /* A single flex item cannot wrap within itself, so without this one wide
+     thumbnail would push the row past the message column. */
+  min-width: 0;
+}
+
+/* Width is capped and height follows, never the reverse: a 1512x112 strip
+   fits the column instead of scrolling the whole chat sideways. */
+.msg .thumb {
+  max-width: 100%;
+  max-height: 200px;
+  width: auto;
+  height: auto;
+  object-fit: contain;
+  border-radius: 6px;
+  border: 1px solid var(--line);
+}
+
+/* a shared bash run, in the tool row's grammar */
+.bashrow {
+  max-width: var(--column);
+  margin: 0 auto 16px;
+  padding: 0 24px;
+}
+
+.bashhead {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  font: 12px var(--mono);
+  color: var(--dim);
+  background: var(--code);
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--ok);
+  border-radius: 6px;
+  padding: 7px 12px;
+}
+
+.bashhead.failed {
+  border-left-color: var(--error);
+}
+
+.bashhead .cmd {
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bashhead .sharetag {
+  margin-left: auto;
+  flex: none;
+  font: 10.5px var(--font);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--accent2);
+  border: 1px solid var(--accent);
+  border-radius: 9px;
+  padding: 1px 8px;
+}
+
+.bashout {
+  background: var(--code-deep);
+  border: 1px solid var(--line);
+  border-top: none;
+  border-radius: 0 0 6px 6px;
+  padding: 10px 14px;
+  font: 11.5px/1.5 var(--mono);
+  color: var(--output-ink);
+  margin: 0;
+  max-height: 140px;
+  overflow: auto;
+  white-space: pre-wrap;
+}
+
+/* a command invocation: compact, and it opens to the delivered text */
+.msg.user .cmdbubble {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  width: 100%;
+  text-align: left;
+  border-color: var(--thinking);
+  color: var(--ink);
+  font: 13px var(--mono);
+}
+
+.msg.user .cmdbubble .disc {
+  color: var(--thinking);
+}
+
+.msg.user .cmdbubble .cmdtext {
+  color: var(--thinking);
+}
+
+.msg.user .cmdbubble .cmdsaid {
+  margin-left: auto;
+  font: 10px var(--mono);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--faint);
+}
+
+.msg.user .cmdfull {
+  margin-top: 6px;
+  white-space: pre-wrap;
+  font: 12.5px/1.6 var(--mono);
+  color: var(--dim);
+}
+
+/* ==== src/renderer/src/components/composer.css ==== */
+.composer {
+  max-width: var(--column);
+  width: 100%;
+  margin: 0 auto;
+  padding: 0 24px 18px;
+  flex: none;
+}
+
+.cbox {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  padding: 12px 14px 10px;
+}
+
+.cbox textarea {
+  width: 100%;
+  background: none;
+  border: none;
+  resize: none;
+  outline: none;
+  height: 46px;
+  font: 14px/1.5 var(--font);
+  color: var(--ink);
+}
+
+.cbox textarea::placeholder {
+  color: var(--faint);
+}
+
+.crow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+.chipwrap {
+  position: relative;
+}
+
+.chip {
+  font-size: 12px;
+  color: var(--dim);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 3px 10px;
+  background: none;
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.chip b {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.chip:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+/* the worktree chip: where this session works, in one element for all of its
+   states — checkout, creating, and a branch it is already in */
+.chip .g {
+  color: var(--faint);
+}
+
+.chip.on {
+  border-color: var(--accent);
+  color: var(--accent2);
+}
+
+.chip.on .g {
+  color: var(--accent2);
+}
+
+.chip.on b {
+  color: var(--accent2);
+}
+
+.chip.busy {
+  color: var(--accent2);
+}
+
+.chip.busy .g {
+  color: var(--accent2);
+  animation: pulse 1.1s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%,
+  100% {
+    opacity: 0.35;
+  }
+
+  50% {
+    opacity: 1;
+  }
+}
+
+/* a script may mint a long name: the tail is the distinctive part, so what is
+   cut is the head */
+.chip.branch b {
+  font: 500 11px var(--mono);
+  max-width: 170px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  direction: rtl;
+  text-align: left;
+}
+
+/* a failed creation, in the transcript's own code styling rather than an error
+   surface of its own */
+.wtout {
+  background: var(--code);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 8px 10px;
+  margin: 8px 0 0;
+  font: 11px/1.5 var(--mono);
+  color: var(--error);
+  white-space: pre-wrap;
+  max-height: 180px;
+  overflow: auto;
+}
+
+/* Send and Stop trade the same slot, so both get the same box: swapping one
+   for the other moves nothing around them. */
+.send,
+.stop {
+  margin-left: auto;
+  height: 31px;
+  width: 104px;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius);
+  padding: 0;
+}
+
+.send {
+  background: var(--accent);
+  color: var(--on-accent);
+  border: none;
+  font-weight: 700;
+}
+
+.send:disabled {
+  background: var(--panel2);
+  color: var(--faint);
+  cursor: default;
+}
+
+/* While working, the send button stays and says what it will do; Stop sits
+   beside it rather than in its place. */
+.stop {
+  background: var(--panel);
+  color: var(--ink);
+  border: 1px solid var(--accent);
+  gap: 8px;
+  font-weight: 600;
+}
+
+.stopsq {
+  width: 9px;
+  height: 9px;
+  background: var(--accent);
+  border-radius: 2px;
+}
+
+/* Height is reserved in every state, so nothing above or below moves when
+   the working, bash or held-back state lands. */
+.esc {
+  text-align: center;
+  font-size: 11.5px;
+  color: var(--faint);
+  margin-top: 8px;
+  min-height: 21px;
+  line-height: 21px;
+}
+
+.esc .workingnote {
+  color: var(--accent2);
+}
+
+kbd {
+  font: 11px var(--mono);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 1px 5px;
+  color: var(--dim);
+}
+
+.pop {
+  position: absolute;
+  bottom: 34px;
+  left: 0;
+  z-index: 4;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 18px 44px rgb(0 0 0 / 50%);
+  overflow: hidden;
+}
+
+.pop.picker {
+  width: 320px;
+}
+
+.pop .search {
+  width: 100%;
+  padding: 11px 14px;
+  border: none;
+  border-bottom: 1px solid var(--line);
+  background: none;
+  color: var(--ink);
+  font-size: 13px;
+  outline: none;
+}
+
+.models {
+  list-style: none;
+  margin: 0;
+  padding: 4px;
+  max-height: 260px;
+  overflow: auto;
+}
+
+.models button {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border: none;
+  background: none;
+  color: var(--ink);
+  font-size: 13px;
+  text-align: left;
+  border-radius: 6px;
+}
+
+.models button:hover,
+.models button[aria-current='true'] {
+  background: var(--panel2);
+}
+
+.models .check {
+  margin-left: auto;
+  color: var(--accent2);
+}
+
+.nomodels {
+  padding: 10px;
+  color: var(--faint);
+  font-size: 12px;
+}
+
+.pop.menu {
+  padding: 4px;
+  min-width: 130px;
+}
+
+.pop.menu button {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 7px 10px;
+  border: none;
+  background: none;
+  color: var(--ink);
+  font-size: 12.5px;
+  border-radius: 6px;
+}
+
+.pop.menu button:hover,
+.pop.menu button[aria-current='true'] {
+  background: var(--panel2);
+  color: var(--accent2);
+}
+
+/* bash mode: the whole box says what pressing enter will do */
+.cbox.bash {
+  border-color: var(--accent);
+  background: var(--code);
+}
+
+.cbox.bash textarea {
+  font: 13px/1.5 var(--mono);
+  color: var(--code-ink);
+}
+
+.modebadge {
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--accent2);
+  margin-bottom: 6px;
+}
+
+.modebadge .cwd {
+  color: var(--faint);
+  text-transform: none;
+  letter-spacing: 0;
+  font: 11px var(--mono);
+}
+
+.esc .bashnote {
+  color: var(--accent2);
+}
+
+/* images held back from a queued message are said out loud, never dropped */
+.esc .heldback {
+  color: var(--error);
+}
+
+.chips {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+
+/* Capped in both directions: a wide screenshot is clipped inside the chip
+   rather than stretching the row it sits in. */
+.imgchip {
+  position: relative;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  overflow: hidden;
+  height: 52px;
+  max-width: 156px;
+  display: block;
+  flex: none;
+}
+
+/* The chip's own `overflow: hidden` does the clipping, so a wide image is cut
+   off at the cap instead of widening anything. */
+.imgchip img {
+  height: 100%;
+  width: auto;
+  max-width: none;
+  display: block;
+}
+
+.imgchip .x {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: rgb(0 0 0 / 65%);
+  border: none;
+  color: var(--ink);
+  font-size: 10px;
+  line-height: 1;
+  padding: 0;
+}
+
+.imgchip .x:hover {
+  background: var(--error);
+}
+
+.composer {
+  position: relative;
+}
+
+.filepop {
+  position: absolute;
+  left: 24px;
+  right: 24px;
+  bottom: 100%;
+  margin-bottom: 8px;
+  background: var(--panel2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  overflow: hidden;
+  z-index: 5;
+  box-shadow: 0 10px 30px rgb(0 0 0 / 50%);
+}
+
+.filepop .pophead {
+  padding: 6px 12px;
+  font-size: 11px;
+  color: var(--faint);
+  border-bottom: 1px solid var(--line);
+}
+
+.popitem {
+  display: flex;
+  gap: 10px;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: none;
+  padding: 7px 12px;
+  font: 12.5px var(--mono);
+  color: var(--dim);
+}
+
+.popitem .file {
+  color: var(--ink);
+}
+
+.popitem.sel,
+.popitem:hover {
+  background: var(--panel);
+}
+
+.popitem.sel .file {
+  color: var(--accent2);
+}
+
+.popempty {
+  padding: 10px 12px;
+  font-size: 12px;
+  color: var(--faint);
+}
+
+.veil {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  background: rgb(25 20 25 / 85%);
+  border: 2px dashed var(--accent);
+  border-radius: 12px;
+  margin: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 15px;
+  color: var(--accent2);
+}
+
+/* command mode: purple, so the eye tells it from bash orange at a glance */
+.cbox.cmd {
+  border-color: var(--thinking);
+  background: var(--think-bg);
+}
+
+.modebadge.command {
+  color: var(--thinking);
+}
+
+.cmdpop {
+  position: absolute;
+  left: 24px;
+  right: 24px;
+  bottom: 100%;
+  margin-bottom: 8px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  z-index: 5;
+  box-shadow: 0 10px 30px rgb(0 0 0 / 50%);
+}
+
+.cmdpop .pophead {
+  padding: 7px 14px;
+  font-size: 11px;
+  color: var(--faint);
+  border-bottom: 1px solid var(--line);
+}
+
+.cmdrow {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: none;
+  padding: 8px 14px;
+}
+
+.cmdrow .cname {
+  font: 600 13px var(--mono);
+  color: var(--thinking);
+  white-space: nowrap;
+}
+
+.cmdrow .cargs {
+  font: 12px var(--mono);
+  color: var(--faint);
+  white-space: nowrap;
+}
+
+.cmdrow .cdesc {
+  flex: 1;
+  font-size: 12px;
+  color: var(--dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cmdrow.sel,
+.cmdrow:hover {
+  background: var(--panel2);
+}
+
+/* the three origins, one badge each; built-in is the muted one */
+.scope {
+  flex: none;
+  font: 600 9.5px/1 var(--mono);
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  padding: 2.5px 6px;
+  border-radius: 4px;
+}
+
+.scope.user {
+  color: var(--accent2);
+  border: 1px solid color-mix(in srgb, var(--accent2) 40%, transparent);
+}
+
+.scope.workspace {
+  color: var(--ok);
+  border: 1px solid color-mix(in srgb, var(--ok) 40%, transparent);
+}
+
+.scope.built-in {
+  color: var(--faint);
+  border: 1px solid var(--line);
+}
+
+/* ==== src/renderer/src/components/overlay.css ==== */
+.overlaybg {
+  position: fixed;
+  inset: 0;
+  z-index: 10;
+  background: rgb(0 0 0 / 45%);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 12vh;
+}
+
+.overlay {
+  width: 460px;
+  max-width: 90vw;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 24px 60px rgb(0 0 0 / 60%);
+  overflow: hidden;
+}
+
+.osearch {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--line);
+  color: var(--faint);
+}
+
+.osearch input {
+  flex: 1;
+  border: none;
+  background: none;
+  outline: none;
+  color: var(--ink);
+  font-size: 14px;
+}
+
+.results {
+  list-style: none;
+  margin: 0;
+  padding: 6px;
+  max-height: 46vh;
+  overflow: auto;
+}
+
+.results button {
+  display: flex;
+  width: 100%;
+  align-items: baseline;
+  gap: 12px;
+  padding: 9px 10px;
+  border: none;
+  background: none;
+  color: var(--ink);
+  text-align: left;
+  border-radius: 6px;
+  font-size: 13px;
+}
+
+.results button:hover {
+  background: var(--panel2);
+}
+
+.results .preview {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.results .when {
+  font: 11px var(--mono);
+  color: var(--dim);
+  flex: none;
+}
+
+.noresults,
+.ofail {
+  padding: 12px 16px;
+  color: var(--faint);
+  font-size: 12.5px;
+}
+
+.ofail {
+  color: var(--error);
+}
+
+.ofoot {
+  padding: 8px 16px;
+  border-top: 1px solid var(--line);
+  font-size: 10.5px;
+  color: var(--faint);
+}
+
+.dialog {
+  width: 420px;
+  max-width: 90vw;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 20px 50px rgb(0 0 0 / 50%);
+  overflow: hidden;
+}
+
+.dialog .dh {
+  padding: 13px 18px;
+  border-bottom: 1px solid var(--line);
+  font-weight: 650;
+  font-size: 13.5px;
+}
+
+.dialog .dbody {
+  padding: 14px 18px;
+  font-size: 12.5px;
+  color: var(--dim);
+  line-height: 1.6;
+}
+
+.dialog .dfoot {
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+  padding: 12px 18px;
+  border-top: 1px solid var(--line);
+}
+
+/* ==== src/renderer/src/components/runs.css ==== */
+/* The three run surfaces: the strip above the chat, the full-screen dig, and
+   the global ⌘R view. Visuals follow mock T on the Ember tokens. */
+
+/* ---------- the run strip ---------- */
+
+.runstrip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 14px;
+  border-bottom: 1px solid var(--line);
+  background: var(--bg2);
+  font-size: 12px;
+  overflow-x: auto;
+}
+
+.runstrip .rslabel {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--faint);
+  margin-right: 2px;
+}
+
+.runchip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 3px 11px;
+  background: var(--panel);
+  color: var(--dim);
+  white-space: nowrap;
+}
+
+.runchip b {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.runchip .node {
+  font: 11px var(--mono);
+  color: var(--accent2);
+}
+
+.runchip .age {
+  font: 11px var(--mono);
+  color: var(--faint);
+}
+
+.runchip.parked {
+  border-color: var(--warn);
+}
+
+.runchip.parked .node {
+  color: var(--warn);
+}
+
+.runstrip .rshint {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--faint);
+  white-space: nowrap;
+}
+
+.runstrip kbd,
+.runview kbd {
+  font: 10.5px var(--mono);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 0 4px;
+}
+
+/* The breathing dot every run surface shares. */
+.runchip .dot,
+.runrow .dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--ok);
+  flex-shrink: 0;
+}
+
+.runchip .dot.running,
+.runrow .dot.running {
+  animation: run-breathe 2.2s infinite;
+}
+
+.runchip.parked .dot,
+.runrow.parked .dot,
+.runchip .dot.paused,
+.runrow .dot.paused {
+  background: var(--warn);
+  animation: none;
+}
+
+.runrow.done .dot {
+  background: var(--faint);
+  animation: none;
+}
+
+.runchip .dot.failed,
+.runrow .dot.failed {
+  background: var(--error);
+  animation: none;
+}
+
+@keyframes run-breathe {
+  50% {
+    opacity: 0.35;
+  }
+}
+
+/* ---------- shared overlay bones ---------- */
+
+.runview,
+.runsoverview {
+  position: absolute;
+  inset: 0;
+  z-index: 6;
+  background: var(--bg);
+  display: flex;
+  flex-direction: column;
+}
+
+.runview .btn,
+.runsoverview .btn {
+  font-size: 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--bg2);
+  color: var(--ink);
+  padding: 4px 11px;
+  white-space: nowrap;
+}
+
+.runview .btn.primary,
+.runsoverview .btn.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--on-accent);
+  font-weight: 700;
+}
+
+/* ---------- the full-screen run view ---------- */
+
+.rvtop {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 12px 20px;
+  border-bottom: 1px solid var(--line);
+  flex-wrap: wrap;
+}
+
+.rvtop .wf {
+  font-weight: 700;
+  font-size: 15px;
+}
+
+.rvtop .id {
+  font: 12px var(--mono);
+  color: var(--faint);
+}
+
+.rvtop .stat {
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ok);
+}
+
+.rvtop .stat.paused {
+  color: var(--warn);
+}
+
+.rvtop .stat.failed,
+.rvtop .stat.cancelled {
+  color: var(--error);
+}
+
+.rvtop .where {
+  font: 11.5px var(--mono);
+  color: var(--dim);
+}
+
+.rvtop .where b {
+  color: var(--accent2);
+  font-weight: 600;
+}
+
+.rvtop .spend {
+  margin-left: auto;
+  font: 12px var(--mono);
+  color: var(--dim);
+}
+
+.rvbody {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+}
+
+/* The graph rail: layered top-down, a row per layer, click-through to the
+   node detail. Fit to width inside the rail; scroll as the escape hatch. */
+.runview .graph {
+  width: 300px;
+  border-right: 1px solid var(--line);
+  background: var(--bg2);
+  padding: 16px;
+  overflow-y: auto;
+  flex-shrink: 0;
+}
+
+.glayer {
+  position: relative;
+  display: flex;
+  gap: 8px;
+  margin-bottom: 22px;
+}
+
+/* The spine between layers, in place of drawn edges (v1). */
+.glayer:not(:last-child)::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  bottom: -23px;
+  width: 1px;
+  height: 22px;
+  background: var(--line);
+}
+
+.gnode {
+  flex: 1;
+  min-width: 0;
+  text-align: left;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel);
+  padding: 9px 12px;
+}
+
+.gnode .n {
+  font-size: 13px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gnode .n .s {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--faint);
+  flex-shrink: 0;
+}
+
+.gnode.done .n .s {
+  background: var(--ok);
+}
+
+.gnode.live {
+  border-color: var(--accent);
+}
+
+.gnode.live .n .s {
+  background: var(--accent);
+  animation: run-breathe 2.2s infinite;
+}
+
+.gnode.parked {
+  border-color: var(--warn);
+}
+
+.gnode.parked .n .s {
+  background: var(--warn);
+}
+
+.gnode.bad .n .s {
+  background: var(--error);
+}
+
+.gnode.wait {
+  opacity: 0.55;
+}
+
+.gnode .meta {
+  display: block;
+  font: 11px var(--mono);
+  color: var(--faint);
+  margin-top: 4px;
+  white-space: normal;
+}
+
+.gnode.sel {
+  outline: 2px solid var(--accent2);
+  outline-offset: 1px;
+}
+
+/* Node detail: the chat pane's own rendering inside the run view. */
+.runview .detail {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.runview .dhead {
+  padding: 14px 20px;
+  border-bottom: 1px solid var(--line);
+}
+
+.runview .dhead .n {
+  font-weight: 700;
+}
+
+.runview .dhead .facts {
+  display: flex;
+  gap: 18px;
+  font: 11.5px var(--mono);
+  color: var(--dim);
+  margin-top: 6px;
+  flex-wrap: wrap;
+}
+
+.runview .dhead .facts b {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.runview .dhead .now {
+  margin-top: 8px;
+  font-size: 12.5px;
+  color: var(--accent2);
+}
+
+.runview .dhead .nodeerror {
+  margin-top: 8px;
+  font-size: 12.5px;
+  color: var(--error);
+}
+
+.rvempty,
+.gvempty {
+  padding: 40px;
+  color: var(--faint);
+  text-align: center;
+}
+
+.runview .artifacts {
+  border-top: 1px solid var(--line);
+  padding: 10px 20px;
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  font-size: 12px;
+  color: var(--dim);
+}
+
+.runview .artifacts .a {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 3px 10px;
+  font: 11.5px var(--mono);
+  color: var(--accent2);
+}
+
+.runview .artifacts .anote {
+  margin-left: auto;
+  font: 11px var(--mono);
+  color: var(--faint);
+}
+
+/* The routed check-in banner: what was asked and where it went. No input —
+   the conversation happens in the session (ADR 0017). */
+.routed {
+  border-top: 1px solid var(--warn);
+  background: color-mix(in srgb, var(--warn) 9%, var(--bg));
+  padding: 11px 20px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 12.5px;
+}
+
+.routed b {
+  color: var(--warn);
+  white-space: nowrap;
+}
+
+.routed .q {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.routed .to {
+  color: var(--dim);
+  white-space: nowrap;
+}
+
+.routed .btn {
+  margin-left: auto;
+}
+
+/* ---------- the global runs view ---------- */
+
+.gvtop {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 22px;
+  border-bottom: 1px solid var(--line);
+}
+
+.gvtop .t {
+  font-weight: 700;
+  font-size: 15px;
+}
+
+.gvtop .count {
+  font-size: 12px;
+  color: var(--dim);
+}
+
+.gvtop .x {
+  margin-left: auto;
+}
+
+.gvbody {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px 22px 20px;
+}
+
+.wsgroup {
+  margin-top: 14px;
+}
+
+.wsname {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--faint);
+  padding-bottom: 6px;
+}
+
+.runrow {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel);
+  padding: 10px 14px;
+  margin-bottom: 8px;
+}
+
+.runrow .wf {
+  font-weight: 700;
+  font-size: 13px;
+  width: 70px;
+}
+
+.runrow .id {
+  font: 11.5px var(--mono);
+  color: var(--faint);
+  width: 70px;
+}
+
+.runrow .st {
+  font: 11.5px var(--mono);
+  width: 210px;
+}
+
+.runrow.parked .st {
+  color: var(--warn);
+}
+
+.runrow .sess {
+  font-size: 12.5px;
+  color: var(--dim);
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.runrow .sess em {
+  font-style: normal;
+  color: var(--accent2);
+}
+
+.runrow .sess .un {
+  color: var(--faint);
+  font-style: italic;
+}
+
+.runrow .spend {
+  font: 11.5px var(--mono);
+  color: var(--faint);
+}
+
+/* ==== src/renderer/src/shell.css ==== */
+/* The panel region is there only while the active session has tabs. */
+.shell {
+  display: flex;
+  height: 100%;
+  overflow: hidden;
+}
+
+.main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  /* What the chat column keeps whatever the divider is dragged to. */
+  min-width: 320px;
+  /* The branch board covers this column and nothing else. */
+  position: relative;
+}
+
+/* Empty states: one sentence and the one thing to do. */
+.blank {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  color: var(--dim);
+}
+
+.btn {
+  border: 1px solid var(--line);
+  background: var(--bg2);
+  color: var(--ink);
+  border-radius: var(--radius);
+  padding: 6px 14px;
+  font-size: 12.5px;
+}
+
+.btn.primary {
+  background: var(--accent);
+  color: var(--on-accent);
+  border: none;
+  font-weight: 600;
+}
+
+/* A refusal is shown where the next action is, and stays until the next send
+   clears it. */
+.failure {
+  max-width: var(--column);
+  width: 100%;
+  margin: 0 auto;
+  padding: 8px 24px;
+  color: var(--error);
+  font-size: 12.5px;
+}
+
+/* The transcript region, and the only thing the session tree overlays. */
+.stage {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+
+.tree.loading {
+  padding: 24px;
+}
+</style>
+
+<style>
+  /* ---------- page chrome, not app chrome ---------- */
+  * { box-sizing: border-box; margin: 0 }
+  body { background: #120e12; color: var(--ink); font: 14px/1.55 var(--font);
+         padding: 30px 34px 80px }
+  h1 { font-size: 19px; font-weight: 700; letter-spacing: .02em }
+  h2 { font-size: 13px; font-weight: 600; color: var(--accent2); margin: 38px 0 6px }
+  p.note { color: var(--dim); font-size: 12.5px; max-width: 860px; margin-bottom: 16px }
+  p.note b { color: var(--ink); font-weight: 600 }
+  p.note code, li code { font: 11.5px var(--mono); color: var(--accent2) }
+  ul.note { color: var(--dim); font-size: 12.5px; max-width: 860px; margin: 0 0 16px 18px }
+  ul.note li { margin-bottom: 5px }
+  .cap { font-size: 11px; letter-spacing: .1em; text-transform: uppercase;
+         color: var(--faint); margin-bottom: 8px }
+  .cap b { color: var(--accent); font-weight: 600; letter-spacing: .06em;
+           text-transform: none; font-size: 11.5px }
+  .row { display: flex; gap: 26px; flex-wrap: wrap; align-items: flex-start }
+
+  /* A window, so nothing on this page is a fragment floating in the dark. */
+  .win { width: 1080px; height: 640px; position: relative; overflow: hidden;
+         background: var(--bg); border: 1px solid var(--line);
+         border-radius: 10px; box-shadow: 0 18px 50px rgb(0 0 0 / 45%) }
+  .win .shell { height: 100% }
+  .win .side { border-right: 1px solid var(--line) }
+  /* The dialog is fixed in the app and absolute here, so it covers its own
+     window rather than the page. */
+  .win .overlaybg { position: absolute; padding-top: 90px }
+  /* Only for the hover frame: CSS can't hold a real pointer down. */
+  .forcehover .cachestrip { background: var(--panel) }
+  .forcehover .cachestrip .cwhen { color: var(--dim) }
+</style>
+</head>
+<body>
+
+<h1>Mock U — cache misses in place</h1>
+<p class="note">
+  Mock G §6 drew the cache badge and the transcript seam against a session
+  header that no longer exists, and drew nothing at all for the six controls
+  the interview rulings added. This page puts every one of them in the window
+  it actually lives in. It carries the app's own CSS, so the sidebar, top bar,
+  run strip, transcript and dialog here are the real ones, down to the pixel:
+  this is the window, not an impression of it.
+</p>
+
+<h2>1 · The window, resting</h2>
+<p class="note">
+  Nine misses have accumulated since the last reset. Three surfaces carry it at
+  once and they say different things. The <b>strip</b> at the sidebar foot is
+  the global count, true whichever session is open. The <b>badge</b> in the top
+  bar is this session's two. The <b>seam</b> is one miss, at the turn it
+  happened. The run chip's <code>⚠ 2</code> is a sub-agent's misses, which
+  would otherwise be invisible while nobody is watching that run.
+</p>
+
+<div class="win">
+  <div class="shell">
+
+    <nav class="side" aria-label="Workspaces and sessions">
+      <div class="brand"><span class="mark">◆</span> CRUCIBLE</div>
+      <button class="newsession">New session</button>
+      <div class="wslabel">Workspaces</div>
+
+      <ul class="wslist">
+        <li>
+          <div class="ws active working">
+            <button class="wsname"><span class="dot"></span>crucible</button>
+            <span class="wsn">1</span>
+          </div>
+          <ul class="sessions">
+            <li class="sessrow viewing">
+              <button class="sess active"><span class="sesstext">cache miss alerting</span></button>
+              <span class="rowend">
+                <span class="elapsed">1:12</span>
+                <span class="typing"><i></i><i></i><i></i></span>
+              </span>
+            </li>
+            <li class="sessrow asking">
+              <button class="sess"><span class="sesstext"><span class="wt">⑂</span>quota strip polish</span></button>
+              <span class="rowend"><span class="pip"></span><small>18m ago</small></span>
+            </li>
+            <li class="sessrow">
+              <button class="sess"><span class="sesstext">ledger schema spike</span></button>
+              <span class="rowend"><small>2h ago</small></span>
+            </li>
+          </ul>
+        </li>
+        <li>
+          <div class="ws">
+            <button class="wsname"><span class="dot"></span>pi-extensions</button>
+          </div>
+          <ul class="sessions">
+            <li class="sessrow">
+              <button class="sess untitled"><span class="sesstext">Untitled</span></button>
+              <span class="rowend"><small>yesterday</small></span>
+            </li>
+          </ul>
+        </li>
+      </ul>
+
+      <!-- NEW: the cache strip. Sits above the quota block, keeps the rail's
+           gutter, and is the only row down here that is clickable. -->
+      <button class="cachestrip" aria-label="Cache health — 9 misses since your last reset">
+        <span class="cline">
+          <span class="clabel">Cache · <b>9 misses</b></span>
+          <span class="cmoney">$2.80 re-billed</span>
+        </span>
+        <span class="cwhen">since Tue 3pm</span>
+      </button>
+
+      <div class="quota">
+        <div class="qlabel">Subscriptions</div>
+        <div class="qrow">
+          <div class="qline"><span>Anthropic</span><span class="qreset">resets 21:00</span></div>
+          <div class="qmeter"><span class="qlbl">5h</span>
+            <span class="qbar"><i style="width:62%"></i><u style="left:48%"></u></span>
+            <span class="qnum">62%</span></div>
+          <div class="qmeter"><span class="qlbl">week</span>
+            <span class="qbar"><i class="warn" style="width:81%"></i><u style="left:70%"></u></span>
+            <span class="qnum warn">81%</span></div>
+        </div>
+      </div>
+
+      <button class="addws">+ Add workspace</button>
+    </nav>
+
+    <div class="main">
+      <header class="top">
+        <button class="treebtn"><span>⑂</span> Tree <span class="hint">esc esc</span></button>
+        <span class="spacer"></span>
+        <button class="tchip"><span class="g">⑂</span> <b>2 landed</b></button>
+        <!-- NEW: this session's badge. Click jumps to the seam. -->
+        <button class="cost cachebadge" aria-label="2 cache misses in this session">⚠ 2 misses</button>
+        <button class="cost">$4.12</button>
+        <div class="meter">
+          <span>34% ctx</span>
+          <span class="bar"><i style="width:34%"></i></span>
+          <span class="counts">68k / 200k</span>
+        </div>
+        <button class="gear">⚙</button>
+        <div class="sessionmenu"><button>⋯</button></div>
+      </header>
+
+      <div class="runstrip" role="toolbar" aria-label="Runs">
+        <span class="rslabel">Runs</span>
+        <!-- NEW: the miss mark, after age and spend. -->
+        <button class="runchip">
+          <span class="dot running"></span><b>build</b>
+          <span class="node">planner</span>
+          <span class="age">31m · $1.90</span>
+          <span class="miss" title="2 cache misses in this run">⚠ 2</span>
+        </button>
+        <button class="runchip">
+          <span class="dot running"></span><b>review</b>
+          <span class="node">reader</span>
+          <span class="age">4m · $0.12</span>
+        </button>
+        <span class="rshint">click a run to open · <kbd>⌘R</kbd> all runs</span>
+      </div>
+
+      <div class="stage">
+        <div class="chat">
+          <ul class="items">
+            <li class="msg user">
+              <div class="who">You</div>
+              <div class="bubble">Pick that thread back up — where did the ledger writer land?</div>
+            </li>
+
+            <!-- NEW: the seam. Facts, no cause, no action. -->
+            <li class="cacheseam">
+              <span class="cstag">⚡ Cache miss</span>
+              <span class="csfacts">118k tokens re-billed (+$0.62) · 8h since previous turn ·
+                model unchanged · thinking unchanged · retention 5 min</span>
+            </li>
+
+            <li class="msg agent">
+              <div class="who">Crucible</div>
+              <div>The writer appends to the ledger on every turn end and never prunes, so
+                the file is the whole history and the counter is a view over it.</div>
+            </li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="composer">
+        <div class="cbox">
+          <textarea placeholder="Ask anything"></textarea>
+          <div class="crow"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<h2>2 · The cache health view</h2>
+<p class="note">
+  Clicking the strip opens this. It is a dialog in the app's existing
+  <code>.dialog</code> shape, the same one the guard uses, because it holds four
+  facts and three buttons and a full screen would be a lie about how much is
+  here. No list of misses: the ledger's reader is an agent, and a human scrolling
+  a thousand JSONL lines was never the point. <b>Investigate</b> opens a new
+  session already prompted to read the ledger since the last reset.
+  <b>Reset counter</b> appends a reset line and re-dates the strip; it deletes
+  nothing, so "since we changed that setting" stays a question you can ask later.
+</p>
+
+<div class="win">
+  <div class="shell">
+    <nav class="side" aria-label="Workspaces and sessions">
+      <div class="brand"><span class="mark">◆</span> CRUCIBLE</div>
+      <button class="newsession">New session</button>
+      <div class="wslabel">Workspaces</div>
+      <ul class="wslist">
+        <li>
+          <div class="ws active working">
+            <button class="wsname"><span class="dot"></span>crucible</button>
+          </div>
+          <ul class="sessions">
+            <li class="sessrow viewing">
+              <button class="sess active"><span class="sesstext">cache miss alerting</span></button>
+              <span class="rowend"><small>now</small></span>
+            </li>
+          </ul>
+        </li>
+      </ul>
+      <button class="cachestrip" aria-label="Cache health — 9 misses since your last reset">
+        <span class="cline">
+          <span class="clabel">Cache · <b>9 misses</b></span>
+          <span class="cmoney">$2.80 re-billed</span>
+        </span>
+        <span class="cwhen">since Tue 3pm</span>
+      </button>
+      <div class="quota">
+        <div class="qlabel">Subscriptions</div>
+        <div class="qrow">
+          <div class="qline"><span>Anthropic</span><span class="qreset">resets 21:00</span></div>
+          <div class="qmeter"><span class="qlbl">5h</span>
+            <span class="qbar"><i style="width:62%"></i><u style="left:48%"></u></span>
+            <span class="qnum">62%</span></div>
+        </div>
+      </div>
+      <button class="addws">+ Add workspace</button>
+    </nav>
+    <div class="main">
+      <header class="top">
+        <span class="spacer"></span>
+        <button class="cost cachebadge">⚠ 2 misses</button>
+        <button class="cost">$4.12</button>
+        <button class="gear">⚙</button>
+      </header>
+      <div class="stage"><div class="chat"></div></div>
+    </div>
+  </div>
+
+  <div class="overlaybg">
+    <div class="dialog cachedialog" role="dialog" aria-modal="true" aria-label="Cache health">
+      <div class="dh">Cache health</div>
+      <div class="dbody">
+        <div class="cfacts">
+          <div class="cfact"><b>9</b><span>misses</span></div>
+          <div class="cfact"><b class="money">$2.80</b><span>re-billed</span></div>
+          <div class="cfact"><b>Tue 3:04pm</b><span>counting since</span></div>
+        </div>
+        <p class="cprose">
+          Every miss Crucible has ever seen is in the ledger, across every
+          workspace and every run. The counter above runs from your last reset;
+          the file goes back further.
+        </p>
+        <div class="cpath">
+          <code>~/Library/Application Support/crucible/cache-misses.jsonl</code>
+          <button class="btn cpcopy">Copy path</button>
+        </div>
+        <p class="cretention">Retention in force · <b>5 min</b> (π default)</p>
+      </div>
+      <div class="dfoot">
+        <button class="btn cghost">Reset counter</button>
+        <span class="dspacer"></span>
+        <button class="btn">Close</button>
+        <button class="btn primary">Investigate</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<h2>3 · The strip, three states</h2>
+<p class="note">
+  Real width, 248px, the rail's own gutter. It reads exactly the ruled line in
+  reading order and wraps where a 248px column makes it wrap. Zero still shows,
+  because an absent strip would take the only door to the view with it, and
+  because "no misses since Tuesday" is the answer you most want on a good day.
+</p>
+
+<div class="row">
+  <div>
+    <div class="cap"><b>Misses since reset</b></div>
+    <div class="stripframe">
+      <button class="cachestrip">
+        <span class="cline">
+          <span class="clabel">Cache · <b>9 misses</b></span>
+          <span class="cmoney">$2.80 re-billed</span>
+        </span>
+        <span class="cwhen">since Tue 3pm</span>
+      </button>
+    </div>
+  </div>
+  <div>
+    <div class="cap"><b>Hover</b></div>
+    <div class="stripframe forcehover">
+      <button class="cachestrip">
+        <span class="cline">
+          <span class="clabel">Cache · <b>9 misses</b></span>
+          <span class="cmoney">$2.80 re-billed</span>
+        </span>
+        <span class="cwhen">since Tue 3pm</span>
+      </button>
+    </div>
+  </div>
+  <div>
+    <div class="cap"><b>Clean</b></div>
+    <div class="stripframe">
+      <button class="cachestrip">
+        <span class="cline">
+          <span class="clabel">Cache · <b>0 misses</b></span>
+        </span>
+        <span class="cwhen">since Tue 3pm</span>
+      </button>
+    </div>
+  </div>
+</div>
+
+<h2>4 · Badge and chip, beside what they mark</h2>
+<p class="note">
+  Both are counts, so both use the badge idiom Mock G set: <code>⚠ N</code>. One
+  deliberate change from that mock. It drew the badge in <b>error red</b>; here
+  it is <b>amber</b>, because in the app as built red is failure (a failed run
+  dot, an error card) and a cache miss is money, not breakage. The quota strip's
+  own over-pace numbers are amber for the same reason.
+</p>
+
+<div class="row">
+  <div>
+    <div class="cap"><b>Top bar</b></div>
+    <div class="barframe">
+      <header class="top">
+        <span class="spacer"></span>
+        <button class="cost cachebadge">⚠ 2 misses</button>
+        <button class="cost">$4.12</button>
+        <div class="meter"><span>34% ctx</span>
+          <span class="bar"><i style="width:34%"></i></span></div>
+        <button class="gear">⚙</button>
+      </header>
+    </div>
+  </div>
+  <div>
+    <div class="cap"><b>Run chips</b></div>
+    <div class="barframe">
+      <div class="runstrip">
+        <span class="rslabel">Runs</span>
+        <button class="runchip">
+          <span class="dot running"></span><b>build</b>
+          <span class="node">planner</span><span class="age">31m · $1.90</span>
+          <span class="miss">⚠ 2</span>
+        </button>
+        <button class="runchip parked">
+          <span class="dot paused"></span><b>align</b>
+          <span class="node">⚑ asked</span><span class="age">6m · $0.40</span>
+          <span class="miss">⚠ 1</span>
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<h2>5 · What this binds, and the two calls I made</h2>
+<ul class="note">
+  <li><b>The strip is a button, the quota rows are not.</b> Its stylesheet says
+    "Nothing here is clickable, focusable or hoverable, which is why the
+    component takes no callbacks at all". That stays true: the cache strip is
+    its own component above the quota block, not a quota row.</li>
+  <li><b>Amber, not red</b>, for the badge, the chip mark and the money. Mock G
+    used red before the app had a red. Say the word and it goes back.</li>
+  <li><b>The seam has no action.</b> Mock G's seam carried a <code>view log</code>
+    link. The badge already jumps here and the strip already opens the view, so
+    a third path is one too many. The seam states facts and stops.</li>
+  <li><b>Retention is on the dialog</b>, not just in the ledger. It is the
+    setting the whole experiment is about, so seeing it beside the bill is worth
+    the line. Cut it if the dialog should stay pure counts.</li>
+  <li><b>Mock G's session header is gone.</b> That mock put the badge in a
+    per-session <code>shead</code> the app never built; the top bar is where the
+    per-session cost and context live now, so the badge goes beside them.</li>
+</ul>
+
+<style>
+  /* ======================================================================
+     NEW CSS — everything above this point is the app's own stylesheets.
+     This block is the whole visual cost of the feature and is written to be
+     lifted into src/renderer/src/components/cache-strip.css as it stands.
+     ====================================================================== */
+
+  /* ---------- the cache strip ---------- */
+
+  /* A button that looks like a rail row: the rail's gutter, the quota block's
+     typography, and a hover it shares with the session rows so the one
+     clickable thing at the foot says so before it is clicked. */
+  .cachestrip {
+    display: block;
+    width: 100%;
+    text-align: left;
+    background: none;
+    border: none;
+    border-top: 1px solid var(--line);
+    padding: 8px var(--gutter, 14px) 9px;
+    font: inherit;
+  }
+
+  .cachestrip:hover {
+    background: var(--panel);
+  }
+
+  .cline {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 8px;
+    font-size: 11.5px;
+    color: var(--dim);
+  }
+
+  /* The count carries the weight; the word "Cache" is just the label. */
+  .cline b {
+    color: var(--ink);
+    font-weight: 600;
+  }
+
+  /* Money is the part that stings, so it is the part that is amber. */
+  .cmoney {
+    font: 10.5px var(--mono);
+    color: var(--warn);
+    flex: none;
+  }
+
+  /* The since-date sits under the line and lifts on hover, which is the only
+     motion the foot of the rail is allowed. */
+  .cwhen {
+    display: block;
+    margin-top: 2px;
+    font: 10.5px var(--mono);
+    color: var(--faint);
+  }
+
+  /* ---------- the badge and the run chip's mark ---------- */
+
+  /* Rides on .cost, so it keeps the top bar's pill metrics exactly. */
+  .cachebadge {
+    color: var(--warn);
+    border-color: color-mix(in srgb, var(--warn) 45%, transparent);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .cachebadge:hover {
+    color: var(--warn);
+    border-color: var(--warn);
+  }
+
+  .runchip .miss {
+    font: 11px var(--mono);
+    color: var(--warn);
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* ---------- the seam ---------- */
+
+  /* Built like .summarycard: a card in the flow, read as meta, never a toast.
+     Amber rather than the error card's red, because nothing failed. */
+  .cacheseam {
+    max-width: var(--column);
+    margin: 0 auto 20px;
+    padding: 9px 14px;
+    border: 1px solid color-mix(in srgb, var(--warn) 42%, transparent);
+    border-radius: var(--radius);
+    background: color-mix(in srgb, var(--warn) 7%, transparent);
+    font-size: 12.5px;
+    color: var(--dim);
+  }
+
+  .cstag {
+    display: block;
+    font-size: 10.5px;
+    text-transform: uppercase;
+    letter-spacing: .08em;
+    color: var(--warn);
+    margin-bottom: 5px;
+  }
+
+  .csfacts {
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* ---------- the cache health view ---------- */
+
+  .cachedialog {
+    /* Wider than the guard dialog by one reason only: the ledger path is the
+       machine's entry point and has to be readable whole, not elided. */
+    width: 520px;
+  }
+
+  .cfacts {
+    display: flex;
+    gap: 26px;
+    padding-bottom: 4px;
+  }
+
+  .cfact {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .cfact b {
+    font: 600 17px var(--font);
+    color: var(--ink);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .cfact b.money {
+    color: var(--warn);
+  }
+
+  .cfact span {
+    font-size: 10.5px;
+    text-transform: uppercase;
+    letter-spacing: .08em;
+    color: var(--faint);
+  }
+
+  .cprose {
+    margin: 14px 0 12px;
+  }
+
+  /* The path is the machine's entry point, so it is shown whole and copyable
+     rather than summarized. */
+  .cpath {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 10px;
+    background: var(--code);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+  }
+
+  .cpath code {
+    flex: 1;
+    min-width: 0;
+    font: 10.5px var(--mono);
+    color: var(--code-ink);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .cpath .btn {
+    flex: none;
+    padding: 4px 10px;
+    font-size: 11.5px;
+  }
+
+  .cretention {
+    margin-top: 12px;
+    font-size: 11.5px;
+    color: var(--faint);
+  }
+
+  .cretention b {
+    color: var(--dim);
+    font-weight: 600;
+  }
+
+  /* Reset is the one act here with a consequence, so it sits apart from the
+     pair on the right rather than beside them. */
+  .dfoot .dspacer {
+    flex: 1;
+  }
+
+  .btn.cghost {
+    color: var(--dim);
+    background: none;
+  }
+
+  .btn.cghost:hover {
+    color: var(--ink);
+    border-color: var(--dim);
+  }
+
+  /* ---------- page-only frames, not part of the feature ---------- */
+
+  .stripframe {
+    width: 248px;
+    --gutter: 14px;
+    background: var(--bg2);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    overflow: hidden;
+  }
+
+  .stripframe .cachestrip {
+    border-top: none;
+  }
+
+  .barframe {
+    background: var(--bg);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    overflow: hidden;
+    width: 560px;
+  }
+</style>
+
+</body>
+</html>

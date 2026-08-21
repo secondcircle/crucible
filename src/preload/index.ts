@@ -14,6 +14,13 @@ import {
 } from '../shared/app-update/channels'
 import type { UpdateReady } from '../shared/app-update/service'
 import {
+  CACHE_EVENT_CHANNEL,
+  CACHE_REQUEST_CHANNEL,
+  type CacheRequest,
+  type CacheResult
+} from '../shared/cache/channels'
+import type { CacheHealth } from '../shared/cache/service'
+import {
   COMMAND_REQUEST_CHANNEL,
   type CommandRequest,
   type CommandResult
@@ -93,6 +100,16 @@ contextBridge.exposeInMainWorld('crucible', {
 
     onEvent: (listener: (snapshot: QuotaSnapshot) => void): (() => void) =>
       forwarder(QUOTA_EVENT_CHANNEL, listener)
+  },
+
+  // The cache ledger's counter: the strip asks, main's single ledger answers,
+  // and a miss landing in any session or any run moves every strip on screen.
+  cache: {
+    request: (request: CacheRequest): Promise<CacheResult> =>
+      ipcRenderer.invoke(CACHE_REQUEST_CHANNEL, request),
+
+    onEvent: (listener: (health: CacheHealth) => void): (() => void) =>
+      forwarder(CACHE_EVENT_CHANNEL, listener)
   },
 
   // The sidebar mark's two channels outside the window. One way only: main

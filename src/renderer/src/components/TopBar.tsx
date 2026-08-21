@@ -1,5 +1,7 @@
 import type { SessionState } from '../../../shared/agent/port'
+import { missesText } from '../cache/format'
 import { contextPercent, tokens } from '../labels'
+import './cache-strip.css'
 import './topbar.css'
 
 // Nothing here repeats a fact the sidebar rows or the composer chip already
@@ -16,6 +18,7 @@ export function TopBar({
   onResetSession,
   onOpenSettings,
   onOpenUsage,
+  onJumpToCacheMiss,
   issues,
   board,
   update
@@ -30,6 +33,8 @@ export function TopBar({
   readonly onOpenSettings: () => void
   /** The cost chip, which lands on the same sheet's Usage tab. */
   readonly onOpenUsage: () => void
+  /** The cache badge: scroll the transcript to the most recent seam. */
+  readonly onJumpToCacheMiss: () => void
   // The issue board's whole resting surface, on the same terms: absent until a
   // collection has answered with a board for this workspace.
   readonly issues?: {
@@ -114,6 +119,21 @@ export function TopBar({
           onClick={update.onRestart}
         >
           ↻ Update ready · Restart
+        </button>
+      )}
+
+      {/* This session's whole-conversation misses, absent at zero. Amber and
+          never red: red in this app means failure, and a cache miss is money.
+          Clicking it lands on the most recent seam. */}
+      {session?.cacheMisses === undefined || session.cacheMisses.count === 0 ? null : (
+        <button
+          className="cost cachebadge"
+          aria-label={`${session.cacheMisses.count} cache ${
+            session.cacheMisses.count === 1 ? 'miss' : 'misses'
+          } in this session`}
+          onClick={onJumpToCacheMiss}
+        >
+          <span aria-hidden="true">⚠</span> {missesText(session.cacheMisses.count)}
         </button>
       )}
 

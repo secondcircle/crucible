@@ -60,6 +60,20 @@ describe('the workflows Crucible ships', () => {
     for (const node of planned) {
       for (const parent of node.parents ?? []) expect(ids.has(parent)).toBe(true)
     }
+
+    // A build ends in the merge gate, so its first round is certain to run
+    // and belongs in what a human sees before anything costs money.
+    expect(planned.map((node) => `${node.id}<-${(node.parents ?? []).join(',')}`)).toEqual([
+      'planner<-',
+      'builder<-planner',
+      'review-1<-builder',
+      'gate-alignment-1<-review-1',
+      'gate-comments-1<-gate-alignment-1',
+      'gate-verdict-1<-gate-alignment-1,gate-comments-1'
+    ])
+    for (const conditional of ['gate-fixer-1', 'gate-alignment-2', 'fixer-1', 'review-2']) {
+      expect(ids.has(conditional), 'a conditional node must not haunt the preview').toBe(false)
+    }
   })
 
   it('says which workflow a name misses', async () => {

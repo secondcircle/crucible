@@ -22,6 +22,7 @@ import type {
   BindRequest,
   Binding,
   ConversationAdapter,
+  ObservedCacheMiss,
   ResumeRequest,
   UsageRequest
 } from '../../shared/agent/adapter'
@@ -30,6 +31,8 @@ import type {
   AuthNotice,
   AuthPromptKind,
   BashRunShare,
+  CacheMissFacts,
+  ChangeFact,
   HistoryMatch,
   ImageAttachment,
   ModelId,
@@ -52,7 +55,14 @@ import { summarizeActivity } from '../../shared/agent/activity.ts'
 import { TITLE_MODEL } from '../../shared/agent/known-models.ts'
 import { PANEL_TOOLS, type PanelTools } from '../../shared/agent/panel-tools.ts'
 import { RUN_TOOLS, type RunTools } from '../../shared/agent/run-tools.ts'
+import { retentionInForce } from '../cache/retention.ts'
 import { displaySafeMessage } from './adapter-error.ts'
+import {
+  billsPrompt,
+  scanCacheMisses,
+  type CacheMissTrackerOptions,
+  type DetectedCacheMiss
+} from './cache-miss.ts'
 import { toProviderState, type AuthFacts, type ProviderFacts } from './providers.ts'
 import { crucibleAgentDir, workspaceSessionDir } from './paths.ts'
 import { createEventMapper } from './sdk-events.ts'
@@ -60,6 +70,9 @@ import { sanitizeTitle, TITLE_INSTRUCTION, titleInput } from './sdk-titler.ts'
 import {
   BASH_RUN_TYPE,
   deliveredBashRunId,
+  entriesToScan,
+  pathSeams,
+  toCacheMessage,
   toTranscript,
   userTextOf,
   type StoredMessage
@@ -79,6 +92,15 @@ interface Bound {
   readonly shares: PendingShare[]
   /** The last numbers reported for this conversation, so a still count is not re-sent. */
   reported?: ReportedUsage
+  // What Crucible itself did to this session since the last request it
+  // watched complete. Read into a miss's `changed` facts and cleared there,
+  // because they describe the span between the two compared turns.
+  thinkingChanged: boolean
+  jumped: boolean
+  // Whether this launch watched the request the next miss would be compared
+  // against. Without that, the tool set and the role prompt of the compared
+  // turn are genuinely unknown rather than unchanged.
+  watchedPrevious: boolean
   /**
    * A prompt sent to π but not yet in `session.messages`, which is the whole
    * first minutes of a session as far as the titler can see.
@@ -90,6 +112,7 @@ interface ReportedUsage {
   readonly usedTokens: number
   readonly contextWindow: number
   readonly cost?: number
+  readonly cacheMisses?: { readonly count: number; readonly dollars: number }
 }
 
 interface PendingShare {
@@ -140,6 +163,10 @@ export function createSdkAdapter({
   const resources = new Map<string, Promise<WorkspaceResources>>()
   let sdkModule: Promise<Sdk> | undefined
   let modelRuntime: Promise<ModelRuntime> | undefined
+  // The runtime once it has resolved, because pricing a miss happens inside a
+  // synchronous event callback and a promise would be a frame too late.
+  let models: ModelRuntime | undefined
+  const retention = retentionInForce()
   // One at a time: a second login while one is live is refused.
   let liveLogin: LiveLogin | undefined
   let prompts = 0
@@ -159,8 +186,21 @@ export function createSdkAdapter({
   }
 
   function runtime(): Promise<ModelRuntime> {
-    modelRuntime ??= sdk().then((pi) => pi.ModelRuntime.create())
+    modelRuntime ??= sdk()
+      .then((pi) => pi.ModelRuntime.create())
+      .then((created) => {
+        models = created
+        return created
+      })
     return modelRuntime
+  }
+
+  // π's listed cache-read price, in dollars per million tokens, for a message
+  // that paid for no cache read of its own. A model nothing can price falls
+  // back to zero, exactly as π's own arithmetic does.
+  const pricing: CacheMissTrackerOptions = {
+    listedCacheReadPerMillion: (provider, model) =>
+      models?.getModel(provider, model)?.cost.cacheRead
   }
 
   function sessionDir(workspacePath: string): string {
@@ -497,6 +537,12 @@ export function createSdkAdapter({
         emit(mapped)
       }
 
+      // Detection runs per completed assistant message, aborted and errored
+      // ones included: π's scan exempts none of them, and neither does this.
+      if (event.type === 'message_end' && event.message.role === 'assistant') {
+        observeMessage(sessionId, turnId, bound, event.message as StoredMessage)
+      }
+
       // The three moments the context genuinely moved: an answer landed with
       // its own token count, a tool result was appended after it, or a
       // compaction threw most of the conversation away. Deltas are skipped
@@ -620,6 +666,120 @@ export function createSdkAdapter({
     }
   }
 
+  // What Crucible itself did between the two compared turns. A span this
+  // launch did not watch is unknown, and unknown is never guessed into an
+  // answer.
+  interface Span {
+    readonly watched: boolean
+    readonly thinkingChanged: boolean
+    readonly jumped: boolean
+  }
+
+  function fact(changed: boolean): ChangeFact {
+    return changed ? 'yes' : 'no'
+  }
+
+  /** Rounded to a hundredth of a cent, so no dollar figure carries a tail. */
+  function round(dollars: number): number {
+    return Math.round(dollars * 10_000) / 10_000
+  }
+
+  // A miss on a just-completed assistant message, detected as π detects one:
+  // the conversation as it stands is scanned for the request this message is
+  // compared against, and the message itself is not part of that scan yet.
+  function observeMessage(
+    sessionId: SessionId,
+    turnId: TurnId,
+    bound: Bound,
+    message: StoredMessage
+  ): void {
+    const scanned = toCacheMessage(message)
+    if (scanned === undefined) return
+    const entries = bound.session.sessionManager
+      .getEntries()
+      .filter((entry) => (entry as { message?: unknown }).message !== message)
+    const miss = scanCacheMisses(entriesToScan(entries), pricing).tracker.observe(scanned)
+
+    const span: Span = {
+      watched: bound.watchedPrevious,
+      thinkingChanged: bound.thinkingChanged,
+      jumped: bound.jumped
+    }
+    if (billsPrompt(scanned)) {
+      // This message is what the next one is compared against, and the span
+      // since it is empty until something happens in it.
+      bound.watchedPrevious = true
+      bound.thinkingChanged = false
+      bound.jumped = false
+    }
+    if (miss === undefined) return
+
+    emit({
+      type: 'cache_miss',
+      sessionId,
+      turnId,
+      miss: {
+        provider: scanned.provider,
+        model: scanned.model,
+        ...(bound.session.thinkingLevel === undefined
+          ? {}
+          : { thinkingLevel: bound.session.thinkingLevel }),
+        tokensRebilled: miss.missedTokens,
+        dollarsRebilled: round(miss.missedCost),
+        gapMs: miss.gapMs,
+        changed: {
+          model: fact(miss.modelChanged),
+          thinking: span.watched ? fact(span.thinkingChanged) : 'unknown',
+          jump: span.watched ? fact(span.jumped) : 'unknown',
+          // The comparison starts over at a compaction, so a detected miss
+          // never spans one.
+          compaction: 'no',
+          // Within one bound conversation in one launch neither can have
+          // changed; across launches Crucible genuinely does not know.
+          tools: span.watched ? 'no' : 'unknown',
+          rolePrompt: span.watched ? 'no' : 'unknown'
+        }
+      } satisfies ObservedCacheMiss
+    })
+  }
+
+  // A restored seam states what the file still holds. What Crucible did
+  // between two turns of an earlier launch was never written down, so those
+  // facts stay unknown and the seam says nothing about them.
+  function restoredFacts(miss: DetectedCacheMiss): CacheMissFacts {
+    return {
+      tokensRebilled: miss.missedTokens,
+      dollarsRebilled: round(miss.missedCost),
+      gapMs: miss.gapMs,
+      modelChanged: fact(miss.modelChanged),
+      thinkingChanged: 'unknown',
+      jump: 'unknown',
+      retention
+    }
+  }
+
+  // The seams of a conversation's current path, by the message that paid.
+  // Rebuilt from the whole entry sequence, exactly as π rebuilds its notices
+  // on resume and exactly as the ledger and the badge counted them, so a
+  // conversation reopens showing the seams it showed live — across jumps
+  // included.
+  function seamsOf(
+    manager: SessionManager,
+    messages: readonly StoredMessage[]
+  ): Map<number, CacheMissFacts> {
+    const seams = new Map<number, CacheMissFacts>()
+    for (const [at, miss] of pathSeams(manager.getEntries(), messages, pricing)) {
+      seams.set(at, restoredFacts(miss))
+    }
+    return seams
+  }
+
+  /** Every branch of the conversation, exactly as the money is counted. */
+  function missTotals(manager: SessionManager): { count: number; dollars: number } {
+    const { totals } = scanCacheMisses(entriesToScan(manager.getEntries()), pricing)
+    return { count: totals.count, dollars: totals.dollars }
+  }
+
   // π keeps no context counter: it recomputes the estimate from the branch on
   // every read, so this is worth asking for whenever the conversation grows —
   // on the bind, after each answer and tool result, and once the turn is over.
@@ -631,19 +791,23 @@ export function createSdkAdapter({
 
     // The tokens are the current path's, as π counts them; the cost beside
     // them is the whole conversation's, because money does not vanish on a
-    // jump.
+    // jump. The misses are counted the same way, for the same reason.
     const spent = usageOf(bound.session.sessionManager)
+    const misses = missTotals(bound.session.sessionManager)
     const next: ReportedUsage = {
       usedTokens: usage.tokens,
       contextWindow: usage.contextWindow,
-      ...(spent === undefined ? {} : { cost: spent.totalCost })
+      ...(spent === undefined ? {} : { cost: spent.totalCost }),
+      cacheMisses: misses
     }
     const last = bound.reported
     if (
       last !== undefined &&
       last.usedTokens === next.usedTokens &&
       last.contextWindow === next.contextWindow &&
-      last.cost === next.cost
+      last.cost === next.cost &&
+      last.cacheMisses?.count === misses.count &&
+      last.cacheMisses.dollars === misses.dollars
     ) {
       return
     }
@@ -724,7 +888,12 @@ export function createSdkAdapter({
         session,
         workspacePath: request.workspacePath,
         token: tokenOf(session),
-        shares: []
+        shares: [],
+        // Nothing of this conversation's earlier turns was watched here, so
+        // the first miss compares against a request this launch never saw.
+        thinkingChanged: false,
+        jumped: false,
+        watchedPrevious: false
       }
       sessions.set(request.sessionId, bound)
       // A conversation that came back is already holding context, and it is
@@ -757,8 +926,12 @@ export function createSdkAdapter({
       bound.session = session
       bound.token = tokenOf(session)
       // The old conversation's numbers described a conversation this session
-      // no longer has.
+      // no longer has, and so did the span its next miss would be measured
+      // over.
       bound.reported = undefined
+      bound.thinkingChanged = false
+      bound.jumped = false
+      bound.watchedPrevious = false
       return describe(bound, false)
     },
 
@@ -779,7 +952,10 @@ export function createSdkAdapter({
         session,
         workspacePath: request.workspacePath,
         token: tokenOf(session),
-        shares: []
+        shares: [],
+        thinkingChanged: false,
+        jumped: false,
+        watchedPrevious: false
       }
       sessions.set(request.sessionId, bound)
       reportUsage(request.sessionId, bound)
@@ -787,7 +963,10 @@ export function createSdkAdapter({
     },
 
     async transcript(sessionId: SessionId): Promise<readonly TranscriptItem[]> {
-      return toTranscript(requireBound(sessionId).session.messages)
+      const { session } = requireBound(sessionId)
+      const { messages } = session
+      // Seams in place: a reopened conversation shows where it paid twice.
+      return toTranscript(messages, seamsOf(session.sessionManager, messages))
     },
 
     release(sessionId: SessionId): void {
@@ -849,8 +1028,11 @@ export function createSdkAdapter({
       const navigated = await bound.session.navigateTree(ref, { summarize })
       if (navigated.cancelled) throw new Error('That jump did not happen.')
       // The branch under the session changed, so whatever was last reported
-      // counted messages that are no longer on the path.
+      // counted messages that are no longer on the path. π compares straight
+      // across a jump, so the comparison is not reset — it is recorded as a
+      // fact about the span instead.
       bound.reported = undefined
+      bound.jumped = true
       return navigated.editorText === undefined ? {} : { editorText: navigated.editorText }
     },
 
@@ -934,9 +1116,11 @@ export function createSdkAdapter({
     },
 
     async setThinkingLevel(sessionId: SessionId, level: ThinkingLevel): Promise<void> {
-      requireBound(sessionId).session.setThinkingLevel(
-        level as Parameters<AgentSession['setThinkingLevel']>[0]
-      )
+      const bound = requireBound(sessionId)
+      bound.session.setThinkingLevel(level as Parameters<AgentSession['setThinkingLevel']>[0])
+      // A fact about the span between the next miss's two turns: Crucible
+      // changed the level in it, whatever that turns out to have cost.
+      bound.thinkingChanged = true
     },
 
     // π's whole catalog, unfiltered: which providers become a list and which a

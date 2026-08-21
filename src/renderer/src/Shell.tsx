@@ -13,6 +13,7 @@ import type {
   WorkspaceId
 } from '../../shared/agent/port'
 import type { AppUpdateService } from '../../shared/app-update/service'
+import type { CacheService } from '../../shared/cache/service'
 import type { CommandInfo, CommandService } from '../../shared/commands/service'
 import { commandFragment } from '../../shared/commands/template'
 import type { NeedsYouService } from '../../shared/needs-you/service'
@@ -32,6 +33,7 @@ import type { RunsSnapshot, WorkflowRunService } from '../../shared/workflows/se
 import { useBranchBoards, useIssueBoards } from './board/use-boards'
 import { BashDrawer, type RunView } from './components/BashDrawer'
 import { BranchBoard } from './components/BranchBoard'
+import { CacheHealthView } from './components/CacheHealthView'
 import { IssueBoard, type IssueSession } from './components/IssueBoard'
 import { type Attachment, Composer, useElapsedSeconds } from './components/Composer'
 import { ConfirmDialog } from './components/ConfirmDialog'
@@ -46,6 +48,8 @@ import { Sidebar } from './components/Sidebar'
 import { WorkflowRunView } from './components/WorkflowRunView'
 import { TopBar } from './components/TopBar'
 import { Transcript } from './components/Transcript'
+import { investigationPrompt } from './cache/prompt'
+import { useCacheHealth } from './cache/use-cache'
 import { readAttachment, refuse } from './images'
 import { contextPercent, UNTITLED } from './labels'
 import { useQuota } from './quota/use-quota'
@@ -91,6 +95,7 @@ export function Shell({
   commands,
   appUpdate,
   quota,
+  cache: cacheService,
   needsYou: needsYouService,
   workflowRuns
 }: {
@@ -105,6 +110,10 @@ export function Shell({
   // Beside the port, never behind it: quota is global, session-free provider
   // data. Without this service no quota strip renders at all.
   readonly quota?: QuotaService
+  // Beside the port too: the cache ledger is global, one file per
+  // installation across every workspace, session and run. Without this
+  // service no cache strip and no cache health view render at all.
+  readonly cache?: CacheService
   // The two needs-you channels outside the window. Without it the sidebar mark
   // and the Tab walk work exactly as they do with it, and nothing reaches the
   // dock or the notification centre.
@@ -117,6 +126,12 @@ export function Shell({
   const [state, dispatch] = useReducer(reduce, NOTHING_YET)
   const quotaHold = useQuota(quota)
   const refreshQuota = quotaHold.refresh
+  // The counter as main holds it, repainted whenever a miss lands anywhere.
+  const cacheHealth = useCacheHealth(cacheService)
+  const [cacheOpen, setCacheOpen] = useState(false)
+  // The badge's jump: a counter the transcript watches, because the request
+  // carries nothing but itself.
+  const [missJump, setMissJump] = useState(0)
   // The waiting build's commit, once main has announced one.
   const [updateCommit, setUpdateCommit] = useState<string | undefined>(undefined)
 
@@ -705,6 +720,11 @@ export function Shell({
         setQuestion(undefined)
         return
       }
+      if (cacheOpen) {
+        pressed.preventDefault()
+        setCacheOpen(false)
+        return
+      }
       if (popover !== 'none') {
         pressed.preventDefault()
         setPopover('none')
@@ -768,6 +788,7 @@ export function Shell({
     return () => document.removeEventListener('keydown', onKeyDown)
   }, [
     question,
+    cacheOpen,
     popover,
     fileToken,
     boardOpen,
@@ -871,7 +892,7 @@ export function Shell({
       if (sessionId === undefined) return
       // A modal surface owns the keyboard while it is up.
       if (liveLogin !== undefined || settings.open || question !== undefined) return
-      if (popover === 'resume') return
+      if (cacheOpen || popover === 'resume') return
       // A ring model the adapter did not list is skipped; with none listed the
       // key is left exactly as it was, no toast and no error.
       const candidates = MODEL_RING.filter((id) =>
@@ -910,6 +931,7 @@ export function Shell({
     liveLogin,
     settings.open,
     question,
+    cacheOpen,
     popover
   ])
 
@@ -929,6 +951,7 @@ export function Shell({
       if (pressed.shiftKey || pressed.metaKey || pressed.ctrlKey || pressed.altKey) return
       if (pressed.defaultPrevented) return
       if (liveLogin !== undefined || settings.open || question !== undefined) return
+      if (cacheOpen) return
       if (popover !== 'none' || browsingCommands || fileToken !== undefined) return
       if (boardOpen || issuesOpen || treeOpen) return
       pressed.preventDefault()
@@ -950,6 +973,7 @@ export function Shell({
     liveLogin,
     settings.open,
     question,
+    cacheOpen,
     popover,
     browsingCommands,
     fileToken,
@@ -1552,6 +1576,24 @@ export function Shell({
     [workflowRuns, openRunId]
   )
 
+  // The app starts the investigation: a new session in the active workspace,
+  // activated, with the opening prompt already sent. Whatever the ledger says
+  // is in that prompt, so the agent needs nothing else to begin.
+  async function investigateCache(): Promise<void> {
+    const workspaceId = activeWorkspaceId
+    if (workspaceId === undefined || cacheHealth === undefined) {
+      throw new Error('Open a workspace first — an investigation runs in a session of its own.')
+    }
+    const text = investigationPrompt(cacheHealth)
+    const sessionId = await port.createSession(workspaceId)
+    await port.activateSession(sessionId)
+    // Echoed in the transcript as any prompt is; the working state is the
+    // wait indicator from here.
+    dispatch({ type: 'sent', sessionId, text, images: [] })
+    await port.prompt(sessionId, text)
+    setCacheOpen(false)
+  }
+
   function answer(): void {
     if (question === undefined) return
     const asked = question
@@ -1583,6 +1625,11 @@ export function Shell({
         onActivateSession={activateSession}
         onRemoveSession={removeSession}
         onResume={() => setPopover('resume')}
+        cache={
+          cacheService === undefined
+            ? undefined
+            : { health: cacheHealth, onOpen: () => setCacheOpen(true) }
+        }
         quota={
           quota === undefined
             ? undefined
@@ -1603,6 +1650,7 @@ export function Shell({
           onResetSession={resetSession}
           onOpenSettings={() => setSettings({ open: true, tab: 'providers' })}
           onOpenUsage={() => setSettings({ open: true, tab: 'usage' })}
+          onJumpToCacheMiss={() => setMissJump((asked) => asked + 1)}
           issues={
             issues === undefined
               ? undefined
@@ -1649,6 +1697,7 @@ export function Shell({
               items={items}
               sessionId={session.id}
               invocations={shownInvocations}
+              missJump={missJump}
             />
           )}
 
@@ -1842,6 +1891,22 @@ export function Shell({
           )}
           activeSessionId={activeSessionId}
           contextPercent={contextPercent(session?.usage)}
+        />
+      ) : null}
+
+      {cacheOpen && cacheService !== undefined && cacheHealth !== undefined ? (
+        <CacheHealthView
+          health={cacheHealth}
+          workspaceOpen={activeWorkspaceId !== undefined}
+          // Appends a reset line and nothing else: the misses underneath
+          // survive it, which is what makes reset cheap enough to need no
+          // confirmation.
+          onReset={() => cacheService.reset().then(() => {})}
+          onInvestigate={investigateCache}
+          // The button says it copied; a toast over the transcript would be a
+          // second answer to one click.
+          onCopy={(path) => void navigator.clipboard?.writeText(path).catch(report)}
+          onClose={() => setCacheOpen(false)}
         />
       ) : null}
 

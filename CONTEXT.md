@@ -240,6 +240,25 @@ of the run's age over teal dots in the row's end slot, where a live turn shows
 green. Teal is the run color everywhere, chips and ⌘R rows included.
 _Avoid_: run indicator, running badge, run status.
 
+**Run artifact**:
+A file a node of a run declares as an output and writes into the run's own
+directory, outside the repo. The files handed in at kickoff are shown beside
+them but are the repo's, not the run's.
+_Avoid_: output file, deliverable, exhibit (an exhibit is a context panel tab).
+
+**Artifact rail**:
+The third column of the run view, listing every artifact the run has touched
+in production order — inputs first, then what the run wrote — each naming the
+node that wrote it and the nodes that read it. Declared outputs appear dimmed
+from the moment their node starts.
+_Avoid_: artifacts panel, output list, artifact sidebar.
+
+**Artifact reader**:
+The rendered view of one artifact, opened in place of the node transcript
+while the graph and the artifact rail stay put. Read-only, like the rest of
+the run view.
+_Avoid_: preview, viewer, artifact tab.
+
 **Merge gate**:
 The final phase of a build run: one map-level pass over the whole branch —
 coverage against the intent document, scope creep against incidental extras,
@@ -254,6 +273,27 @@ something non-obvious was done, in a line or two, referencing nothing outside
 the code. Ships with Crucible; a workspace that disagrees replaces the whole
 workflow.
 _Avoid_: comment style guide, comment policy.
+
+**Cache miss**:
+A model turn that re-billed prompt tokens the previous turn had already
+paid to cache. π's word and π's arithmetic, adopted verbatim; Crucible
+never decides that one was justified.
+_Avoid_: cache break (the earlier docs' word), cache invalidation, cache hit
+rate.
+
+**Cache ledger**:
+The append-only file recording every cache miss Crucible observes, across
+every workspace, session and run, plus a line for each counter reset. One
+per installation, never pruned: it is the evidence an agent reads when asked
+why the misses keep happening.
+_Avoid_: cache log, miss history, usage ledger.
+
+**Cache strip**:
+The row at the foot of the sidebar counting misses and dollars re-billed
+since the last reset, with the reset's date. Global, like the quota strip
+below it, and it opens the cache health view.
+_Avoid_: cache badge (that is the per-session one in the top bar), cache
+meter, cache counter.
 
 **Standing prompt**:
 The text appended to every agent Crucible starts, whatever its role prompt

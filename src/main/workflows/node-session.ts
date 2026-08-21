@@ -1,3 +1,4 @@
+import type { ObservedCacheMiss } from '../../shared/agent/adapter'
 import type { TranscriptItem, Unsubscribe } from '../../shared/agent/port'
 
 // The engine's one seam onto agents: a node is a fresh session with two
@@ -31,6 +32,10 @@ export interface NodeSessionRequest {
   readonly onComplete: (completion: NodeCompletion) => string
   /** The agent called raise_blocker; same contract. */
   readonly onBlocker: (blocker: NodeBlocker) => string
+  // A cache miss on one of this node's turns, detected the way a session's
+  // is. A run is observed, never conversed with: this reaches the ledger and
+  // the run's chip and becomes no message to anybody (ADR 0017).
+  readonly onCacheMiss?: (miss: ObservedCacheMiss) => void
 }
 
 export interface NodeSessionStats {

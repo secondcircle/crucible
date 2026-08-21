@@ -105,11 +105,35 @@ export interface SessionState {
     readonly contextWindow: number
     readonly cost?: number
   }
+  // The whole conversation's misses, every branch of it, exactly as `usage`
+  // counts money: neither vanishes on a jump. Absent until genuinely known.
+  readonly cacheMisses?: { readonly count: number; readonly dollars: number }
   /** Absent when nothing is queued. */
   readonly queue?: QueueState
   // The context panel's tabs, folded in exactly as the queue is. Absent when
   // the session has no tabs, which is what makes the region vanish.
   readonly panel?: PanelState
+}
+
+// What Crucible knows about one fact of a cache miss. `'unknown'` is never
+// guessed into an answer: a surface says nothing at all about an unknown.
+export type ChangeFact = 'yes' | 'no' | 'unknown'
+
+/** π's prompt retention: five minutes by default, an hour with PI_CACHE_RETENTION=long. */
+export type CacheRetention = '5m' | '1h'
+
+// One miss as every surface shows it: facts, never a cause. Crucible records
+// what it observed and names no culprit.
+export interface CacheMissFacts {
+  readonly tokensRebilled: number
+  readonly dollarsRebilled: number
+  /** Since the previous request, which is what an idle expiry looks like. */
+  readonly gapMs: number
+  readonly modelChanged: ChangeFact
+  readonly thinkingChanged: ChangeFact
+  /** Whether a jump intervened between the compared turns. */
+  readonly jump: ChangeFact
+  readonly retention: CacheRetention
 }
 
 export interface ShellSnapshot {
@@ -188,6 +212,9 @@ export type TranscriptItem =
   // The context a jump-with-summary or a compaction carried forward: what
   // the conversation is standing on now, shown so nobody starts blind.
   | { readonly kind: 'summary'; readonly text: string }
+  // The seam, immediately above the assistant message that paid for it, so a
+  // reopened conversation shows its misses where they happened.
+  | { readonly kind: 'cacheMiss'; readonly miss: CacheMissFacts }
   /** The quiet marker that closes a cancelled turn. */
   | { readonly kind: 'stopped' }
   | { readonly kind: 'error'; readonly message: string }
@@ -339,6 +366,15 @@ export type PortEvent =
   // Follows the `state` event carrying the show, so a listener already holds
   // the snapshot this names. A user's own switch or close says nothing.
   | { readonly type: 'panel_shown'; readonly sessionId: SessionId; readonly tabId: TabId }
+  // One completed assistant message re-billed prompt tokens the previous turn
+  // had already paid to cache. Announced per miss; a turn may pay for more
+  // than one.
+  | {
+      readonly type: 'cache_miss'
+      readonly sessionId: SessionId
+      readonly turnId: TurnId
+      readonly miss: CacheMissFacts
+    }
   | { readonly type: 'turn_ended'; readonly sessionId: SessionId; readonly turnId: TurnId }
   | { readonly type: 'turn_cancelled'; readonly sessionId: SessionId; readonly turnId: TurnId }
   | {

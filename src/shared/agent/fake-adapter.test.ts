@@ -4,7 +4,7 @@
 // on is pinned here.
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { AdapterEvent } from './adapter'
-import { createFakeAdapter, FAKE_MODEL, FAKE_TURN_USAGE } from './fake-adapter'
+import { createFakeAdapter, FAKE_CACHE_MISS, FAKE_MODEL, FAKE_TURN_USAGE } from './fake-adapter'
 
 const WORKSPACE = '/workspaces/crucible'
 
@@ -173,6 +173,44 @@ describe('the scripted turn', () => {
 
 // π's own queueing semantics, implemented here so both features are
 // exercisable without a paid call.
+describe('the scripted cache miss', () => {
+  it('pays for one on a prompt that asks about the cache, and on no other', async () => {
+    const { adapter, events } = await withSession()
+
+    await adapter.prompt('s1', 't1', 'an ordinary prompt')
+    expect(events.some((event) => event.type === 'cache_miss')).toBe(false)
+
+    await adapter.prompt('s1', 't2', 'show me what a cache miss looks like')
+
+    const announced = events.filter((event) => event.type === 'cache_miss')
+    expect(announced).toHaveLength(1)
+    expect(announced[0]).toEqual({
+      type: 'cache_miss',
+      sessionId: 's1',
+      turnId: 't2',
+      miss: { ...FAKE_CACHE_MISS, thinkingLevel: 'low' }
+    })
+  })
+
+  it('leaves the seam above the message that paid, and counts it in the totals', async () => {
+    const { adapter, events } = await withSession()
+
+    await adapter.prompt('s1', 't1', 'what does a cache miss look like?')
+
+    const items = await adapter.transcript('s1')
+    const seamAt = items.findIndex((item) => item.kind === 'cacheMiss')
+    expect(seamAt).toBeGreaterThan(-1)
+    // Immediately above the assistant message it happened on, live and
+    // restored alike.
+    expect(items[seamAt + 1]?.kind).toBe('assistant')
+
+    const totals = usageOf(events).at(-1)
+    expect(totals).toEqual(
+      expect.objectContaining({ cacheMisses: { count: 1, dollars: 0.62 } })
+    )
+  })
+})
+
 describe('queued messages', () => {
   /** Queues through `at`, once, the first time that event type arrives. */
   function once(
