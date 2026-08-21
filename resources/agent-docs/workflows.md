@@ -60,6 +60,29 @@ The user watches runs in the run strip above the chat and can open a
 full-screen view of any run, but they never talk to a run's agents — every
 conversation about a run happens here, with you.
 
+### When a `build` run completes
+
+A `build` run ends in the merge gate, so what comes back is a branch already
+judged against the intent document that authorized it. Its `Outputs` carry
+the gate's `verdict` and `reason`, a `coverageReport`, one `commentReports`
+path per gate round, and a `merge` result. Do all four of these:
+
+- Give the verdict and its reason in chat. The reason is written to be acted
+  on without opening anything.
+- Open the coverage report as a context panel tab with `panel_show`. It is
+  the coverage-and-scope judgment on the branch and the thing the user reads
+  before they merge. The run never opens it itself — a run only speaks to
+  you, and the panel is this session's.
+- Name the comment report's path in chat without opening it. It is an audit
+  trail of comment edits the gate made, read only when something looks off.
+- Relay the merge result. `clean` means the branch still merges with the
+  local trunk; `conflicts` comes with the conflicting files, so name them —
+  the user wants to know before they go to merge, not during. `untested`
+  means the check itself could not run, and says why.
+
+The gate never merges, pushes or touches the trunk, and neither does
+completion: merging stays the human's act.
+
 ## Where workflows come from
 
 Three origins, exactly like commands: built-in (shipped with Crucible),
