@@ -234,6 +234,21 @@ The bar above a session's chat pane where runs appear, one chip each —
 workflow, current node, age, spend.
 _Avoid_: run bar, pill row, status bar.
 
+**Merge gate**:
+The final phase of a build run: one map-level pass over the whole branch —
+coverage against the intent document, scope creep against incidental extras,
+mock fidelity, input acknowledgment, comments — that loops until it approves,
+and leaves the branch ready for the human to merge. A phase, not a workflow of
+its own, and it never merges anything.
+_Avoid_: PR review, final review, the gate workflow.
+
+**Comment doctrine**:
+The rules a comment must satisfy to survive the merge gate: it explains why
+something non-obvious was done, in a line or two, referencing nothing outside
+the code. Ships with Crucible; a workspace that disagrees replaces the whole
+workflow.
+_Avoid_: comment style guide, comment policy.
+
 **Standing prompt**:
 The text appended to every agent Crucible starts, whatever its role prompt
 says — things true of every agent regardless of its job. Day one it is the
