@@ -4,6 +4,7 @@
 // on is pinned here.
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { AdapterEvent } from './adapter'
+import type { ImageAttachment, QueuedEntry } from './port'
 import { createFakeWorkflowRunService } from '../workflows/fake-service'
 import {
   createFakeAdapter,
@@ -426,7 +427,7 @@ describe('queued messages', () => {
       { text: 'check the adapter too' },
       { text: 'and the tests' }
     ])
-    expect(flow[at + 1]).toMatchObject({ steering: ['and the tests'] })
+    expect(flow[at + 1]).toMatchObject({ steering: [{ text: 'and the tests' }] })
     expect(flow[at + 3]).toMatchObject({ steering: [], followUp: [] })
   })
 
@@ -482,9 +483,9 @@ describe('queued messages', () => {
     expect(events).toEqual([])
   })
 
-  it('dequeues exactly the named entry, and answers false for a delivered one', async () => {
+  it('dequeues exactly the named entry, and answers with nothing for a delivered one', async () => {
     const { adapter, events } = await withSession()
-    const removed: boolean[] = []
+    const removed: (QueuedEntry | undefined)[] = []
     once(adapter, 'tool_started', () => {
       void adapter.steer('s1', 'one')
       void adapter.steer('s1', 'two')
@@ -493,10 +494,10 @@ describe('queued messages', () => {
 
     await adapter.prompt('s1', 't-1', 'hello')
 
-    expect(removed).toEqual([true])
+    expect(removed).toEqual([{ text: 'one' }])
     expect(events.filter((event) => event.type === 'user_message')).toMatchObject([{ text: 'two' }])
     // Already delivered: there is nothing left to take back.
-    expect(await adapter.dequeue('s1', 'steering', 'two')).toBe(false)
+    expect(await adapter.dequeue('s1', 'steering', 'two')).toBeUndefined()
   })
 
   it('settles a delivered message into the conversation where it was delivered', async () => {
@@ -562,6 +563,76 @@ describe('queued messages', () => {
 
     expect(types(events)).not.toContain('queue_flushed')
     expect(types(events)).not.toContain('user_message')
+  })
+})
+
+// The whole image path is drivable here, so `npm run dev` reaches all of it
+// without a paid call.
+describe('images on a queued message', () => {
+  const SHOT: ImageAttachment = { mimeType: 'image/png', data: 'AAAAAA==' }
+  const OTHER: ImageAttachment = { mimeType: 'image/jpeg', data: 'BBBBBB==' }
+
+  /** Queues through `at`, once, the first time that event type arrives. */
+  function once(
+    adapter: ReturnType<typeof createFakeAdapter>,
+    type: AdapterEvent['type'],
+    act: () => void
+  ): void {
+    let done = false
+    adapter.onEvent((event) => {
+      if (event.type !== type || done) return
+      done = true
+      act()
+    })
+  }
+
+  it('reports them in the queue, announces them on delivery, and keeps them', async () => {
+    const { adapter, events } = await withSession()
+    once(adapter, 'tool_started', () => {
+      void adapter.steer('s1', 'look at this', [SHOT])
+      void adapter.followUp('s1', 'and this after', [OTHER])
+    })
+
+    await adapter.prompt('s1', 't-1', 'hello')
+
+    expect(events.filter((event) => event.type === 'queue_changed')).toContainEqual(
+      expect.objectContaining({
+        steering: [{ text: 'look at this', images: [SHOT] }],
+        followUp: [{ text: 'and this after', images: [OTHER] }]
+      })
+    )
+    expect(events.filter((event) => event.type === 'user_message')).toMatchObject([
+      { text: 'look at this', images: [SHOT] },
+      { text: 'and this after', images: [OTHER] }
+    ])
+    // Kept in the conversation, so reopening the session shows the same
+    // thumbnails.
+    expect(await adapter.transcript('s1')).toContainEqual({
+      kind: 'user',
+      text: 'look at this',
+      images: [SHOT]
+    })
+  })
+
+  it('hands them back on a flush, and on the dequeue that named the message', async () => {
+    const { adapter, events } = await withSession()
+    let removed: QueuedEntry | undefined
+    once(adapter, 'tool_started', () => {
+      void adapter.steer('s1', 'the first', [SHOT])
+      void adapter.steer('s1', 'the second', [OTHER])
+      void adapter.dequeue('s1', 'steering', 'the first').then((answer) => {
+        removed = answer
+        void adapter.cancel('s1')
+      })
+    })
+
+    await adapter.prompt('s1', 't-1', 'hello')
+
+    expect(removed).toEqual({ text: 'the first', images: [SHOT] })
+    // Taking one message out never costs the others their pictures.
+    expect(events.find((event) => event.type === 'queue_flushed')).toMatchObject({
+      messages: [{ kind: 'steering', text: 'the second', images: [OTHER] }]
+    })
   })
 })
 

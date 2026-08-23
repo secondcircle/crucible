@@ -57,7 +57,38 @@ async function working(): Promise<void> {
 
 const ops = (port: ScriptedPort): string[] => port.calls.map((call) => call.op)
 
+/** A PNG of `bytes` zero bytes: enough to be read, small enough to be read back. */
+function png(name: string, bytes: number): File {
+  return new File([new Uint8Array(bytes)], name, { type: 'image/png' })
+}
+
+// The bytes are read through promises this test does not own, so a task
+// boundary settles the chain whatever it is.
+async function paste(...files: readonly File[]): Promise<void> {
+  const pasted = new Event('paste', { bubbles: true, cancelable: true })
+  Object.defineProperty(pasted, 'clipboardData', {
+    value: { items: files.map((file) => ({ kind: 'file', getAsFile: () => file })) }
+  })
+  await act(async () => {
+    fireEvent(document, pasted)
+  })
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 0))
+  })
+}
+
+const chips = (): string[] =>
+  Array.from(document.querySelectorAll('.imgchip img')).map(
+    (chip) => chip.getAttribute('alt') ?? ''
+  )
+
 const strip = (): HTMLElement | null => screen.queryByLabelText('Queued messages')
+
+/** The thumbnails of the row at `index`, by what each one is showing. */
+const thumbnails = (index = 0): string[] =>
+  Array.from(strip()?.querySelectorAll('.qitem')[index]?.querySelectorAll('.qthumb') ?? []).map(
+    (thumb) => thumb.getAttribute('src') ?? ''
+  )
 
 const entries = (): string[] =>
   Array.from(strip()?.querySelectorAll('.qitem') ?? []).map((item) => item.textContent ?? '')
@@ -183,7 +214,7 @@ describe('pulling a queued message back', () => {
 
   it('does nothing when the port says it was no longer queued', async () => {
     const port = await queued()
-    port.dequeueAnswer = false
+    port.dequeueMisses = true
 
     await act(async () => {
       fireEvent.click(screen.getAllByRole('button', { name: /queued/ })[0])
@@ -217,6 +248,102 @@ describe('pulling a queued message back', () => {
   })
 })
 
+// Variant A: the picture is why the message exists, so the row carries it.
+describe('a queued row with images', () => {
+  async function queuedWith(...files: readonly File[]): Promise<ScriptedPort> {
+    const port = await shellWithSession()
+    await working()
+    await paste(...files)
+    type('look at these')
+    await press('Enter')
+    return port
+  }
+
+  it('draws one thumbnail between the badge and the text', async () => {
+    await queuedWith(png('one.png', 3))
+
+    expect(thumbnails()).toEqual(['data:image/png;base64,AAAA'])
+    // Decorative: the row's accessible name says what it said before.
+    expect(screen.getAllByRole('button', { name: /queued/ })[0]?.textContent).toBe(
+      'steerlook at thesequeued · click or ⌥↑ to edit'
+    )
+    expect(document.querySelector('.qthumb')?.getAttribute('alt')).toBe('')
+  })
+
+  it('draws two of them, 4px apart in a group of their own', async () => {
+    await queuedWith(png('one.png', 3), png('two.png', 6))
+
+    expect(thumbnails()).toEqual([
+      'data:image/png;base64,AAAA',
+      'data:image/png;base64,AAAAAAAA'
+    ])
+    expect(document.querySelectorAll('.qthumbs')).toHaveLength(1)
+    expect(document.querySelector('.qmore')).toBeNull()
+  })
+
+  it('draws three and a remainder marker for four', async () => {
+    await queuedWith(
+      png('one.png', 3),
+      png('two.png', 6),
+      png('three.png', 9),
+      png('four.png', 12)
+    )
+
+    expect(thumbnails()).toHaveLength(3)
+    expect(document.querySelector('.qmore')?.textContent).toBe('+1')
+    // No count text was invented: variant B was the rejected option.
+    expect(strip()?.textContent).not.toContain('4 images')
+  })
+
+  it('leaves a row with no images exactly as it was', async () => {
+    const port = await shellWithSession()
+    await working()
+    type('check the adapter too')
+    await press('Enter')
+
+    expect(port.calls).toContainEqual({ op: 'steer', args: ['s1', 'check the adapter too'] })
+    expect(thumbnails()).toEqual([])
+    expect(entries()).toEqual(['steercheck the adapter tooqueued · click or ⌥↑ to edit'])
+  })
+})
+
+// The file the user pasted is never lost by taking the message back.
+describe('pulling the pictures back', () => {
+  async function queuedWithImage(): Promise<ScriptedPort> {
+    const port = await shellWithSession()
+    await working()
+    await paste(png('one.png', 3))
+    type('look at this')
+    await press('Enter')
+    return port
+  }
+
+  it('restores them as chips on a click, with the text', async () => {
+    await queuedWithImage()
+
+    await act(async () => {
+      fireEvent.click(screen.getAllByRole('button', { name: /queued/ })[0])
+    })
+
+    expect(box()).toHaveValue('look at this')
+    // The file name never crossed the port, so the chip is named by its place.
+    expect(chips()).toEqual(['image 1'])
+    expect(screen.getByLabelText('Remove image 1')).toBeInTheDocument()
+    expect(strip()).toBeNull()
+  })
+
+  it('does the same on Option+Up, ahead of the chips already held', async () => {
+    await queuedWithImage()
+    await paste(png('later.png', 6))
+
+    await press('ArrowUp', { altKey: true })
+
+    // Ahead of the composer's own, and counting past them so no two chips in
+    // the composer share a name.
+    expect(chips()).toEqual(['image 2', 'later.png'])
+  })
+})
+
 describe('a flush', () => {
   it('hands every queued message back to the composer when the turn is stopped', async () => {
     const port = await shellWithSession()
@@ -234,6 +361,34 @@ describe('a flush', () => {
 
     expect(box()).toHaveValue('check the adapter too\n\nthen summarize')
     expect(strip()).toBeNull()
+  })
+
+  // A stop that dropped the screenshot would be the same defect as a dequeue
+  // that dropped it.
+  it('hands the pictures back too, in the order the messages came back', async () => {
+    const port = await shellWithSession(TWO_SESSIONS)
+    await working()
+
+    await act(async () => {
+      await port.activateSession('s2')
+      port.flushQueue('s1', [
+        { kind: 'steering', text: 'look at this', images: [{ mimeType: 'image/png', data: 'AAAA' }] },
+        { kind: 'followUp', text: 'and this', images: [{ mimeType: 'image/png', data: 'BBBB' }] }
+      ])
+    })
+    expect(chips()).toEqual([])
+
+    await act(async () => {
+      await port.activateSession('s1')
+    })
+
+    expect(box()).toHaveValue('look at this\n\nand this')
+    expect(chips()).toEqual(['image 1', 'image 2'])
+    expect(
+      Array.from(document.querySelectorAll('.imgchip img')).map((chip) =>
+        chip.getAttribute('src')
+      )
+    ).toEqual(['data:image/png;base64,AAAA', 'data:image/png;base64,BBBB'])
   })
 
   it('does the same for a turn that failed, keeping the draft in the box', async () => {

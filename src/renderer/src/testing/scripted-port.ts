@@ -14,6 +14,7 @@ import type {
   PortEvent,
   PortEventListener,
   ProviderState,
+  QueuedEntry,
   QueuedKind,
   QueuedMessage,
   QueueState,
@@ -88,9 +89,10 @@ export interface ScriptedPort extends AgentPort {
   holdShare?: boolean
   /** Settles a held share, as the port does when it reaches its delivery point. */
   settleShare(outcome: 'delivered' | 'dropped'): void
-  // Set only where a test needs the race: otherwise `dequeue` answers by
-  // whether the entry was really there, the way main does.
-  dequeueAnswer?: boolean
+  // Set only where a test needs the race: it makes `dequeue` answer with
+  // nothing, as main does for a message delivered while the click was in
+  // flight. Otherwise the double answers with the entry it really removed.
+  dequeueMisses?: boolean
   /** What `exhibit` answers with, per tab id. */
   readonly exhibits: Map<TabId, string>
   /** Set where a test wants a read main could not carry out. */
@@ -126,7 +128,11 @@ export interface ScriptedPort extends AgentPort {
   turnOf(sessionId: SessionId): TurnId | undefined
   /** Announces a shared run at its delivery point, the way main does. */
   bashRunShared(sessionId: SessionId, run: BashRunShare): void
-  userMessage(sessionId: SessionId, text: string): void
+  userMessage(
+    sessionId: SessionId,
+    text: string,
+    images?: readonly ImageAttachment[]
+  ): void
   /** Hands queued messages back the way a stop or a failed turn does. */
   flushQueue(sessionId: SessionId, messages: readonly QueuedMessage[]): void
   queueOf(sessionId: SessionId): QueueState | undefined
@@ -192,6 +198,16 @@ export function createScriptedPort(initial: Partial<ShellSnapshot> = {}): Script
     emitState()
   }
 
+  // An absent image list is an absent argument, so a recorded call reads as
+  // what was asked for.
+  function argsOf(
+    sessionId: SessionId,
+    text: string,
+    images?: readonly ImageAttachment[]
+  ): readonly unknown[] {
+    return images === undefined ? [sessionId, text] : [sessionId, text, images]
+  }
+
   function queueOf(sessionId: SessionId): QueueState {
     const session = snapshot.sessions.find((candidate) => candidate.id === sessionId)
     return session?.queue ?? { steering: [], followUp: [] }
@@ -221,24 +237,31 @@ export function createScriptedPort(initial: Partial<ShellSnapshot> = {}): Script
     })
   }
 
-  function queue(sessionId: SessionId, kind: QueuedKind, text: string): Promise<void> {
+  function queue(
+    sessionId: SessionId,
+    kind: QueuedKind,
+    text: string,
+    images?: readonly ImageAttachment[]
+  ): Promise<void> {
+    const carried = images === undefined || images.length === 0 ? {} : { images }
     if (!turns.has(sessionId)) {
       // Nothing to queue into: main sends the text as the next prompt and
-      // announces it, because no caller echoed it.
+      // announces it, images and all, because no caller echoed it.
       const turnId = `t-${(minted += 1)}`
       turns.set(sessionId, turnId)
       changeSession(sessionId, (session) => ({ ...session, working: true, fresh: false }))
       emit({ type: 'turn_started', sessionId, turnId })
-      emit({ type: 'user_message', sessionId, turnId, text })
+      emit({ type: 'user_message', sessionId, turnId, text, ...carried })
       emitState()
       return Promise.resolve()
     }
+    const entry: QueuedEntry = { text, ...carried }
     const current = queueOf(sessionId)
     setQueue(
       sessionId,
       kind === 'steering'
-        ? { ...current, steering: [...current.steering, text] }
-        : { ...current, followUp: [...current.followUp, text] }
+        ? { ...current, steering: [...current.steering, entry] }
+        : { ...current, followUp: [...current.followUp, entry] }
     )
     emitState()
     return Promise.resolve()
@@ -634,10 +657,7 @@ export function createScriptedPort(initial: Partial<ShellSnapshot> = {}): Script
       text: string,
       images?: readonly ImageAttachment[]
     ): Promise<TurnId> {
-      calls.push({
-        op: 'prompt',
-        args: images === undefined ? [sessionId, text] : [sessionId, text, images]
-      })
+      calls.push({ op: 'prompt', args: argsOf(sessionId, text, images) })
       const turnId = `t-${(minted += 1)}`
       turns.set(sessionId, turnId)
       // The first accepted message is what ends freshness, exactly as the
@@ -650,27 +670,39 @@ export function createScriptedPort(initial: Partial<ShellSnapshot> = {}): Script
 
     // Queued while the session works, exactly as main answers; with no live
     // turn the text starts one, which is main's fallback.
-    steer(sessionId: SessionId, text: string): Promise<void> {
-      calls.push({ op: 'steer', args: [sessionId, text] })
-      return queue(sessionId, 'steering', text)
+    steer(
+      sessionId: SessionId,
+      text: string,
+      images?: readonly ImageAttachment[]
+    ): Promise<void> {
+      calls.push({ op: 'steer', args: argsOf(sessionId, text, images) })
+      return queue(sessionId, 'steering', text, images)
     },
 
-    followUp(sessionId: SessionId, text: string): Promise<void> {
-      calls.push({ op: 'followUp', args: [sessionId, text] })
-      return queue(sessionId, 'followUp', text)
+    followUp(
+      sessionId: SessionId,
+      text: string,
+      images?: readonly ImageAttachment[]
+    ): Promise<void> {
+      calls.push({ op: 'followUp', args: argsOf(sessionId, text, images) })
+      return queue(sessionId, 'followUp', text, images)
     },
 
-    dequeue(sessionId: SessionId, kind: QueuedKind, text: string): Promise<boolean> {
+    dequeue(
+      sessionId: SessionId,
+      kind: QueuedKind,
+      text: string
+    ): Promise<QueuedEntry | undefined> {
       calls.push({ op: 'dequeue', args: [sessionId, kind, text] })
-      if (port.dequeueAnswer !== undefined) return Promise.resolve(port.dequeueAnswer)
+      if (port.dequeueMisses === true) return Promise.resolve(undefined)
       const current = queueOf(sessionId)
       const entries = [...(kind === 'steering' ? current.steering : current.followUp)]
-      const at = entries.indexOf(text)
-      if (at === -1) return Promise.resolve(false)
-      entries.splice(at, 1)
+      const at = entries.findIndex((entry) => entry.text === text)
+      if (at === -1) return Promise.resolve(undefined)
+      const [removed] = entries.splice(at, 1)
       setQueue(sessionId, kind === 'steering' ? { ...current, steering: entries } : { ...current, followUp: entries })
       emitState()
-      return Promise.resolve(true)
+      return Promise.resolve(removed)
     },
 
     activateTab(sessionId: SessionId, tabId: TabId): Promise<void> {
@@ -755,8 +787,14 @@ export function createScriptedPort(initial: Partial<ShellSnapshot> = {}): Script
       })
     },
 
-    userMessage(sessionId, text) {
-      emit({ type: 'user_message', sessionId, turnId: turn(sessionId), text })
+    userMessage(sessionId, text, images) {
+      emit({
+        type: 'user_message',
+        sessionId,
+        turnId: turn(sessionId),
+        text,
+        ...(images === undefined ? {} : { images })
+      })
     },
 
     flushQueue(sessionId, messages) {

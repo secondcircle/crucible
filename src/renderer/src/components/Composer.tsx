@@ -207,12 +207,13 @@ export function Composer({
   const chipName =
     modelId === undefined ? undefined : (MODEL_ALIASES[modelId] ?? model?.label ?? modelId)
 
-  // Sending and queueing ask the same question of a draft, except that
-  // steering and follow-up carry text only, so chips are held back.
-  const heldBack = working && attachments.length > 0
+  // Sending and queueing ask the same question of a draft: some text, and a
+  // session settled enough to answer it. Chips ride whichever it turns out to
+  // be, so they never hold a message back.
+  //
   // Nothing is sent while a worktree is being made: the directory the message
   // would be answered in is not settled yet.
-  const sendable = !disabled && draft.trim() !== '' && !heldBack && !worktreeBusy
+  const sendable = !disabled && draft.trim() !== '' && !worktreeBusy
   const runnable = !disabled && command !== undefined && command !== ''
 
   // Read from the element rather than from the draft prop: a keystroke is
@@ -544,10 +545,6 @@ export function Composer({
         {bash ? (
           <span className="bashnote">
             runs locally in the workspace — nothing goes to the model
-          </span>
-        ) : heldBack ? (
-          <span className="heldback">
-            images go with the next prompt — stop the agent first to send them now
           </span>
         ) : working ? (
           <>

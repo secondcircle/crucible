@@ -356,11 +356,6 @@ kbd {
   color: var(--accent2);
 }
 
-/* images held back from a queued message are said out loud, never dropped */
-.esc .heldback {
-  color: var(--error);
-}
-
 .chips {
   display: flex;
   gap: 8px;

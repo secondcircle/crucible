@@ -221,16 +221,50 @@ describe('what crosses the request channel', () => {
   })
 
   it('serves the queue operations, and refuses a queue it cannot name', async () => {
-    const stub = stubShell({ dequeue: true })
+    const stub = stubShell({ dequeue: { text: 'later' } })
     serveAgentChannel(stub.shell, stubWindow().window)
 
     expect(await request('steer', 's', 'redirect')).toEqual({ ok: true, value: undefined })
-    expect(await request('dequeue', 's', 'followUp', 'later')).toEqual({ ok: true, value: true })
+    expect(await request('dequeue', 's', 'followUp', 'later')).toEqual({
+      ok: true,
+      value: { text: 'later' }
+    })
     expect(await request('dequeue', 's', 'both', 'later')).toMatchObject({ ok: false })
 
     expect(stub.asked).toEqual([
       { op: 'steer', args: ['s', 'redirect'] },
       { op: 'dequeue', args: ['s', 'followUp', 'later'] }
+    ])
+  })
+
+  // Everything from the renderer is unknown until it has been checked, and a
+  // queued message's images are checked exactly as a prompt's are.
+  it('carries images on a queued message, and refuses a list that is not one', async () => {
+    const stub = stubShell()
+    serveAgentChannel(stub.shell, stubWindow().window)
+    const shot = [{ mimeType: 'image/png', data: 'AAAAAA==' }]
+
+    expect(await request('steer', 's', 'look at this', shot)).toEqual({
+      ok: true,
+      value: undefined
+    })
+    expect(await request('followUp', 's', 'and this', shot)).toEqual({
+      ok: true,
+      value: undefined
+    })
+    // Refused in the same words the prompt path uses, with the operation named.
+    expect(await request('steer', 's', 'look', [{ mimeType: 'image/png' }])).toEqual({
+      ok: false,
+      message: 'steer was given something that is not an image.'
+    })
+    expect(await request('followUp', 's', 'look', 'a screenshot')).toEqual({
+      ok: false,
+      message: 'followUp needs a list of images where it was given none.'
+    })
+
+    expect(stub.asked).toEqual([
+      { op: 'steer', args: ['s', 'look at this', shot] },
+      { op: 'followUp', args: ['s', 'and this', shot] }
     ])
   })
 

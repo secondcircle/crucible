@@ -8,7 +8,13 @@ import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { AdapterEventListener, ConversationAdapter } from '../../shared/agent/adapter'
 import { createFakeAdapter } from '../../shared/agent/fake-adapter'
-import type { PortEvent, SessionId, ShellSnapshot } from '../../shared/agent/port'
+import type {
+  ImageAttachment,
+  PortEvent,
+  QueuedEntry,
+  SessionId,
+  ShellSnapshot
+} from '../../shared/agent/port'
 import { createPanelModel, type PanelModel } from '../panel/model'
 import { storePanelPersistence } from '../panel/store-persistence'
 import { createShell, type Shell } from './shell'
@@ -52,6 +58,16 @@ async function withSession(): Promise<{ workspaceId: string; sessionId: SessionI
 }
 
 const types = (): string[] => events.map((event) => event.type)
+
+/** Acts once, the first time a call in the live turn starts. */
+function atFirstCall(act: () => void): void {
+  let done = false
+  shell.onEvent((event) => {
+    if (event.type !== 'tool_started' || done) return
+    done = true
+    act()
+  })
+}
 
 const sessionOf = (snapshot: ShellSnapshot, id: SessionId) =>
   snapshot.sessions.find((session) => session.id === id)
@@ -302,16 +318,6 @@ describe('turns', () => {
 // π's queueing semantics as they cross the port, including the turn started
 // for a message that found none.
 describe('queued messages', () => {
-  /** Acts once, the first time a call in the live turn starts. */
-  function atFirstCall(act: () => void): void {
-    let done = false
-    shell.onEvent((event) => {
-      if (event.type !== 'tool_started' || done) return
-      done = true
-      act()
-    })
-  }
-
   const queueOf = async (id: SessionId) => sessionOf(await shell.snapshot(), id)?.queue
 
   it('starts a turn for a steering message with nothing to steer, and announces it', async () => {
@@ -347,7 +353,7 @@ describe('queued messages', () => {
 
   it('carries the queue in the snapshot until the message is delivered', async () => {
     const { sessionId } = await withSession()
-    const seen: (readonly string[] | undefined)[] = []
+    const seen: (readonly QueuedEntry[] | undefined)[] = []
     shell.onEvent((event) => {
       if (event.type === 'state') seen.push(sessionOf(event.snapshot, sessionId)?.queue?.steering)
     })
@@ -358,7 +364,11 @@ describe('queued messages', () => {
     await shell.prompt(sessionId, 'hello')
     await settled()
 
-    expect(seen.some((steering) => steering?.includes('read the adapter too'))).toBe(true)
+    expect(
+      seen.some((steering) =>
+        steering?.some((entry) => entry.text === 'read the adapter too')
+      )
+    ).toBe(true)
     // Delivered, so the strip has nothing left to show and the transcript has
     // it instead.
     expect(await queueOf(sessionId)).toBeUndefined()
@@ -508,10 +518,66 @@ describe('queued messages', () => {
     ).toBe(true)
   })
 
-  it('answers false for a dequeue of something no longer queued', async () => {
+  it('answers with nothing for a dequeue of something no longer queued', async () => {
     const { sessionId } = await withSession()
 
-    expect(await shell.dequeue(sessionId, 'steering', 'never queued')).toBe(false)
+    expect(await shell.dequeue(sessionId, 'steering', 'never queued')).toBeUndefined()
+  })
+})
+
+// The picture rides a queued message exactly as it rides a prompt, wherever
+// that message ends up.
+describe('images on a queued message', () => {
+  const SHOT: ImageAttachment = { mimeType: 'image/png', data: 'AAAAAA==' }
+
+  it('rides the queue in the snapshot, and the transcript once it lands', async () => {
+    const { sessionId } = await withSession()
+    const queued: (readonly QueuedEntry[] | undefined)[] = []
+    shell.onEvent((event) => {
+      if (event.type === 'state') queued.push(sessionOf(event.snapshot, sessionId)?.queue?.steering)
+    })
+    atFirstCall(() => {
+      void shell.steer(sessionId, 'look at this', [SHOT])
+    })
+
+    await shell.prompt(sessionId, 'hello')
+    await settled()
+
+    expect(
+      queued.some((steering) =>
+        steering?.some((entry) => entry.text === 'look at this' && entry.images?.[0] === SHOT)
+      )
+    ).toBe(true)
+    expect(
+      events.find((event) => event.type === 'user_message' && event.text === 'look at this')
+    ).toMatchObject({ images: [SHOT] })
+    expect(await shell.transcript(sessionId)).toContainEqual({
+      kind: 'user',
+      text: 'look at this',
+      images: [SHOT]
+    })
+  })
+
+  // Nothing to steer, so it becomes the next prompt: the picture appears once,
+  // at the moment the turn starts, and is not dropped for having come through
+  // the steering door.
+  it('rides the prompt a message with nothing to steer becomes', async () => {
+    const { sessionId } = await withSession()
+    events.length = 0
+
+    await shell.followUp(sessionId, 'start from this', [SHOT])
+    await settled()
+
+    const announced = events.filter(
+      (event) => event.type === 'user_message' && event.text === 'start from this'
+    )
+    expect(announced).toHaveLength(1)
+    expect(announced[0]).toMatchObject({ images: [SHOT] })
+    expect(await shell.transcript(sessionId)).toContainEqual({
+      kind: 'user',
+      text: 'start from this',
+      images: [SHOT]
+    })
   })
 })
 

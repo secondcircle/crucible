@@ -21,6 +21,7 @@ import type {
   ModelId,
   ModelInfo,
   ProviderState,
+  QueuedEntry,
   QueuedKind,
   QueuedMessage,
   SessionId,
@@ -405,9 +406,11 @@ interface Bound {
   model: ModelId
   thinkingLevel: ThinkingLevel
   running?: RunningTurn
-  /** π's two queues, oldest first, undelivered only. */
-  readonly steering: string[]
-  readonly followUp: string[]
+  // π's two queues, oldest first, undelivered only. Each entry carries the
+  // images the message was queued with, because the strip shows them and a
+  // dequeue or a flush hands them back.
+  readonly steering: QueuedEntry[]
+  readonly followUp: QueuedEntry[]
   // Bash runs waiting for a delivery point. They are not queued messages: they
   // never appear in queue state and are never handed back to the composer.
   readonly shares: PendingShare[]
@@ -441,6 +444,12 @@ export function scaleUsage(messages: number): SessionUsage {
     totalTokens: TURN_TOKENS * messages,
     totalCost: dollars(TURN_COST * messages * 100)
   }
+}
+
+// Absent rather than empty, so a message with no pictures carries no `images`
+// field anywhere it is reported, handed back or written down.
+function queuedEntry(text: string, images?: readonly ImageAttachment[]): QueuedEntry {
+  return images === undefined || images.length === 0 ? { text } : { text, images: [...images] }
 }
 
 export function fakeTitle(text: string): string {
@@ -773,8 +782,8 @@ export function createFakeAdapter({
 
   function flushQueue(bound: Bound, sessionId: SessionId): void {
     const messages: QueuedMessage[] = [
-      ...bound.steering.map((text): QueuedMessage => ({ kind: 'steering', text })),
-      ...bound.followUp.map((text): QueuedMessage => ({ kind: 'followUp', text }))
+      ...bound.steering.map((entry): QueuedMessage => ({ kind: 'steering', ...entry })),
+      ...bound.followUp.map((entry): QueuedMessage => ({ kind: 'followUp', ...entry }))
     ]
     bound.steering.length = 0
     bound.followUp.length = 0
@@ -1126,11 +1135,15 @@ export function createFakeAdapter({
       while (queue.length > 0) {
         await beat()
         if (stopped !== undefined) return false
-        const message = queue.shift() ?? ''
+        const message = queue.shift() ?? { text: '' }
         settleSpoken()
-        add(message)
-        pending.push({ kind: 'user', text: message })
-        emit({ type: 'user_message', sessionId, turnId, text: message })
+        add(message.text)
+        // A delivered message is a user message with its pictures, the shape a
+        // prompt image already has, and it is kept in the conversation so a
+        // reopened session shows the same thumbnails.
+        const carried = message.images === undefined ? {} : { images: [...message.images] }
+        pending.push({ kind: 'user', text: message.text, ...carried })
+        emit({ type: 'user_message', sessionId, turnId, text: message.text, ...carried })
         emitQueue(bound, sessionId)
       }
       return true
@@ -1607,18 +1620,26 @@ export function createFakeAdapter({
 
     // Nothing is queued into a session with no live run, so the caller is told
     // and can send the text as a prompt rather than leave it unheard.
-    async steer(sessionId: SessionId, text: string): Promise<'queued' | 'idle'> {
+    async steer(
+      sessionId: SessionId,
+      text: string,
+      images?: readonly ImageAttachment[]
+    ): Promise<'queued' | 'idle'> {
       const bound = requireBound(sessionId)
       if (bound.running === undefined) return 'idle'
-      bound.steering.push(text)
+      bound.steering.push(queuedEntry(text, images))
       emitQueue(bound, sessionId)
       return 'queued'
     },
 
-    async followUp(sessionId: SessionId, text: string): Promise<'queued' | 'idle'> {
+    async followUp(
+      sessionId: SessionId,
+      text: string,
+      images?: readonly ImageAttachment[]
+    ): Promise<'queued' | 'idle'> {
       const bound = requireBound(sessionId)
       if (bound.running === undefined) return 'idle'
-      bound.followUp.push(text)
+      bound.followUp.push(queuedEntry(text, images))
       emitQueue(bound, sessionId)
       return 'queued'
     },
@@ -1646,17 +1667,23 @@ export function createFakeAdapter({
       })
     },
 
-    async dequeue(sessionId: SessionId, kind: QueuedKind, text: string): Promise<boolean> {
+    async dequeue(
+      sessionId: SessionId,
+      kind: QueuedKind,
+      text: string
+    ): Promise<QueuedEntry | undefined> {
       const bound = sessions.get(sessionId)
-      if (bound === undefined) return false
+      if (bound === undefined) return undefined
       const queue = kind === 'steering' ? bound.steering : bound.followUp
       // The first match, because that is the one the strip shows first and the
       // one delivery would take next.
-      const index = queue.indexOf(text)
-      if (index === -1) return false
-      queue.splice(index, 1)
+      const index = queue.findIndex((entry) => entry.text === text)
+      if (index === -1) return undefined
+      // The entry that left, so the composer gets back the pictures that were
+      // genuinely queued rather than the ones the clicked row was showing.
+      const [removed] = queue.splice(index, 1)
       emitQueue(bound, sessionId)
-      return true
+      return removed
     },
 
     // There is no summary to abort here: the canned one is written in the

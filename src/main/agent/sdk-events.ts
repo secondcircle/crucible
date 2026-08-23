@@ -2,11 +2,12 @@ import { homedir } from 'node:os'
 import { basename, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import type { AgentSessionEvent } from '@earendil-works/pi-coding-agent'
 import type { AdapterEvent } from '../../shared/agent/adapter'
-import type { SessionId, TurnId } from '../../shared/agent/port'
+import type { QueuedEntry, SessionId, TurnId } from '../../shared/agent/port'
 // Spelled with its extension so plain Node can load this module: its ESM
 // resolver does no extension guessing.
 import { SKILL_TOOL } from '../../shared/agent/skill-tool.ts'
 import { displaySafeMessage } from './adapter-error.ts'
+import { createQueuedImages, type QueuedImages } from './queued-images.ts'
 
 export { SKILL_TOOL }
 
@@ -133,8 +134,13 @@ const OUTPUT_LIMIT = 20_000
 const SUMMARY_LIMIT = 160
 
 // `inForce` is the turn's own skill set, read fresh on the way into it: what a
-// turn is displayed against never changes under it mid-turn.
-export function createEventMapper(inForce?: SkillsInForce): EventMapper {
+// turn is displayed against never changes under it mid-turn. `queued` is the
+// session's memory of the pictures π's text-only queue cannot carry; without
+// one, every queued message reads as text.
+export function createEventMapper(
+  inForce?: SkillsInForce,
+  queued: QueuedImages = createQueuedImages()
+): EventMapper {
   // Tool output arrives as a growing snapshot rather than as chunks, so only
   // the part past this count is forwarded.
   const forwarded = new Map<string, number>()
@@ -142,40 +148,49 @@ export function createEventMapper(inForce?: SkillsInForce): EventMapper {
   // cumulative and monotonic rather than per-frame.
   const argChars = new Map<string, number>()
   /** The queue as the last `queue_update` reported it, oldest first. */
-  let queued: readonly string[] = []
+  let held: readonly QueuedEntry[] = []
   // π says a message left its queue immediately before that message starts, so
   // what left is exactly what is being delivered. A prompt leaves no trace.
-  const delivering: string[] = []
+  // The entries rather than their text, because a delivered message is
+  // announced with the pictures it carried.
+  const delivering: QueuedEntry[] = []
 
   return {
     map(event: AgentSessionEvent, { sessionId, turnId }: TurnTarget): AdapterEvent | undefined {
       switch (event.type) {
         case 'queue_update': {
-          const now = [...event.steering, ...event.followUp]
-          const left = [...queued]
-          for (const text of now) {
-            const at = left.indexOf(text)
+          const paired = queued.pair(event.steering, event.followUp)
+          const now = [...paired.steering, ...paired.followUp]
+          const left = [...held]
+          for (const entry of now) {
+            const at = left.findIndex((candidate) => candidate.text === entry.text)
             if (at !== -1) left.splice(at, 1)
           }
           delivering.push(...left)
-          queued = now
+          held = now
           return {
             type: 'queue_changed',
             sessionId,
-            steering: [...event.steering],
-            followUp: [...event.followUp]
+            steering: paired.steering,
+            followUp: paired.followUp
           }
         }
 
         case 'message_start': {
           if (event.message.role !== 'user') return undefined
           const text = userText(event.message.content)
-          const at = delivering.indexOf(text)
+          const at = delivering.findIndex((entry) => entry.text === text)
           // A user message nobody queued is the prompt's own, and its caller
           // already echoed it.
           if (text === '' || at === -1) return undefined
-          delivering.splice(at, 1)
-          return { type: 'user_message', sessionId, turnId, text }
+          const [entry] = delivering.splice(at, 1)
+          return {
+            type: 'user_message',
+            sessionId,
+            turnId,
+            text,
+            ...(entry?.images === undefined ? {} : { images: entry.images })
+          }
         }
 
         case 'message_update':

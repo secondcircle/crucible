@@ -4,6 +4,8 @@
 // a paid call.
 import { describe, expect, it } from 'vitest'
 import type { AgentSessionEvent } from '@earendil-works/pi-coding-agent'
+import type { ImageAttachment } from '../../shared/agent/port'
+import { createQueuedImages } from './queued-images'
 import {
   createEventMapper,
   displayToolCall,
@@ -230,7 +232,7 @@ describe('queued messages', () => {
     expect(map({ type: 'queue_update', steering: ['redirect'], followUp: [] })).toEqual({
       type: 'queue_changed',
       sessionId: 's1',
-      steering: ['redirect'],
+      steering: [{ text: 'redirect' }],
       followUp: []
     })
   })
@@ -286,6 +288,52 @@ describe('queued messages', () => {
         TARGET
       )
     ).toBeUndefined()
+  })
+
+  // π's queue is text, so the pictures are paired back on from the memory the
+  // adapter fills when it hands a message over.
+  describe('the pictures π’s queue cannot carry', () => {
+    const SHOT: ImageAttachment = { mimeType: 'image/png', data: 'AAAAAA==' }
+
+    function withImage(): ReturnType<typeof createEventMapper> {
+      const queued = createQueuedImages()
+      queued.add('steering', 'look at this', [SHOT])
+      return createEventMapper(undefined, queued)
+    }
+
+    it('rides the queue it reports', () => {
+      const mapper = withImage()
+
+      expect(
+        mapper.map(sdk({ type: 'queue_update', steering: ['look at this'], followUp: [] }), TARGET)
+      ).toEqual({
+        type: 'queue_changed',
+        sessionId: 's1',
+        steering: [{ text: 'look at this', images: [SHOT] }],
+        followUp: []
+      })
+    })
+
+    it('is announced with the message that carried it, and not before', () => {
+      const mapper = withImage()
+      const start = sdk({
+        type: 'message_start',
+        message: { role: 'user', content: [{ type: 'text', text: 'look at this' }] }
+      })
+      mapper.map(sdk({ type: 'queue_update', steering: ['look at this'], followUp: [] }), TARGET)
+
+      // Still queued: nothing is said about it at all.
+      expect(mapper.map(start, TARGET)).toBeUndefined()
+
+      mapper.map(sdk({ type: 'queue_update', steering: [], followUp: [] }), TARGET)
+      expect(mapper.map(start, TARGET)).toEqual({
+        type: 'user_message',
+        sessionId: 's1',
+        turnId: 't-1',
+        text: 'look at this',
+        images: [SHOT]
+      })
+    })
   })
 })
 

@@ -10,6 +10,7 @@ import type {
   ModelId,
   ModelInfo,
   ProviderState,
+  QueuedEntry,
   QueuedKind,
   QueuedMessage,
   SessionId,
@@ -216,14 +217,16 @@ export type AdapterEvent =
   | {
       readonly type: 'queue_changed'
       readonly sessionId: SessionId
-      readonly steering: readonly string[]
-      readonly followUp: readonly string[]
+      readonly steering: readonly QueuedEntry[]
+      readonly followUp: readonly QueuedEntry[]
     }
   | {
       readonly type: 'user_message'
       readonly sessionId: SessionId
       readonly turnId: TurnId
       readonly text: string
+      /** Present only for images the delivered message genuinely carried. */
+      readonly images?: readonly ImageAttachment[]
     }
   | {
       readonly type: 'queue_flushed'
@@ -323,10 +326,23 @@ export interface ConversationAdapter {
 
   // `'idle'` closes the race between the caller's view of `working` and the
   // adapter's: nothing was queued, so the caller sends the text as a prompt.
-  steer(sessionId: SessionId, text: string): Promise<'queued' | 'idle'>
-  followUp(sessionId: SessionId, text: string): Promise<'queued' | 'idle'>
-  /** Removes the first entry of that kind whose text matches. */
-  dequeue(sessionId: SessionId, kind: QueuedKind, text: string): Promise<boolean>
+  steer(
+    sessionId: SessionId,
+    text: string,
+    images?: readonly ImageAttachment[]
+  ): Promise<'queued' | 'idle'>
+  followUp(
+    sessionId: SessionId,
+    text: string,
+    images?: readonly ImageAttachment[]
+  ): Promise<'queued' | 'idle'>
+  // Removes the first entry of that kind whose text matches and answers with
+  // it, images included; nothing removed means nothing matched.
+  dequeue(
+    sessionId: SessionId,
+    kind: QueuedKind,
+    text: string
+  ): Promise<QueuedEntry | undefined>
 
   // Stops what the session is doing: its live turn, and the branch summary a
   // summarizing jump is waiting on. Harmless when there is neither.

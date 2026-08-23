@@ -225,10 +225,20 @@ async function invoke(shell: Shell, request: unknown): Promise<unknown> {
     }
     case 'shareBashRun':
       return shell.shareBashRun(text(0), run(1))
-    case 'steer':
-      return shell.steer(text(0), text(1))
-    case 'followUp':
-      return shell.followUp(text(0), text(1))
+    // Checked exactly as the prompt path checks its own, because everything
+    // from the renderer is unknown until it has been.
+    case 'steer': {
+      const attached = images(2)
+      return attached === undefined
+        ? shell.steer(text(0), text(1))
+        : shell.steer(text(0), text(1), attached)
+    }
+    case 'followUp': {
+      const attached = images(2)
+      return attached === undefined
+        ? shell.followUp(text(0), text(1))
+        : shell.followUp(text(0), text(1), attached)
+    }
     case 'dequeue':
       return shell.dequeue(text(0), kind(1), text(2))
     case 'activateTab':

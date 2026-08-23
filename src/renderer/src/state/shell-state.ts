@@ -243,11 +243,21 @@ function heard(state: ShellState, event: PortEvent, at: number): ShellState {
 
   switch (event.type) {
     // A message the port delivered itself, which reads exactly as a sent one:
-    // it appears here at its delivery point, never before it.
+    // it appears here at its delivery point, never before it, with whatever
+    // pictures it carried.
     case 'user_message':
       return withView(state, sessionId, {
         ...view,
-        items: [...settle(view.items, at), { kind: 'user', text: event.text }]
+        items: [
+          ...settle(view.items, at),
+          {
+            kind: 'user',
+            text: event.text,
+            ...(event.images === undefined || event.images.length === 0
+              ? {}
+              : { images: event.images })
+          }
+        ]
       })
 
     case 'text_delta':
