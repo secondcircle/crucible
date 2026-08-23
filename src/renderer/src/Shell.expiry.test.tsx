@@ -438,4 +438,63 @@ describe('the choice belongs to one session', () => {
     expect(choice()).toBeNull()
     expect(composer()).toHaveValue('half a thought')
   })
+
+  it('never destroys words typed while the summary was being written', async () => {
+    const twoSessions: ShellSnapshot = {
+      workspaces: [{ id: 'w1', name: 'crucible', path: '/repos/crucible' }],
+      activeWorkspaceId: 'w1',
+      sessions: [
+        {
+          id: 's1',
+          workspaceId: 'w1',
+          createdAt: '2026-08-20T10:00:00.000Z',
+          title: 'session A',
+          working: false,
+          fresh: false,
+          cachedPrefix: prefix()
+        },
+        {
+          id: 's2',
+          workspaceId: 'w1',
+          createdAt: '2026-08-20T10:00:00.000Z',
+          title: 'session B',
+          working: false,
+          fresh: false
+        }
+      ],
+      activeSessionId: 's1'
+    }
+    const port = await mount(twoSessions)
+    port.holdJump = true
+    await type('carry on')
+    await press('s')
+
+    // Switching away dismisses the dialog but the jump keeps working, and
+    // coming back lands in a live composer that still holds the draft. The
+    // user is free to keep typing there for the whole ~15s of the summary.
+    await act(async () => {
+      fireEvent.click(sessionRows()[1] as HTMLElement)
+    })
+    await settled()
+    await act(async () => {
+      fireEvent.click(sessionRows()[0] as HTMLElement)
+    })
+    await settled()
+    expect(composer()).toHaveValue('carry on')
+    fireEvent.change(composer(), { target: { value: 'carry on — and check the rail first' } })
+
+    port.transcripts.set('s1', [
+      { kind: 'summary', text: 'Carried forward: the branch was summarized.' }
+    ])
+    await act(async () => {
+      port.settleJump('jumped')
+    })
+    await settled()
+
+    // The message that raised the choice goes out, exactly as promised.
+    expect(port.calls).toContainEqual({ op: 'prompt', args: ['s1', 'carry on'] })
+    // But nothing the user typed is ever lost: the words written during the
+    // wait are still in the composer, not blanked by the landing.
+    expect(composer()).toHaveValue('carry on — and check the rail first')
+  })
 })
