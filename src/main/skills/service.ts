@@ -1,3 +1,4 @@
+import { readdirSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import type { Skill } from '@earendil-works/pi-coding-agent'
@@ -46,8 +47,9 @@ export function userSkillsPath(home = homedir()): string {
 export interface SkillService {
   // Every skill the workspace offers, resolved fresh: a skill written a moment
   // ago is in this answer, and a folder that does not exist contributes
-  // nothing. Never rejects. `undefined` means the folders could not be read at
-  // all, so whatever the caller holds stays in force.
+  // nothing. Never rejects. `undefined` means an origin folder is there but
+  // could not be read, so the answer would be missing skills the user still
+  // has: whatever the caller holds stays in force instead.
   resolve(workspacePath: string): Promise<readonly LoadedSkill[] | undefined>
 }
 
@@ -63,6 +65,33 @@ export interface SkillServiceOptions {
 // bundle cannot `require` it.
 type Sdk = typeof import('@earendil-works/pi-coding-agent')
 
+/** ENOENT, and the ENOTDIR of a path whose parent segment is a file. */
+function absent(cause: unknown): boolean {
+  const code = (cause as { code?: unknown })?.code
+  return code === 'ENOENT' || code === 'ENOTDIR'
+}
+
+// π's loader never reports this. Its directory walk wraps `readdir` in a bare
+// `try {} catch {}`, so a folder nobody may open comes back empty, with no
+// diagnostic, reading exactly like a folder holding no skills. That
+// difference is the whole of B5: an empty origin contributes nothing, an
+// unreadable one leaves the previous set in force. So the service asks the
+// question itself, before the load, of the three origins it hands in. A
+// subdirectory further down that π cannot open stays π's silence; Crucible
+// speaks only for the folders it names.
+function unreadableFolders(folders: readonly string[]): readonly { path: string; cause: unknown }[] {
+  const unreadable: { path: string; cause: unknown }[] = []
+  for (const path of folders) {
+    try {
+      readdirSync(path)
+    } catch (cause) {
+      if (absent(cause)) continue
+      unreadable.push({ path, cause })
+    }
+  }
+  return unreadable
+}
+
 export function createSkillService({ roots, onDiagnostic }: SkillServiceOptions): SkillService {
   let sdkModule: Promise<Sdk> | undefined
 
@@ -74,6 +103,19 @@ export function createSkillService({ roots, onDiagnostic }: SkillServiceOptions)
   return {
     async resolve(workspacePath: string): Promise<readonly LoadedSkill[] | undefined> {
       const folders = foldersFor(roots, workspacePath)
+      const unreadable = unreadableFolders(folders)
+      if (unreadable.length > 0) {
+        // The load is not even attempted: what it answered would be short the
+        // skills of that folder, and a caller cannot tell a short answer from
+        // a true one.
+        for (const { path, cause } of unreadable) {
+          onDiagnostic?.({
+            path,
+            message: `skills folder could not be read, previous skills stay in force: ${reasonFor(cause)}`
+          })
+        }
+        return undefined
+      }
       try {
         const pi = await sdk()
         const loaded = pi.loadSkills({
@@ -100,7 +142,7 @@ export function createSkillService({ roots, onDiagnostic }: SkillServiceOptions)
       } catch (cause) {
         // Nothing is said anywhere: no dialog, no transcript message, no
         // badge. The run log is the whole of the report.
-        onDiagnostic?.({ message: cause instanceof Error ? cause.message : String(cause) })
+        onDiagnostic?.({ message: reasonFor(cause) })
         return undefined
       }
     }
@@ -119,4 +161,8 @@ export function narrowSkills(
   if (names === undefined) return skills
   const wanted = new Set(names)
   return skills.filter((skill) => wanted.has(skill.name))
+}
+
+function reasonFor(cause: unknown): string {
+  return cause instanceof Error ? cause.message : String(cause)
 }
