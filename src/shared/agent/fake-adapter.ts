@@ -6,6 +6,7 @@ import type {
   Binding,
   ConversationAdapter,
   ObservedCacheMiss,
+  ObservedCachedPrefix,
   ResumeRequest,
   UsageRequest
 } from './adapter'
@@ -86,6 +87,21 @@ export const FAKE_CACHE_MISS: ObservedCacheMiss = {
     rolePrompt: 'no'
   }
 }
+
+// One prompt is enough to stage the cache expiry choice. Fired by a prompt
+// containing "expire" and by nothing else: the turn that prompt opens ends
+// with a prefix backdated past any retention, and the next send meets the
+// dialog.
+export const FAKE_EXPIRED_PREFIX = {
+  /** 2h 13m: long past any retention, and recognizably an afternoon away. */
+  idleMs: (2 * 60 + 13) * 60 * 1000,
+  tokens: 110_000,
+  rebillDollars: 0.63
+} as const
+
+// What re-billing one prompt token costs in this adapter, taken from the
+// scripted miss so the dialog's estimate and the seam's agree.
+const REBILL_PER_TOKEN = FAKE_CACHE_MISS.dollarsRebilled / FAKE_CACHE_MISS.tokensRebilled
 
 /** Cents, so a sum of turns is exact rather than a float with a tail. */
 function dollars(cents: number): number {
@@ -354,6 +370,9 @@ interface Conversation {
   usageMessages: number
   /** Scripted misses paid for in this conversation, counted the same way. */
   cacheMisses: number
+  // What the provider is pretending to hold: set when a turn ends, cleared by
+  // a summarizing jump, absent until this conversation has paid for anything.
+  prefix?: ObservedCachedPrefix
   /** ISO time of the last thing that happened in it. */
   at: string
   minted: number
@@ -487,7 +506,10 @@ export function createFakeAdapter({
       cacheMisses: {
         count: conversation.cacheMisses,
         dollars: dollars(conversation.cacheMisses * FAKE_CACHE_MISS.dollarsRebilled * 100)
-      }
+      },
+      // Beside the tokens at every report, exactly as the SDK adapter sends
+      // it: what the last turn of this conversation left cached.
+      ...(conversation.prefix === undefined ? {} : { cachedPrefix: conversation.prefix })
     })
   }
 
@@ -865,6 +887,11 @@ export function createFakeAdapter({
     // "cache" is asking to see what a miss looks like.
     const missPrompted =
       opening.kind === 'user' && opening.text.toLowerCase().includes('cache')
+    // The second trigger, in the same convention: a prompt that says "expire"
+    // asks for a conversation whose cache is already gone, so the next send
+    // meets the cache expiry choice.
+    const expirePrompted =
+      opening.kind === 'user' && opening.text.toLowerCase().includes('expire')
     // What opened the turn is in the conversation from the moment it was sent,
     // which is what makes it a node of the tree while the turn is still live.
     append(conversation, opening)
@@ -907,6 +934,24 @@ export function createFakeAdapter({
       // One usage-bearing message per turn, whichever way the turn ended: a
       // stopped turn was still paid for.
       conversation.usageMessages += 1
+      // The turn billed a prompt, so the provider is holding one from this
+      // instant — or, where the turn asked for it, from long enough ago that
+      // no retention still covers it.
+      conversation.prefix = expirePrompted
+        ? {
+            at: new Date(Date.now() - FAKE_EXPIRED_PREFIX.idleMs).toISOString(),
+            tokens: FAKE_EXPIRED_PREFIX.tokens,
+            rebillDollars: FAKE_EXPIRED_PREFIX.rebillDollars
+          }
+        : {
+            at: new Date().toISOString(),
+            tokens: conversation.usedTokens,
+            // To a hundredth of a cent, exactly as the mirror rounds a miss:
+            // a short conversation is worth fractions of a cent and saying
+            // zero would be a different claim.
+            rebillDollars:
+              Math.round(conversation.usedTokens * REBILL_PER_TOKEN * 10_000) / 10_000
+          }
       emit(terminal)
       // The last word: the tokens are settled and the turn's money is now
       // known, which the counts crossing mid-turn could not say.
@@ -1339,6 +1384,9 @@ export function createFakeAdapter({
         // π summarizes the branch that was left; this one says the same thing
         // the same way every time, so the two actions are told apart for free.
         append(conversation, { kind: 'summary', text: FAKE_BRANCH_SUMMARY })
+        // The context legitimately changed: nothing of the old prefix is
+        // cached any more, and the next billed turn establishes the new one.
+        conversation.prefix = undefined
       }
       conversation.at = new Date().toISOString()
       // Canned replies never fail and never take long enough to cancel, so

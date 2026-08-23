@@ -10,7 +10,12 @@ import { afterEach, describe, expect, it } from 'vitest'
 import type { CacheMissChanges } from '../../shared/agent/adapter'
 import { createCacheLedger, type RecordedCacheMiss } from './ledger'
 import { cacheLedgerPath, LEDGER_FILE_NAME, useCacheLedgerDir } from './paths'
-import { retentionInForce } from './retention'
+
+// Another file in this worker may already have applied Crucible's default to
+// the process, and what a ledger with no override of its own records is the
+// decision made from a clean environment. Cleared before the retention module
+// this file loads has been asked anything.
+delete process.env.PI_CACHE_RETENTION
 
 const directories: string[] = []
 
@@ -77,13 +82,16 @@ describe('the cache ledger', () => {
       dollars: 0,
       since: '2026-08-19T15:04:00.000Z',
       ledgerPath: join(dir, LEDGER_FILE_NAME),
-      retention: '5m'
+      // Nothing overrode the setting, so the hour Crucible asks for is what
+      // every miss in this file is recorded against.
+      retention: '1h',
+      retentionSource: 'crucible'
     })
   })
 
   it('writes one whole line per miss, with the retention in force', async () => {
     const dir = tempDir()
-    const ledger = createCacheLedger({ dir, retention: '1h' })
+    const ledger = createCacheLedger({ dir, retention: { retention: '1h', source: 'env' } })
 
     await ledger.append(miss())
 
@@ -211,15 +219,19 @@ describe('the cache ledger', () => {
     expect(cacheLedgerPath()).toBe(join(dir, LEDGER_FILE_NAME))
   })
 
-  it('reads the retention in force from π\u2019s own environment variable', () => {
-    expect(retentionInForce({})).toBe('5m')
-    expect(retentionInForce({ PI_CACHE_RETENTION: 'long' })).toBe('1h')
-    expect(retentionInForce({ PI_CACHE_RETENTION: '5m' })).toBe('5m')
-
+  it('records every miss against the retention the launch decided on', async () => {
     const dir = tempDir()
+    // No explicit retention: the ledger takes the launch's own decision, and
+    // with nothing overriding it that is the hour.
     const ledger = createCacheLedger({ dir })
-    // Crucible records the setting; it never sets it.
-    expect(ledger.retention).toBe(retentionInForce())
+    expect(ledger.retention).toBe('1h')
+
+    await ledger.append(miss())
+    await ledger.append(miss())
+
+    const written = lines(dir).filter((line) => line.type === 'miss')
+    expect(written.map((line) => line.retention)).toEqual(['1h', '1h'])
+    expect(await ledger.read()).toMatchObject({ retention: '1h', retentionSource: 'crucible' })
   })
 
   it('never fails a turn over a write it could not make', async () => {

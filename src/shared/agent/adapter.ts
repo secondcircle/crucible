@@ -35,6 +35,17 @@ export interface CacheMissChanges {
   readonly rolePrompt: ChangeFact
 }
 
+// What the conversation has cached, as the observer sees it. Main adds the
+// retention, exactly as it does for a miss: the observer knows the tokens and
+// what they cost, main knows the setting they were sent under.
+export interface ObservedCachedPrefix {
+  /** ISO of the conversation's last billed request. */
+  readonly at: string
+  readonly tokens: number
+  /** Estimated dollars to re-bill them. An estimate, never a promise. */
+  readonly rebillDollars: number
+}
+
 // One observed miss, carrying the facts only the observer holds. Main adds
 // the identity (which session or run) and the retention in force.
 export interface ObservedCacheMiss {
@@ -184,6 +195,9 @@ export type AdapterEvent =
       // The whole conversation's misses, reported at the same moments the
       // tokens are. Absent until genuinely known.
       readonly cacheMisses?: { readonly count: number; readonly dollars: number }
+      // What the provider is holding for this conversation, reported at the
+      // same moments too. Absent when nothing is cached.
+      readonly cachedPrefix?: ObservedCachedPrefix
     }
   // A live login's questions and running commentary. Session-less, because
   // credentials belong to the machine rather than to any conversation.

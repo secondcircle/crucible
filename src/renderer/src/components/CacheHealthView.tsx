@@ -131,7 +131,7 @@ export function CacheHealthView({
               bill it is being measured against. */}
           <p className="cretention">
             Retention in force · <b>{retentionText(health.retention)}</b> (
-            {retentionSource(health.retention)})
+            {retentionSource(health.retention, health.retentionSource)})
           </p>
 
           {workspaceOpen ? null : (

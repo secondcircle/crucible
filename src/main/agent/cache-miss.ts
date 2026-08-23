@@ -13,14 +13,11 @@ import type { StoredUsage } from './usage'
 /** π's `NOISE_FLOOR_TOKENS`: at or below this, a "miss" is breakpoint granularity. */
 export const NOISE_FLOOR_TOKENS = 1024
 
-// π's `CACHE_TTL_MS`: Anthropic's default prompt-cache lifetime, and the gap
-// past which π's own notice blames an idle expiry. No arithmetic below reads
-// it, because Crucible blames nothing and exempts nothing — a miss on a
-// conversation resumed after eight hours is the datum the ledger exists to
-// hold. It is kept beside the floor because this module is where π's
-// constants live, and because `PI_CACHE_RETENTION=long` moves it to an hour,
-// which is the question the ledger is being read to answer.
-export const CACHE_TTL_MS = 5 * 60 * 1000
+// π's prompt-cache lifetimes, re-exported so π's constants are still found
+// together. No arithmetic below reads them, because Crucible blames nothing
+// and exempts nothing — a miss on a conversation resumed after eight hours is
+// the datum the ledger exists to hold.
+export { CACHE_TTL_MS, cacheTtlMs } from '../../shared/cache/ttl.ts'
 
 /** One completed assistant message, as the mirror reads it. */
 export interface CacheMessage {
@@ -48,6 +45,21 @@ export interface PreviousRequest {
   readonly timestamp: number
   /** Whether this conversation has ever reported cache activity. */
   readonly reportedCache: boolean
+  // What re-billing one of this request's prompt tokens would cost, at the
+  // rates it was itself billed at. The same arithmetic a miss is priced with,
+  // held from the moment the request was observed because the message's own
+  // cost breakdown is the only rate that is certainly its own.
+  readonly rebillPerToken: number
+}
+
+// What the conversation currently has cached, as the tracker holds it: the
+// prefix an expired send would pay for again.
+export interface CachedPrefixFacts {
+  /** Epoch milliseconds, π's own stamp on the last billed request. */
+  readonly at: number
+  readonly tokens: number
+  /** Rounded to a hundredth of a cent, so no dollar figure carries a tail. */
+  readonly rebillDollars: number
 }
 
 // One item of a conversation, in the order it happened. `other` earns its
@@ -97,6 +109,10 @@ export interface CacheMissTracker {
   // the next turn's prompt is new content rather than re-billed content.
   // Model switches are NOT exempt — they re-bill the full prompt.
   contextReset(): void
+  // The prefix the provider is holding, if it is holding one. Absent wherever
+  // detection would not compare either: nothing billed yet, a context reset
+  // since, or a conversation that has never reported cache activity at all.
+  cachedPrefix(): CachedPrefixFacts | undefined
 }
 
 function number(value: number | undefined): number {
@@ -128,6 +144,16 @@ export function createCacheMissTracker(
     return number(listed) / 1_000_000
   }
 
+  // What one re-billed prompt token of this message costs: missed tokens can
+  // only land in the input or cacheWrite buckets, so the rate they were really
+  // billed at comes from this message's own cost breakdown, write premium
+  // included.
+  function rebillRate(usage: StoredUsage): number {
+    const paidTokens = number(usage.input) + number(usage.cacheWrite)
+    if (paidTokens <= 0) return 0
+    return (number(usage.cost?.input) + number(usage.cost?.cacheWrite)) / paidTokens
+  }
+
   function detect(message: CacheMessage): DetectedCacheMiss | undefined {
     const usage = message.usage
     if (usage === undefined) return undefined
@@ -148,17 +174,11 @@ export function createCacheMissTracker(
     const missedTokens = Math.min(previous.promptTokens, promptTokens) - cacheRead
     if (missedTokens <= NOISE_FLOOR_TOKENS) return undefined
 
-    // Missed tokens can only land in the input or cacheWrite buckets, so the
-    // rate they were really billed at comes from this message's own cost
-    // breakdown, write premium included.
-    const paidTokens = number(usage.input) + cacheWrite
-    const paidPerToken =
-      paidTokens > 0 ? (number(usage.cost?.input) + number(usage.cost?.cacheWrite)) / paidTokens : 0
     const readPerToken = readRate(message, usage)
 
     return {
       missedTokens,
-      missedCost: missedTokens * Math.max(0, paidPerToken - readPerToken),
+      missedCost: missedTokens * Math.max(0, rebillRate(usage) - readPerToken),
       gapMs: Math.max(0, message.timestamp - previous.timestamp),
       modelChanged: `${message.provider}/${message.model}` !== previous.modelKey
     }
@@ -180,7 +200,8 @@ export function createCacheMissTracker(
           // does not cache.
           reportedCache:
             (previous?.reportedCache ?? false) ||
-            number(usage.cacheRead) + number(usage.cacheWrite) > 0
+            number(usage.cacheRead) + number(usage.cacheWrite) > 0,
+          rebillPerToken: Math.max(0, rebillRate(usage) - readRate(message, usage))
         }
       }
       return miss
@@ -188,6 +209,18 @@ export function createCacheMissTracker(
 
     contextReset(): void {
       previous = undefined
+    },
+
+    cachedPrefix(): CachedPrefixFacts | undefined {
+      // A provider that has never reported caching is holding nothing, so
+      // there is nothing for a later send to lose.
+      if (previous === undefined || !previous.reportedCache) return undefined
+      return {
+        at: previous.timestamp,
+        tokens: previous.promptTokens,
+        rebillDollars:
+          Math.round(previous.promptTokens * previous.rebillPerToken * 10_000) / 10_000
+      }
     }
   }
 }

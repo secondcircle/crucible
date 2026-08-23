@@ -23,6 +23,7 @@ import type {
   Binding,
   ConversationAdapter,
   ObservedCacheMiss,
+  ObservedCachedPrefix,
   ResumeRequest,
   UsageRequest
 } from '../../shared/agent/adapter'
@@ -116,6 +117,7 @@ interface ReportedUsage {
   readonly contextWindow: number
   readonly cost?: number
   readonly cacheMisses?: { readonly count: number; readonly dollars: number }
+  readonly cachedPrefix?: ObservedCachedPrefix
 }
 
 interface PendingShare {
@@ -169,7 +171,7 @@ export function createSdkAdapter({
   // The runtime once it has resolved, because pricing a miss happens inside a
   // synchronous event callback and a promise would be a frame too late.
   let models: ModelRuntime | undefined
-  const retention = retentionInForce()
+  const { retention } = retentionInForce()
   // One at a time: a second login while one is live is refused.
   let liveLogin: LiveLogin | undefined
   let prompts = 0
@@ -792,10 +794,27 @@ export function createSdkAdapter({
     return seams
   }
 
-  /** Every branch of the conversation, exactly as the money is counted. */
-  function missTotals(manager: SessionManager): { count: number; dollars: number } {
-    const { totals } = scanCacheMisses(entriesToScan(manager.getEntries()), pricing)
-    return { count: totals.count, dollars: totals.dollars }
+  // Every branch of the conversation, exactly as the money is counted, and
+  // the prefix the last billed request of it left behind. One pass, because
+  // the scan that counts the misses is the scan that ends holding the prefix.
+  function missTotals(manager: SessionManager): {
+    readonly totals: { readonly count: number; readonly dollars: number }
+    readonly cachedPrefix?: ObservedCachedPrefix
+  } {
+    const { totals, tracker } = scanCacheMisses(entriesToScan(manager.getEntries()), pricing)
+    const prefix = tracker.cachedPrefix()
+    return {
+      totals: { count: totals.count, dollars: totals.dollars },
+      ...(prefix === undefined
+        ? {}
+        : {
+            cachedPrefix: {
+              at: new Date(prefix.at).toISOString(),
+              tokens: prefix.tokens,
+              rebillDollars: prefix.rebillDollars
+            }
+          })
+    }
   }
 
   // π keeps no context counter: it recomputes the estimate from the branch on
@@ -811,12 +830,13 @@ export function createSdkAdapter({
     // them is the whole conversation's, because money does not vanish on a
     // jump. The misses are counted the same way, for the same reason.
     const spent = usageOf(bound.session.sessionManager)
-    const misses = missTotals(bound.session.sessionManager)
+    const { totals: misses, cachedPrefix } = missTotals(bound.session.sessionManager)
     const next: ReportedUsage = {
       usedTokens: usage.tokens,
       contextWindow: usage.contextWindow,
       ...(spent === undefined ? {} : { cost: spent.totalCost }),
-      cacheMisses: misses
+      cacheMisses: misses,
+      ...(cachedPrefix === undefined ? {} : { cachedPrefix })
     }
     const last = bound.reported
     if (
@@ -825,7 +845,12 @@ export function createSdkAdapter({
       last.contextWindow === next.contextWindow &&
       last.cost === next.cost &&
       last.cacheMisses?.count === misses.count &&
-      last.cacheMisses.dollars === misses.dollars
+      last.cacheMisses.dollars === misses.dollars &&
+      // The prefix moves when a request bills a prompt, which the tokens
+      // above may not: a re-sent conversation of the same size still re-dates
+      // what the provider is holding.
+      last.cachedPrefix?.at === cachedPrefix?.at &&
+      last.cachedPrefix?.tokens === cachedPrefix?.tokens
     ) {
       return
     }

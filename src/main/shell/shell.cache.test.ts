@@ -139,6 +139,32 @@ describe('recording a session\u2019s cache misses', () => {
     expect(session?.usage?.cost).toBeGreaterThan(0)
   })
 
+  it('folds what the conversation has cached in, stamped with the setting', async () => {
+    build('1h')
+    const sessionId = await withSession()
+
+    await shell.prompt(sessionId, 'let the cache expire on this one')
+    await settled()
+
+    const session = (await shell.snapshot()).sessions.find(
+      (candidate) => candidate.id === sessionId
+    )
+    // The adapter knows the tokens and what they cost; the retention is
+    // main's, exactly as it is on a recorded miss, so nothing on screen can
+    // disagree with what was written down.
+    expect(session?.cachedPrefix).toMatchObject({ tokens: 110_000, retention: '1h' })
+    expect(Date.parse(session?.cachedPrefix?.at ?? '')).not.toBeNaN()
+  })
+
+  it('says nothing about a prefix a fresh session has not built yet', async () => {
+    const sessionId = await withSession()
+
+    const session = (await shell.snapshot()).sessions.find(
+      (candidate) => candidate.id === sessionId
+    )
+    expect(session?.cachedPrefix).toBeUndefined()
+  })
+
   it('records nothing at all for a prompt that paid for nothing', async () => {
     const sessionId = await withSession()
 

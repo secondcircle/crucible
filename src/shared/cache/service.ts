@@ -1,4 +1,4 @@
-import type { CacheRetention, Unsubscribe } from '../agent/port'
+import type { CacheRetention, RetentionSource, Unsubscribe } from '../agent/port'
 
 // Beside the agent port, not behind it: the cache ledger is global, one file
 // per installation across every workspace, session and run, and
@@ -17,6 +17,8 @@ export interface CacheHealth {
   /** Absolute, because handing it to an agent is the ledger's primary use. */
   readonly ledgerPath: string
   readonly retention: CacheRetention
+  /** Whoever decided it, which is what "Retention in force" names. */
+  readonly retentionSource: RetentionSource
 }
 
 export interface CacheService {

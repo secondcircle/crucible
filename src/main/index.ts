@@ -5,6 +5,7 @@ import type { SessionId } from '../shared/agent/port'
 import { type AppUpdateChannel, serveAppUpdateChannel } from './app-update/channel'
 import { type CacheChannel, serveCacheChannel } from './cache/channel'
 import { createCacheLedger } from './cache/ledger'
+import { retentionInForce } from './cache/retention'
 import { useCacheLedgerDir } from './cache/paths'
 import { createAppUpdateService, stillAppUpdateService } from './app-update/service'
 import { decideFlavor, selectAdapter } from './agent/select-adapter'
@@ -74,6 +75,17 @@ log.append({
   electron: process.versions.electron,
   packaged: app.isPackaged,
   dev: Boolean(process.env.ELECTRON_RENDERER_URL)
+})
+
+// Before the ledger, the adapter and the workflow engine: every agent this
+// launch starts inherits `PI_CACHE_RETENTION`, so the hour has to be in the
+// environment before the first of them exists.
+const retention = retentionInForce()
+log.append({
+  source: 'main',
+  event: 'cache_retention',
+  retention: retention.retention,
+  decidedBy: retention.source
 })
 
 // Crucible's own state file in Crucible's own directory: nothing of π's is read

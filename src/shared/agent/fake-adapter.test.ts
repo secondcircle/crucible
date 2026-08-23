@@ -5,7 +5,13 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { AdapterEvent } from './adapter'
 import { createFakeWorkflowRunService } from '../workflows/fake-service'
-import { createFakeAdapter, FAKE_CACHE_MISS, FAKE_MODEL, FAKE_TURN_USAGE } from './fake-adapter'
+import {
+  createFakeAdapter,
+  FAKE_CACHE_MISS,
+  FAKE_EXPIRED_PREFIX,
+  FAKE_MODEL,
+  FAKE_TURN_USAGE
+} from './fake-adapter'
 
 const WORKSPACE = '/workspaces/crucible'
 
@@ -208,6 +214,68 @@ describe('the scripted cache miss', () => {
     const totals = usageOf(events).at(-1)
     expect(totals).toEqual(
       expect.objectContaining({ cacheMisses: { count: 1, dollars: 0.62 } })
+    )
+  })
+})
+
+// The cache expiry choice needs a conversation whose cache is certainly gone,
+// which under this flavor costs one prompt and no money at all.
+describe('the scripted cached prefix', () => {
+  const prefixOf = (events: readonly AdapterEvent[]) => {
+    const last = usageOf(events).at(-1)
+    return last?.type === 'usage' ? last.cachedPrefix : undefined
+  }
+
+  it('reports what the turn left cached, stamped with the moment it ended', async () => {
+    const { adapter, events } = await withSession()
+
+    // Nothing has been billed yet, so nothing is cached and nothing is
+    // reported.
+    expect(prefixOf(events)).toBeUndefined()
+
+    const before = Date.now()
+    await adapter.prompt('s1', 't1', 'an ordinary prompt')
+
+    const prefix = prefixOf(events)
+    expect(prefix?.tokens).toBeGreaterThan(0)
+    expect(prefix?.rebillDollars).toBeGreaterThan(0)
+    expect(Date.parse(prefix?.at ?? '')).toBeGreaterThanOrEqual(before)
+  })
+
+  it('backdates the next one past any retention on a prompt that says expire', async () => {
+    const { adapter, events } = await withSession()
+
+    await adapter.prompt('s1', 't1', 'let the cache expire on this one')
+
+    const prefix = prefixOf(events)
+    // The staged conversation: 2h 13m idle, 110k in context, $0.63 to re-bill.
+    expect(prefix?.tokens).toBe(FAKE_EXPIRED_PREFIX.tokens)
+    expect(prefix?.rebillDollars).toBe(FAKE_EXPIRED_PREFIX.rebillDollars)
+    expect(Date.now() - Date.parse(prefix?.at ?? '')).toBeGreaterThanOrEqual(
+      FAKE_EXPIRED_PREFIX.idleMs
+    )
+
+    // The next turn re-dates it: the trigger is the prompt, not the session.
+    await adapter.prompt('s1', 't2', 'and now an ordinary one')
+    expect(prefixOf(events)?.tokens).not.toBe(FAKE_EXPIRED_PREFIX.tokens)
+  })
+
+  it('drops it when a summarizing jump lands, and rebuilds it on the next turn', async () => {
+    const { adapter, events } = await withSession()
+    await adapter.prompt('s1', 't1', 'let the cache expire on this one')
+    const tree = await adapter.sessionTree('s1')
+
+    await adapter.jump('s1', tree.path[0] as string, true)
+
+    // The context legitimately changed, so what the provider was holding is
+    // gone rather than expired.
+    const items = await adapter.transcript('s1')
+    expect(items[0]?.kind).toBe('summary')
+    await adapter.prompt('s1', 't2', 'carry on from the summary')
+    const rebuilt = prefixOf(events)
+    expect(rebuilt?.tokens).not.toBe(FAKE_EXPIRED_PREFIX.tokens)
+    expect(Date.now() - Date.parse(rebuilt?.at ?? '')).toBeLessThan(
+      FAKE_EXPIRED_PREFIX.idleMs
     )
   })
 })

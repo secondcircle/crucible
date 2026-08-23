@@ -178,7 +178,7 @@ interface CacheWatch extends CacheMissTrackerOptions {
 function wrap(session: AgentSession, cache: CacheWatch): NodeSession {
   const activityListeners = new Set<(now: string | undefined) => void>()
   const inflight = new Map<string, string>()
-  const retention = retentionInForce()
+  const { retention } = retentionInForce()
 
   /** Rounded to a hundredth of a cent, so no dollar figure carries a tail. */
   const round = (dollars: number): number => Math.round(dollars * 10_000) / 10_000
