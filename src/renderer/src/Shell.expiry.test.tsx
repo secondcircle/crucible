@@ -439,6 +439,63 @@ describe('the choice belongs to one session', () => {
     expect(composer()).toHaveValue('half a thought')
   })
 
+  it('never dismisses a choice another session raised while its summary landed', async () => {
+    const twoSessions: ShellSnapshot = {
+      workspaces: [{ id: 'w1', name: 'crucible', path: '/repos/crucible' }],
+      activeWorkspaceId: 'w1',
+      sessions: [
+        {
+          id: 's1',
+          workspaceId: 'w1',
+          createdAt: '2026-08-20T10:00:00.000Z',
+          title: 'session A',
+          working: false,
+          fresh: false,
+          cachedPrefix: prefix()
+        },
+        {
+          id: 's2',
+          workspaceId: 'w1',
+          createdAt: '2026-08-20T10:00:00.000Z',
+          title: 'session B',
+          working: false,
+          fresh: false,
+          cachedPrefix: prefix()
+        }
+      ],
+      activeSessionId: 's1'
+    }
+    const port = await mount(twoSessions)
+    port.holdJump = true
+    await type('carry on in A')
+    await press('s')
+
+    // The summary keeps working while the user goes to session B and meets
+    // the choice there too: B's cache is just as gone as A's was.
+    await act(async () => {
+      fireEvent.click(sessionRows()[1] as HTMLElement)
+    })
+    await settled()
+    await type('carry on in B')
+    expect(choice()).not.toBeNull()
+
+    port.transcripts.set('s1', [
+      { kind: 'summary', text: 'Carried forward: the branch was summarized.' }
+    ])
+    await act(async () => {
+      port.settleJump('jumped')
+    })
+    await settled()
+
+    // A's message goes out in A, exactly as promised.
+    expect(port.calls).toContainEqual({ op: 'prompt', args: ['s1', 'carry on in A'] })
+    // But A's chain owns nothing on B's screen: the choice B is reading —
+    // the dollars it exists to show — is still up, still waiting on B's own
+    // decision (per-session, ADR 0003).
+    expect(choice()).not.toBeNull()
+    expect(composer()).toHaveValue('carry on in B')
+  })
+
   it('never destroys words typed while the summary was being written', async () => {
     const twoSessions: ShellSnapshot = {
       workspaces: [{ id: 'w1', name: 'crucible', path: '/repos/crucible' }],
