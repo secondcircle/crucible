@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { CachedPrefix } from '../../../shared/agent/port'
 import { idleMs } from '../cache/expiry'
 import { compactTokens, idleText, rebillText, retentionText } from '../cache/format'
@@ -42,6 +42,14 @@ export function CacheExpiryChoice({
   const tokens = compactTokens(prefix.tokens)
   const rebill = rebillText(prefix.rebillDollars)
 
+  // How many times the backdrop has been clicked at a summary in flight. The
+  // click cannot dismiss that one — money is being spent, and stopping it is
+  // Escape's decision alone — but a click that lands on nothing teaches the
+  // user that clicks go nowhere. So it is answered where the answer is: the
+  // footer, which names the way out, lights up. Counted rather than flagged
+  // so a second click replays the light instead of landing on nothing again.
+  const [refused, setRefused] = useState(0)
+
   // Focus goes to the dialog rather than to a button: with a button focused
   // the browser turns Enter into a click of it, and one press would send
   // twice.
@@ -57,7 +65,8 @@ export function CacheExpiryChoice({
     <div
       className="overlaybg"
       onMouseDown={() => {
-        if (!summarizing) onDismiss()
+        if (summarizing) setRefused((clicks) => clicks + 1)
+        else onDismiss()
       }}
     >
       <div
@@ -141,7 +150,7 @@ export function CacheExpiryChoice({
 
               <button className="edoor" onClick={onSummarize}>
                 <span className="eic" aria-hidden="true">
-                  ⇣
+                  ↯
                 </span>
                 <span className="etext">
                   <span className="et">
@@ -160,7 +169,9 @@ export function CacheExpiryChoice({
           </>
         )}
 
-        <div className="efoot">
+        {/* Keyed by the count so a repeat click remounts the footer and the
+            one-shot light runs again. */}
+        <div className={refused > 0 ? 'efoot lit' : 'efoot'} key={refused}>
           <kbd>esc</kbd>
           {summarizing
             ? 'cancel — the conversation is left exactly as it was'

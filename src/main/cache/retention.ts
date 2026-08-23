@@ -2,12 +2,15 @@ import type { CacheRetention, RetentionSource } from '../../shared/agent/port'
 
 // π's `PI_CACHE_RETENTION`: `long` asks Anthropic for one-hour prompt
 // retention, anything else leaves the five-minute default. Crucible asks for
-// the hour for every agent it starts — single-shot fresh-context nodes
-// included, because the ledger shows five minutes passing inside a single
-// turn's own generation, so no kind of agent is safely exempt. π reads the
-// variable per request, so one write covers every agent this launch starts.
-// A variable already set is the user's override and is never touched; there
-// is no Settings toggle.
+// the hour for every agent it starts. Single-shot fresh-context nodes look
+// like the obvious exemption and are not: the most expensive miss in the
+// ledger is one of those, $0.71 and 61k tokens re-billed because five minutes
+// passed inside a single turn's own generation, no slow tool call in the gap.
+// What predicts a miss is not whether an agent waits but whether five minutes
+// can pass between two of its turns, which is true of nearly everything here.
+// π reads the variable per request, so one write covers every agent this
+// launch starts. A variable already set is the user's override and is never
+// touched; there is no Settings toggle.
 
 export interface RetentionDecision {
   readonly retention: CacheRetention

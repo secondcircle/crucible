@@ -99,6 +99,10 @@ const doors = (): HTMLElement[] => [...document.querySelectorAll<HTMLElement>('.
 
 const opsOf = (port: ScriptedPort): string[] => port.calls.map((call) => call.op)
 
+const backdrop = (): HTMLElement => document.querySelector('.overlaybg') as HTMLElement
+
+const footer = (): HTMLElement => document.querySelector('.efoot') as HTMLElement
+
 /** Types a draft and presses Enter, the way a person sends. */
 async function type(text: string): Promise<void> {
   fireEvent.change(composer(), { target: { value: text } })
@@ -147,6 +151,24 @@ describe('when the choice is raised', () => {
     expect(facts()).toEqual(['Idle2h 13m', 'In context110k', 'Re-bill~$0.63'])
     // The footer names the setting the prefix was written under.
     expect(document.querySelector('.efoot')?.textContent).toContain('retention 1 hour')
+  })
+
+  it('meets Option+Enter on an idle session, which is exactly Enter', async () => {
+    const port = await mount()
+
+    fireEvent.change(composer(), { target: { value: 'and now the artifact rail' } })
+    await act(async () => {
+      fireEvent.keyDown(composer(), { key: 'Enter', altKey: true })
+    })
+
+    // Option+Enter on a session that is not working starts a prompt turn like
+    // any other send, so it re-bills like any other send and is asked about
+    // like any other send. Nothing was queued as a follow-up behind the
+    // question.
+    expect(choice()).not.toBeNull()
+    expect(composer()).toHaveValue('and now the artifact rail')
+    expect(opsOf(port)).not.toContain('followUp')
+    expect(opsOf(port)).not.toContain('prompt')
   })
 
   it('shows a two-cent break its two cents, because there is no floor', async () => {
@@ -414,6 +436,42 @@ describe('escape', () => {
     expect(composer()).toHaveValue('carry on')
     expect(screen.getByRole('log')).toHaveTextContent('the old conversation')
     expect(opsOf(port)).not.toContain('prompt')
+  })
+})
+
+describe('the backdrop', () => {
+  it('dismisses the choice with the message kept', async () => {
+    const port = await mount()
+    await type('half a thought')
+    const before = port.calls.length
+
+    await act(async () => {
+      fireEvent.mouseDown(backdrop())
+    })
+
+    expect(choice()).toBeNull()
+    expect(composer()).toHaveValue('half a thought')
+    expect(port.calls).toHaveLength(before)
+  })
+
+  it('answers a click at a summary in flight rather than swallowing it', async () => {
+    const port = await mount()
+    port.holdJump = true
+    await type('carry on')
+    await press('s')
+    expect(footer()).not.toHaveClass('lit')
+
+    await act(async () => {
+      fireEvent.mouseDown(backdrop())
+    })
+
+    // A click cannot close a dialog that is already spending money; stopping
+    // that is Escape's decision. But it is answered in its own frame, and
+    // answered where the answer is: the footer line that names the way out.
+    expect(waiting()).not.toBeNull()
+    expect(footer()).toHaveClass('lit')
+    expect(opsOf(port)).not.toContain('cancel')
+    expect(composer()).toHaveValue('carry on')
   })
 })
 
