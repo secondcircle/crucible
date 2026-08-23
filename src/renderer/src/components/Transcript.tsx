@@ -4,6 +4,8 @@ import {
   callSummary,
   countsText,
   groupIntoChains,
+  SKILL_TOOL,
+  splitSkillSummary,
   type LoneItem,
   type ToolChain,
   type ToolItem
@@ -309,6 +311,18 @@ function Chain({ chain }: { readonly chain: ToolChain }): React.JSX.Element {
   )
 }
 
+// The faint tail is what makes a supporting file legible as part of the skill
+// read above it.
+function skillSummary(summary: string): React.JSX.Element {
+  const { skill, within } = splitSkillSummary(summary)
+  return (
+    <>
+      {skill}
+      {within === undefined ? null : <span className="toolunder"> · {within}</span>}
+    </>
+  )
+}
+
 function Call({ call }: { readonly call: ToolItem }): React.JSX.Element {
   const [open, setOpen] = useState(false)
   const tail = useRef<HTMLPreElement>(null)
@@ -342,7 +356,10 @@ function Call({ call }: { readonly call: ToolItem }): React.JSX.Element {
           <span aria-hidden="true">{open ? '▾' : '▸'}</span>
         )}
         <span className="toolname">{name}</span>
-        <span className="toolsummary">{summary}</span>
+        {/* The left border is left alone: it already carries call state, and
+            an overloaded border would hide a failure. */}
+        {name === SKILL_TOOL ? <span className="toolbadge">{SKILL_TOOL}</span> : null}
+        <span className="toolsummary">{name === SKILL_TOOL ? skillSummary(summary) : summary}</span>
         <span className="toolstate">{said}</span>
       </button>
       {(running || open) && output !== '' ? (

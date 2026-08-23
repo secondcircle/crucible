@@ -73,8 +73,11 @@ describe('the scripted turn', () => {
       'thinking_delta',
       'thinking_delta',
       'thinking_delta',
-      // Three consecutive calls, which is one tool chain. The first announces
-      // itself while its arguments stream.
+      // Five consecutive calls, which is one tool chain: two reads of one
+      // skill, then a bash that announces itself while its arguments stream,
+      // then two ordinary reads.
+      ...call(2),
+      ...call(1),
       ...pendingCall(3, 3),
       ...call(1),
       ...call(1),
@@ -107,23 +110,44 @@ describe('the scripted turn', () => {
     const started = events.filter((event) => event.type === 'tool_started')
     const ended = events.filter((event) => event.type === 'tool_ended')
 
-    expect(started[0]).toMatchObject({ name: 'bash', summary: 'npm test' })
+    expect(started[0]).toMatchObject({ name: 'skill', summary: 'writing-agent-prompts' })
     expect(ended.map((event) => event.callId)).toEqual(started.map((event) => event.callId))
-    expect(ended[0].type === 'tool_ended' ? ended[0].output : '').toContain('42 passed')
+    expect(ended[0].type === 'tool_ended' ? ended[0].output : '').toContain(
+      'name: writing-agent-prompts'
+    )
   })
 
-  it('spans two tool names in one chain and fails exactly one of the calls', async () => {
+  it('spans three tool names in one chain and fails exactly one of the calls', async () => {
     const { adapter, events } = await withSession()
 
     await adapter.prompt('s1', 't-1', 'hello')
     const started = events.filter((event) => event.type === 'tool_started')
     const ended = events.filter((event) => event.type === 'tool_ended')
 
-    // Three in the chain and one on its own, under two names, so a single
-    // scripted turn shows the counts, the failure marker and a chain of one.
-    expect(started).toHaveLength(4)
-    expect(new Set(started.map((event) => event.name))).toEqual(new Set(['bash', 'read']))
+    // Five in the chain and one on its own, under three names, so a single
+    // scripted turn shows the counts, the skill marker, the failure marker
+    // and a chain of one.
+    expect(started).toHaveLength(6)
+    expect(new Set(started.map((event) => event.name))).toEqual(
+      new Set(['skill', 'bash', 'read'])
+    )
     expect(ended.filter((event) => !event.ok)).toHaveLength(1)
+  })
+
+  // Two reads of the same skill, so a chain head that counted skill reads
+  // rather than skills would say `2 skill` where it must say `1 skill`.
+  it('reads one skill twice: its SKILL.md and a supporting file inside it', async () => {
+    const { adapter, events } = await withSession()
+
+    await adapter.prompt('s1', 't-1', 'hello')
+    const skills = events.filter(
+      (event) => event.type === 'tool_started' && event.name === 'skill'
+    )
+
+    expect(skills.map((event) => (event.type === 'tool_started' ? event.summary : ''))).toEqual([
+      'writing-agent-prompts',
+      'writing-agent-prompts · scope-boundaries.md'
+    ])
   })
 
   it('reports usage that is inside the window and grows with the conversation', async () => {

@@ -19,6 +19,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import type { ObservedCacheMiss } from '../../shared/agent/adapter'
 import type { SessionId, TranscriptItem } from '../../shared/agent/port'
 import type { CacheRecorder, RecordedCacheMiss } from '../cache/ledger'
+import type { LoadedSkill, SkillService } from '../skills/service'
 import type { PlannedNode, WorkflowDef } from './authoring'
 import { createWorkflowEngine, type EngineOptions, type WorkflowEngine } from './engine'
 import type {
@@ -87,13 +88,21 @@ function outputPath(prompt: string, file: string): string {
 
 function scriptedSessions(
   scriptFor: (nodeId: string) => NodeScript
-): NodeSessionFactory & { readonly prompts: string[]; readonly models: string[] } {
+): NodeSessionFactory & {
+  readonly prompts: string[]
+  readonly models: string[]
+  /** What each node was started with, which is the seam this test drives. */
+  readonly requests: NodeSessionRequest[]
+} {
   const prompts: string[] = []
   const models: string[] = []
+  const requests: NodeSessionRequest[] = []
   return {
     prompts,
     models,
+    requests,
     async start(request: NodeSessionRequest): Promise<NodeSession> {
+      requests.push(request)
       const nodeId = /^You are "([^"]+)"/.exec(request.rolePrompt)?.[1] ?? 'unknown'
       models.push(`${nodeId}: ${request.model}`)
       const script = scriptFor(nodeId)
@@ -439,6 +448,32 @@ describe('the engine end to end', () => {
     expect(delivered.at(-1)?.text).toContain('cancelled')
     // A cancelled run is no longer pausable: it is not live.
     expect(() => engine.pause(started.id)).toThrow(/not live/)
+  })
+
+  it('unwinds a node that goes quiet after the cancel, not just one already waiting', async () => {
+    // The window is a cancel landing before the node is registered as live:
+    // releasing nothing leaves the node running, so it exhausts its nudges and
+    // asks for an answer after cancel already swept the waiters. Cancelling
+    // inside `start` puts it there every time rather than by a race.
+    const scripted = scriptedSessions(() => () => {
+      // Never completes: the nudges run out and the node stalls.
+    })
+    const live: { engine?: WorkflowEngine } = {}
+    const sessions: NodeSessionFactory = {
+      async start(request) {
+        // Set by the time any node starts, because a node only starts after
+        // `rig` has returned and the run has been asked for.
+        live.engine?.cancel(live.engine.runs()[0].id)
+        return scripted.start(request)
+      }
+    }
+    const { engine, repo } = rig({ solo: oneNode }, () => () => {}, { sessions })
+    live.engine = engine
+    const task = join(repo, 'task.md')
+    writeFileSync(task, 'the task\n')
+    await engine.start(startRequest(repo, 'solo', { prompt: task }))
+
+    await until(() => engine.runs()[0].status === 'cancelled')
   })
 
   it('starts a staged successor on clean completion, continuing the branch from the final commit', async () => {
@@ -1061,3 +1096,91 @@ describe('dismissing and adopting a run', () => {
 function stateDirOf(runId: string, built: Rig): string {
   return join(built.stateDir, runId, 'artifacts')
 }
+
+// Every node gets every skill of the run's worktree by default; a workflow
+// narrows a node when it wants a lean context.
+describe('what skills a node is started with', () => {
+  const three: readonly LoadedSkill[] = [
+    {
+      name: 'writing-agent-prompts',
+      description: 'writing text an agent reads as instructions',
+      filePath: '/skills/writing-agent-prompts/SKILL.md',
+      baseDir: '/skills/writing-agent-prompts'
+    },
+    {
+      name: 'reviewing-diffs',
+      description: 'reading a diff',
+      filePath: '/skills/reviewing-diffs/SKILL.md',
+      baseDir: '/skills/reviewing-diffs'
+    },
+    {
+      name: 'branch-hygiene',
+      description: 'keeping branches tidy',
+      filePath: '/skills/branch-hygiene/SKILL.md',
+      baseDir: '/skills/branch-hygiene'
+    }
+  ]
+
+  /** The worktree each node's project-local origin was read at. */
+  const askedAbout: string[] = []
+
+  const skills: SkillService = {
+    async resolve(workspacePath: string) {
+      askedAbout.push(workspacePath)
+      return three
+    }
+  }
+
+  const threeNodes: WorkflowDef = {
+    description: 'three nodes, differing only in what skills they ask for',
+    inputs: { prompt: 'the task file' },
+    run: async (ctx) => {
+      await ctx.node('everything', { prompt: 'say nothing about skills' })
+      await ctx.node('narrowed', { prompt: 'ask for one', skills: ['reviewing-diffs'] })
+      await ctx.node('none', { prompt: 'ask for nothing', skills: [] })
+      return {}
+    }
+  }
+
+  it('is every skill by default, the named subset when narrowed, none for an empty list', async () => {
+    askedAbout.length = 0
+    const { engine, repo, sessions } = rig(
+      { three: threeNodes },
+      () => (_prompt, tools) => tools.complete({ summary: 'done' }),
+      { skills }
+    )
+    const task = join(repo, 'task.md')
+    writeFileSync(task, 'the task\n')
+
+    const started = await engine.start(startRequest(repo, 'three', { prompt: task }))
+    await until(() => engine.runs()[0].status === 'complete')
+
+    const namesOf = (at: number): string[] =>
+      (sessions.requests[at].skills ?? []).map((skill) => skill.name)
+
+    expect(namesOf(0)).toEqual([
+      'writing-agent-prompts',
+      'reviewing-diffs',
+      'branch-hygiene'
+    ])
+    expect(namesOf(1)).toEqual(['reviewing-diffs'])
+    expect(namesOf(2)).toEqual([])
+    // The project-local origin of a node is the run's own worktree, so a skill
+    // the run's branch adds reaches the nodes that follow.
+    expect(new Set(askedAbout)).toEqual(new Set([started.worktreePath]))
+  })
+
+  it('is nothing at all when no skill service was wired in', async () => {
+    const { engine, repo, sessions } = rig(
+      { three: threeNodes },
+      () => (_prompt, tools) => tools.complete({ summary: 'done' })
+    )
+    const task = join(repo, 'task.md')
+    writeFileSync(task, 'the task\n')
+
+    await engine.start(startRequest(repo, 'three', { prompt: task }))
+    await until(() => engine.runs()[0].status === 'complete')
+
+    expect(sessions.requests.map((request) => request.skills)).toEqual([[], [], []])
+  })
+})

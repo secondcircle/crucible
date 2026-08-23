@@ -1,5 +1,6 @@
 import type { ObservedCacheMiss } from '../../shared/agent/adapter'
 import type { TranscriptItem, Unsubscribe } from '../../shared/agent/port'
+import type { LoadedSkill } from '../skills/service'
 
 // The engine's one seam onto agents: a node is a fresh session with two
 // injected completion tools, and everything the engine needs of it is here.
@@ -28,6 +29,9 @@ export interface NodeSessionRequest {
   readonly rolePrompt: string
   /** Built-in tool names the node gets, complete_node and raise_blocker aside. */
   readonly tools: readonly string[]
+  // Already resolved and already narrowed to what the node's spec asked for:
+  // a node is offered nothing this does not name.
+  readonly skills?: readonly LoadedSkill[]
   /** The agent called complete_node; the return is the tool's answer text. */
   readonly onComplete: (completion: NodeCompletion) => string
   /** The agent called raise_blocker; same contract. */

@@ -6,6 +6,7 @@ import { describe, expect, it } from 'vitest'
 import type { AgentSessionEvent } from '@earendil-works/pi-coding-agent'
 import {
   createEventMapper,
+  displayToolCall,
   jumpOutcome,
   renderToolOutput,
   summarizeRetryOf,
@@ -416,6 +417,131 @@ describe('what navigateTree answered', () => {
     expect(jumpOutcome({ cancelled: false, aborted: true })).toEqual({ cancelled: true })
     expect(jumpOutcome({ cancelled: true, editorText: 'Hook it up' })).toEqual({
       cancelled: true
+    })
+  })
+})
+
+// Attribution is by directory, so what these pin down is where one skill's
+// claim on a path stops.
+describe('a read attributed to a skill', () => {
+  const CWD = '/repos/crucible'
+
+  const inForce = {
+    cwd: CWD,
+    skills: [
+      {
+        name: 'writing-agent-prompts',
+        filePath: '/skills/writing-agent-prompts/SKILL.md',
+        baseDir: '/skills/writing-agent-prompts'
+      },
+      // A skill that is a single loose file at an origin root: its directory
+      // is the origin, full of other people's skills.
+      { name: 'loose', filePath: '/skills/loose.md', baseDir: '/skills' }
+    ]
+  }
+
+  const shown = (name: string, args: unknown): string =>
+    `${displayToolCall(name, args, inForce).name} ${displayToolCall(name, args, inForce).summary}`
+
+  it('is the skill\u2019s name for the SKILL.md itself, never a path', () => {
+    expect(shown('read', { path: '/skills/writing-agent-prompts/SKILL.md' })).toBe(
+      'skill writing-agent-prompts'
+    )
+  })
+
+  it('is the skill\u2019s name and the file\u2019s path inside it for a supporting file', () => {
+    expect(shown('read', { path: '/skills/writing-agent-prompts/scope-boundaries.md' })).toBe(
+      'skill writing-agent-prompts \u00b7 scope-boundaries.md'
+    )
+    expect(
+      shown('read', { path: '/skills/writing-agent-prompts/reference/examples/tone.md' })
+    ).toBe('skill writing-agent-prompts \u00b7 reference/examples/tone.md')
+  })
+
+  it('resolves a path given relative to the working directory', () => {
+    expect(
+      displayToolCall(
+        'read',
+        { path: 'skills/local/SKILL.md' },
+        {
+          cwd: CWD,
+          skills: [
+            {
+              name: 'local',
+              filePath: `${CWD}/skills/local/SKILL.md`,
+              baseDir: `${CWD}/skills/local`
+            }
+          ]
+        }
+      )
+    ).toEqual({ name: 'skill', summary: 'local' })
+  })
+
+  it('leaves a read of a file under no skill exactly as it was', () => {
+    expect(shown('read', { path: '/repos/crucible/CONTEXT.md' })).toBe(
+      'read /repos/crucible/CONTEXT.md'
+    )
+  })
+
+  it('leaves every tool that is not read alone, inside a skill directory or not', () => {
+    expect(shown('grep', { path: '/skills/writing-agent-prompts', pattern: 'scope' })).toBe(
+      'grep /skills/writing-agent-prompts'
+    )
+    expect(shown('bash', { command: 'ls /skills/writing-agent-prompts' })).toBe(
+      'bash ls /skills/writing-agent-prompts'
+    )
+    expect(shown('ls', { path: '/skills/writing-agent-prompts' })).toBe(
+      'ls /skills/writing-agent-prompts'
+    )
+  })
+
+  it('lets a single-file skill claim its own file and none of its siblings', () => {
+    expect(shown('read', { path: '/skills/loose.md' })).toBe('skill loose')
+    expect(shown('read', { path: '/skills/writing-agent-prompts/SKILL.md' })).toBe(
+      'skill writing-agent-prompts'
+    )
+    expect(shown('read', { path: '/skills/somebody-elses.md' })).toBe(
+      'read /skills/somebody-elses.md'
+    )
+  })
+
+  it('says nothing about skills when a turn is carrying none', () => {
+    expect(displayToolCall('read', { path: '/skills/writing-agent-prompts/SKILL.md' })).toEqual({
+      name: 'read',
+      summary: '/skills/writing-agent-prompts/SKILL.md'
+    })
+  })
+
+  // The row exists from the moment the model commits to the call, seconds
+  // before any path has streamed. It reads `read` until the arguments settle.
+  it('reads as read while its arguments stream, and as skill once they settle', () => {
+    const mapper = createEventMapper(inForce)
+    const opened = mapper.map(
+      sdk({
+        type: 'message_update',
+        assistantMessageEvent: {
+          type: 'toolcall_start',
+          contentIndex: 0,
+          partial: { content: [{ type: 'toolCall', id: 'c1', name: 'read', arguments: {} }] }
+        }
+      }),
+      TARGET
+    )
+    const running = mapper.map(
+      sdk({
+        type: 'tool_execution_start',
+        toolCallId: 'c1',
+        toolName: 'read',
+        args: { path: '/skills/writing-agent-prompts/SKILL.md' }
+      }),
+      TARGET
+    )
+
+    expect(opened).toMatchObject({ type: 'tool_call_started', name: 'read' })
+    expect(running).toMatchObject({
+      type: 'tool_started',
+      name: 'skill',
+      summary: 'writing-agent-prompts'
     })
   })
 })

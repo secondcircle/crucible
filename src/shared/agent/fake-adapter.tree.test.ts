@@ -43,8 +43,9 @@ describe('the tree the fake serves', () => {
 
     const [root] = (await adapter.sessionTree('s1')).roots
 
-    // Counted from the entries the scripted turn really produced.
-    expect(root?.activity).toBe('thinking · assistant · 2 bash · 2 read')
+    // Counted from the entries the scripted turn really produced, per tool
+    // name: the activity line counts calls, skill reads included.
+    expect(root?.activity).toBe('thinking · assistant · 2 skill · 2 bash · 2 read')
   })
 
   it('says nothing about a message nothing has followed yet', async () => {
