@@ -1436,6 +1436,21 @@ export function Shell({
     sendText(id, text)
   }
 
+  // The composer empties of the words that just went out, and of nothing
+  // else. Every send lands at least a round trip after the gesture, an
+  // expansion or a whole summary, and the composer stays live for the whole
+  // of that wait. So what it holds at the landing may be words nobody sent,
+  // and those are a draft being typed, which is never destroyed here or
+  // anywhere else in this shell.
+  function clearSent(id: SessionId, text: string): void {
+    setDrafts((current) => {
+      // Trimmed on both sides because `text` is the trimmed draft: an
+      // untouched composer still counts as holding the message it sent.
+      if ((current[id] ?? '').trim() !== text) return current
+      return { ...current, [id]: '' }
+    })
+  }
+
   // Everything a send does once it is settled: expansion, the draft cleared,
   // the echo, the turn. Named by session rather than by what is on screen,
   // because the message that waited for a summary lands in the session that
@@ -1445,7 +1460,7 @@ export function Shell({
     const held = attachments[id] ?? []
     if (busy && held.length > 0) return
     expanded(id, text, (delivered) => {
-      setDrafts((current) => ({ ...current, [id]: '' }))
+      clearSent(id, text)
       clearFailure(id)
       if (busy) {
         // Nothing is echoed into the transcript: a queued message appears only
@@ -1483,6 +1498,9 @@ export function Shell({
     setChoice({ ...asked, summarizing: true })
     clearFailure(id)
     const token = (summarizeAsked.current += 1)
+    // Set the moment this chain owns a jump, so the cleanup below takes off
+    // its own indicator and never one that belongs to somebody else's.
+    let started = false
 
     void (async () => {
       try {
@@ -1500,6 +1518,7 @@ export function Shell({
         // so π's retry narration and Escape reach this jump exactly as they
         // reach one started there.
         setJumps((current) => withJump(current, id, { kind: 'summarizing', ref }))
+        started = true
         const outcome = await port.jump(id, ref, { summarize: true })
         setChoice(undefined)
         // The user stopped it: the leaf did not move, so the transcript, the
@@ -1519,7 +1538,11 @@ export function Shell({
         setChoice(undefined)
         report(cause, id)
       } finally {
-        setJumps((current) => withoutJump(current, id))
+        // Escape can retire this gesture while the tree is being read. A
+        // summarize started from the session tree in that window is a
+        // different jump, and this chain asked π for nothing, so it takes
+        // nothing away.
+        if (started) setJumps((current) => withoutJump(current, id))
       }
     })()
   }
@@ -1536,7 +1559,7 @@ export function Shell({
     const text = draft.trim()
     if (text === '') return
     expanded(id, text, (delivered) => {
-      setDrafts((current) => ({ ...current, [id]: '' }))
+      clearSent(id, text)
       clearFailure(id)
       void port.followUp(id, delivered).catch(report)
     })
