@@ -18,6 +18,12 @@ export function bandOf(run: RunRecord): Band {
   return run.waiting === true ? 'needsYou' : 'running'
 }
 
+// Written through `bandOf` so the sidebar and ⌘R cannot drift apart on whether
+// a run is asking for something. Not `runIsLive`, which counts paused as live.
+export function runIsWorking(run: RunRecord): boolean {
+  return bandOf(run) === 'running'
+}
+
 export interface RunBand {
   readonly band: Band
   /** What the band head prints. */
