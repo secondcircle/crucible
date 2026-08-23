@@ -554,12 +554,23 @@ export function createSdkAdapter({
     text: string,
     images?: readonly ImageAttachment[]
   ): Promise<void> {
-    bound.queuedImages.add(kind, text, images)
+    // Remembered first, because π reports its queue from inside the call
+    // below with nothing awaited in between: by the time the queue event
+    // arrives the pictures have to be here already.
+    const forget = bound.queuedImages.add(kind, text, images)
     const attached = images === undefined || images.length === 0
       ? undefined
       : images.map(toImageContent)
-    if (kind === 'steering') await bound.session.steer(text, attached)
-    else await bound.session.followUp(text, attached)
+    try {
+      if (kind === 'steering') await bound.session.steer(text, attached)
+      else await bound.session.followUp(text, attached)
+    } catch (refused) {
+      // π refuses a message naming one of its extension commands, and never
+      // queues it. Keeping it here would leave this memory a message longer
+      // than π's queue, and the pairing is by position.
+      forget()
+      throw refused
+    }
   }
 
   // π's retries of a branch summary, for as long as the jump that asked for

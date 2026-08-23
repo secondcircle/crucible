@@ -76,6 +76,70 @@ describe('pairing π’s queue back up', () => {
     })
   })
 
+  // π's own `steer()` expands a `/skill:` command into the skill's body, and a
+  // `/name` that matches a prompt template into the template, before it pushes
+  // anything. So the text it reports for a message is routinely not the text it
+  // was handed, and the message is still that message.
+  describe('a message π rewrote on its way in', () => {
+    const REWRITTEN = '<skill name="review" location="/s/review.md">…</skill>\n\nlook at this'
+
+    it('keeps its pictures under the text π reports', () => {
+      const queued = createQueuedImages()
+      queued.add('steering', '/skill:review look at this', [SHOT])
+
+      expect(queued.pair([REWRITTEN], [])).toEqual({
+        steering: [{ text: REWRITTEN, images: [SHOT] }],
+        followUp: [],
+        left: []
+      })
+    })
+
+    // The memory adopts π's text, so the entry that leaves is named the way π
+    // names it in the `message_start` that delivers it.
+    it('leaves the queue under that text too', () => {
+      const queued = createQueuedImages()
+      queued.add('steering', '/skill:review look at this', [SHOT])
+      queued.pair([REWRITTEN], [])
+
+      expect(queued.pair([], []).left).toEqual([{ text: REWRITTEN, images: [SHOT] }])
+    })
+
+    it('does not shift the pictures of the messages queued after it', () => {
+      const queued = createQueuedImages()
+      queued.add('steering', '/skill:review look at this', [SHOT])
+      queued.pair([REWRITTEN], [])
+      queued.add('steering', 'and this one', [OTHER])
+
+      expect(queued.pair([REWRITTEN, 'and this one'], []).steering).toEqual([
+        { text: REWRITTEN, images: [SHOT] },
+        { text: 'and this one', images: [OTHER] }
+      ])
+    })
+  })
+
+  // π throws on a message naming one of its extension commands rather than
+  // queueing it, and the pairing is by position, so a message that never
+  // reached the queue may not be left here.
+  it('takes back a message π refused, so the next one keeps its own picture', () => {
+    const queued = createQueuedImages()
+    const forget = queued.add('steering', '/pi-extension-command', [SHOT])
+    forget()
+    queued.add('steering', 'look at this', [OTHER])
+
+    expect(queued.pair(['look at this'], []).steering).toEqual([
+      { text: 'look at this', images: [OTHER] }
+    ])
+  })
+
+  it('takes nothing back once π has reported the message as queued', () => {
+    const queued = createQueuedImages()
+    const forget = queued.add('steering', 'look at this', [SHOT])
+    queued.pair(['look at this'], [])
+    forget()
+
+    expect(queued.take().steering).toEqual([{ text: 'look at this', images: [SHOT] }])
+  })
+
   it('empties on a take, so the clear that follows it finds nothing', () => {
     const queued = createQueuedImages()
     queued.add('steering', 'look at this', [SHOT])

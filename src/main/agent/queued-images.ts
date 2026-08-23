@@ -19,8 +19,12 @@ export interface PairedQueue extends QueueState {
 }
 
 export interface QueuedImages {
-  /** A message just handed to π's queue, and whatever rides with it. */
-  add(kind: QueuedKind, text: string, images?: readonly ImageAttachment[]): void
+  // A message just handed to π's queue, and whatever rides with it. The call
+  // handed back takes it out again, for a message π refused: it never reached
+  // the queue, and a memory one entry longer than π's queue would put every
+  // later picture on the message before it. Once π has reported the queue the
+  // message is genuinely in it, and the call then does nothing.
+  add(kind: QueuedKind, text: string, images?: readonly ImageAttachment[]): () => void
   // π's two lists, paired back up with what was handed over, and kept as the
   // new memory: anything π no longer lists has left the queue for good.
   pair(steering: readonly string[], followUp: readonly string[]): PairedQueue
@@ -39,11 +43,17 @@ export function createQueuedImages(): QueuedImages {
         images === undefined || images.length === 0 ? { text } : { text, images: [...images] }
       if (kind === 'steering') steering = [...steering, entry]
       else followUp = [...followUp, entry]
+      // Identity, not text: `pair` replaces every entry it keeps, so an entry
+      // still in the list by reference is one π has never reported.
+      return () => {
+        if (kind === 'steering') steering = steering.filter((held) => held !== entry)
+        else followUp = followUp.filter((held) => held !== entry)
+      }
     },
 
     pair(reportedSteering, reportedFollowUp) {
-      const pairedSteering = claim(reportedSteering, steering)
-      const pairedFollowUp = claim(reportedFollowUp, followUp)
+      const pairedSteering = align(reportedSteering, steering)
+      const pairedFollowUp = align(reportedFollowUp, followUp)
       steering = pairedSteering.entries
       followUp = pairedFollowUp.entries
       return {
@@ -67,37 +77,30 @@ export function withImages(
   texts: readonly string[],
   held: readonly QueuedEntry[]
 ): readonly QueuedEntry[] {
-  return claim(texts, held).entries
+  return align(texts, held).entries
 }
 
-// Matched by text, and from the end, because two queued messages may hold the
-// same words with different pictures. A message leaves π's queue by being
-// delivered, and the oldest of a run goes first: π's queue is FIFO, and the
-// list it reports afterwards has lost its *first* occurrence of that text. So
-// the occurrences still listed are the younger ones, and claiming from the end
-// is what keeps each remaining row on its own picture. Where the texts are all
-// distinct this is the same pairing reading forwards would give.
-function claim(
+// Paired by position rather than by text, because π's text is not the text it
+// was handed: `steer()` expands a `/skill:name` message into the skill's body,
+// and a `/name` that matches one of π's prompt templates into that template,
+// before pushing anything. Position holds where text does not, because the two
+// lists are one queue filled in lockstep — `queueInto` remembers a message
+// immediately before handing it over, and π pushes it with nothing awaited in
+// between. They are aligned at the tail, where a new message arrives with this
+// memory already holding it; π only ever removes from the head, its queue being
+// FIFO and the list it reports having lost the delivered text's first
+// occurrence. Whatever π reports for an entry becomes that entry's text here:
+// that is the text π will deliver it under, hand back on a flush, and name it
+// by in a dequeue.
+function align(
   texts: readonly string[],
   held: readonly QueuedEntry[]
 ): { readonly entries: readonly QueuedEntry[]; readonly left: readonly QueuedEntry[] } {
-  const unclaimed: (QueuedEntry | undefined)[] = [...held]
-  const entries: QueuedEntry[] = []
-  for (let at = texts.length - 1; at >= 0; at -= 1) {
-    const text = texts[at]
-    let found: QueuedEntry | undefined
-    for (let candidate = unclaimed.length - 1; candidate >= 0; candidate -= 1) {
-      const entry = unclaimed[candidate]
-      if (entry?.text !== text) continue
-      found = entry
-      unclaimed[candidate] = undefined
-      break
-    }
+  const dropped = held.length - texts.length
+  const entries = texts.map((text, at): QueuedEntry => {
     // A message this memory never saw carries no pictures, and says so.
-    entries[at] = found ?? { text }
-  }
-  return {
-    entries,
-    left: unclaimed.filter((entry): entry is QueuedEntry => entry !== undefined)
-  }
+    const images = dropped + at < 0 ? undefined : held[dropped + at]?.images
+    return images === undefined ? { text } : { text, images }
+  })
+  return { entries, left: held.slice(0, Math.max(dropped, 0)) }
 }
