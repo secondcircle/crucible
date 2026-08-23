@@ -18,6 +18,16 @@ export function bandOf(run: RunRecord): Band {
   return run.waiting === true ? 'needsYou' : 'running'
 }
 
+// Whether something is working on the session's behalf, which is what decides
+// that a turn ending in that session is not news. Written in terms of `bandOf`
+// and kept beside it so the sidebar and ⌘R cannot drift into disagreeing about
+// whether a run is asking for something. Not `runIsLive`: that one counts a
+// paused run as live, and a paused run is stopped until somebody moves it.
+/** Working on the session's behalf: the runs view files it under Running. */
+export function runIsWorking(run: RunRecord): boolean {
+  return bandOf(run) === 'running'
+}
+
 export interface RunBand {
   readonly band: Band
   /** What the band head prints. */

@@ -4,7 +4,7 @@
 // `RunStatus`, so every case is written out here rather than sampled.
 import { describe, expect, it } from 'vitest'
 import type { RunRecord, RunStatus } from '../../../shared/workflows/run'
-import { bandOf, bandsOf, finishedToday, runsHeadline } from './bands'
+import { bandOf, bandsOf, finishedToday, runIsWorking, runsHeadline } from './bands'
 
 const NOW = new Date('2026-08-21T14:00:00.000Z').getTime()
 
@@ -54,6 +54,34 @@ describe('which band a run is in', () => {
     expect(bandOf(runOf({ status: 'failed', ...dismissed }))).toBe('done')
     expect(bandOf(runOf({ status: 'cancelled', ...dismissed }))).toBe('done')
     expect(bandOf(runOf({ status: 'complete', ...dismissed }))).toBe('done')
+  })
+})
+
+// The sidebar reads this to decide a turn's ending is not news, and ⌘R reads
+// `bandOf` to file the same run under Running. Every record is put to both, so
+// an edit to either that pulls them apart fails here rather than in the app.
+describe('what counts as working on the session\'s behalf', () => {
+  const STATUSES: readonly RunStatus[] = ['running', 'paused', 'complete', 'failed', 'cancelled']
+  const WAITING: readonly (boolean | undefined)[] = [undefined, false, true]
+  const DISMISSED: readonly (string | undefined)[] = [undefined, '2026-08-21T13:30:00.000Z']
+  const EVERY_RECORD = STATUSES.flatMap((status) =>
+    WAITING.flatMap((waiting) => DISMISSED.map((dismissedAt) => ({ status, waiting, dismissedAt })))
+  )
+
+  it('is true for exactly the records the runs view files under Running', () => {
+    for (const shape of EVERY_RECORD) {
+      const run = runOf(shape)
+      expect([shape, runIsWorking(run)]).toEqual([shape, bandOf(run) === 'running'])
+    }
+  })
+
+  // Spelled out as well as agreed, so the pair cannot agree on a wrong answer:
+  // a run is working while it runs and nobody owes it one.
+  it('is a run that is running, owed no answer and not dismissed, and nothing else', () => {
+    expect(EVERY_RECORD.filter((shape) => runIsWorking(runOf(shape)))).toEqual([
+      { status: 'running', waiting: undefined, dismissedAt: undefined },
+      { status: 'running', waiting: false, dismissedAt: undefined }
+    ])
   })
 })
 

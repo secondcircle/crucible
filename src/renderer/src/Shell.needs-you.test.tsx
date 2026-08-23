@@ -1,15 +1,21 @@
 // @vitest-environment jsdom
 //
 // Turns finish in sessions nobody is looking at, which is the whole point of
-// running several at once. What the rail does about it is here: the mark, what
-// clears it, the Tab walk across workspaces, and what leaves the window.
+// running several at once. What the rail does about it is here: the mark, the
+// hush over a session whose own run is still working, what clears the mark,
+// the Tab walk across workspaces, and what leaves the window.
 import { act, fireEvent, render, screen } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 import type { ShellSnapshot } from '../../shared/agent/port'
 import type { NeedsYouService, WaitingSession } from '../../shared/needs-you/service'
+import type { RunRecord } from '../../shared/workflows/run'
 import { Shell } from './Shell'
 import { createScriptedPort, type ScriptedPort } from './testing/scripted-port'
 import { createScriptedCommands } from './testing/scripted-commands'
+import {
+  createScriptedWorkflowRuns,
+  type ScriptedWorkflowRuns
+} from './testing/scripted-workflow-runs'
 import { createScriptedWorkspace } from './testing/scripted-workspace'
 import { settled } from './testing/settled'
 
@@ -73,20 +79,40 @@ function recorder(): NeedsYouService & {
 }
 
 async function rail(
-  needsYou?: NeedsYouService
-): Promise<{ readonly port: ScriptedPort }> {
+  needsYou?: NeedsYouService,
+  runs: readonly RunRecord[] = []
+): Promise<{ readonly port: ScriptedPort; readonly workflowRuns: ScriptedWorkflowRuns }> {
   const port = createScriptedPort(TWO_WORKSPACES)
+  const workflowRuns = createScriptedWorkflowRuns(runs)
   render(
     <Shell
       port={port}
       workspace={createScriptedWorkspace()}
       commands={createScriptedCommands()}
+      workflowRuns={workflowRuns}
       needsYou={needsYou}
     />
   )
   await screen.findByRole('button', { name: HERE })
   await settled()
-  return { port }
+  return { port, workflowRuns }
+}
+
+/** A run of s2's own, working unless the test says otherwise. */
+function runOf(overrides: Partial<RunRecord> = {}): RunRecord {
+  return {
+    id: 'en42',
+    workflow: 'build',
+    status: 'running',
+    workspacePath: '/repos/crucible',
+    workspaceName: 'crucible',
+    sessionId: 's2',
+    inputs: {},
+    nodes: [],
+    createdAt: new Date(Date.now() - 18 * 60_000).toISOString(),
+    startedAt: new Date(Date.now() - 18 * 60_000).toISOString(),
+    ...overrides
+  }
 }
 
 /** A whole turn in one session, start to finish. */
@@ -192,6 +218,120 @@ describe('the mark', () => {
     })
 
     expect(screen.getByRole('button', { name: HERE })).toBeInTheDocument()
+  })
+})
+
+// The externally observable end of the rule: what the user would see, or in
+// this case would not. A session with a run working in its name has already
+// said everything its turn's ending had to say.
+describe('a session with a run working in its name', () => {
+  it('finishes a turn unwatched and asks for nothing at all', async () => {
+    const service = recorder()
+    const { port } = await rail(service, [runOf({})])
+
+    await turn(port, 's2')
+
+    // The row says the run is working and stops there: no "needs you" in it.
+    expect(screen.getByRole('button', { name: `${NEARBY} (run working)` })).toBeInTheDocument()
+    expect(screen.queryByTitle(/waiting on you/)).toBeNull()
+    expect(service.counts.at(-1)).toBe(0)
+    expect(service.banners).toEqual([])
+
+    await act(async () => tab())
+
+    expect(row(HERE)).toHaveAttribute('aria-current', 'true')
+    expect(port.calls.filter((call) => call.op === 'activateSession')).toEqual([])
+  })
+
+  // The orchestrator answered the check-in out of its own context and the run
+  // carried on, so the turn that message opened has no news in it.
+  it('goes quiet again when its orchestrator answers the check-in itself', async () => {
+    const service = recorder()
+    const { port, workflowRuns } = await rail(service, [runOf({ waiting: true })])
+
+    await act(async () => {
+      await port.prompt('s2', '⚑ Crucible run en42 (build) needs a decision')
+    })
+    await act(async () => {
+      workflowRuns.setRuns([runOf({ waiting: false })])
+      await settled()
+    })
+    act(() => port.endTurn('s2'))
+    await settled()
+
+    expect(screen.getByRole('button', { name: `${NEARBY} (run working)` })).toBeInTheDocument()
+    expect(service.counts.at(-1)).toBe(0)
+    expect(service.banners).toEqual([])
+  })
+
+  it('asks once its run parks on a check-in nobody has answered', async () => {
+    const service = recorder()
+    const { port, workflowRuns } = await rail(service, [runOf({})])
+
+    await act(async () => {
+      workflowRuns.setRuns([runOf({ waiting: true })])
+      await settled()
+    })
+    await turn(port, 's2')
+
+    expect(
+      screen.getByRole('button', { name: `${NEARBY} (run working, needs you)` })
+    ).toBeInTheDocument()
+    expect(screen.getByTitle('1 session waiting on you in crucible')).toHaveTextContent('1')
+    expect(service.banners).toEqual([{ sessionId: 's2', workspace: 'crucible', title: NEARBY }])
+
+    await act(async () => tab())
+
+    expect(row(NEARBY)).toHaveAttribute('aria-current', 'true')
+  })
+
+  it('asks when its turn errors, which no run of its own will ever report', async () => {
+    const { port } = await rail(undefined, [runOf({})])
+    await act(async () => {
+      await port.prompt('s2', 'go')
+    })
+
+    act(() => port.failTurn('s2', 'the provider refused'))
+    await settled()
+
+    expect(
+      screen.getByRole('button', { name: `${NEARBY} (run working, needs you)` })
+    ).toBeInTheDocument()
+  })
+
+  it('is judged on the records held when the turn ends, not when it started', async () => {
+    const service = recorder()
+    const { port, workflowRuns } = await rail(service, [])
+    await act(async () => {
+      await port.prompt('s2', 'go')
+    })
+
+    // The run the turn started arrives mid-turn, as the engine's does.
+    await act(async () => {
+      workflowRuns.setRuns([runOf({})])
+      await settled()
+    })
+    act(() => port.endTurn('s2'))
+    await settled()
+
+    expect(screen.getByRole('button', { name: `${NEARBY} (run working)` })).toBeInTheDocument()
+    expect(service.banners).toEqual([])
+  })
+
+  it('is silenced by no run but its own', async () => {
+    const service = recorder()
+    const { port } = await rail(service, [
+      runOf({
+        sessionId: 's3',
+        workspacePath: '/repos/splash-down',
+        workspaceName: 'splash-down'
+      })
+    ])
+
+    await turn(port, 's2')
+
+    expect(screen.getByRole('button', { name: `${NEARBY} (needs you)` })).toBeInTheDocument()
+    expect(service.banners).toEqual([{ sessionId: 's2', workspace: 'crucible', title: NEARBY }])
   })
 })
 
