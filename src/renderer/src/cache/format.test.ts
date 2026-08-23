@@ -8,8 +8,10 @@ import {
   compactTokens,
   gapText,
   homePath,
+  idleText,
   missesText,
   moneyText,
+  rebillText,
   retentionSource,
   retentionText,
   seamFacts,
@@ -154,10 +156,34 @@ describe('the ledger path', () => {
 })
 
 describe('the retention in force', () => {
-  it('reads as the setting, and says where the setting came from', () => {
+  it('reads as the setting, and names whoever actually decided it', () => {
     expect(retentionText('5m')).toBe('5 min')
     expect(retentionText('1h')).toBe('1 hour')
-    expect(retentionSource('5m')).toBe('π default')
-    expect(retentionSource('1h')).toBe('PI_CACHE_RETENTION=long')
+    // The hour is Crucible's own, and the line says so rather than naming a
+    // variable nobody set.
+    expect(retentionSource('1h', 'crucible')).toBe('Crucible default')
+    expect(retentionSource('1h', 'env')).toBe('PI_CACHE_RETENTION=long')
+    expect(retentionSource('5m', 'env')).toBe('PI_CACHE_RETENTION override')
+  })
+})
+
+describe('what the cache expiry choice says', () => {
+  it('says the idle time in the two largest units that still mean something', () => {
+    expect(idleText(2 * HOUR + 13 * MINUTE)).toBe('2h 13m')
+    expect(idleText(47 * MINUTE)).toBe('47m')
+    expect(idleText(DAY + 3 * HOUR)).toBe('1d 3h')
+    // A round span says one thing rather than padding itself with a zero.
+    expect(idleText(2 * HOUR)).toBe('2h')
+    expect(idleText(2 * DAY)).toBe('2d')
+    expect(idleText(-5)).toBe('0s')
+  })
+
+  it('states the re-bill to two decimals, with no floor under it', () => {
+    expect(rebillText(0.63)).toBe('$0.63')
+    // A two-cent break still shows its two cents: without the number the
+    // dialog is a scold, and a scold is dismissed by reflex.
+    expect(rebillText(0.02)).toBe('$0.02')
+    expect(rebillText(0.6249)).toBe('$0.62')
+    expect(rebillText(12)).toBe('$12.00')
   })
 })

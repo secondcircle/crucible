@@ -12,7 +12,7 @@ export function investigationPrompt(health: CacheHealth): string {
   // Spelled out rather than the seam's shorthand: this is read by a model,
   // and "5 min" beside a five-minute TTL is one abbreviation too many.
   const spelled = health.retention === '1h' ? '1 hour' : '5 minutes'
-  const retention = `${spelled} (${retentionSource(health.retention)})`
+  const retention = `${spelled} (${retentionSource(health.retention, health.retentionSource)})`
 
   return (
     `Investigate Crucible's cache misses. The ledger of every miss Crucible has ever ` +

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'r
 import { MODEL_RING } from '../../shared/agent/known-models'
 import type {
   AgentPort,
+  CachedPrefix,
   HistoryMatch,
   ModelId,
   QueuedKind,
@@ -37,6 +38,7 @@ import type {
 import { useBranchBoards, useIssueBoards } from './board/use-boards'
 import { BashDrawer, type RunView } from './components/BashDrawer'
 import { BranchBoard } from './components/BranchBoard'
+import { CacheExpiryChoice } from './components/CacheExpiryChoice'
 import { CacheHealthView } from './components/CacheHealthView'
 import { IssueBoard, type IssueSession } from './components/IssueBoard'
 import { type Attachment, Composer, useElapsedSeconds } from './components/Composer'
@@ -52,6 +54,7 @@ import { Sidebar } from './components/Sidebar'
 import { WorkflowRunView } from './components/WorkflowRunView'
 import { TopBar } from './components/TopBar'
 import { Transcript } from './components/Transcript'
+import { prefixExpired } from './cache/expiry'
 import { investigationPrompt } from './cache/prompt'
 import { investigationPrompt as runInvestigationPrompt } from './runs/prompt'
 import { useCacheHealth } from './cache/use-cache'
@@ -97,6 +100,20 @@ type Occupant =
   | { readonly kind: 'run'; readonly runId: WorkflowRunId }
   | { readonly kind: 'cache' }
   | { readonly kind: 'resume' }
+
+// The cache expiry choice, while it is up: whose send raised it, what that
+// send would re-bill, and the message waiting to go out. The text is held
+// here as well as in the draft, because the summarize path sends it minutes
+// later and the draft is what the user may have gone back to editing.
+interface Choice {
+  readonly sessionId: SessionId
+  readonly prefix: CachedPrefix
+  readonly text: string
+  /** The instant of the gesture, which the idle figure is measured from. */
+  readonly at: number
+  /** The summarize door was taken and π is writing the summary. */
+  readonly summarizing?: boolean
+}
 
 type Question =
   | { readonly kind: 'reset'; readonly sessionId: SessionId }
@@ -182,6 +199,9 @@ export function Shell({
   }, [appUpdate])
   const [popover, setPopover] = useState<Popover>('none')
   const [question, setQuestion] = useState<Question | undefined>(undefined)
+  // The cache expiry choice. Per session like everything else here: what one
+  // session asked about puts nothing on another session's screen.
+  const [choice, setChoice] = useState<Choice | undefined>(undefined)
   // What the model ring just switched to, shown before the port has confirmed
   // it. Dropped when the snapshot agrees, and dropped again if the call fails.
   const [ringed, setRinged] = useState<
@@ -275,6 +295,14 @@ export function Shell({
   const windowFocused = useRef(true)
   /** Sessions with a send under way, still waiting on its expansion. */
   const sending = useRef<Set<SessionId>>(new Set())
+  // Which press of the summarize door the live chain belongs to. Escape
+  // retires the gesture by moving it on, so a tree read that was already in
+  // flight cannot go on to ask π for a summary nobody wants.
+  const summarizeAsked = useRef(0)
+  // The send as of the latest render, for the one path that outlives its own
+  // frame: a summarize-then-send delivers its message a minute after the key
+  // was pressed, into whatever the session looks like by then.
+  const sendLatest = useRef<(id: SessionId, text: string) => void>(() => {})
   // What a raised cancel confirm owes its asker: the row's button waits on
   // this to learn whether the run is on its way out or still working.
   const cancelChoice = useRef<((chose: 'cancelled' | 'kept') => void) | undefined>(undefined)
@@ -561,6 +589,9 @@ export function Shell({
   const treeShown = treeOpen && session !== undefined
   const runShown = openRun !== undefined && workflowRuns !== undefined
   const cacheShown = cacheOpen && cacheService !== undefined && cacheHealth !== undefined
+  // The cache expiry choice belongs to the session that raised it: landing
+  // anywhere else dismisses it, so it can only ever be on screen there.
+  const choiceShown = choice !== undefined && choice.sessionId === activeSessionId
   const occupied =
     boardOpen ||
     issuesOpen ||
@@ -612,6 +643,11 @@ export function Shell({
       setRegion([])
       setOpenArtifactPath(undefined)
       setQuestion(undefined)
+      // A choice raised on one session says nothing about the one being
+      // arrived at. The draft it was raised over is untouched, and the next
+      // send in that session asks again. A summarize it started goes on: the
+      // work belongs to the session that asked, not to the screen.
+      setChoice(undefined)
       setFileToken(undefined)
       // The composer's own popovers: the command list closes until the next
       // edit reopens it, exactly as Escape closes it.
@@ -832,6 +868,12 @@ export function Shell({
     return () => clearTimeout(clear)
   }, [toast])
 
+  // Every render, deliberately without dependencies: what this holds is
+  // whatever the send does now, not what it did when the dialog opened.
+  useEffect(() => {
+    sendLatest.current = sendText
+  })
+
   // A cancel confirm that left the screen without being confirmed — Esc, the
   // backdrop, Decline, an arrival — means the run keeps working, and the
   // button that raised it hears so. One place, so no closer has to remember.
@@ -928,6 +970,30 @@ export function Shell({
         closeLogin()
         return
       }
+      // The cache expiry choice is an answer owed to a send, so it comes off
+      // before anything under it. During the summary it is the wait's own way
+      // out instead, and stopping is what Escape means there.
+      if (choice !== undefined) {
+        pressed.preventDefault()
+        const running = jumpOf(jumps, choice.sessionId)
+        if (choice.summarizing === true && running !== undefined && jumpCancellable(running)) {
+          // Acknowledged in this frame; the port answers `cancelled` after it,
+          // and the leaf has not moved.
+          setJumps((current) =>
+            withJump(current, choice.sessionId, { kind: 'cancelling', ref: running.ref })
+          )
+          void port
+            .cancel(choice.sessionId)
+            .catch((cause: unknown) => report(cause, choice.sessionId))
+          return
+        }
+        // Nothing has been asked of π yet, so there is nothing to stop: the
+        // gesture is retired and the composer has the message, as typed.
+        summarizeAsked.current += 1
+        setChoice(undefined)
+        box.current?.focus()
+        return
+      }
       // A confirm is an answer to a click, not a navigation: it stacks above
       // whatever is up and comes off first.
       if (question !== undefined) {
@@ -1011,6 +1077,8 @@ export function Shell({
     return () => document.removeEventListener('keydown', onKeyDown)
   }, [
     question,
+    choice,
+    jumps,
     popover,
     fileToken,
     region,
@@ -1124,8 +1192,10 @@ export function Shell({
       if (pressed.key !== 'Tab' || !pressed.shiftKey) return
       const sessionId = activeSessionId
       if (sessionId === undefined) return
-      // A modal surface owns the keyboard while it is up.
-      if (liveLogin !== undefined || question !== undefined) return
+      // A modal surface owns the keyboard while it is up — the cache expiry
+      // choice included, or Shift-Tab would break the cache it is asking
+      // about, from behind it.
+      if (liveLogin !== undefined || question !== undefined || choice !== undefined) return
       if (settingsOpen || cacheOpen || resumeOpen) return
       // A ring model the adapter did not list is skipped; with none listed the
       // key is left exactly as it was, no toast and no error.
@@ -1165,6 +1235,7 @@ export function Shell({
     liveLogin,
     settingsOpen,
     question,
+    choice,
     cacheOpen,
     resumeOpen
   ])
@@ -1185,7 +1256,7 @@ export function Shell({
       // Shift-Tab is the model ring and stays exactly as it was.
       if (pressed.shiftKey || pressed.metaKey || pressed.ctrlKey || pressed.altKey) return
       if (pressed.defaultPrevented) return
-      if (liveLogin !== undefined || question !== undefined) return
+      if (liveLogin !== undefined || question !== undefined || choice !== undefined) return
       if (settingsOpen || cacheOpen) return
       if (popover !== 'none' || browsingCommands || fileToken !== undefined) return
       if (boardOpen || issuesOpen || treeOpen || resumeOpen) return
@@ -1208,6 +1279,7 @@ export function Shell({
     liveLogin,
     settingsOpen,
     question,
+    choice,
     cacheOpen,
     popover,
     browsingCommands,
@@ -1351,22 +1423,105 @@ export function Shell({
     // Steering and follow-up carry text only in this cut, so a message with
     // chips waits rather than losing them.
     if (working && chips.length > 0) return
+    // The cache expiry choice, decided in the frame of the gesture and before
+    // anything is expanded, cleared or sent. Only a send that would start a
+    // turn can meet it: a live turn's cache is warm, and nothing the run
+    // delivers comes through here at all.
+    const prefix = session?.cachedPrefix
+    const at = Date.now()
+    if (!working && prefix !== undefined && prefixExpired(prefix, at)) {
+      setChoice({ sessionId: id, prefix, text, at })
+      return
+    }
+    sendText(id, text)
+  }
+
+  // Everything a send does once it is settled: expansion, the draft cleared,
+  // the echo, the turn. Named by session rather than by what is on screen,
+  // because the message that waited for a summary lands in the session that
+  // asked for it, active or not.
+  function sendText(id: SessionId, text: string): void {
+    const busy = railNow.current.sessions.find((one) => one.id === id)?.working === true
+    const held = attachments[id] ?? []
+    if (busy && held.length > 0) return
     expanded(id, text, (delivered) => {
       setDrafts((current) => ({ ...current, [id]: '' }))
       clearFailure(id)
-      if (working) {
+      if (busy) {
         // Nothing is echoed into the transcript: a queued message appears only
         // in the strip until the port says it was delivered.
         void port.steer(id, delivered).catch(report)
         return
       }
-      const images = chips.map((chip) => ({ mimeType: chip.mimeType, data: chip.data }))
+      const images = held.map((chip) => ({ mimeType: chip.mimeType, data: chip.data }))
       setAttachments((current) => ({ ...current, [id]: [] }))
       // What was sent stands in the transcript at once; the turn it starts
       // arrives as events.
       dispatch({ type: 'sent', sessionId: id, text: delivered, images })
       void port.prompt(id, delivered, images.length === 0 ? undefined : images).catch(report)
     })
+  }
+
+  // Door one. The send proceeds exactly as an ordinary send from this moment:
+  // if the session began working while the dialog was up, that is a steering
+  // message, and a live turn's cache is warm.
+  function sendAnyway(): void {
+    const asked = choice
+    if (asked === undefined) return
+    setChoice(undefined)
+    sendText(asked.sessionId, asked.text)
+  }
+
+  // Door two: a jump, so the session keeps its row, its title and its spend,
+  // and the whole old path stays in the tree. The typed message goes out the
+  // moment the summary lands.
+  function summarizeThenSend(): void {
+    const asked = choice
+    if (asked === undefined || asked.summarizing === true) return
+    const id = asked.sessionId
+    // The wait state in the frame the door was pressed (ADR 0010).
+    setChoice({ ...asked, summarizing: true })
+    clearFailure(id)
+    const token = (summarizeAsked.current += 1)
+
+    void (async () => {
+      try {
+        const tree = await port.sessionTree(id)
+        // Escape retired this gesture while the tree was being read: π has
+        // been asked for nothing, so nothing is left to stop.
+        if (summarizeAsked.current !== token) return
+        // Before the first message is where the whole current conversation
+        // gets summarized, which is the point of this door.
+        const ref = tree.path[0]
+        if (ref === undefined) {
+          throw new Error('There is nothing to summarize in this conversation yet.')
+        }
+        // The same per-session jump state the session tree's summarize uses,
+        // so π's retry narration and Escape reach this jump exactly as they
+        // reach one started there.
+        setJumps((current) => withJump(current, id, { kind: 'summarizing', ref }))
+        const outcome = await port.jump(id, ref, { summarize: true })
+        setChoice(undefined)
+        // The user stopped it: the leaf did not move, so the transcript, the
+        // composer and the draft stand exactly as they were.
+        if (outcome.cancelled) return
+        // The conversation stands somewhere else now, so the whole view is
+        // replaced by the path it stands on — whose first item is the summary
+        // π carried forward. The `editorText` a jump hands back is dropped
+        // here: the typed message is the one going out, and two copies of it
+        // would land.
+        const path = await port.transcript(id)
+        dispatch({ type: 'jumped', sessionId: id, items: path })
+        sendLatest.current(id, asked.text)
+      } catch (cause) {
+        // π's own retries are spent and nothing moved. The draft is untouched
+        // and the refusal reports where every refusal does.
+        setChoice(undefined)
+        report(cause, id)
+      } finally {
+        setJumps((current) => withoutJump(current, id))
+      }
+    })()
   }
 
   /** Option+Enter: a follow-up while working, and exactly Enter while idle. */
@@ -2122,8 +2277,11 @@ export function Shell({
           {/* A summarize keeps running behind a closed overlay, and a session
               that looks idle while it pays for a call is a wait nobody can see.
               The failure outlives the call, so it is read the moment the user
-              arrives, before they reopen anything. */}
-          {activeJump === undefined || treeShowing ? null : activeJump.kind === 'failed' ? (
+              arrives, before they reopen anything. One wait state at a time:
+              a summarize the cache expiry choice is showing is narrated there. */}
+          {activeJump === undefined ||
+          treeShowing ||
+          choiceShown ? null : activeJump.kind === 'failed' ? (
             <p className="failure" role="alert">
               {jumpNote(activeJump)}
             </p>
@@ -2203,7 +2361,7 @@ export function Shell({
         {/* The overlay region: one host for every overlay. It is here at all
             only while something is in it, and everything in it is anchored to
             it, so no overlay can reach the sidebar or either bar. */}
-        {occupied || question !== undefined ? (
+        {occupied || question !== undefined || choiceShown ? (
           <div className="region">
             {boardOpen ? (
               <BranchBoard
@@ -2373,6 +2531,27 @@ export function Shell({
                 onCancel={() => setQuestion(undefined)}
               />
             )}
+
+            {/* The choice a send raised, above whatever it was raised over,
+                and only ever on the session that raised it. */}
+            {choiceShown && choice !== undefined ? (
+              <CacheExpiryChoice
+                prefix={choice.prefix}
+                now={choice.at}
+                summarizing={choice.summarizing === true}
+                note={
+                  activeJump?.kind === 'retrying' || activeJump?.kind === 'cancelling'
+                    ? jumpNote(activeJump)
+                    : undefined
+                }
+                onSendAnyway={sendAnyway}
+                onSummarize={summarizeThenSend}
+                onDismiss={() => {
+                  setChoice(undefined)
+                  box.current?.focus()
+                }}
+              />
+            ) : null}
           </div>
         ) : null}
       </div>

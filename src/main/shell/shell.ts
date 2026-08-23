@@ -8,6 +8,7 @@ import type {
   AgentPort,
   AuthMethod,
   BashRunShare,
+  CachedPrefix,
   HistoryMatch,
   ImageAttachment,
   ModelId,
@@ -33,6 +34,7 @@ import type {
 import { displaySafeMessage } from '../agent/adapter-error'
 import type { Flavor } from '../agent/select-adapter'
 import type { CacheRecorder } from '../cache/ledger'
+import { retentionInForce } from '../cache/retention'
 import type { PanelModel } from '../panel/model'
 import type { ShellStore, StoredSession } from './store'
 
@@ -119,8 +121,14 @@ export function createShell({
       contextWindow: number
       cost?: number
       cacheMisses?: { count: number; dollars: number }
+      cachedPrefix?: CachedPrefix
     }
   >()
+  // The setting every request of this launch was sent under, stamped onto the
+  // prefix exactly as the ledger stamps it onto a miss. The ledger's own
+  // answer where there is a ledger, and the same module's answer where there
+  // is not, so nothing on screen can disagree with what was recorded.
+  const retention = cache?.retention ?? retentionInForce().retention
   // Folded from `queue_changed` exactly as usage is, so the strip renders from
   // the snapshot and survives both a session switch and a renderer reload.
   const queues = new Map<SessionId, QueueState>()
@@ -176,6 +184,9 @@ export function createShell({
         // Beside the usage rather than inside it: money and misses are two
         // counts of the same conversation, and neither vanishes on a jump.
         ...(reported?.cacheMisses === undefined ? {} : { cacheMisses: reported.cacheMisses }),
+        // Beside them for the same reason: what the provider still holds is a
+        // fact about the conversation, not about its token count.
+        ...(reported?.cachedPrefix === undefined ? {} : { cachedPrefix: reported.cachedPrefix }),
         ...(queued(queue) ? { queue } : {}),
         ...(tabs === undefined ? {} : { panel: tabs })
       }
@@ -717,7 +728,10 @@ export function createShell({
         usedTokens: event.usedTokens,
         contextWindow: event.contextWindow,
         ...(event.cost === undefined ? {} : { cost: event.cost }),
-        ...(event.cacheMisses === undefined ? {} : { cacheMisses: event.cacheMisses })
+        ...(event.cacheMisses === undefined ? {} : { cacheMisses: event.cacheMisses }),
+        ...(event.cachedPrefix === undefined
+          ? {}
+          : { cachedPrefix: { ...event.cachedPrefix, retention } })
       })
       emitState()
       return

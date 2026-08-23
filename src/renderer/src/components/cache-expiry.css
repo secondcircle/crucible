@@ -1,0 +1,216 @@
+/* The cache expiry choice, lifted from docs/design/mock-y-cache-expiry.html.
+   Every color is a token, and the ruling colour is amber (--warn) rather than
+   error red: in this app red means failure, and an expired cache is money. */
+
+.expirydialog {
+  /* The mock's width: two doors whose descriptions read as one line each. */
+  width: 540px;
+}
+
+/* The dialog holds focus so Enter and S land in it rather than in the
+   composer underneath, but it is a surface and not a control: the app's focus
+   ring around all 540px of it would be the loudest thing in a dialog whose
+   whole point is one number. The doors keep their own ring. */
+.expirydialog:focus,
+.expirydialog:focus-visible {
+  outline: none;
+}
+
+.ehead {
+  padding: 16px 20px 0;
+}
+
+.ehead h3 {
+  font-size: 14.5px;
+  font-weight: 650;
+}
+
+.ehead .esub {
+  font-size: 12.5px;
+  color: var(--dim);
+  margin-top: 5px;
+  line-height: 1.5;
+}
+
+/* ---------- the three facts ---------- */
+
+.efacts {
+  display: flex;
+  gap: 8px;
+  padding: 14px 20px 0;
+}
+
+.efact {
+  flex: 1;
+  background: var(--panel2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 9px 11px;
+}
+
+.efact .k {
+  display: block;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.09em;
+  color: var(--faint);
+}
+
+.efact b {
+  display: block;
+  margin-top: 3px;
+  font: 600 15px var(--mono);
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+
+.efact b.warn {
+  color: var(--warn);
+}
+
+/* ---------- the two doors ---------- */
+
+.edoors {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  padding: 16px 20px 0;
+}
+
+.edoor {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  text-align: left;
+  width: 100%;
+  background: var(--panel2);
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  padding: 11px 13px;
+  color: var(--ink);
+  font: inherit;
+}
+
+.edoor:hover {
+  border-color: var(--accent2);
+}
+
+/* Lit, not filled: the default door is named by its border, the way the
+   composer's chip is. */
+.edoor.primary {
+  border-color: var(--lit);
+}
+
+.edoor .eic {
+  flex: none;
+  width: 18px;
+  text-align: center;
+  color: var(--faint);
+  font-size: 13px;
+  margin-top: 1px;
+}
+
+.edoor.primary .eic {
+  color: var(--accent);
+}
+
+.edoor .etext {
+  flex: 1;
+  min-width: 0;
+}
+
+.edoor .et {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 13.5px;
+  font-weight: 600;
+}
+
+.edoor .ed {
+  display: block;
+  font-size: 12px;
+  color: var(--dim);
+  margin-top: 3px;
+  line-height: 1.45;
+}
+
+.edoor .eprice {
+  flex: none;
+  font: 12px var(--mono);
+  color: var(--warn);
+  margin-top: 1px;
+  font-variant-numeric: tabular-nums;
+}
+
+.edoor .eprice.good {
+  color: var(--ok);
+}
+
+/* ---------- the wait while the summary is written ---------- */
+
+.ework {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 14px 20px 16px;
+}
+
+.ework .ebar {
+  flex: 1;
+  height: 4px;
+  border-radius: 3px;
+  background: var(--panel2);
+  overflow: hidden;
+}
+
+/* Indeterminate on purpose: the wait is π's, and a bar that filled would be
+   claiming knowledge of it. */
+.ework .ebar i {
+  display: block;
+  height: 100%;
+  width: 38%;
+  background: var(--accent);
+  animation: eslide 1.6s ease-in-out infinite;
+}
+
+@keyframes eslide {
+  0% {
+    transform: translateX(-100%);
+  }
+
+  100% {
+    transform: translateX(300%);
+  }
+}
+
+.ework .eeta {
+  font: 12px var(--mono);
+  color: var(--dim);
+}
+
+/* ---------- the footer ---------- */
+
+.efoot {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 13px 20px 15px;
+  margin-top: 14px;
+  border-top: 1px solid var(--line);
+  font-size: 11.5px;
+  color: var(--faint);
+}
+
+.efoot .espacer {
+  flex: 1;
+}
+
+.expirydialog kbd {
+  font: 10.5px var(--mono);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 1px 5px;
+  color: var(--dim);
+  font-weight: 400;
+}
