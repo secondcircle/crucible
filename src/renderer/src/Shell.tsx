@@ -111,12 +111,11 @@ interface Choice {
   readonly text: string
   /** The instant of the gesture, which the idle figure is measured from. */
   readonly at: number
-  /** The summarize door was taken and π is writing the summary. */
+  // The summarize door was taken and π is writing the summary. A session has
+  // at most one of these up and the chain that owns its summarize is the one
+  // that put it there, so this flag is all a cleanup needs to tell the wait
+  // state apart from a choice still waiting on an answer.
   readonly summarizing?: boolean
-  // Which press of the door put this wait state up, so the chain that lands
-  // minutes later can tell its own dialog from whatever is on screen by then
-  // — another session's choice, or a later one of this session's.
-  readonly chain?: number
 }
 
 type Question =
@@ -299,12 +298,14 @@ export function Shell({
   const windowFocused = useRef(true)
   /** Sessions with a send under way, still waiting on its expansion. */
   const sending = useRef<Set<SessionId>>(new Set())
-  // Which press of the summarize door the live chain belongs to, counted per
-  // session because the chains are (ADR 0003). Escape retires that session's
-  // gesture by moving its count on, so a tree read that was already in flight
-  // cannot go on to ask π for a summary nobody wants — and retiring one in
-  // session B never abandons the summary session A is paying for.
-  const summarizeAsked = useRef<Record<SessionId, number>>({})
+  // Which press of the summarize door owns each session's summarize state:
+  // its wait dialog, its jump, and this stamp. Counted per session because
+  // the chains are (ADR 0003), and read by one predicate inside the chain, so
+  // no two of its cleanups can disagree about whose work they are taking
+  // down. Moving a session's count on is how a press is superseded — by
+  // Escape retiring the gesture, or by a second press taking the session over
+  // — and moving one session's never touches another's.
+  const summarizeChain = useRef<Record<SessionId, number>>({})
   // The send as of the latest render, for the one path that outlives its own
   // frame: a summarize-then-send delivers its message a minute after the key
   // was pressed, into whatever the session looks like by then.
@@ -994,9 +995,11 @@ export function Shell({
           return
         }
         // Nothing has been asked of π yet, so there is nothing to stop: the
-        // gesture is retired and the composer has the message, as typed.
-        summarizeAsked.current[choice.sessionId] =
-          (summarizeAsked.current[choice.sessionId] ?? 0) + 1
+        // gesture is retired and the composer has the message, as typed. The
+        // session's stamp moves on, which is what tells a chain still in its
+        // tree read that the summarize is no longer its own.
+        summarizeChain.current[choice.sessionId] =
+          (summarizeChain.current[choice.sessionId] ?? 0) + 1
         setChoice(undefined)
         box.current?.focus()
         return
@@ -1501,33 +1504,43 @@ export function Shell({
     const asked = choice
     if (asked === undefined || asked.summarizing === true) return
     const id = asked.sessionId
-    const token = (summarizeAsked.current[id] = (summarizeAsked.current[id] ?? 0) + 1)
-    // The wait state in the frame the door was pressed (ADR 0010), stamped
-    // with the press that put it there.
-    setChoice({ ...asked, summarizing: true, chain: token })
+    // The stamp, taken at the press: from here on this chain is the session's
+    // summarize chain, until something supersedes it.
+    const token = (summarizeChain.current[id] = (summarizeChain.current[id] ?? 0) + 1)
+    // Is this session's summarize state still this chain's? It stops being so
+    // the moment a second press of the door takes the session over, or Escape
+    // retires the gesture: both move the stamp on. This chain leaves three
+    // things behind it — a wait dialog, a jump indicator, the stamp — and
+    // every one of its cleanups asks this and nothing else, so no two of them
+    // can disagree about whose work they are taking down.
+    const owned = (): boolean => summarizeChain.current[id] === token
+
+    // The wait state in the frame the door was pressed (ADR 0010).
+    setChoice({ ...asked, summarizing: true })
     clearFailure(id)
-    // Set the moment this chain owns a jump, so the cleanup below takes off
-    // its own indicator and never one that belongs to somebody else's.
-    let started = false
 
     // This chain outlives its own screen on purpose (2.5.6: the work belongs
     // to the session that asked, not to what is being looked at), so by the
     // time it lands the dialog up may be one nobody asked it to touch — the
-    // choice another session raised and is reading its dollars off. It closes
-    // the wait state it put up, and nothing else; every other way out of a
-    // dialog is already somebody's gesture.
-    const closeOwnChoice = (): void => {
+    // choice another session raised and is reading its dollars off, or a
+    // later one of this session's. It closes the wait state it put up, and
+    // nothing else; every other way out of a dialog is already somebody's
+    // gesture.
+    const closeOwnWait = (): void => {
       setChoice((current) =>
-        current?.sessionId === id && current.chain === token ? undefined : current
+        current?.sessionId === id && current.summarizing === true && owned()
+          ? undefined
+          : current
       )
     }
 
     void (async () => {
       try {
         const tree = await port.sessionTree(id)
-        // Escape retired this gesture while the tree was being read: π has
-        // been asked for nothing, so nothing is left to stop.
-        if (summarizeAsked.current[id] !== token) return
+        // Escape retired this gesture while the tree was being read, or a
+        // second press took the session over: π has been asked for nothing, so
+        // nothing is left to stop.
+        if (!owned()) return
         // Before the first message is where the whole current conversation
         // gets summarized, which is the point of this door.
         const ref = tree.path[0]
@@ -1538,9 +1551,14 @@ export function Shell({
         // so π's retry narration and Escape reach this jump exactly as they
         // reach one started there.
         setJumps((current) => withJump(current, id, { kind: 'summarizing', ref }))
-        started = true
-        const outcome = await port.jump(id, ref, { summarize: true })
-        closeOwnChoice()
+        // The indicator comes down where the jump that raised it settles,
+        // however it settled — and only while the session's summarize is still
+        // this chain's. A later chain's jump is running in that one per-session
+        // slot otherwise, and Escape has to be able to reach it.
+        const outcome = await port.jump(id, ref, { summarize: true }).finally(() => {
+          if (owned()) setJumps((current) => withoutJump(current, id))
+        })
+        closeOwnWait()
         // The user stopped it: the leaf did not move, so the transcript, the
         // composer and the draft stand exactly as they were.
         if (outcome.cancelled) return
@@ -1551,18 +1569,15 @@ export function Shell({
         // would land.
         const path = await port.transcript(id)
         dispatch({ type: 'jumped', sessionId: id, items: path })
+        // The door was taken with these words in it, so they go out even if a
+        // later chain owns the session's summarize state by now: what was
+        // superseded is the cleanup, never the send.
         sendLatest.current(id, asked.text)
       } catch (cause) {
         // π's own retries are spent and nothing moved. The draft is untouched
         // and the refusal reports where every refusal does.
-        closeOwnChoice()
+        closeOwnWait()
         report(cause, id)
-      } finally {
-        // Escape can retire this gesture while the tree is being read. A
-        // summarize started from the session tree in that window is a
-        // different jump, and this chain asked π for nothing, so it takes
-        // nothing away.
-        if (started) setJumps((current) => withoutJump(current, id))
       }
     })()
   }
