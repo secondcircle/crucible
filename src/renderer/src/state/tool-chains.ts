@@ -1,5 +1,8 @@
+import { SKILL_TOOL, splitSkillSummary } from '../../../shared/agent/skill-tool'
 import { tokens } from '../labels'
 import type { ViewItem } from './shell-state'
+
+export { SKILL_TOOL, splitSkillSummary }
 
 // A derivation over the flat item list rather than a second shape the reducer
 // has to keep in step, so a restored transcript groups as the stream did.
@@ -12,21 +15,6 @@ export type LoneItem = Exclude<ViewItem, { kind: 'tool' }>
 export interface ToolCount {
   readonly name: string
   readonly count: number
-}
-
-/** The tool name a skill read is displayed under, as the port sends it. */
-export const SKILL_TOOL = 'skill'
-
-// The port sends a supporting file as the skill's name, ` · `, then the path
-// inside the skill, and both the head's count and the row's faint tail turn on
-// that one format.
-export function splitSkillSummary(summary: string): {
-  readonly skill: string
-  readonly within?: string
-} {
-  const at = summary.indexOf(' · ')
-  if (at === -1) return { skill: summary }
-  return { skill: summary.slice(0, at), within: summary.slice(at + ' · '.length) }
 }
 
 export interface ToolChain {

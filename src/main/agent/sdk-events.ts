@@ -5,7 +5,10 @@ import type { AdapterEvent } from '../../shared/agent/adapter'
 import type { SessionId, TurnId } from '../../shared/agent/port'
 // Spelled with its extension so plain Node can load this module: its ESM
 // resolver does no extension guessing.
+import { SKILL_TOOL } from '../../shared/agent/skill-tool.ts'
 import { displaySafeMessage } from './adapter-error.ts'
+
+export { SKILL_TOOL }
 
 // Where no π SDK type is allowed past: the SDK is imported for its types only,
 // and anything not named below is dropped rather than guessed at.
@@ -69,9 +72,6 @@ export function displayToolCall(
     summary: best.within === '' ? best.skill.name : `${best.skill.name} · ${best.within}`
   }
 }
-
-/** The tool name a skill read is displayed under. */
-export const SKILL_TOOL = 'skill'
 
 // A skill that is a loose `.md` at an origin root claims only that file: its
 // directory is the origin, full of other people's skills.
