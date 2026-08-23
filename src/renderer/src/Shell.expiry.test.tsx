@@ -538,6 +538,54 @@ describe('the choice belongs to one session', () => {
     expect(waiting()).not.toBeNull()
   })
 
+  it('still cancels the second summary after the first one landed', async () => {
+    const port = await mount(twoSessions('expired'))
+    port.holdJump = true
+    await type('carry on in A')
+    await press('s')
+
+    // Away and back, a second send and its door two: two summaries in flight
+    // in one session, the second one's wait state on screen.
+    await act(async () => {
+      fireEvent.click(sessionRows()[1] as HTMLElement)
+    })
+    await settled()
+    await act(async () => {
+      fireEvent.click(sessionRows()[0] as HTMLElement)
+    })
+    await settled()
+    await type('and one more thing')
+    await press('s')
+
+    // The first summary lands under the second one's wait state.
+    port.transcripts.set('s1', [
+      { kind: 'summary', text: 'Carried forward: the branch was summarized.' }
+    ])
+    await act(async () => {
+      port.settleJump('jumped')
+    })
+    await settled()
+    expect(waiting()).not.toBeNull()
+
+    // The wait state's footer says "cancel — the conversation is left exactly
+    // as it was", so Escape here must stop the summary π is still writing,
+    // exactly as it does when only one chain ever ran.
+    await escape()
+    expect(port.calls).toContainEqual({ op: 'cancel', args: ['s1'] })
+
+    await act(async () => {
+      port.settleJump('cancelled')
+    })
+    await settled()
+
+    // The escaped message was never sent and is still in the composer.
+    expect(port.calls).not.toContainEqual({
+      op: 'prompt',
+      args: ['s1', 'and one more thing']
+    })
+    expect(composer()).toHaveValue('and one more thing')
+  })
+
   it('lets a summary another session started run on when Escape retires this one', async () => {
     const port = await mount(twoSessions('expired'))
     port.holdTree = true
