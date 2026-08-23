@@ -6,7 +6,7 @@ import type { RunRecord, WorkflowRunId } from '../../shared/workflows/run'
 // The run record outlives the run: every record ever written stays readable,
 // which is what lets the global runs view show finished work across
 // launches. Everything lives under Crucible's own state directory — never
-// the repository, and never anything of π's (ADR 0015).
+// the repository, and never anything of π's.
 //
 // Layout: <root>/<runId>/run.json, artifacts/, transcripts/<node>.json.
 

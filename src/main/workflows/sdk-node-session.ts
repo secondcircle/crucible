@@ -28,8 +28,8 @@ import type {
 
 // A node is a fresh π session with two injected tools and no interactive
 // user: in-memory session and settings managers, so nothing of π's state is
-// read or written (ADR 0015), and a full prompt override composed of the
-// node's role and the standing prompt (ADR 0012).
+// read or written, and a full prompt override composed of the node's role
+// and the standing prompt.
 
 type Sdk = typeof import('@earendil-works/pi-coding-agent')
 
@@ -178,7 +178,7 @@ interface CacheWatch extends CacheMissTrackerOptions {
 function wrap(session: AgentSession, cache: CacheWatch): NodeSession {
   const activityListeners = new Set<(now: string | undefined) => void>()
   const inflight = new Map<string, string>()
-  const retention = retentionInForce()
+  const { retention } = retentionInForce()
 
   /** Rounded to a hundredth of a cent, so no dollar figure carries a tail. */
   const round = (dollars: number): number => Math.round(dollars * 10_000) / 10_000

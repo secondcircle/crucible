@@ -283,6 +283,25 @@ describe('sending a command', () => {
     ])
   })
 
+  // The composer stays live for the whole of the expansion's round trip, so
+  // what it holds when the send lands may be words that were never sent.
+  it('empties the composer of the message it sent and of nothing typed after it', async () => {
+    const { port, commands } = await shell()
+    commands.holdExpansion = true
+
+    await type('/align the queue')
+    await press('Enter')
+    // Still waiting on the expansion, and the user carries on writing.
+    await type('/align the queue, and the strip under it')
+    await act(async () => {
+      commands.settleExpansion()
+    })
+    await settled()
+
+    expect(sent(port, 'prompt')).toEqual(['s1', 'Interview me about the queue until we agree.'])
+    expect(box()).toHaveValue('/align the queue, and the strip under it')
+  })
+
   it('sends the draft on the next Enter after an expansion was refused', async () => {
     const gone: ScriptedCommand = {
       name: 'gone',

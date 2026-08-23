@@ -29,7 +29,9 @@ export function fakeCacheHealth(over: Partial<CacheHealth> = {}): CacheHealth {
     dollars: 0,
     since: '2026-08-19T15:04:00.000Z',
     ledgerPath: FAKE_LEDGER_PATH,
-    retention: '5m',
+    // What a launch that carries no override runs on: Crucible's own hour.
+    retention: '1h',
+    retentionSource: 'crucible',
     ...over
   }
 }

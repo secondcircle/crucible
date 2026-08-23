@@ -2,9 +2,9 @@ import { join } from 'node:path'
 
 // The cache ledger is Crucible's alone and lives directly under Crucible's own
 // state directory, which is already flavor-scoped: installed, dev, and a
-// per-worktree directory for runs. Nothing under `.pi` is read or written
-// (ADR 0015), and there is one file per installation rather than one per
-// workspace, because the pattern being hunted crosses workspaces (ADR 0019).
+// per-worktree directory for runs. Nothing under `.pi` is read or written,
+// and there is one file per installation rather than one per workspace,
+// because the pattern being hunted crosses workspaces.
 
 export const LEDGER_FILE_NAME = 'cache-misses.jsonl'
 

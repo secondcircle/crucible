@@ -5,6 +5,7 @@ import type { SessionId } from '../shared/agent/port'
 import { type AppUpdateChannel, serveAppUpdateChannel } from './app-update/channel'
 import { type CacheChannel, serveCacheChannel } from './cache/channel'
 import { createCacheLedger } from './cache/ledger'
+import { retentionInForce } from './cache/retention'
 import { useCacheLedgerDir } from './cache/paths'
 import { createAppUpdateService, stillAppUpdateService } from './app-update/service'
 import { decideFlavor, selectAdapter } from './agent/select-adapter'
@@ -76,6 +77,17 @@ log.append({
   dev: Boolean(process.env.ELECTRON_RENDERER_URL)
 })
 
+// Before the ledger, the adapter and the workflow engine: every agent this
+// launch starts inherits `PI_CACHE_RETENTION`, so the hour has to be in the
+// environment before the first of them exists.
+const retention = retentionInForce()
+log.append({
+  source: 'main',
+  event: 'cache_retention',
+  retention: retention.retention,
+  decidedBy: retention.source
+})
+
 // Crucible's own state file in Crucible's own directory: nothing of π's is read
 // or written here.
 const store = createShellStore(join(app.getPath('userData'), 'shell-state.json'), (cause) => {
@@ -107,7 +119,7 @@ const panel = createPanelModel({ persistence: storePanelPersistence(store) })
 
 // The cache ledger, before anything that could observe a miss: one file per
 // installation, directly under Crucible's own state directory, flavor-scoped
-// like everything there and never pruned (ADR 0015, ADR 0019). A fake-flavor
+// like everything there and never pruned. A fake-flavor
 // launch writes to the dev ledger, which is what makes the whole loop
 // drivable by an agent.
 useCacheLedgerDir(app.getPath('userData'))
@@ -120,6 +132,17 @@ const cache = createCacheLedger({
     })
   }
 })
+
+// One store for the launch, whatever is on screen: two windows, two workspaces
+// or a dozen sessions never multiply the requests. The cache is Crucible's own
+// and lives under Crucible's state, so it follows the dev/installed split and
+// touches nothing of π's. Before the engine, which asks it what a node may
+// spend on.
+useQuotaCacheDir(app.getPath('userData'))
+const quota = selectQuotaService(
+  decideFlavor(process.env.CRUCIBLE_AGENT, app.isPackaged).flavor,
+  log
+)
 
 // The workflow engine exists before the adapter, because the run tools ride
 // every composed agent. A run speaks by messaging its orchestrator session,
@@ -135,6 +158,7 @@ const workflowRuns = selectWorkflowRunService(
     appPath: app.getAppPath(),
     stateDir: app.getPath('userData'),
     cache,
+    quota,
     ...(cannedWorkspacePath === undefined ? {} : { cannedWorkspacePath }),
     // The renderer gets no path-opening capability of its own; Reveal in the
     // artifact reader asks the service, which asks this.
@@ -172,12 +196,6 @@ const workspace = selectWorkspaceService(flavor, log, (url: string) => {
   void electronShell.openExternal(url)
 })
 const commands = selectCommandService(flavor, log, app.getAppPath())
-// One store for the launch, whatever is on screen: two windows, two workspaces
-// or a dozen sessions never multiply the requests. The cache is Crucible's own
-// and lives under Crucible's state, so it follows the dev/installed split and
-// touches nothing of π's (ADR 0015).
-useQuotaCacheDir(app.getPath('userData'))
-const quota = selectQuotaService(flavor, log)
 
 // Installed only: install-stable replaces the bundle in place, so watching
 // our own stamp file is how the running app learns a newer build is waiting.
@@ -236,7 +254,7 @@ const shell = withLogging(
 )
 
 // A run's message is a follow-up: queued while the orchestrator works,
-// prompted the moment it is idle — never lost, never refused (ADR 0017).
+// prompted the moment it is idle — never lost, never refused.
 orchestratorInbox = (sessionId, text) => {
   void shell.followUp(sessionId, text).catch((cause: unknown) => {
     log.append({

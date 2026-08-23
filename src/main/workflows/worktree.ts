@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { setUpWorktree } from '../workspace/worktree-setup'
 
 // Run worktrees are plain git on purpose: a run's base is a commit named at
-// kickoff (ADR 0016), and the repo worktree script of ADR 0014 takes no base
+// kickoff, and the repo worktree script takes no base
 // argument — it exists to provision a session's worktree from the checkout's
 // HEAD. Same directory family as session worktrees, same self-ignoring
 // .gitignore, and nothing here ever removes a worktree or a branch.
@@ -55,7 +55,7 @@ export async function createRunWorktree(request: RunWorktreeRequest): Promise<Ru
         ['-C', workspacePath, 'worktree', 'add', '-b', branch, path, baseCommit]
       : // Continue the predecessor's branch, whose tip is the named commit.
         // Forced, because the branch is still checked out in the
-        // predecessor's worktree — kept forever by ADR 0014 — and git would
+        // predecessor's worktree — kept forever — and git would
         // otherwise refuse the second checkout. The predecessor is done;
         // nothing works there again.
         ['-C', workspacePath, 'worktree', 'add', '--force', path, branch]

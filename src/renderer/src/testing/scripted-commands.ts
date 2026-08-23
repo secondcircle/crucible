@@ -13,6 +13,10 @@ export interface ScriptedCommands extends CommandService {
   readonly calls: ReadonlyArray<{ readonly op: string; readonly args: readonly unknown[] }>
   /** What `list` answers with; a test may change it between openings. */
   commands: readonly ScriptedCommand[]
+  // Held open where a test drives what happens while an expansion is in
+  // flight: the promise settles when the test says so.
+  holdExpansion?: boolean
+  settleExpansion(): void
 }
 
 /** Enough of a set that badges, hints and filtering all have something to show. */
@@ -44,6 +48,7 @@ export function createScriptedCommands(
   commands: readonly ScriptedCommand[] = SCRIPTED_COMMANDS
 ): ScriptedCommands {
   const calls: Array<{ op: string; args: readonly unknown[] }> = []
+  let held: (() => void) | undefined
 
   const service: ScriptedCommands = {
     calls,
@@ -63,22 +68,36 @@ export function createScriptedCommands(
       )
     },
 
+    settleExpansion(): void {
+      const settle = held
+      held = undefined
+      settle?.()
+    },
+
     expand(workspacePath: string, draft: string): Promise<Expansion> {
       calls.push({ op: 'expand', args: [workspacePath, draft] })
-      const invocation = splitInvocation(draft)
-      if (invocation === undefined) return Promise.resolve({ kind: 'plain' })
-      const found = service.commands.find((command) => command.name === invocation.name)
-      if (found === undefined) return Promise.resolve({ kind: 'plain' })
-      // A command whose file has gone since the popover listed it: the only
-      // thing `expand` ever rejects for.
-      if (found.body === undefined) {
-        return Promise.reject(new Error(`The file behind /${found.name} could not be read.`))
+      const answer = (): Promise<Expansion> => {
+        const invocation = splitInvocation(draft)
+        if (invocation === undefined) return Promise.resolve({ kind: 'plain' })
+        const found = service.commands.find((command) => command.name === invocation.name)
+        if (found === undefined) return Promise.resolve({ kind: 'plain' })
+        // A command whose file has gone since the popover listed it: the only
+        // thing `expand` ever rejects for.
+        if (found.body === undefined) {
+          return Promise.reject(new Error(`The file behind /${found.name} could not be read.`))
+        }
+        return Promise.resolve({
+          kind: 'command',
+          name: found.name,
+          origin: found.origin,
+          text: expandBody({ body: found.body }, invocation.args)
+        })
       }
-      return Promise.resolve({
-        kind: 'command',
-        name: found.name,
-        origin: found.origin,
-        text: expandBody({ body: found.body }, invocation.args)
+      if (service.holdExpansion !== true) return answer()
+      return new Promise<Expansion>((resolve, reject) => {
+        held = () => {
+          answer().then(resolve, reject)
+        }
       })
     }
   }

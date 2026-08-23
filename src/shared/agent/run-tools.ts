@@ -4,7 +4,7 @@ import type { SessionId } from './port'
 // tools cannot drift into meaning different things in the two flavors. The
 // descriptions carry the orchestration teaching too: a description rides the
 // request's tools parameter, the one channel Crucible's system prompt does
-// not replace (ADR 0012).
+// not replace.
 
 export type RunToolName =
   | 'crucible_workflows'

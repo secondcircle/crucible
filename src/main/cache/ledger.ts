@@ -4,11 +4,11 @@ import type { CacheMissChanges } from '../../shared/agent/adapter'
 import type { CacheRetention, ThinkingLevel, Unsubscribe } from '../../shared/agent/port'
 import type { CacheHealth, CacheHealthListener, CacheService } from '../../shared/cache/service'
 import { cacheLedgerPath } from './paths'
-import { retentionInForce } from './retention'
+import { retentionInForce, type RetentionDecision } from './retention'
 
 // The cache ledger: one append-only JSONL file recording every cache miss
 // Crucible observes, plus a line for each counter reset. Permanent and never
-// pruned (ADR 0019) — the questions it answers are longitudinal, and a miss
+// pruned — the questions it answers are longitudinal, and a miss
 // filtered out as uninteresting is a hole in exactly the evidence being
 // reasoned over. An agent reads this file, so the line schema below is a
 // product contract rather than an implementation detail.
@@ -65,7 +65,9 @@ export interface CacheLedgerOptions {
   // The state directory the file lives directly under. Absent means the one
   // main configured, and an unconfigured launch throws rather than guessing.
   readonly dir?: string
-  readonly retention?: CacheRetention
+  // Overridden by tests that record against a setting of their own; absent
+  // means the decision the retention module made for this launch.
+  readonly retention?: RetentionDecision
   /** A write nobody is waiting on still deserves a line in the run log. */
   readonly onFailure?: (cause: unknown) => void
   /** Overridden by tests that need a reset line at an instant of their own. */
@@ -90,10 +92,11 @@ function round(dollars: number): number {
 
 export function createCacheLedger(options: CacheLedgerOptions = {}): CacheLedger {
   const path = cacheLedgerPath(options.dir)
-  const retention = options.retention ?? retentionInForce()
+  const decision = options.retention ?? retentionInForce()
+  const { retention } = decision
   const now = options.clock ?? ((): string => new Date().toISOString())
   const listeners = new Set<CacheHealthListener>()
-  // Sessions run concurrently (ADR 0003), so appends are serialized here: one
+  // Sessions run concurrently, so appends are serialized here: one
   // complete JSON line per write. Different flavors write different files, so
   // there is no cross-process contention to solve.
   let queue: Promise<unknown> = Promise.resolve()
@@ -170,7 +173,8 @@ export function createCacheLedger(options: CacheLedgerOptions = {}): CacheLedger
       // is honestly the oldest miss still in it.
       since: since ?? earliestMiss ?? now(),
       ledgerPath: path,
-      retention
+      retention,
+      retentionSource: decision.source
     }
   }
 

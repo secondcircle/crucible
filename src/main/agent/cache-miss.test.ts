@@ -222,3 +222,69 @@ describe('scanning a whole conversation', () => {
     expect(next?.gapMs).toBe(5 * MINUTE)
   })
 })
+
+// The same state, read the other way round: not what the last message paid,
+// but what the provider is holding now and what re-billing it would cost.
+describe('what the conversation has cached', () => {
+  it('is nothing until a request has both billed a prompt and cached one', () => {
+    const tracker = createCacheMissTracker()
+    expect(tracker.cachedPrefix()).toBeUndefined()
+
+    // A provider that reports no caching at all is holding nothing, so a
+    // later send has nothing to lose.
+    tracker.observe(message({ input: 80_000 }))
+    expect(tracker.cachedPrefix()).toBeUndefined()
+
+    tracker.observe(message({ input: 10_000, cacheWrite: 90_000, at: 5 * MINUTE }))
+    expect(tracker.cachedPrefix()).toMatchObject({ at: 5 * MINUTE, tokens: 100_000 })
+  })
+
+  it('prices the re-bill exactly as a miss on the same prompt is priced', () => {
+    const tracker = createCacheMissTracker()
+    // 20k input at $15/M and 80k cache writes at $18.75/M: $18/M paid,
+    // against $1.50/M the cache read cost.
+    tracker.observe(
+      message({
+        input: 20_000,
+        cacheWrite: 80_000,
+        cacheRead: 10_000,
+        costInput: 0.3,
+        costCacheWrite: 1.5,
+        costCacheRead: 0.015
+      })
+    )
+
+    const prefix = tracker.cachedPrefix()
+    expect(prefix?.tokens).toBe(110_000)
+    // Rounded to a hundredth of a cent, the way every dollar figure here is.
+    expect(prefix?.rebillDollars).toBeCloseTo(110_000 * (18 - 1.5) * 1e-6, 4)
+  })
+
+  it('goes with the context a compaction or a branch summary replaced', () => {
+    const tracker = createCacheMissTracker()
+    tracker.observe(message({ input: 10_000, cacheWrite: 90_000 }))
+    expect(tracker.cachedPrefix()).toBeDefined()
+
+    tracker.contextReset()
+    // What was cached is not what would be sent now, so the next billed
+    // request establishes the new, small prefix.
+    expect(tracker.cachedPrefix()).toBeUndefined()
+
+    tracker.observe(message({ input: 500, cacheWrite: 1_500, at: MINUTE }))
+    expect(tracker.cachedPrefix()).toMatchObject({ tokens: 2_000 })
+  })
+
+  it('is what a restored conversation reports before anyone prompts it', () => {
+    const scan = scanCacheMisses([
+      assistant(message({ input: 10_000, cacheWrite: 90_000, costCacheWrite: 1.5, at: 0 })),
+      assistant(message({ input: 100_000, costInput: 1.5, at: 5 * MINUTE }))
+    ])
+
+    // Read off the stored messages at bind, so a session reopened hours later
+    // carries the fact before a send can meet it.
+    expect(scan.tracker.cachedPrefix()).toMatchObject({
+      at: 5 * MINUTE,
+      tokens: 100_000
+    })
+  })
+})

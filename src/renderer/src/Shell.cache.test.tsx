@@ -40,13 +40,16 @@ function miss(over: Partial<CacheMissFacts> = {}): CacheMissFacts {
   }
 }
 
-function health(over: { count?: number; dollars?: number; retention?: '5m' | '1h' } = {}) {
+function health(
+  over: { count?: number; dollars?: number; retention?: '5m' | '1h'; source?: 'crucible' | 'env' } = {}
+) {
   return fakeCacheHealth({
     count: over.count ?? 9,
     dollars: over.dollars ?? 2.8,
     since: SINCE.toISOString(),
     ledgerPath: LEDGER,
-    ...(over.retention === undefined ? {} : { retention: over.retention })
+    ...(over.retention === undefined ? {} : { retention: over.retention }),
+    ...(over.source === undefined ? {} : { retentionSource: over.source })
   })
 }
 
@@ -238,16 +241,17 @@ describe('the cache health view', () => {
     const path = dialog.querySelector('.cpath code')
     expect(path?.textContent).toBe('~/Library/Application Support/Crucible/cache-misses.jsonl')
     expect(path?.getAttribute('title')).toBe(LEDGER)
+    // The line names whoever actually decided: Crucible's own hour, here.
     expect(dialog.querySelector('.cretention')?.textContent).toBe(
-      'Retention in force · 5 min (π default)'
+      'Retention in force · 1 hour (Crucible default)'
     )
     // No list of misses: the ledger's reader is an agent.
     expect(dialog.textContent).not.toContain('118k')
   })
 
-  it('names the retention when the hour is in force', async () => {
+  it('names the environment when the environment overrode', async () => {
     const { container } = await mount({
-      cache: createFakeCacheService(health({ retention: '1h' }))
+      cache: createFakeCacheService(health({ retention: '1h', source: 'env' }))
     })
 
     await openDialog(container)
@@ -255,6 +259,17 @@ describe('the cache health view', () => {
     expect(screen.getByRole('dialog').querySelector('.cretention')?.textContent).toBe(
       'Retention in force · 1 hour (PI_CACHE_RETENTION=long)'
     )
+
+    const off = await mount({
+      cache: createFakeCacheService(health({ retention: '5m', source: 'env' }))
+    })
+    await openDialog(off.container)
+
+    // The only way back to π's five minutes, and the line says who asked for
+    // it rather than calling it a default.
+    expect(
+      [...screen.getAllByRole('dialog')].at(-1)?.querySelector('.cretention')?.textContent
+    ).toBe('Retention in force · 5 min (PI_CACHE_RETENTION override)')
   })
 
   it('says it copied the path in the frame the click lands', async () => {
@@ -290,7 +305,7 @@ describe('the cache health view', () => {
       fireEvent.click(screen.getByRole('button', { name: 'Reset counter' }))
     })
 
-    // Acknowledged before the ledger has answered (ADR 0010).
+    // Acknowledged before the ledger has answered.
     const busy = screen.getByRole('button', { name: 'Resetting…' })
     expect((busy as HTMLButtonElement).disabled).toBe(true)
     // No confirmation dialog: reset deletes nothing, so it is deliberately cheap.
@@ -337,7 +352,7 @@ describe('the cache health view', () => {
     // Everything the agent needs to begin: the file, the boundary, the setting.
     expect(text).toContain(LEDGER)
     expect(text).toContain(SINCE.toISOString())
-    expect(text).toContain('5 minutes (π default)')
+    expect(text).toContain('1 hour (Crucible default)')
     expect(text).toContain('after the last reset')
     expect(text).toContain('Judge nothing away')
     // The prompt echoes in the transcript, as any prompt does.

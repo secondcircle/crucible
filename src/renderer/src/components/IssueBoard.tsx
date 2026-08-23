@@ -109,7 +109,7 @@ export function IssueBoard({
   const [now, setNow] = useState(() => Date.now())
   // What the last keystroke did, when it did nothing visible on its own. The
   // footer is where this board answers its keys, so a refusal answers there
-  // too rather than passing in silence (ADR 0010).
+  // too rather than passing in silence.
   const [said, setSaid] = useState<string | undefined>(undefined)
   const overlay = useRef<HTMLElement>(null)
 

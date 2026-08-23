@@ -108,6 +108,11 @@ export interface SessionState {
   // The whole conversation's misses, every branch of it, exactly as `usage`
   // counts money: neither vanishes on a jump. Absent until genuinely known.
   readonly cacheMisses?: { readonly count: number; readonly dollars: number }
+  // What the provider is still holding for this conversation, reported at the
+  // same moments the usage is. Absent when nothing is cached: a fresh
+  // conversation, no billed request yet, or a provider that has never
+  // reported cache activity.
+  readonly cachedPrefix?: CachedPrefix
   /** Absent when nothing is queued. */
   readonly queue?: QueueState
   // The context panel's tabs, folded in exactly as the queue is. Absent when
@@ -121,6 +126,23 @@ export type ChangeFact = 'yes' | 'no' | 'unknown'
 
 /** π's prompt retention: five minutes by default, an hour with PI_CACHE_RETENTION=long. */
 export type CacheRetention = '5m' | '1h'
+
+/** Who settled the retention in force: Crucible's own default, or the env var. */
+export type RetentionSource = 'crucible' | 'env'
+
+// The prefix a conversation has cached, and what sending against an expired
+// one re-bills. What the cache expiry choice states, and the only fact its
+// trigger reads.
+export interface CachedPrefix {
+  /** ISO of the conversation's last billed request. */
+  readonly at: string
+  /** Prompt tokens that request paid for — what an expired send re-bills. */
+  readonly tokens: number
+  /** Estimated dollars to re-bill them. An estimate, never a promise. */
+  readonly rebillDollars: number
+  /** The retention governing how long the provider keeps this prefix. */
+  readonly retention: CacheRetention
+}
 
 // One miss as every surface shows it: facts, never a cause. Crucible records
 // what it observed and names no culprit.

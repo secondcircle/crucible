@@ -1,4 +1,9 @@
-import type { CacheMissFacts, CacheRetention, ChangeFact } from '../../../shared/agent/port'
+import type {
+  CacheMissFacts,
+  CacheRetention,
+  ChangeFact,
+  RetentionSource
+} from '../../../shared/agent/port'
 
 // The cache surfaces' display formats, in one place so the strip, the dialog,
 // the badge and the seam cannot drift into four spellings of one fact.
@@ -93,9 +98,38 @@ export function retentionText(retention: CacheRetention): string {
   return retention === '1h' ? '1 hour' : '5 min'
 }
 
-/** The dialog's line: the setting, and where it came from. */
-export function retentionSource(retention: CacheRetention): string {
-  return retention === '1h' ? 'PI_CACHE_RETENTION=long' : 'π default'
+// Where the setting came from, named as whoever actually decided: Crucible's
+// own default, or the environment variable when it overrode.
+export function retentionSource(
+  retention: CacheRetention,
+  source: RetentionSource
+): string {
+  if (source === 'crucible') return 'Crucible default'
+  return retention === '1h' ? 'PI_CACHE_RETENTION=long' : 'PI_CACHE_RETENTION override'
+}
+
+// How long a conversation has been sitting, in the two largest units that
+// still say something: `47m`, `2h 13m`, `1d 3h`. The cache expiry choice's
+// first fact, and the one the person recognizes as their own afternoon.
+export function idleText(idleMs: number): string {
+  const idle = Math.max(0, idleMs)
+  if (idle < MINUTE) return `${Math.floor(idle / 1000)}s`
+  if (idle < HOUR) return `${Math.floor(idle / MINUTE)}m`
+  if (idle < DAY) {
+    const hours = Math.floor(idle / HOUR)
+    const minutes = Math.floor((idle - hours * HOUR) / MINUTE)
+    return minutes === 0 ? `${hours}h` : `${hours}h ${minutes}m`
+  }
+  const days = Math.floor(idle / DAY)
+  const hours = Math.floor((idle - days * DAY) / HOUR)
+  return hours === 0 ? `${days}d` : `${days}d ${hours}h`
+}
+
+// An estimated re-bill, always to two decimals and never rounded away: a
+// two-cent break still shows its two cents, because the number is the whole
+// reason the dialog is worth interrupting for.
+export function rebillText(dollars: number): string {
+  return `$${Math.max(0, dollars).toFixed(2)}`
 }
 
 // An unknown fact is omitted rather than guessed: honest data holds, and a

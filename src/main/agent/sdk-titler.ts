@@ -27,7 +27,7 @@ const INPUT_LIMIT = 4_000
 // and without it the titler would read an almost empty session.
 //
 // A run's messages arrive in the user's role because prompting an agent is
-// the only voice a run has (ADR 0017), but nobody typed them and they are
+// the only voice a run has, but nobody typed them and they are
 // status, not subject. Left in, they take over the name of any session short
 // enough for a few of them to be most of it — the sidebar ends up reading
 // "Crucible run fk139 completed" instead of the work the human came for.
