@@ -218,9 +218,13 @@ _Avoid_: velocity, burn rate, forecast, projection line.
 
 **Needs you**:
 The state of a session whose turn ended, or errored, while the user was not
-looking at it — marked in the sidebar until the user lands on that session,
-and walked by Tab. The branch board's count of branches and pull requests is a
-separate thing, spoken of as the board's need-you count.
+looking at it and nothing was working on the user's behalf — marked in the
+sidebar until the user lands on that session, and walked by Tab. A session
+whose own run is working has something working on its behalf, so its turn
+ending is not news; a run that stopped and cannot move without the user is not
+working, and the turn carrying that news marks. The branch board's count of
+branches and pull requests is a separate thing, spoken of as the board's
+need-you count.
 _Avoid_: unread, alert, attention flag, notification (the OS banner is one
 way a needs-you state is announced, not the state itself).
 

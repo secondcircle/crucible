@@ -74,7 +74,7 @@ import {
 } from './state/jumps'
 import {
   askingCount,
-  finishedUnwatched,
+  finishedAsking,
   forgetGone,
   nextAsking,
   withMark,
@@ -314,6 +314,10 @@ export function Shell({
   const cancelChoice = useRef<((chose: 'cancelled' | 'kept') => void) | undefined>(undefined)
   /** The engine's records, whole on every event. */
   const [runsSnapshot, setRunsSnapshot] = useState<RunsSnapshot | undefined>(undefined)
+  // A ref, not the state above: the needs-you verdict is taken inside an event,
+  // and written where the snapshot arrives rather than in an effect so a turn
+  // ending in the same batch is judged on the newer record.
+  const runsNow = useRef<readonly RunRecord[]>([])
   // Lives here rather than in the run view because Escape unwinds one surface
   // at a time and this is where that ladder is; the reader is a step of it,
   // above the run occupying the region.
@@ -443,17 +447,21 @@ export function Shell({
     setToast({ sessionId: owner ?? railNow.current.activeSessionId, text })
   }, [])
 
-  // A turn ended in a session nobody was watching, so that session needs the
-  // user. The mark is the document's; whether it also leaves the window is
-  // main's call, because main is what knows whether this window has focus.
+  // The rule itself lives in the needs-you module; this only applies it. Whether
+  // the mark also leaves the window is main's call, because main is what knows
+  // whether this window has focus.
   const finished = useCallback(
-    (sessionId: SessionId): void => {
+    (sessionId: SessionId, outcome: 'ended' | 'errored'): void => {
       const rail = railNow.current
-      const unwatched = finishedUnwatched(sessionId, {
-        activeSessionId: rail.activeSessionId,
-        windowFocused: windowFocused.current
-      })
-      if (!unwatched) return
+      const asking = finishedAsking(
+        { sessionId, outcome },
+        {
+          activeSessionId: rail.activeSessionId,
+          windowFocused: windowFocused.current,
+          runs: runsNow.current
+        }
+      )
+      if (!asking) return
       setMarks((current) => withMark(current, sessionId))
       if (needsYouService === undefined) return
       const done = rail.sessions.find((candidate) => candidate.id === sessionId)
@@ -698,13 +706,17 @@ export function Shell({
   // arrives here too when main intercepted it before the menu could.
   useEffect(() => {
     if (workflowRuns === undefined) return
+    const take = (taken: RunsSnapshot): void => {
+      runsNow.current = taken.runs
+      setRunsSnapshot(taken)
+    }
     const stop = workflowRuns.onEvent((event) => {
-      if (event.type === 'runs') setRunsSnapshot(event.snapshot)
+      if (event.type === 'runs') take(event.snapshot)
       if (event.type === 'toggle-overview') toggleRuns()
     })
     void workflowRuns
       .snapshot()
-      .then(setRunsSnapshot)
+      .then(take)
       .catch(() => {})
     return stop
   }, [workflowRuns, toggleRuns])
@@ -779,7 +791,7 @@ export function Shell({
       // user stopped with Escape: that one is already known about, and marking
       // it would leave something to go and clear after every deliberate stop.
       if (event.type === 'turn_ended' || event.type === 'turn_error') {
-        finished(event.sessionId)
+        finished(event.sessionId, event.type === 'turn_error' ? 'errored' : 'ended')
       }
     })
     void port

@@ -199,8 +199,10 @@ describe('the one slot, and who owns it', () => {
     expect(nameOf(RUNNING)).toBe(`${RUNNING} (working, run working)`)
   })
 
+  // Parked on an unanswered check-in, because a run still working would hush
+  // the turn and leave no needs-you state to win the slot.
   it('gives it to needs-you, which outranks a run', async () => {
-    const { port } = await rail([runOf({})])
+    const { port } = await rail([runOf({ waiting: true })])
 
     await turn(port, 's2')
 

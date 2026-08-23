@@ -1,8 +1,9 @@
 import type { SessionId, SessionState, ShellSnapshot } from '../../../shared/agent/port'
+import type { RunRecord } from '../../../shared/workflows/run'
+import { runIsWorking } from '../runs/bands'
 
-// A session whose turn ended while the user was not looking at it needs them.
-// Everything about that state is decided here, so the rules are readable in
-// one place and testable without a document.
+// Everything about the needs-you state is decided here, so the rules are
+// readable in one place and testable without a document.
 //
 // The marks live as long as the launch does and no longer: nothing runs while
 // Crucible is closed, so there is nothing to remember across a restart.
@@ -15,12 +16,25 @@ export type Marks = ReadonlySet<SessionId>
  *
  * Looking is per window, not per session: a turn that ends while Crucible is
  * behind another app was not watched, whichever session was on screen.
+ *
+ * The verdict is taken once and never revisited, because a run that stops later
+ * speaks to its orchestrator and that turn's own ending marks.
  */
-export function finishedUnwatched(
-  sessionId: SessionId,
-  looking: { readonly activeSessionId?: SessionId; readonly windowFocused: boolean }
+export function finishedAsking(
+  finished: { readonly sessionId: SessionId; readonly outcome: 'ended' | 'errored' },
+  world: {
+    readonly activeSessionId?: SessionId
+    readonly windowFocused: boolean
+    /** Unfiltered: the rule picks out this session's own. */
+    readonly runs: readonly RunRecord[]
+  }
 ): boolean {
-  return !looking.windowFocused || sessionId !== looking.activeSessionId
+  const unwatched = !world.windowFocused || finished.sessionId !== world.activeSessionId
+  if (!unwatched) return false
+  // An error is the session's own news and no run will ever deliver it, so a
+  // working run does not hush one.
+  if (finished.outcome === 'errored') return true
+  return !world.runs.some((run) => run.sessionId === finished.sessionId && runIsWorking(run))
 }
 
 // The sidebar's own order: workspaces top to bottom, and within each the
