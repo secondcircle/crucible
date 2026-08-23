@@ -212,7 +212,7 @@
 }
 
 /* Height is reserved in every state, so nothing above or below moves when
-   the working, bash or held-back state lands. */
+   the working or bash state lands. */
 .esc {
   text-align: center;
   font-size: 11.5px;
