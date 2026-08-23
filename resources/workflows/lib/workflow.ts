@@ -50,6 +50,12 @@ export interface NodeSpec {
   /** Built-in tool names. Defaults to read/bash/edit/write/grep/find/ls. */
   tools?: string[]
   /**
+   * Skill names this node may use. Absent means every skill available in the
+   * worktree; an empty array means none at all. A name matching no skill is
+   * ignored.
+   */
+  skills?: readonly string[]
+  /**
    * Deterministic output validation (lint). Runs alongside the built-in
    * checks on every complete_node; returned problems are delivered back into
    * the SAME agent session as a rejection, so fixes happen with full context.

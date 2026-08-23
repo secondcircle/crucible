@@ -27,6 +27,11 @@ function chooseWith(requested: string | undefined): {
       // what proves the fake needs no prompt at all.
       systemPrompt: () => {
         throw new Error('A fake-flavor launch must never ask for a system prompt.')
+      },
+      // Same, for the same reason: the fake reads no skill folder because it
+      // never builds the service that would.
+      skills: () => {
+        throw new Error('A fake-flavor launch must never ask for skills.')
       }
     }
   )

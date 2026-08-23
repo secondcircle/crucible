@@ -14,6 +14,11 @@ export function shippedCommandsPath(root: string): string {
   return join(root, SHIPPED_DIRECTORY, 'commands')
 }
 
+/** The built-in origin: skills that ship inside the app, read-only. */
+export function shippedSkillsPath(root: string): string {
+  return join(root, SHIPPED_DIRECTORY, 'skills')
+}
+
 export function shippedDocsIndexPath(root: string): string {
   return join(root, SHIPPED_DIRECTORY, 'agent-docs', 'index.md')
 }

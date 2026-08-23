@@ -136,9 +136,27 @@ interface ScriptedCall {
   readonly argBeats?: readonly number[]
 }
 
-// Two names and one failure, so a single scripted turn exercises a tool
-// chain's multi-name counts and its failure marker without a paid call.
+// Three names and one failure, so a single scripted turn exercises a tool
+// chain's multi-name counts, its skill marker and its failure marker without a
+// paid call. The two skill calls are one skill read twice — its SKILL.md and a
+// supporting file — so the head reads `1 skill`, which is the whole point of
+// counting skills rather than skill reads.
 const CHAIN: readonly ScriptedCall[] = [
+  {
+    name: 'skill',
+    summary: 'writing-agent-prompts',
+    ok: true,
+    chunks: [
+      '---\nname: writing-agent-prompts\ndescription: Read before writing or changing any ',
+      'text an agent will read as instructions.\n---\n'
+    ]
+  },
+  {
+    name: 'skill',
+    summary: 'writing-agent-prompts \u00b7 scope-boundaries.md',
+    ok: true,
+    chunks: ['# Scope boundaries\n\nSay how much work the prompt authorizes.\n']
+  },
   {
     name: 'bash',
     summary: 'npm test',
@@ -269,7 +287,7 @@ const REPLY_DELTAS: readonly string[] = [
   ' Nothing was sent anywhere and nothing was paid for it.\n\n',
   'What the script covers:\n\n',
   '- a thinking block, dim and collapsed\n',
-  '- a chain of three calls, one of which fails, and a lone call after it\n',
+  '- a chain of five calls, two of them one skill, one a failure, then a lone call\n',
   '- markdown with `inline code`, a table and a fenced block\n\n',
   '| flavor | cost | default |\n| --- | --- | --- |\n',
   '| fake | none | yes |\n| sdk | metered | no |\n\n',

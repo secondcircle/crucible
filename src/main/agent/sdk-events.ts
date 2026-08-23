@@ -1,3 +1,5 @@
+import { homedir } from 'node:os'
+import { basename, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import type { AgentSessionEvent } from '@earendil-works/pi-coding-agent'
 import type { AdapterEvent } from '../../shared/agent/adapter'
 import type { SessionId, TurnId } from '../../shared/agent/port'
@@ -15,6 +17,89 @@ export interface TurnTarget {
 
 export interface EventMapper {
   map(event: AgentSessionEvent, target: TurnTarget): AdapterEvent | undefined
+}
+
+/** One skill, as attribution reads it: π's own `Skill` is one of these. */
+export interface AttributableSkill {
+  readonly name: string
+  /** Absolute path of the skill's own markdown file. */
+  readonly filePath: string
+  /** Absolute directory that file sits in. */
+  readonly baseDir: string
+}
+
+/** The skills in force for a turn, and where a relative path resolves. */
+export interface SkillsInForce {
+  readonly skills: readonly AttributableSkill[]
+  /** The session's working directory. */
+  readonly cwd: string
+}
+
+export interface DisplayedCall {
+  readonly name: string
+  readonly summary: string
+}
+
+// A read of a file a skill claims is displayed as the tool `skill`, summarized
+// by the skill's name rather than by a path. Attribution is by directory, so a
+// supporting file read after the SKILL.md counts as the same skill and
+// progressive disclosure stays visible instead of scattering among ordinary
+// reads. Only `read` is re-attributed: a grep or a bash command that touches a
+// skill directory stays what it was.
+export function displayToolCall(
+  name: string,
+  args: unknown,
+  inForce?: SkillsInForce
+): DisplayedCall {
+  const summary = summarizeToolArgs(args)
+  if (inForce === undefined || name !== 'read') return { name, summary }
+
+  const asked = readPath(args)
+  if (asked === undefined) return { name, summary }
+  const path = absolutePath(asked, inForce.cwd)
+
+  // The most specific claim wins, so a skill nested inside another's tree is
+  // still its own skill.
+  let best: { skill: AttributableSkill; within: string } | undefined
+  for (const skill of inForce.skills) {
+    const within = claimed(skill, path)
+    if (within === undefined) continue
+    if (best === undefined || within.length < best.within.length) best = { skill, within }
+  }
+  if (best === undefined) return { name, summary }
+
+  return {
+    name: SKILL_TOOL,
+    summary: best.within === '' ? best.skill.name : `${best.skill.name} · ${best.within}`
+  }
+}
+
+/** The tool name a skill read is displayed under. */
+export const SKILL_TOOL = 'skill'
+
+// What the skill claims of this path: its own file, a path under its
+// directory, or nothing. A skill that is a loose `.md` at an origin root
+// claims only that file — its directory is the origin, full of other people's
+// skills.
+function claimed(skill: AttributableSkill, path: string): string | undefined {
+  if (path === resolve(skill.filePath)) return ''
+  if (basename(skill.filePath) !== 'SKILL.md') return undefined
+  const within = relative(resolve(skill.baseDir), path)
+  if (within === '' || within.startsWith('..') || isAbsolute(within)) return undefined
+  return within.split(sep).join('/')
+}
+
+/** π's read tool takes one path, and expands a leading `~` as this does. */
+function readPath(args: unknown): string | undefined {
+  if (typeof args !== 'object' || args === null) return undefined
+  const asked = (args as { path?: unknown }).path
+  return typeof asked === 'string' && asked.trim() !== '' ? asked.trim() : undefined
+}
+
+function absolutePath(asked: string, cwd: string): string {
+  if (asked === '~') return homedir()
+  if (asked.startsWith('~/')) return join(homedir(), asked.slice(2))
+  return resolve(cwd, asked)
 }
 
 // What π's `navigateTree` answered, in the port's words. π reports a
@@ -53,7 +138,9 @@ const OUTPUT_LIMIT = 20_000
 
 const SUMMARY_LIMIT = 160
 
-export function createEventMapper(): EventMapper {
+// `inForce` is the turn's own skill set, read fresh on the way into it: what a
+// turn is displayed against never changes under it mid-turn.
+export function createEventMapper(inForce?: SkillsInForce): EventMapper {
   // Tool output arrives as a growing snapshot rather than as chunks, so only
   // the part past this count is forwarded.
   const forwarded = new Map<string, number>()
@@ -175,17 +262,21 @@ export function createEventMapper(): EventMapper {
               }
             : undefined
 
-        case 'tool_execution_start':
+        case 'tool_execution_start': {
           forwarded.set(event.toolCallId, 0)
           argChars.delete(event.toolCallId)
+          // The arguments have settled, so a path exists to attribute: a row
+          // that announced itself as `read` becomes `skill` here.
+          const displayed = displayToolCall(event.toolName, event.args, inForce)
           return {
             type: 'tool_started',
             sessionId,
             turnId,
             callId: event.toolCallId,
-            name: event.toolName,
-            summary: summarizeToolArgs(event.args)
+            name: displayed.name,
+            summary: displayed.summary
           }
+        }
 
         case 'tool_execution_update': {
           const whole = renderToolOutput(event.partialResult)

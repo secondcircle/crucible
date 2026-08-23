@@ -6,6 +6,8 @@ matches what you were asked about.
 
 - `commands.md` — read this when the user asks about Crucible's commands, or
   wants you to write a new one.
+- `skills.md` — read this when the user asks about Crucible's skills, or wants
+  you to write a new one.
 - `worktrees.md` — read this when the user asks to make worktrees work with
   Crucible here, when a worktree is missing dependencies or setup, or when
   asked how a session's or a run's worktree is created or cleaned up.

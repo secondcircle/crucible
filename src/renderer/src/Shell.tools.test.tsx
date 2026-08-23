@@ -313,6 +313,113 @@ describe('drilling into a chain', () => {
   })
 })
 
+// A skill read is its own tool name, so a glance at a collapsed chain says
+// whether a skill fired. Attribution happened before the event crossed the
+// port; here it is only rendered.
+describe('a skill read in a chain', () => {
+  it('counts under skill in the head, beside every other tool', async () => {
+    const port = await streaming()
+
+    act(() => {
+      port.toolStarted('s1', 'c1', 'skill', 'writing-agent-prompts')
+      port.toolEnded('s1', 'c1', true, '---\nname: writing-agent-prompts\n')
+      port.toolStarted('s1', 'c2', 'skill', 'writing-agent-prompts · scope-boundaries.md')
+      port.toolEnded('s1', 'c2', true, '# Scope boundaries\n')
+      for (const [callId, path] of [
+        ['c3', 'CONTEXT.md'],
+        ['c4', 'docs/adr/0012.md'],
+        ['c5', 'package.json']
+      ]) {
+        port.toolStarted('s1', callId, 'read', path)
+        port.toolEnded('s1', callId, true, 'ok')
+      }
+      port.toolStarted('s1', 'c6', 'bash', 'git log --oneline -12')
+      port.toolEnded('s1', 'c6', true, 'ok')
+    })
+
+    // Two reads of one skill are one skill: progressive disclosure inside a
+    // skill does not inflate the number.
+    expect(chainRow()).toHaveTextContent('1 skill · 3 read · 1 bash')
+  })
+
+  it('counts a second skill in the same chain as a second skill', async () => {
+    const port = await streaming()
+
+    act(() => {
+      port.toolStarted('s1', 'c1', 'skill', 'writing-agent-prompts')
+      port.toolEnded('s1', 'c1', true, 'ok')
+      port.toolStarted('s1', 'c2', 'skill', 'writing-agent-prompts · scope-boundaries.md')
+      port.toolEnded('s1', 'c2', true, 'ok')
+      port.toolStarted('s1', 'c3', 'skill', 'reviewing-diffs')
+      port.toolEnded('s1', 'c3', true, 'ok')
+    })
+
+    expect(chainRow()).toHaveTextContent('2 skill')
+  })
+
+  it('names the skill, marks the row, and shows a supporting file faintly', async () => {
+    const port = await streaming()
+
+    act(() => {
+      port.toolStarted('s1', 'c1', 'skill', 'writing-agent-prompts')
+      port.toolEnded('s1', 'c1', true, 'ok')
+      port.toolStarted('s1', 'c2', 'skill', 'writing-agent-prompts · scope-boundaries.md')
+      port.toolEnded('s1', 'c2', true, 'ok')
+    })
+    fireEvent.click(chainRow())
+
+    const head = screen.getByRole('button', { name: 'skill writing-agent-prompts' })
+    expect(head.querySelector('.toolname')?.textContent).toBe('skill')
+    expect(head.querySelector('.toolbadge')?.textContent).toBe('skill')
+    // The summary is the skill's name. No path appears anywhere on the row.
+    expect(head.querySelector('.toolsummary')?.textContent).toBe('writing-agent-prompts')
+
+    const supporting = screen.getByRole('button', {
+      name: 'skill writing-agent-prompts · scope-boundaries.md'
+    })
+    expect(supporting.querySelector('.toolunder')?.textContent).toBe(' · scope-boundaries.md')
+  })
+
+  it('changes nothing about a chain with no skill in it', async () => {
+    const port = await streaming()
+
+    act(() => {
+      port.toolStarted('s1', 'c1', 'read', 'src/main/index.ts')
+      port.toolEnded('s1', 'c1', true, 'ok')
+      port.toolStarted('s1', 'c2', 'bash', 'npm run typecheck')
+      port.toolEnded('s1', 'c2', true, 'ok')
+    })
+    fireEvent.click(chainRow())
+
+    expect(chainRow()).toHaveTextContent('1 read · 1 bash')
+    expect(document.querySelectorAll('.toolbadge')).toHaveLength(0)
+  })
+
+  // The call announces itself while its arguments are still streaming, before
+  // any path exists to attribute. That flip is correct behavior.
+  it('reads as read while its arguments stream, and as skill once they settle', async () => {
+    const port = await streaming()
+
+    act(() => {
+      port.toolCallStarted('s1', 'c1', 'read')
+      port.toolCallArgs('s1', 'c1', 40)
+    })
+
+    expect(chainRow()).toHaveTextContent('read arguments · 40')
+
+    act(() => {
+      port.toolStarted('s1', 'c1', 'skill', 'writing-agent-prompts')
+      port.toolEnded('s1', 'c1', true, 'ok')
+    })
+
+    expect(chainRow()).toHaveTextContent('1 skill')
+    fireEvent.click(chainRow())
+    expect(
+      screen.getByRole('button', { name: 'skill writing-agent-prompts' })
+    ).toBeInTheDocument()
+  })
+})
+
 describe('thinking', () => {
   it('appears only when a thinking event says so', async () => {
     const port = await streaming()

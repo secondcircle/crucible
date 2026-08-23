@@ -14,7 +14,12 @@ import {
   type CacheScanEntry,
   type DetectedCacheMiss
 } from './cache-miss.ts'
-import { renderToolOutput, summarizeToolArgs } from './sdk-events.ts'
+import {
+  displayToolCall,
+  renderToolOutput,
+  type DisplayedCall,
+  type SkillsInForce
+} from './sdk-events.ts'
 
 // Stored messages produce the same item kinds a live turn does, so history
 // renders through the code a stream renders through.
@@ -27,12 +32,19 @@ export const BASH_RUN_TYPE = 'crucible.bashRun'
 // A seam per message that paid for a miss, keyed by that message's position
 // in `messages`, so a restored conversation shows the miss immediately above
 // the assistant message it happened on.
+//
+// `skills` are the ones present as the transcript is built, which is what a
+// reopened conversation is read against: attribution is computed, never
+// stored, so nothing of Crucible's is written into a π session file (ADR
+// 0015) and a file that has stopped being part of a skill reads as an
+// ordinary read.
 export function toTranscript(
   messages: readonly StoredMessage[],
-  seams?: ReadonlyMap<number, CacheMissFacts>
+  seams?: ReadonlyMap<number, CacheMissFacts>,
+  skills?: SkillsInForce
 ): TranscriptItem[] {
   const items: TranscriptItem[] = []
-  const calls = new Map<string, { name: string; summary: string }>()
+  const calls = new Map<string, DisplayedCall>()
 
   for (const [index, message] of messages.entries()) {
     const seam = seams?.get(index)
@@ -80,7 +92,7 @@ export function toTranscript(
       const call = calls.get(message.toolCallId)
       items.push({
         kind: 'tool',
-        name: message.toolName,
+        name: call?.name ?? message.toolName,
         summary: call?.summary ?? '',
         ok: !message.isError,
         output: renderToolOutput(message)
@@ -111,7 +123,7 @@ export function toTranscript(
       }
       if (block.type === 'toolCall') {
         flush()
-        calls.set(block.id, { name: block.name, summary: summarizeToolArgs(block.arguments) })
+        calls.set(block.id, displayToolCall(block.name, block.arguments, skills))
       }
     }
     flush()

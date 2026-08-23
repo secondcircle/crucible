@@ -242,7 +242,14 @@ describe('everything else', () => {
     await adapter.prompt('s1', 't-1', 'write the adapter')
 
     expect(types()).toContain('thinking_delta')
-    expect(calls().map((call) => call.name)).toEqual(['bash', 'read', 'read', 'bash'])
+    expect(calls().map((call) => call.name)).toEqual([
+      'skill',
+      'skill',
+      'bash',
+      'read',
+      'read',
+      'bash'
+    ])
   })
 
   it('runs the standard script for the word panel when no panel was injected', async () => {

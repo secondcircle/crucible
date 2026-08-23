@@ -20,6 +20,7 @@ import type {
   WorkflowDef
 } from './authoring'
 import type { CacheRecorder } from '../cache/ledger'
+import { narrowSkills, type SkillService } from '../skills/service'
 import type { WorkflowLoader } from './loader'
 import type { NodeSession, NodeSessionFactory } from './node-session'
 import type { RunStore } from './store'
@@ -85,6 +86,10 @@ export interface EngineOptions {
   // run's own count lands on the record either way, because that is what the
   // chip's mark is drawn from.
   readonly cache?: CacheRecorder
+  // The three skill origins, read against the run's own worktree so a skill
+  // the run's branch adds is offered to the nodes that follow. Absent means
+  // no node is offered any.
+  readonly skills?: SkillService
   /** Fired after any record change; the service fans it out. */
   readonly onChanged: () => void
   readonly log?: (event: Record<string, unknown>) => void
@@ -180,6 +185,7 @@ export function createWorkflowEngine(options: EngineOptions): WorkflowEngine {
     sessions,
     deliver,
     cache,
+    skills,
     onChanged,
     log,
     defaultModel = 'anthropic/claude-opus-5:high',
@@ -464,11 +470,17 @@ export function createWorkflowEngine(options: EngineOptions): WorkflowEngine {
       let completion: { summary: string; verdict?: unknown } | undefined
       let blockerRaised: { reason: string; details?: string; artifact?: string } | undefined
 
+      // Resolved against the run's own worktree, so the project-local origin
+      // is the branch this run is working on, then narrowed to what the node
+      // asked for. Every skill by default; the workflow author narrows.
+      const nodeSkills = narrowSkills((await skills?.resolve(cwd)) ?? [], spec.skills)
+
       const session: NodeSession = await sessions.start({
         cwd,
         model: node.model ?? defaultModel,
         rolePrompt: nodeRolePrompt(id, run.workflow, cwd),
         tools: spec.tools ?? DEFAULT_TOOLS,
+        skills: nodeSkills,
         onComplete(done) {
           completion = { summary: done.summary, ...(done.verdict === undefined ? {} : { verdict: done.verdict }) }
           return 'Completion recorded. End your turn now.'

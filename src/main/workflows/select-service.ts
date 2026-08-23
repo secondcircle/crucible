@@ -10,7 +10,13 @@ import type { MainWorkflowRunService } from '../../shared/workflows/service'
 import type { CacheRecorder } from '../cache/ledger'
 import type { Flavor } from '../agent/select-adapter'
 import type { LogSink } from '../log/sink'
-import { readShippedStandingPrompt, shippedWorkflowLibPath, shippedWorkflowsPath } from '../shipped'
+import {
+  readShippedStandingPrompt,
+  shippedSkillsPath,
+  shippedWorkflowLibPath,
+  shippedWorkflowsPath
+} from '../shipped'
+import { createSkillService, userSkillsPath } from '../skills/service'
 import { createWorkflowEngine } from './engine'
 import { createWorkflowLoader } from './loader'
 import { createLiveWorkflowRunService } from './service'
@@ -128,6 +134,14 @@ export function selectWorkflowRunService(
     }),
     deliver: wiring.deliver,
     ...(wiring.cache === undefined ? {} : { cache: wiring.cache }),
+    // Built only here, in the sdk branch, so a fake-flavor launch reads no
+    // skill folder for a run either.
+    skills: createSkillService({
+      roots: { builtIn: shippedSkillsPath(wiring.appPath), user: userSkillsPath() },
+      onDiagnostic: (diagnostic) => {
+        log.append({ source: 'main', event: 'skill_diagnostic', ...diagnostic })
+      }
+    }),
     onChanged: () => {
       for (const listener of [...changeListeners]) listener()
     },

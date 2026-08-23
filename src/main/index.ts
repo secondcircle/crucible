@@ -11,7 +11,8 @@ import { decideFlavor, selectAdapter } from './agent/select-adapter'
 import { withLogging } from './agent/with-logging'
 import { type CommandChannel, serveCommandChannel } from './commands/channel'
 import { selectCommandService } from './commands/select-service'
-import { shippedSystemPrompt } from './shipped'
+import { createSkillService, userSkillsPath } from './skills/service'
+import { shippedSkillsPath, shippedSystemPrompt } from './shipped'
 import { forwardRendererOutput } from './log/renderer-output'
 import { createFileSink } from './log/sink'
 import { type NeedsYouChannel, serveNeedsYouChannel } from './needs-you/channel'
@@ -157,6 +158,15 @@ const { adapter, flavor } = selectAdapter(
     // A thunk, so a fake-flavor launch starts even when a shipped prompt file
     // cannot be read; for the sdk flavor an unreadable file throws the launch.
     systemPrompt: () => shippedSystemPrompt(app.getAppPath()),
+    // A thunk for the other half of the same reason: a fake-flavor launch
+    // never builds this, so it reads no skill folder at all.
+    skills: () =>
+      createSkillService({
+        roots: { builtIn: shippedSkillsPath(app.getAppPath()), user: userSkillsPath() },
+        onDiagnostic: (diagnostic) => {
+          log.append({ source: 'main', event: 'skill_diagnostic', ...diagnostic })
+        }
+      }),
     // A login's browser is opened here; the renderer gets no such capability.
     openExternal: (url: string) => {
       void electronShell.openExternal(url)

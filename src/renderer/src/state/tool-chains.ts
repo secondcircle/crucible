@@ -14,11 +14,28 @@ export interface ToolCount {
   readonly count: number
 }
 
+/** The tool name a skill read is displayed under, as the port sends it. */
+export const SKILL_TOOL = 'skill'
+
+// A skill row's summary is the skill's name, and for a supporting file the
+// name, then ` · `, then that file's path inside the skill. The split is the
+// contract between the port's format and everything that reads it: the count
+// in the chain head, and the faint tail in the row.
+export function splitSkillSummary(summary: string): {
+  readonly skill: string
+  readonly within?: string
+} {
+  const at = summary.indexOf(' · ')
+  if (at === -1) return { skill: summary }
+  return { skill: summary.slice(0, at), within: summary.slice(at + ' · '.length) }
+}
+
 export interface ToolChain {
   /** Stable while the user stays in the session: what expansion state is keyed by. */
   readonly key: string
   readonly calls: readonly ToolItem[]
-  /** Settled calls per tool name, in order of first settlement. */
+  // Settled calls per tool name, in order of first settlement — except
+  // `skill`, which counts skills rather than reads of them.
   readonly counts: readonly ToolCount[]
   /** The running call to describe in the collapsed row, if one is running. */
   readonly live?: ToolItem
@@ -63,6 +80,10 @@ export function groupIntoChains(items: readonly ViewItem[]): readonly Transcript
 
 function describe(calls: readonly ToolItem[], startedAt: number): ToolChain {
   const counts: ToolCount[] = []
+  // Two reads of one skill are `1 skill`: progressive disclosure inside a
+  // skill must not inflate the number, so what is counted is the skills, not
+  // the calls.
+  const skillsSeen = new Set<string>()
   let errors = 0
   let running = false
   let cutOff = false
@@ -83,6 +104,11 @@ function describe(calls: readonly ToolItem[], startedAt: number): ToolChain {
       continue
     }
     if (!call.ok) errors += 1
+    if (call.name === SKILL_TOOL) {
+      const { skill } = splitSkillSummary(call.summary)
+      if (skillsSeen.has(skill)) continue
+      skillsSeen.add(skill)
+    }
     const already = counts.find((count) => count.name === call.name)
     if (already === undefined) counts.push({ name: call.name, count: 1 })
     else counts[counts.indexOf(already)] = { name: already.name, count: already.count + 1 }

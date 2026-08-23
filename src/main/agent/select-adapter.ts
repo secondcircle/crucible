@@ -2,6 +2,7 @@ import type { ConversationAdapter } from '../../shared/agent/adapter'
 import { createFakeAdapter, type FakePanel } from '../../shared/agent/fake-adapter'
 import type { RunTools } from '../../shared/agent/run-tools'
 import type { LogSink } from '../log/sink'
+import type { SkillService } from '../skills/service'
 import { createSdkAdapter } from './sdk-adapter'
 
 /** The launch flavor, in one word. */
@@ -16,6 +17,10 @@ export interface SdkOptions {
   // Called only for the sdk flavor, so a launch on the fake still starts when
   // no prompt can be read.
   readonly systemPrompt: () => string
+  // Also sdk-only, which is the whole of B6's seam: a fake-flavor launch
+  // never builds a skill service, so it reads no skill folder and composes no
+  // skills block.
+  readonly skills: () => SkillService
   /** Opening the OS browser during a login; only main can do it. */
   readonly openExternal?: (url: string) => void
 }
@@ -79,6 +84,7 @@ export function selectAdapter(
         ? createSdkAdapter({
             panel: panel.tools,
             ...(runs === undefined ? {} : { runs }),
+            skills: sdk.skills(),
             systemPrompt: sdk.systemPrompt(),
             ...(sdk.openExternal === undefined ? {} : { openExternal: sdk.openExternal })
           })

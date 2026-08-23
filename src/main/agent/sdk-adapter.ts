@@ -11,6 +11,7 @@ import type {
   CreateAgentSessionOptions,
   DefaultResourceLoader,
   ModelRuntime,
+  ResourceLoader,
   SessionManager,
   SessionTreeNode,
   SettingsManager,
@@ -63,9 +64,15 @@ import {
   type CacheMissTrackerOptions,
   type DetectedCacheMiss
 } from './cache-miss.ts'
+import { forPi, type LoadedSkill, type SkillService } from '../skills/service.ts'
 import { toProviderState, type AuthFacts, type ProviderFacts } from './providers.ts'
 import { crucibleAgentDir, workspaceSessionDir } from './paths.ts'
-import { createEventMapper, jumpOutcome, summarizeRetryOf } from './sdk-events.ts'
+import {
+  createEventMapper,
+  jumpOutcome,
+  summarizeRetryOf,
+  type SkillsInForce
+} from './sdk-events.ts'
 import { sanitizeTitle, TITLE_INSTRUCTION, titleInput } from './sdk-titler.ts'
 import {
   BASH_RUN_TYPE,
@@ -100,10 +107,15 @@ interface Bound {
   // because they describe the span between the two compared turns.
   thinkingChanged: boolean
   jumped: boolean
+  // Crucible rewrote this session's composed system prompt in that span,
+  // which a changed skill set is the one thing that does.
+  promptChanged: boolean
   // Whether this launch watched the request the next miss would be compared
   // against. Without that, the tool set and the role prompt of the compared
   // turn are genuinely unknown rather than unchanged.
   watchedPrevious: boolean
+  /** π's skills block this session's composed prompt is currently carrying. */
+  carriedBlock: string
   /**
    * A prompt sent to π but not yet in `session.messages`, which is the whole
    * first minutes of a session as far as the titler can see.
@@ -143,6 +155,7 @@ const PREVIEW_LIMIT = 140
 export function createSdkAdapter({
   panel,
   runs,
+  skills,
   systemPrompt,
   openExternal
 }: {
@@ -153,6 +166,9 @@ export function createSdkAdapter({
   // agent (Q19: tools, not a bash CLI). Absent — as in `prove:sdk` — means no
   // run tools are mounted.
   readonly runs?: RunTools
+  // Crucible's three skill origins, resolved through π's own loader. Absent —
+  // as in `prove:sdk` — means no folder is read and no skill is offered.
+  readonly skills?: SkillService
   // Passed as a full override: every session this adapter opens is told this
   // and nothing π wrote.
   readonly systemPrompt: string
@@ -175,8 +191,14 @@ export function createSdkAdapter({
   let prompts = 0
 
   interface WorkspaceResources {
-    readonly resourceLoader: DefaultResourceLoader
+    // π's loader, wrapped so the skills it reports are the ones Crucible
+    // resolved rather than the ones π would have discovered.
+    readonly resourceLoader: ResourceLoader
     readonly settingsManager: SettingsManager
+    /** Replaced whole on every re-read; π's loader is never reloaded for it. */
+    resolved: readonly LoadedSkill[]
+    /** π's own `<available_skills>` text for that set, which is what changed. */
+    block: string
   }
 
   function emit(event: AdapterEvent): void {
@@ -220,6 +242,9 @@ export function createSdkAdapter({
     const built = (async (): Promise<WorkspaceResources> => {
       const pi = await sdk()
       const settingsManager = pi.SettingsManager.create(workspacePath, agentDir)
+      // Read before the first session of this workspace is composed, so an
+      // agent is offered its workspace's skills from its very first turn.
+      const resolved = (await skills?.resolve(workspacePath)) ?? []
       // In memory only, never written back to the user's settings files. The
       // queue modes are fixed here: a kind is delivered as one group.
       settingsManager.applyOverrides({
@@ -236,8 +261,8 @@ export function createSdkAdapter({
         // π's own prompt folders are not read at all: commands are Crucible's,
         // and two command systems in one composer would be two grammars.
         noPromptTemplates: true,
-        // A skill is one of the few things that would still reach a session
-        // past a full prompt override.
+        // π's own skill folders are never read; Crucible's three origins are
+        // handed in through `getSkills` below instead (ADR 0021).
         noSkills: true,
         // The base is ignored, so π's own prompt never reaches a session and a
         // system-prompt file discovered in any folder is dead.
@@ -247,7 +272,13 @@ export function createSdkAdapter({
         appendSystemPromptOverride: () => []
       })
       await resourceLoader.reload()
-      return { resourceLoader, settingsManager }
+      const held: WorkspaceResources = {
+        resourceLoader: withCrucibleSkills(resourceLoader, () => held.resolved),
+        settingsManager,
+        resolved,
+        block: pi.formatSkillsForPrompt(forPi(resolved))
+      }
+      return held
     })()
 
     resources.set(workspacePath, built)
@@ -517,6 +548,44 @@ export function createSdkAdapter({
     }
   }
 
+  // The skill folders, read again on the way into every turn Crucible starts,
+  // so a skill an agent wrote mid-session is offered to the very next thing
+  // the user types. A steering or follow-up message into a live turn goes
+  // through none of this: that turn keeps the skills it started with.
+  //
+  // The user is already looking at their echoed message by now (ADR 0010), and
+  // a folder that cannot be read leaves the previous set in force rather than
+  // turning a send into an error.
+  async function skillsForTurn(bound: Bound): Promise<SkillsInForce> {
+    const held = await workspaceResources(bound.workspacePath)
+    const resolved = await skills?.resolve(bound.workspacePath)
+    if (resolved !== undefined) {
+      held.resolved = resolved
+      held.block = (await sdk()).formatSkillsForPrompt(forPi(resolved))
+    }
+
+    if (bound.carriedBlock !== held.block) {
+      // The set this session was composed with is no longer the set in force,
+      // so its system prompt is rewritten before the turn goes out. π rebuilds
+      // it from the loader, which now answers with the new skills; the tool
+      // set handed back is the one the session already had.
+      bound.session.setActiveToolsByName(bound.session.getActiveToolNames())
+      bound.carriedBlock = held.block
+      // Rewriting the prompt re-bills the cache, so the next miss in this
+      // session says the prompt changed rather than claiming nothing did.
+      bound.promptChanged = true
+    }
+
+    return { skills: held.resolved, cwd: bound.workspacePath }
+  }
+
+  // The skills this workspace is holding, without reading a folder: what a
+  // transcript built now is attributed against.
+  async function skillsHeld(workspacePath: string): Promise<SkillsInForce> {
+    const held = await workspaceResources(workspacePath)
+    return { skills: held.resolved, cwd: workspacePath }
+  }
+
   // A typed prompt and a shared bash run differ only in what `deliver` sends,
   // never in how the turn is watched, stopped or ended.
   async function runTurn(
@@ -526,7 +595,7 @@ export function createSdkAdapter({
   ): Promise<void> {
     const bound = requireBound(sessionId)
     const { session } = bound
-    const mapper = createEventMapper()
+    const mapper = createEventMapper(await skillsForTurn(bound))
 
     let cancelled = false
     let abandoned = false
@@ -691,6 +760,7 @@ export function createSdkAdapter({
     readonly watched: boolean
     readonly thinkingChanged: boolean
     readonly jumped: boolean
+    readonly promptChanged: boolean
   }
 
   function fact(changed: boolean): ChangeFact {
@@ -721,7 +791,8 @@ export function createSdkAdapter({
     const span: Span = {
       watched: bound.watchedPrevious,
       thinkingChanged: bound.thinkingChanged,
-      jumped: bound.jumped
+      jumped: bound.jumped,
+      promptChanged: bound.promptChanged
     }
     if (billsPrompt(scanned)) {
       // This message is what the next one is compared against, and the span
@@ -729,6 +800,7 @@ export function createSdkAdapter({
       bound.watchedPrevious = true
       bound.thinkingChanged = false
       bound.jumped = false
+      bound.promptChanged = false
     }
     if (miss === undefined) return
 
@@ -752,10 +824,12 @@ export function createSdkAdapter({
           // The comparison starts over at a compaction, so a detected miss
           // never spans one.
           compaction: 'no',
-          // Within one bound conversation in one launch neither can have
-          // changed; across launches Crucible genuinely does not know.
+          // The tool set cannot change within one bound conversation in one
+          // launch; the composed prompt can, when the skills in force change
+          // under the session. Across launches Crucible genuinely does not
+          // know either.
           tools: span.watched ? 'no' : 'unknown',
-          rolePrompt: span.watched ? 'no' : 'unknown'
+          rolePrompt: span.watched ? fact(span.promptChanged) : 'unknown'
         }
       } satisfies ObservedCacheMiss
     })
@@ -911,7 +985,9 @@ export function createSdkAdapter({
         // the first miss compares against a request this launch never saw.
         thinkingChanged: false,
         jumped: false,
-        watchedPrevious: false
+        promptChanged: false,
+        watchedPrevious: false,
+        carriedBlock: (await workspaceResources(request.workspacePath)).block
       }
       sessions.set(request.sessionId, bound)
       // A conversation that came back is already holding context, and it is
@@ -949,7 +1025,11 @@ export function createSdkAdapter({
       bound.reported = undefined
       bound.thinkingChanged = false
       bound.jumped = false
+      bound.promptChanged = false
       bound.watchedPrevious = false
+      // The fresh conversation was composed from the same loader, so it is
+      // carrying whatever skills block the workspace holds now.
+      bound.carriedBlock = (await workspaceResources(bound.workspacePath)).block
       return describe(bound, false)
     },
 
@@ -973,7 +1053,9 @@ export function createSdkAdapter({
         shares: [],
         thinkingChanged: false,
         jumped: false,
-        watchedPrevious: false
+        promptChanged: false,
+        watchedPrevious: false,
+        carriedBlock: (await workspaceResources(request.workspacePath)).block
       }
       sessions.set(request.sessionId, bound)
       reportUsage(request.sessionId, bound)
@@ -981,10 +1063,16 @@ export function createSdkAdapter({
     },
 
     async transcript(sessionId: SessionId): Promise<readonly TranscriptItem[]> {
-      const { session } = requireBound(sessionId)
+      const bound = requireBound(sessionId)
+      const { session } = bound
       const { messages } = session
-      // Seams in place: a reopened conversation shows where it paid twice.
-      return toTranscript(messages, seamsOf(session.sessionManager, messages))
+      // Seams in place: a reopened conversation shows where it paid twice, and
+      // its skill reads read as skill reads.
+      return toTranscript(
+        messages,
+        seamsOf(session.sessionManager, messages),
+        await skillsHeld(bound.workspacePath)
+      )
     },
 
     release(sessionId: SessionId): void {
@@ -1369,6 +1457,31 @@ export function createSdkAdapter({
         dropShares(bound)
       }
     }
+  }
+}
+
+// π's loader with one answer replaced: the skills a session is composed with
+// are the ones Crucible resolved at its own three origins. Everything else —
+// the prompt override, the emptied extensions, π's `<available_skills>` block
+// built from whatever `getSkills` says — is π's, untouched.
+function withCrucibleSkills(
+  base: DefaultResourceLoader,
+  current: () => readonly LoadedSkill[]
+): ResourceLoader {
+  return {
+    getExtensions: () => base.getExtensions(),
+    // Read on every prompt rebuild, so a set replaced between turns is the set
+    // the next turn is composed with.
+    getSkills: () => ({ skills: forPi(current()), diagnostics: [] }),
+    getPrompts: () => base.getPrompts(),
+    getThemes: () => base.getThemes(),
+    getAgentsFiles: () => base.getAgentsFiles(),
+    getSystemPrompt: () => base.getSystemPrompt(),
+    getSystemPromptSource: () => base.getSystemPromptSource(),
+    getAppendSystemPrompt: () => base.getAppendSystemPrompt(),
+    getAppendSystemPromptSources: () => base.getAppendSystemPromptSources(),
+    extendResources: (paths) => base.extendResources(paths),
+    reload: (options) => base.reload(options)
   }
 }
 
