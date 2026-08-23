@@ -16,8 +16,7 @@ export const NOISE_FLOOR_TOKENS = 1024
 // π's prompt-cache lifetimes, re-exported so π's constants are still found
 // together. No arithmetic below reads them, because Crucible blames nothing
 // and exempts nothing — a miss on a conversation resumed after eight hours is
-// the datum the ledger exists to hold. They are declared in shared because
-// the cache expiry choice reads the same numbers in the renderer.
+// the datum the ledger exists to hold.
 export { CACHE_TTL_MS, cacheTtlMs } from '../../shared/cache/ttl.ts'
 
 /** One completed assistant message, as the mirror reads it. */

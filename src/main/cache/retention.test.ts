@@ -1,10 +1,8 @@
 // @vitest-environment node
 //
 // The decision on its own, against an environment the test hands it: no
-// adapter, no ledger, no launch. This is where the two SDK readers' agreement
-// is proven — both read this module and nothing else, so agreeing is a
-// property of the shape rather than of two constructions nobody makes here
-// (`npm test` constructs no SDK adapter).
+// adapter, no ledger, no launch. Both SDK readers take their retention from
+// this module and nothing else, so proving it here proves they agree.
 import { describe, expect, it } from 'vitest'
 import { CACHE_TTL_MS, cacheTtlMs } from '../../shared/cache/ttl'
 import { retentionInForce } from './retention'

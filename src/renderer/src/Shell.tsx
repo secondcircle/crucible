@@ -299,11 +299,8 @@ export function Shell({
   /** Sessions with a send under way, still waiting on its expansion. */
   const sending = useRef<Set<SessionId>>(new Set())
   // Which press of the summarize door owns each session's summarize state:
-  // its wait dialog, its jump, and this stamp. Counted per session because
-  // sessions run concurrently and each runs its own chains, and read by one
-  // predicate inside the chain, so no two of its cleanups can disagree about
-  // whose work they are taking down. Moving a session's count on is how a
-  // press is superseded — by Escape retiring the gesture, or by a second
+  // its wait dialog, its jump, and this stamp. Moving a session's count on is
+  // how a press is superseded — Escape retiring the gesture, or a second
   // press taking the session over — and moving one session's never touches
   // another's.
   const summarizeChain = useRef<Record<SessionId, number>>({})
@@ -1447,12 +1444,10 @@ export function Shell({
     sendText(id, text)
   }
 
-  // The composer empties of the words that just went out, and of nothing
-  // else. Every send lands at least a round trip after the gesture, an
-  // expansion or a whole summary, and the composer stays live for the whole
-  // of that wait. So what it holds at the landing may be words nobody sent,
-  // and those are a draft being typed, which is never destroyed here or
-  // anywhere else in this shell.
+  // Every send lands at least a round trip after the gesture — an expansion,
+  // or a whole summary — and the composer stays live for that wait. What it
+  // holds at the landing may be a newer draft being typed, which is never
+  // destroyed.
   function clearSent(id: SessionId, text: string): void {
     setDrafts((current) => {
       // Trimmed on both sides because `text` is the trimmed draft: an
@@ -1508,11 +1503,8 @@ export function Shell({
     // The stamp, taken at the press: from here on this chain is the session's
     // summarize chain, until something supersedes it.
     const token = (summarizeChain.current[id] = (summarizeChain.current[id] ?? 0) + 1)
-    // Is this session's summarize state still this chain's? It stops being so
-    // the moment a second press of the door takes the session over, or Escape
-    // retires the gesture: both move the stamp on. This chain leaves three
-    // things behind it — a wait dialog, a jump indicator, the stamp — and
-    // every one of its cleanups asks this and nothing else, so no two of them
+    // Is this session's summarize state still this chain's? Every cleanup the
+    // chain runs asks this one predicate and nothing else, so no two of them
     // can disagree about whose work they are taking down.
     const owned = (): boolean => summarizeChain.current[id] === token
 
@@ -1521,13 +1513,10 @@ export function Shell({
     setChoice({ ...asked, summarizing: true })
     clearFailure(id)
 
-    // This chain outlives its own screen on purpose — the work belongs to
-    // the session that asked, not to what is being looked at — so by the
-    // time it lands the dialog up may be one nobody asked it to touch — the
-    // choice another session raised and is reading its dollars off, or a
-    // later one of this session's. It closes the wait state it put up, and
-    // nothing else; every other way out of a dialog is already somebody's
-    // gesture.
+    // This chain outlives its own screen on purpose: the work belongs to the
+    // session that asked, not to what is being looked at. So the dialog up
+    // when it lands may be another gesture's, and it closes only the wait
+    // state it put up — every other way out is already somebody's gesture.
     const closeOwnWait = (): void => {
       setChoice((current) =>
         current?.sessionId === id && current.summarizing === true && owned()

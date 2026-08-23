@@ -6,9 +6,8 @@ import './cache-expiry.css'
 import './overlay.css'
 
 // The cache expiry choice: three facts, two doors, and a footer that names
-// the way out. It exists to make one invisible
-// number visible — what this send costs — so the dollars are never rounded
-// away and never hidden behind a threshold.
+// the way out. It exists to make what this send costs visible, so the
+// dollars are never rounded away and never hidden behind a threshold.
 //
 // Escape belongs to the shell, which knows what else is on screen and in what
 // order. Enter and S are this dialog's own, read on the dialog itself, which
@@ -42,12 +41,11 @@ export function CacheExpiryChoice({
   const tokens = compactTokens(prefix.tokens)
   const rebill = rebillText(prefix.rebillDollars)
 
-  // How many times the backdrop has been clicked at a summary in flight. The
-  // click cannot dismiss that one — money is being spent, and stopping it is
-  // Escape's decision alone — but a click that lands on nothing teaches the
-  // user that clicks go nowhere. So it is answered where the answer is: the
-  // footer, which names the way out, lights up. Counted rather than flagged
-  // so a second click replays the light instead of landing on nothing again.
+  // A backdrop click cannot dismiss a summary that is already spending money
+  // — stopping it is Escape's decision alone — but a click that lands on
+  // nothing teaches the user that clicks go nowhere, so the footer that names
+  // the way out lights up. A count rather than a flag, so a second click
+  // replays the light.
   const [refused, setRefused] = useState(0)
 
   // Focus goes to the dialog rather than to a button: with a button focused
