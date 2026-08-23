@@ -19,7 +19,7 @@ const NOW = new Date(2026, 7, 20, 15, 4, 0).getTime()
 const MINUTE = 60 * 1000
 const HOUR = 60 * MINUTE
 
-/** Mock Y's own conversation: 2h 13m idle, 110k in context, $0.63 to re-bill. */
+/** A conversation left sitting: 2h 13m idle, 110k in context, $0.63 to re-bill. */
 function prefix(over: Partial<CachedPrefix> = {}): CachedPrefix {
   return {
     at: new Date(NOW - (2 * HOUR + 13 * MINUTE)).toISOString(),
@@ -466,7 +466,7 @@ describe('the choice belongs to one session', () => {
     expect(port.calls).toContainEqual({ op: 'prompt', args: ['s1', 'carry on in A'] })
     // But A's chain owns nothing on B's screen: the choice B is reading —
     // the dollars it exists to show — is still up, still waiting on B's own
-    // decision (per-session, ADR 0003).
+    // decision. Sessions run concurrently, and the choice is per session.
     expect(choice()).not.toBeNull()
     expect(composer()).toHaveValue('carry on in B')
   })

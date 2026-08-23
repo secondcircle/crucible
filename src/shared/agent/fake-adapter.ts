@@ -88,12 +88,12 @@ export const FAKE_CACHE_MISS: ObservedCacheMiss = {
   }
 }
 
-// Mock Y's own numbers, so one prompt puts the cache expiry choice on screen
-// reading exactly as it was drawn. Fired by a prompt containing "expire" and
-// by nothing else: the turn that prompt opens ends with a prefix backdated
-// past any retention, and the next send meets the dialog.
+// One prompt is enough to stage the cache expiry choice. Fired by a prompt
+// containing "expire" and by nothing else: the turn that prompt opens ends
+// with a prefix backdated past any retention, and the next send meets the
+// dialog.
 export const FAKE_EXPIRED_PREFIX = {
-  /** 2h 13m, the mock's idle time. */
+  /** 2h 13m: long past any retention, and recognizably an afternoon away. */
   idleMs: (2 * 60 + 13) * 60 * 1000,
   tokens: 110_000,
   rebillDollars: 0.63

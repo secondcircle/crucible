@@ -5,8 +5,8 @@ import { compactTokens, idleText, rebillText, retentionText } from '../cache/for
 import './cache-expiry.css'
 import './overlay.css'
 
-// The cache expiry choice, exactly as mock Y draws it: three facts, two
-// doors, and a footer that names the way out. It exists to make one invisible
+// The cache expiry choice: three facts, two doors, and a footer that names
+// the way out. It exists to make one invisible
 // number visible — what this send costs — so the dollars are never rounded
 // away and never hidden behind a threshold.
 //
@@ -29,7 +29,7 @@ export function CacheExpiryChoice({
   readonly prefix: CachedPrefix
   /** The instant the send was pressed: the idle time is measured from it. */
   readonly now: number
-  /** The whole wait while π writes the summary (ADR 0010). */
+  /** The whole wait while π writes the summary, up from the press itself. */
   readonly summarizing: boolean
   /** π's own retry narration, which replaces the subtitle while it stands. */
   readonly note?: string

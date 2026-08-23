@@ -1,9 +1,9 @@
-/* The cache expiry choice, lifted from docs/design/mock-y-cache-expiry.html.
-   Every color is a token, and the ruling colour is amber (--warn) rather than
-   error red: in this app red means failure, and an expired cache is money. */
+/* The cache expiry choice. Every color is a token, and the ruling colour is
+   amber (--warn) rather than error red: in this app red means failure, and an
+   expired cache is money. */
 
 .expirydialog {
-  /* The mock's width: two doors whose descriptions read as one line each. */
+  /* Wide enough that each door's description reads as one line. */
   width: 540px;
 }
 

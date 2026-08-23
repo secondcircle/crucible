@@ -248,7 +248,7 @@ describe('the scripted cached prefix', () => {
     await adapter.prompt('s1', 't1', 'let the cache expire on this one')
 
     const prefix = prefixOf(events)
-    // Mock Y's own numbers: 2h 13m idle, 110k in context, $0.63 to re-bill.
+    // The staged conversation: 2h 13m idle, 110k in context, $0.63 to re-bill.
     expect(prefix?.tokens).toBe(FAKE_EXPIRED_PREFIX.tokens)
     expect(prefix?.rebillDollars).toBe(FAKE_EXPIRED_PREFIX.rebillDollars)
     expect(Date.now() - Date.parse(prefix?.at ?? '')).toBeGreaterThanOrEqual(

@@ -300,11 +300,12 @@ export function Shell({
   const sending = useRef<Set<SessionId>>(new Set())
   // Which press of the summarize door owns each session's summarize state:
   // its wait dialog, its jump, and this stamp. Counted per session because
-  // the chains are (ADR 0003), and read by one predicate inside the chain, so
-  // no two of its cleanups can disagree about whose work they are taking
-  // down. Moving a session's count on is how a press is superseded — by
-  // Escape retiring the gesture, or by a second press taking the session over
-  // — and moving one session's never touches another's.
+  // sessions run concurrently and each runs its own chains, and read by one
+  // predicate inside the chain, so no two of its cleanups can disagree about
+  // whose work they are taking down. Moving a session's count on is how a
+  // press is superseded — by Escape retiring the gesture, or by a second
+  // press taking the session over — and moving one session's never touches
+  // another's.
   const summarizeChain = useRef<Record<SessionId, number>>({})
   // The send as of the latest render, for the one path that outlives its own
   // frame: a summarize-then-send delivers its message a minute after the key
@@ -1515,12 +1516,13 @@ export function Shell({
     // can disagree about whose work they are taking down.
     const owned = (): boolean => summarizeChain.current[id] === token
 
-    // The wait state in the frame the door was pressed (ADR 0010).
+    // The wait state goes up in the frame the door was pressed, before
+    // anything is awaited.
     setChoice({ ...asked, summarizing: true })
     clearFailure(id)
 
-    // This chain outlives its own screen on purpose (2.5.6: the work belongs
-    // to the session that asked, not to what is being looked at), so by the
+    // This chain outlives its own screen on purpose — the work belongs to
+    // the session that asked, not to what is being looked at — so by the
     // time it lands the dialog up may be one nobody asked it to touch — the
     // choice another session raised and is reading its dollars off, or a
     // later one of this session's. It closes the wait state it put up, and

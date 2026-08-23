@@ -16,7 +16,6 @@ export interface ScriptedCommands extends CommandService {
   // Held open where a test drives what happens while an expansion is in
   // flight: the promise settles when the test says so.
   holdExpansion?: boolean
-  /** Settles the held expansion. */
   settleExpansion(): void
 }
 
