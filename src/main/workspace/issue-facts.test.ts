@@ -62,7 +62,8 @@ describe('what one issue parses to', () => {
   })
 
   it('reads assignees as logins, and none as unclaimed', () => {
-    expect(issues[0]?.assignees).toEqual(['ike'])
+    // A login is both the identity the grouping compares and the name shown.
+    expect(issues[0]?.assignees).toEqual([{ id: 'ike', name: 'ike' }])
     expect(issues[2]?.assignees).toEqual([])
   })
 })

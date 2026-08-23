@@ -53,7 +53,9 @@ function Row({ row }: { readonly row: RowView }): React.JSX.Element {
 function Meter({ meter }: { readonly meter: MeterView }): React.JSX.Element {
   const emphasis = meter.level === 'normal' ? '' : ` ${meter.level}`
   return (
-    <div className="qmeter">
+    // A dollar text is three times the width of a percent, so the monthly meter
+    // sizes its number to the text and the bar takes what is left.
+    <div className={meter.kind === 'monthly' ? 'qmeter qmonthly' : 'qmeter'}>
       <span className="qlbl">{meter.label}</span>
       <span className="qbar">
         {/* The exact percent; only the printed number is rounded. */}

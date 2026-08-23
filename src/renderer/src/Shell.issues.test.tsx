@@ -10,7 +10,7 @@ import { Shell } from './Shell'
 import { createScriptedCommands } from './testing/scripted-commands'
 import { createScriptedPort, oneSession, type ScriptedPort } from './testing/scripted-port'
 import { createScriptedWorkspace, type ScriptedWorkspace } from './testing/scripted-workspace'
-import { hostedIssues } from './testing/issues'
+import { hostedIssues, jiraIssues } from './testing/issues'
 import { settled } from './testing/settled'
 
 interface Shelf {
@@ -550,5 +550,178 @@ describe('typing in the filter', () => {
       op: 'createSession',
       args: ['w1', { issue: 'crucible#128' }]
     })
+  })
+})
+
+describe('a board whose host is Jira', () => {
+  /** The same workspace, answering with a Jira project instead. */
+  async function jira(snapshot: Partial<ShellSnapshot> = oneSession()): Promise<Shelf> {
+    return shell((workspace) => {
+      workspace.issues.set('/repos/crucible', { kind: 'board', board: jiraIssues() })
+    }, snapshot)
+  }
+
+  it('names the project and the host over the same board', async () => {
+    await jira()
+    await open()
+
+    expect(document.querySelector('.issues .repo')).toHaveTextContent('EK · Jira')
+  })
+
+  it('names each issue by its key, in the rows and in the pane', async () => {
+    await jira()
+    await open()
+
+    expect(rows()).toEqual(['EK-341', 'EK-352'])
+    expect(screen.getByRole('option', { name: 'EK-341' })).toHaveTextContent('EK-341')
+    expect(pane()).toHaveTextContent('EK-341')
+    // Never the bare GitHub form.
+    expect(pane()).not.toHaveTextContent('#341')
+  })
+
+  it('offers the browse button and the key in Jira’s words', async () => {
+    await jira()
+    await open()
+
+    expect(screen.getByRole('button', { name: /^Open in Jira/ })).toBeInTheDocument()
+    expect(document.querySelector('.issues .bfoot')).toHaveTextContent('open in Jira')
+  })
+
+  it('restates the read-only guarantee in Jira’s verbs', async () => {
+    await jira()
+    await open()
+
+    expect(document.querySelector('.issues .bfoot .sp')).toHaveTextContent(
+      'Jira, read-only · nothing here is transitioned, assigned or commented for you'
+    )
+  })
+
+  it("keeps a teammate's ticket one click away, never hidden", async () => {
+    await jira()
+    await open()
+
+    expect(rows()).not.toContain('EK-349')
+
+    await click("show everyone's")
+
+    expect(headings()).toContain('Assigned to others')
+    expect(rows()).toContain('EK-349')
+  })
+
+  it('never shows a mentions group, there being no such question of Jira', async () => {
+    await jira()
+    await open()
+    await click("show everyone's")
+
+    expect(headings()).not.toContain('Mentions you')
+  })
+
+  it('folds a ticket a session here started on into picked up', async () => {
+    await jira({
+      ...oneSession(),
+      sessions: [
+        {
+          id: 's1',
+          workspaceId: 'w1',
+          createdAt: '2026-08-19T14:14:00.000Z',
+          title: 'address line import',
+          issue: 'EK-341',
+          working: false,
+          fresh: false
+        }
+      ]
+    })
+    await open()
+
+    expect(screen.getByRole('option', { name: 'EK-341' })).toHaveTextContent('session')
+    expect(headings()).toContain('Already picked up')
+  })
+
+  it('starts a session on the key, exactly as it does on a GitHub reference', async () => {
+    const { port } = await jira()
+    await open()
+    await click(/^Align/)
+
+    expect(port.calls).toContainEqual({
+      op: 'createSession',
+      args: ['w1', { issue: 'EK-341' }]
+    })
+  })
+
+  it('opens the ticket’s browse URL through the same path', async () => {
+    const { workspace } = await jira()
+    await open()
+    await press('Enter', { metaKey: true })
+
+    expect(workspace.openedUrls).toEqual(['https://secondcircle.atlassian.net/browse/EK-341'])
+  })
+})
+
+describe('a workspace where Jira is the host and not yet configured', () => {
+  const MISSING = {
+    kind: 'notConfigured' as const,
+    missing: [
+      {
+        name: 'JIRA_API_TOKEN',
+        where: 'An Atlassian API token. A KEY=VALUE line in .env.local at the workspace root.'
+      },
+      {
+        name: '.crucible/jira.json',
+        where: 'Names the project this repository tracks: {"projectKey": "EK"}.'
+      }
+    ]
+  }
+
+  async function unset(): Promise<Shelf> {
+    return shell((workspace) => {
+      workspace.issues.set('/repos/crucible', MISSING)
+    })
+  }
+
+  it('shows no chip, because nothing was counted', async () => {
+    await unset()
+
+    expect(chip()).toBeNull()
+  })
+
+  it('still opens on ⌘I, and says what is missing and where each piece goes', async () => {
+    await unset()
+
+    await press('i', { metaKey: true })
+
+    const said = screen.getByRole('alert')
+    expect(said).toHaveTextContent('Jira is not set up in this workspace yet.')
+    expect(said).toHaveTextContent('JIRA_API_TOKEN')
+    expect(said).toHaveTextContent('A KEY=VALUE line in .env.local at the workspace root.')
+    expect(said).toHaveTextContent('.crucible/jira.json')
+    expect(said).toHaveTextContent('{"projectKey": "EK"}')
+    // And that a session can do it, and that reopening re-checks. The doc's
+    // name must survive as its own word: JSX swallows the newline between the
+    // sentence and the <code> element, so without an explicit space this
+    // renders as "docs, asjira.md".
+    expect(said).toHaveTextContent('agent docs, as jira.md')
+    expect(said).toHaveTextContent(/Open this board again/)
+    expect(rows()).toEqual([])
+  })
+
+  it('speaks in Jira\u2019s words, there being no other host with this state', async () => {
+    await unset()
+    await press('i', { metaKey: true })
+
+    expect(document.querySelector('.issues .bfoot')).toHaveTextContent('open in Jira')
+    expect(document.querySelector('.issues .bfoot .sp')).toHaveTextContent('Jira, read-only')
+  })
+
+  it('closes on ⌘I again, and re-asks the host when it is opened next', async () => {
+    const { workspace } = await unset()
+    await press('i', { metaKey: true })
+    const asked = workspace.calls.filter((call) => call.op === 'issueBoard').length
+
+    await press('i', { metaKey: true })
+    expect(board()).toBeNull()
+
+    await press('i', { metaKey: true })
+    expect(board()).not.toBeNull()
+    expect(workspace.calls.filter((call) => call.op === 'issueBoard').length).toBeGreaterThan(asked)
   })
 })

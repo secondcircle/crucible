@@ -3,6 +3,17 @@ import type { IssueBoardSnapshot, IssueGroupId, IssueRow } from './service'
 // The issue board's judgment, and the only place it is made. Pure: the clock
 // arrives as an argument, so no answer can hide one.
 
+/**
+ * One person as the host names them. Two fields because on Jira they differ:
+ * teammates can share a display name, and nobody shares an account id.
+ */
+export interface IssuePerson {
+  /** Stable on the host — a GitHub login, a Jira account id. Never shown. */
+  readonly id: string
+  /** What the board prints. Never compared. */
+  readonly name: string
+}
+
 /** One issue as the host reports it, before this board has judged it. */
 export interface IssueFact {
   readonly number: number
@@ -12,7 +23,7 @@ export interface IssueFact {
   readonly createdAt: string
   readonly updatedAt: string
   readonly authorLogin: string
-  readonly assignees: readonly string[]
+  readonly assignees: readonly IssuePerson[]
   readonly labels: readonly { readonly name: string; readonly color?: string }[]
   readonly comments: number
   readonly latestComment?: { readonly login: string; readonly at: string; readonly body: string }
@@ -26,11 +37,14 @@ export interface IssueFact {
 }
 
 export interface IssueFacts {
-  /** "owner/name" as the host names the repository. */
+  /** "owner/name" on GitHub, the project key on Jira. */
   readonly repoLabel: string
-  readonly login: string
+  readonly host: IssueBoardSnapshot['host']
+  /** Who you are here: the id decides the groups, the name is what shows. */
+  readonly you: IssuePerson
   readonly issues: readonly IssueFact[]
-  /** Numbers the host says mention you, which is a question of its own. */
+  // Numbers the host says mention you, which is a question of its own. Empty
+  // where the host answers no such question, and Jira answers none this round.
   readonly mentioned: readonly number[]
 }
 
@@ -45,20 +59,18 @@ const GROUP_ORDER: readonly IssueGroupId[] = [
 
 export function classifyIssues(facts: IssueFacts, now: number): IssueBoardSnapshot {
   const mentioned = new Set(facts.mentioned)
-  // The repository's own name, not owner/name: it is what a person writing the
-  // reference by hand would type, and gh reads it back.
-  const repo = facts.repoLabel.split('/').at(-1) ?? facts.repoLabel
 
   const rows = facts.issues.map((issue): IssueRow => {
     const pr = issue.pullRequests[0]
     return {
-      group: group(issue, facts.login, mentioned),
+      group: group(issue, facts.you.id, mentioned),
       number: issue.number,
-      reference: `${repo}#${issue.number}`,
+      reference: reference(facts, issue.number),
       title: issue.title,
       url: issue.url,
       labels: issue.labels,
-      assignees: issue.assignees,
+      // Names cross to the renderer; the ids that decided the grouping do not.
+      assignees: issue.assignees.map((person) => person.name),
       authorLogin: issue.authorLogin,
       createdAt: issue.createdAt,
       updatedAt: issue.updatedAt,
@@ -72,10 +84,21 @@ export function classifyIssues(facts: IssueFacts, now: number): IssueBoardSnapsh
   return {
     collectedAt: new Date(now).toISOString(),
     repoLabel: facts.repoLabel,
-    host: { kind: 'github' },
-    login: facts.login,
+    host: facts.host,
+    login: facts.you.name,
     rows: sortRows(rows)
   }
+}
+
+/**
+ * How this host writes a reference: `crucible#128` on GitHub, `EK-341` on Jira.
+ * On GitHub it is the repository's own name rather than owner/name, because
+ * that is what a person writing it by hand would type and what gh reads back.
+ */
+function reference(facts: IssueFacts, number: number): string {
+  if (facts.host.kind === 'jira') return `${facts.repoLabel}-${number}`
+  const repo = facts.repoLabel.split('/').at(-1) ?? facts.repoLabel
+  return `${repo}#${number}`
 }
 
 /**
@@ -110,15 +133,12 @@ export function issueCounts(board: IssueBoardSnapshot): {
 }
 
 /** First match wins, and an issue is in exactly one group. */
-function group(
-  issue: IssueFact,
-  login: string,
-  mentioned: ReadonlySet<number>
-): IssueGroupId {
+function group(issue: IssueFact, you: string, mentioned: ReadonlySet<number>): IssueGroupId {
   // Work already under way outranks whose it is: the board's question is what
   // to pick up, and this one is taken.
   if (issue.pullRequests.length > 0) return 'pickedUp'
-  if (issue.assignees.includes(login)) return 'assignedToYou'
+  // By id, never by name: two teammates can be called the same thing.
+  if (issue.assignees.some((person) => person.id === you)) return 'assignedToYou'
   if (mentioned.has(issue.number)) return 'mentionsYou'
   if (issue.assignees.length === 0) return 'unclaimed'
   return 'assignedToOthers'

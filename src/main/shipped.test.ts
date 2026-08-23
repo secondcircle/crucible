@@ -232,6 +232,71 @@ describe('the shipped worktrees doc', () => {
   })
 })
 
+describe('the shipped Jira doc', () => {
+  const doc = (): string =>
+    readFileSync(join(dirname(shippedDocsIndexPath(APP)), 'jira.md'), 'utf8')
+
+  it('gives both files by exact path and exact shape', () => {
+    const text = doc()
+    expect(text).toContain('.crucible/jira.json')
+    expect(text).toContain('{ "projectKey": "EK" }')
+    expect(text).toContain('.env.local')
+    for (const key of ['JIRA_BASE_URL', 'JIRA_EMAIL', 'JIRA_API_TOKEN']) {
+      expect(text).toContain(key)
+    }
+    // The pointer is committable; the project key comes from nowhere else.
+    expect(text).toMatch(/meant to be committed/)
+    expect(text).toContain('JIRA_PROJECT_KEY')
+    expect(text).toMatch(/is not read/)
+  })
+
+  it('puts the gitignore check before the token is ever written', () => {
+    const text = doc()
+    expect(text).toContain('git check-ignore -q .env.local')
+    expect(text.indexOf('git check-ignore')).toBeLessThan(text.indexOf('JIRA_API_TOKEN=ATATT'))
+    expect(text).toMatch(/before you write a single\s+credential/)
+  })
+
+  it('says where the values come from: a sibling repository or a fresh token', () => {
+    const text = doc()
+    expect(text).toMatch(/sibling repository/)
+    expect(text).toContain('id.atlassian.com/manage-profile/security/api-tokens')
+  })
+
+  it('says what open means, and that the reading is all it ever does', () => {
+    const text = doc()
+    expect(text).toMatch(/status category is not done/)
+    expect(text).toMatch(/[Nn]ot a status name/)
+    expect(text).toMatch(/No transition, no assignment, no label,\s*\n?no comment/)
+  })
+
+  it('says how the board groups and orders, and that teammates stay visible', () => {
+    const text = doc()
+    expect(text).toMatch(/assigned to you, unclaimed, already picked/)
+    expect(text).toMatch(/never hidden/)
+    expect(text).toMatch(/account ids/)
+  })
+
+  it('describes the not-configured state and that reopening re-checks', () => {
+    const text = doc()
+    expect(text).toMatch(/not set up in this workspace yet/)
+    expect(text).toMatch(/press \u2318I again/)
+    expect(text).toMatch(/nothing to restart/)
+  })
+
+  it('names no \u03c0, and cites no path inside Crucible\u2019s own repository', () => {
+    const text = doc()
+    expect(text).not.toMatch(PI_BY_NAME)
+    expect(text).not.toContain('\u03c0')
+    expect(text).not.toContain('src/')
+    expect(text).not.toContain('docs/adr')
+  })
+
+  it('is the file that ships, byte for byte', () => {
+    expect(doc()).toBe(readFileSync(join(APP, 'resources', 'agent-docs', 'jira.md'), 'utf8'))
+  })
+})
+
 describe('the shipped docs index', () => {
   const index = (): string => readFileSync(shippedDocsIndexPath(APP), 'utf8')
 
@@ -243,6 +308,11 @@ describe('the shipped docs index', () => {
   it('names worktrees.md, and when to read it', () => {
     expect(index()).toContain('worktrees.md')
     expect(index()).toMatch(/worktrees work with\s+Crucible/)
+  })
+
+  it('names jira.md, and when to read it', () => {
+    expect(index()).toContain('jira.md')
+    expect(index()).toMatch(/connect a repository to Jira/)
   })
 
   it('says the docs it lists resolve beside itself', () => {

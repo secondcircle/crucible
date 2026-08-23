@@ -3,11 +3,13 @@
 // The arithmetic behind the strip is pure, so none of it needs a document to
 // be tested.
 import { describe, expect, it } from 'vitest'
+import { monthlyResetAfter, monthWindowStart } from '../../../shared/quota/month'
 import type { QuotaMeter, QuotaSnapshot } from '../../../shared/quota/types'
 import {
   ageText,
   countdownText,
   crossingAt,
+  dollarText,
   levelOf,
   outWord,
   paceFraction,
@@ -21,6 +23,10 @@ const DAY = 24 * HOUR
 const WEEK = 7 * DAY
 const NOW = Date.UTC(2026, 7, 15, 12, 0, 0)
 
+/** The month this file's "now" sits in: 1 September, and the 31 days behind it. */
+const MONTH_END = monthlyResetAfter(NOW)
+const MONTH_MS = MONTH_END - monthWindowStart(MONTH_END)
+
 function meter(over: Partial<QuotaMeter> = {}): QuotaMeter {
   return { kind: 'weekly', label: '7D', usedPercent: 20, resetsAt: null, ...over }
 }
@@ -28,6 +34,18 @@ function meter(over: Partial<QuotaMeter> = {}): QuotaMeter {
 /** A weekly meter this far into its window, at this percent. */
 function weekly(elapsed: number, usedPercent: number, over: Partial<QuotaMeter> = {}): QuotaMeter {
   return meter({ usedPercent, resetsAt: NOW - elapsed + WEEK, ...over })
+}
+
+/** The work account's meter: a dollar budget on the calendar month. */
+function monthly(usedDollars: number, limitDollars = 5000, resetsAt = MONTH_END): QuotaMeter {
+  return {
+    kind: 'monthly',
+    label: 'MO',
+    usedPercent: Math.min(100, (usedDollars / limitDollars) * 100),
+    resetsAt,
+    usedDollars,
+    limitDollars
+  }
 }
 
 function snapshotOf(
@@ -132,6 +150,29 @@ describe('pace', () => {
     expect(outWord([weekly(3.5 * DAY, 0)], NOW)).toBeUndefined()
   })
 
+  it('paces a monthly meter over its own calendar month, not over a week', () => {
+    // Mid-August: 14.5 of August's 31 days are gone.
+    expect(paceFraction(monthly(2119.26), NOW)).toBeCloseTo((14.5 * DAY) / MONTH_MS, 6)
+    // February's window is three days shorter, so the same elapsed time is a
+    // larger fraction of it.
+    const february = Date.UTC(2026, 2, 1)
+    const midFebruary = Date.UTC(2026, 1, 15, 12, 0, 0)
+    expect(paceFraction(monthly(2119.26, 5000, february), midFebruary)).toBeCloseTo(
+      (14.5 * DAY) / (28 * DAY),
+      6
+    )
+  })
+
+  it('stays quiet through the first day of a month, like any other window', () => {
+    const justOpened = Date.UTC(2026, 8, 1, 12, 0, 0)
+    const monthEnd = monthlyResetAfter(justOpened)
+
+    expect(paceFraction(monthly(400, 5000, monthEnd), justOpened)).toBeNull()
+    expect(crossingAt(monthly(400, 5000, monthEnd), justOpened)).toBeNull()
+    // A day and an hour in, it speaks.
+    expect(paceFraction(monthly(400, 5000, monthEnd), justOpened + DAY + HOUR)).not.toBeNull()
+  })
+
   it('names the weekday of the crossing instant', () => {
     // 92 h into the week at 78%: the straight line hits 100% about 26 h from
     // now, and the word names that day.
@@ -145,6 +186,30 @@ describe('pace', () => {
     )
   })
 
+  it('names the month and day of a crossing further out than a week', () => {
+    // A month at 60% with under half of it elapsed: the line crosses 100% weeks
+    // away, where a bare weekday would not say which week.
+    const distant = monthly(3000, 5000, Date.UTC(2026, 9, 1))
+    const early = Date.UTC(2026, 8, 12, 12, 0, 0)
+    const crossing = crossingAt(distant, early) as number
+
+    expect(crossing - early).toBeGreaterThan(7 * DAY)
+    expect(outWord([distant], early)).toBe(
+      `out ${new Date(crossing).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}`
+    )
+    expect(outWord([distant], early)).toMatch(/^out [A-Z][a-z]{2} \d{1,2}$/)
+  })
+
+  it('keeps the weekday for a crossing inside the week, monthly meter or not', () => {
+    const soon = monthly(4600, 5000, MONTH_END)
+    const crossing = crossingAt(soon, NOW) as number
+
+    expect(crossing - NOW).toBeLessThan(7 * DAY)
+    expect(outWord([soon], NOW)).toBe(
+      `out ${new Date(crossing).toLocaleDateString(undefined, { weekday: 'short' })}`
+    )
+  })
+
   it('lets the earliest crossing win when several meters project past 100', () => {
     const sooner = weekly(6 * DAY, 99, { kind: 'weekly_scoped', label: 'FABLE' })
     const later = weekly(4 * DAY, 80)
@@ -153,6 +218,59 @@ describe('pace', () => {
     expect(outWord([later, sooner], NOW)).toBe(
       `out ${new Date(first).toLocaleDateString(undefined, { weekday: 'short' })}`
     )
+  })
+})
+
+describe('the monthly meter\u2019s dollars', () => {
+  it('prints thousands above a thousand, dropping a whole decimal', () => {
+    expect(dollarText(2119.26)).toBe('$2.1k')
+    expect(dollarText(5000)).toBe('$5k')
+    expect(dollarText(1050)).toBe('$1.1k')
+    expect(dollarText(12000)).toBe('$12k')
+  })
+
+  it('prints whole dollars above a hundred, or where the amount is whole', () => {
+    expect(dollarText(211)).toBe('$211')
+    expect(dollarText(42)).toBe('$42')
+    expect(dollarText(0)).toBe('$0')
+  })
+
+  it('prints cents below that, and no more than two of them', () => {
+    expect(dollarText(0.37)).toBe('$0.37')
+    expect(dollarText(0.375)).toBe('$0.38')
+    expect(dollarText(37.5)).toBe('$37.5')
+  })
+
+  it('reads as spent over budget with the percent beside it', () => {
+    const rows = quotaRows(snapshotOf({ anthropic: { meters: [monthly(2119.26)] } }), NOW)
+
+    expect(rows[0].meters[0].text).toBe('$2.1k/$5k · 42%')
+    expect(rows[0].meters[0].label).toBe('MO')
+    expect(rows[0].meters[0].level).toBe('normal')
+  })
+
+  it('leads with a ! at the crit threshold, as every other meter does', () => {
+    const rows = quotaRows(snapshotOf({ anthropic: { meters: [monthly(4700)] } }), NOW)
+
+    expect(rows[0].meters[0].text).toBe('!$4.7k/$5k · 94%')
+    expect(rows[0].meters[0].level).toBe('crit')
+  })
+
+  it('prints an overage while the fill pins at a full budget', () => {
+    const rows = quotaRows(snapshotOf({ anthropic: { meters: [monthly(5200)] } }), NOW)
+
+    // The bar cannot draw past its end; the number must not lie about it.
+    expect(rows[0].meters[0].text).toBe('!$5.2k/$5k · 104%')
+    expect(rows[0].meters[0].fillPercent).toBe(100)
+  })
+
+  it('takes its colour from the same two thresholds, never from pace', () => {
+    const level = (used: number): string =>
+      quotaRows(snapshotOf({ anthropic: { meters: [monthly(used)] } }), NOW)[0].meters[0].level
+
+    expect(level(3499)).toBe('normal')
+    expect(level(3500)).toBe('warn')
+    expect(level(4500)).toBe('crit')
   })
 })
 
@@ -192,6 +310,77 @@ describe('the rows', () => {
     )
 
     expect(rows[0].meters.map((shown) => shown.label)).toEqual(['5H', '7D', 'FABLE'])
+  })
+
+  it('ranks the monthly meter last, whatever order the payload had', () => {
+    const rows = quotaRows(
+      snapshotOf({
+        anthropic: {
+          meters: [
+            monthly(2119.26),
+            meter({ kind: 'weekly_scoped', label: 'FABLE', usedPercent: 22 }),
+            meter({ kind: 'session', label: '5H', usedPercent: 73 }),
+            meter({ kind: 'weekly', label: '7D', usedPercent: 29 })
+          ]
+        }
+      }),
+      NOW
+    )
+
+    expect(rows[0].meters.map((shown) => shown.label)).toEqual(['5H', '7D', 'FABLE', 'MO'])
+  })
+
+  it('counts down to the monthly reset, which outlasts every other meter', () => {
+    const rows = quotaRows(
+      snapshotOf({
+        anthropic: {
+          meters: [
+            meter({ kind: 'session', label: '5H', resetsAt: NOW + 3 * HOUR }),
+            weekly(3 * DAY, 29),
+            monthly(2119.26)
+          ]
+        }
+      }),
+      NOW
+    )
+
+    expect(rows[0].right).toBe(countdownText(MONTH_END, NOW))
+    expect(rows[0].right).toBe('⟳16d12')
+  })
+
+  it('drops a lapsed monthly meter at the month boundary, as it drops any other', () => {
+    const past = quotaRows(
+      snapshotOf({ anthropic: { meters: [monthly(2119.26)] } }),
+      MONTH_END + MINUTE
+    )
+
+    // Correct rather than a bug: the next fetch computes the new month.
+    expect(past[0]).toMatchObject({ state: 'unknown', right: '', meters: [] })
+  })
+
+  it('dims a stale monthly meter and shows the reading\u2019s age instead', () => {
+    const rows = quotaRows(
+      snapshotOf({
+        anthropic: { fetchedAt: NOW - 12 * MINUTE, meters: [monthly(4700)] }
+      }),
+      NOW
+    )
+
+    expect(rows[0].state).toBe('stale')
+    expect(rows[0].right).toBe('·12m')
+    // The alarm goes with the emphasis, so no `!` on a distrusted reading.
+    expect(rows[0].meters[0].text).toBe('$4.7k/$5k · 94%')
+    expect(rows[0].meters[0].level).toBe('normal')
+    expect(rows[0].meters[0].tickPercent).toBeDefined()
+  })
+
+  it('drops a monthly reading past an hour old to a dash', () => {
+    const rows = quotaRows(
+      snapshotOf({ anthropic: { fetchedAt: NOW - 61 * MINUTE, meters: [monthly(2119.26)] } }),
+      NOW
+    )
+
+    expect(rows[0]).toMatchObject({ state: 'unknown', meters: [] })
   })
 
   it('counts down to the longest live reset, which is the weekly one', () => {

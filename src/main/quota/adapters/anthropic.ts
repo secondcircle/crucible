@@ -1,14 +1,23 @@
+import { monthlyResetAfter } from '../../../shared/quota/month'
 import type { QuotaMeter } from '../../../shared/quota/types'
 import { onceIn } from '../log'
 import { getJson } from './http'
 import type { AdapterRequest, AdapterResult, ProviderAdapter } from './types'
 
-// Only `limits[]` is read, never the top-level slots: those carry rotating
-// codenames and omit the scoped meter, so enumerating them would couple this
-// client to experiments and still miss the account's highest meter.
+// Only `limits[]` and `.spend` are read, never the top-level slots: those carry
+// rotating codenames and omit the scoped meter, so enumerating them would
+// couple this client to experiments and still miss the account's highest meter.
+// `.spend` is the account's dollar budget and the only monthly source there is;
+// the codename pools are one-time credits that pin at 100% once spent, so they
+// are no substitute for it. `extra_usage`, `severity`, `cap` and `balance` say
+// nothing this strip draws and are never read either.
 
 export const ANTHROPIC_PROVIDER_ID = 'anthropic'
 export const ANTHROPIC_QUOTA_URL = 'https://api.anthropic.com/api/oauth/usage'
+
+// Crucible's own, because `.spend` carries no name for itself. Every other
+// label on this row is the provider's word.
+export const MONTHLY_LABEL = 'MO'
 
 const KINDS: Record<string, { kind: QuotaMeter['kind']; label?: string }> = {
   session: { kind: 'session', label: '5H' },
@@ -34,10 +43,55 @@ function readResetsAt(value: unknown): number | null {
   return Number.isNaN(ms) ? null : ms
 }
 
+/** `amount_minor / 10^exponent`, the exponent defaulting to 2. */
+function readAmount(value: unknown): number | null {
+  if (!isRecord(value)) return null
+  const minor = value['amount_minor']
+  if (typeof minor !== 'number' || !Number.isFinite(minor) || minor < 0) return null
+  const exponent = value['exponent'] ?? 2
+  // A currency has a handful of minor digits. Past that the divisor is large
+  // enough to read any amount as $0, which is worse than dropping the meter.
+  if (typeof exponent !== 'number' || !Number.isInteger(exponent)) return null
+  if (exponent < 0 || exponent > 9) return null
+  return minor / 10 ** exponent
+}
+
+/**
+ * The account's monthly dollar budget. `null` where the plan has none, which is
+ * normal rather than drift: only a budget that is there, switched on and
+ * unreadable is worth a word.
+ */
+function parseSpend(
+  payload: Record<string, unknown>,
+  log: (message: string) => void,
+  now: number
+): QuotaMeter | null {
+  const spend = payload['spend']
+  if (!isRecord(spend) || spend['enabled'] !== true) return null
+
+  const used = readAmount(spend['used'])
+  const limit = readAmount(spend['limit'])
+  if (used === null || limit === null || limit <= 0) {
+    log(`dropped ${MONTHLY_LABEL}: .spend is enabled but its amounts are unreadable`)
+    return null
+  }
+
+  return {
+    kind: 'monthly',
+    label: MONTHLY_LABEL,
+    // Safe to clamp where a limits[] percent is not: this is arithmetic over
+    // two real amounts, so 100 is a full budget rather than a fabricated number.
+    usedPercent: Math.min(100, (used / limit) * 100),
+    resetsAt: monthlyResetAfter(now),
+    usedDollars: used,
+    limitDollars: limit
+  }
+}
+
 /** `null` is contract drift; `[]` is a document that legitimately meters nothing. */
 export function parseAnthropicQuota(
   payload: unknown,
-  opts: { log?: (message: string) => void } = {}
+  opts: { log?: (message: string) => void; now?: number } = {}
 ): QuotaMeter[] | null {
   const log = onceIn(ANTHROPIC_PROVIDER_ID, opts.log)
   if (!isRecord(payload)) return null
@@ -99,6 +153,12 @@ export function parseAnthropicQuota(
       ...(typeof entry['is_active'] === 'boolean' ? { isActive: entry['is_active'] } : {})
     })
   }
+
+  // Alongside, never instead: an account reporting both shows both, and the
+  // work account (`limits: []`, a live `.spend`) shows this one alone.
+  const monthly = parseSpend(payload, log, opts.now ?? Date.now())
+  if (monthly !== null) meters.push(monthly)
+
   return meters
 }
 

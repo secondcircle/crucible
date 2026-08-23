@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type {
   IssueBoardAnswer,
+  IssueBoardSnapshot,
   IssueGroupId,
   IssueLabel,
-  IssueRow
+  IssueRow,
+  MissingPiece
 } from '../../../shared/workspace/service'
 import { boardAge, issueAge, relativeTime } from '../labels'
 import { Markdown } from './Markdown'
@@ -36,6 +38,26 @@ const GROUP_WHY: Readonly<Record<IssueGroupId, string>> = {
   unclaimed: 'open, nobody assigned — free to pick up',
   pickedUp: 'a session here started on it, or a pull request names it',
   assignedToOthers: "someone else's to answer — here so you see the whole board"
+}
+
+type HostKind = IssueBoardSnapshot['host']['kind']
+
+// Every word that differs between hosts, in one table. The board is the same
+// board otherwise: same groups, same keys, same pane.
+const HOSTS: Readonly<
+  Record<HostKind, { readonly name: string; readonly where: string; readonly promise: string }>
+> = {
+  github: {
+    name: 'GitHub Issues',
+    // Reads as "Open on GitHub", "open on GitHub", "read on GitHub".
+    where: 'on GitHub',
+    promise: 'GitHub Issues via gh · nothing here is closed, assigned or commented for you'
+  },
+  jira: {
+    name: 'Jira',
+    where: 'in Jira',
+    promise: 'Jira, read-only · nothing here is transitioned, assigned or commented for you'
+  }
 }
 
 /** The age line reads as a clock while the board is open. */
@@ -93,6 +115,12 @@ export function IssueBoard({
 
   const board = answer?.kind === 'board' ? answer.board : undefined
   const unreachable = answer?.kind === 'unreachable' ? answer.reason : undefined
+  const missing = answer?.kind === 'notConfigured' ? answer.missing : undefined
+  // Jira is the only host with a not-configured state, so that answer names it
+  // even with no board behind it. Nothing else is host-specific until a board
+  // has answered.
+  const hostKind: HostKind = board?.host.kind ?? (missing === undefined ? 'github' : 'jira')
+  const host = HOSTS[hostKind]
 
   const groups = useMemo(() => {
     const rows = board?.rows ?? []
@@ -189,11 +217,21 @@ export function IssueBoard({
   }, [order, reference, busy, aligning, onAlign, onOpenIssue, onCopy])
 
   return (
-    <section className="board issues" role="dialog" aria-label="Issue board" tabIndex={-1} ref={overlay}>
+    <section
+      // The host's own class carries the one layout difference: a Jira row names
+      // its issue `EK-341`, which needs more room than `#341`.
+      className={hostKind === 'jira' ? 'board issues jira' : 'board issues'}
+      role="dialog"
+      aria-label="Issue board"
+      tabIndex={-1}
+      ref={overlay}
+    >
       <div className="bhead">
         <h1>Issues</h1>
         {board === undefined ? null : (
-          <span className="repo">{board.repoLabel} · GitHub Issues</span>
+          <span className="repo">
+            {board.repoLabel} · {host.name}
+          </span>
         )}
         <button className="x" onClick={onClose}>
           Close <kbd>esc</kbd>
@@ -248,6 +286,8 @@ export function IssueBoard({
             <p className="reading" role="alert">
               {unreachable}
             </p>
+          ) : missing !== undefined ? (
+            <NotConfigured missing={missing} />
           ) : answer === undefined ? (
             <p className="reading">Reading issues…</p>
           ) : order.length === 0 ? (
@@ -270,6 +310,7 @@ export function IssueBoard({
                   <Row
                     key={row.reference}
                     row={row}
+                    host={hostKind}
                     login={board?.login ?? ''}
                     started={sessions.has(row.reference)}
                     now={now}
@@ -291,6 +332,7 @@ export function IssueBoard({
           ) : (
             <Reading
               row={read}
+              host={hostKind}
               login={board?.login ?? ''}
               session={session}
               busy={busy}
@@ -317,23 +359,49 @@ export function IssueBoard({
           <kbd>⇧⏎</kbd> quick align
         </span>
         <span>
-          <kbd>⌘⏎</kbd> open on GitHub
+          <kbd>⌘⏎</kbd> open {host.where}
         </span>
         {reference === undefined ? null : (
           <span>
             <kbd>⌘C</kbd> copy <code>{reference}</code>
           </span>
         )}
-        <span className="sp">
-          {said ?? 'GitHub Issues via gh · nothing here is closed, assigned or commented for you'}
-        </span>
+        <span className="sp">{said ?? host.promise}</span>
       </div>
     </section>
   )
 }
 
+/**
+ * Jira is the host here and its configuration is not finished. Every missing
+ * piece at once, each naming itself and where it goes: a person fixing this
+ * wants the whole list, and an agent can act on it as it stands.
+ */
+function NotConfigured({ missing }: { readonly missing: readonly MissingPiece[] }): React.JSX.Element {
+  return (
+    <div className="setup" role="alert">
+      <h2>Jira is not set up in this workspace yet.</h2>
+      <dl>
+        {missing.map((piece) => (
+          <div key={piece.name}>
+            <dt>
+              <code>{piece.name}</code>
+            </dt>
+            <dd>{piece.where}</dd>
+          </div>
+        ))}
+      </dl>
+      <p>
+        A session here can do this for you: the setup is in Crucible’s agent docs, as{' '}
+        <code>jira.md</code>. Open this board again and it checks the files afresh.
+      </p>
+    </div>
+  )
+}
+
 function Row({
   row,
+  host,
   login,
   started,
   now,
@@ -341,6 +409,7 @@ function Row({
   onFocus
 }: {
   readonly row: IssueRow
+  readonly host: HostKind
   readonly login: string
   readonly started: boolean
   readonly now: number
@@ -362,7 +431,8 @@ function Row({
       aria-label={row.reference}
       onClick={onFocus}
     >
-      <span className="num">#{row.number}</span>
+      {/* `#341` on GitHub, `EK-341` on Jira: the host's own way of naming one. */}
+      <span className="num">{named(row, host)}</span>
       <span className="ttl">{row.title}</span>
       <Labels labels={row.labels} />
       <span className="who2">{who(row, login)}</span>
@@ -381,6 +451,7 @@ function Row({
 /** The whole of one issue, which is what deciding to take it needs. */
 function Reading({
   row,
+  host,
   login,
   session,
   busy,
@@ -390,6 +461,7 @@ function Reading({
   onOpenIssue
 }: {
   readonly row: IssueRow
+  readonly host: HostKind
   readonly login: string
   readonly session?: IssueSession
   readonly busy: boolean
@@ -405,7 +477,7 @@ function Reading({
     <>
       <div className="rhead">
         <div className="rnum">
-          <span>#{row.number}</span>
+          <span>{named(row, host)}</span>
           <span className="st">open</span>
           <span>
             opened {issueAge(row.createdAt, now)} ago by <b>{row.authorLogin}</b>
@@ -443,7 +515,7 @@ function Reading({
         )}
         {rest <= 0 ? null : (
           <p className="cmt more">
-            {rest} more comment{rest === 1 ? '' : 's'} · read on GitHub
+            {rest} more comment{rest === 1 ? '' : 's'} · read {HOSTS[host].where}
           </p>
         )}
       </div>
@@ -483,7 +555,7 @@ function Reading({
           </>
         )}
         <button className="browse" onClick={() => onOpenIssue(row)}>
-          Open on GitHub ⌘⏎
+          Open {HOSTS[host].where} ⌘⏎
         </button>
       </div>
     </>
@@ -516,6 +588,11 @@ function rowId(reference: string): string {
   return `issue-row-${reference}`
 }
 
+/** How this host names one issue: `#341`, or the key itself. */
+function named(row: IssueRow, host: HostKind): string {
+  return host === 'jira' ? row.reference : `#${row.number}`
+}
+
 /** Who is on it: you by name, somebody else by theirs, and a dash for nobody. */
 function who(row: IssueRow, login: string): string {
   if (row.assignees.length === 0) return '—'
@@ -527,6 +604,8 @@ function who(row: IssueRow, login: string): string {
 function matches(row: IssueRow, wanted: string): boolean {
   if (wanted === '') return true
   const haystack = [
+    // The reference matches whichever form the host writes it in.
+    row.reference,
     `#${row.number}`,
     row.title,
     ...row.labels.map((label) => label.name),

@@ -3,7 +3,7 @@
 // SDK-shaped can ride across on a type.
 
 export interface QuotaMeter {
-  readonly kind: 'session' | 'weekly' | 'weekly_scoped'
+  readonly kind: 'session' | 'weekly' | 'weekly_scoped' | 'monthly'
   /** Provider-reported, uppercase, short: "5H", "7D", "FABLE". */
   readonly label: string
   /** Used, 0–100. Never remaining, never a 0–1 fraction. */
@@ -12,6 +12,11 @@ export interface QuotaMeter {
   readonly resetsAt: number | null
   readonly scopeName?: string
   readonly isActive?: boolean
+  // A dollar budget, in major currency units, present exactly when kind is
+  // 'monthly'. Budget numbers, not identity: what a plan costs says nothing
+  // about who holds it.
+  readonly usedDollars?: number
+  readonly limitDollars?: number
 }
 
 // Narrower than an exception on purpose: only states the strip can draw.
