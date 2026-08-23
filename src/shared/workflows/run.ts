@@ -8,7 +8,7 @@ import type { SessionId } from '../agent/port'
 export type WorkflowRunId = string
 
 // No "staged": a chained successor is started directly by the engine when its
-// predecessor completes cleanly (ADR 0016), so a run that exists is running
+// predecessor completes cleanly, so a run that exists is running
 // or done.
 export type RunStatus = 'running' | 'paused' | 'complete' | 'failed' | 'cancelled'
 
@@ -35,7 +35,7 @@ export interface RunArtifact {
 }
 
 // A check-in or a blocker, already routed: what is shown is what was asked
-// and where it went, never an input box (ADR 0017).
+// and where it went, never an input box.
 export interface RunQuestion {
   readonly reason: string
   /** The node that raised it; absent for a workflow-level check-in. */
@@ -87,7 +87,7 @@ export interface RunRecord {
   // The orchestrator session. Every question and the completion go to its
   // agent; absent only for a future unattended run (none is built yet).
   readonly sessionId?: SessionId
-  /** The run's own worktree; every run gets one (ADR 0016). */
+  /** The run's own worktree; every run gets one. */
   readonly worktreePath?: string
   readonly branch?: string
   /** The commit the run branched from, named at kickoff. */

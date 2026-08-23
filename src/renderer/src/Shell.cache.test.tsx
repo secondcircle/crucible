@@ -290,7 +290,7 @@ describe('the cache health view', () => {
       fireEvent.click(screen.getByRole('button', { name: 'Reset counter' }))
     })
 
-    // Acknowledged before the ledger has answered (ADR 0010).
+    // Acknowledged before the ledger has answered.
     const busy = screen.getByRole('button', { name: 'Resetting…' })
     expect((busy as HTMLButtonElement).disabled).toBe(true)
     // No confirmation dialog: reset deletes nothing, so it is deliberately cheap.

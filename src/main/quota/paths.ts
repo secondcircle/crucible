@@ -3,8 +3,8 @@ import { join } from 'node:path'
 // The cache is Crucible's alone, under Crucible's own state directory, and so
 // it follows the dev/installed split like everything else there. Crucible
 // reads and writes nothing under `.pi`: π's directory is π's, and sharing a
-// file format with another app would be a contract nobody agreed to (ADR
-// 0015). Credentials still come through the π SDK's API, which is π asking
+// file format with another app would be a contract nobody agreed to.
+// Credentials still come through the π SDK's API, which is π asking
 // its own files on our behalf, not us reading them.
 
 /** A mismatch discards the file rather than parsing it. */

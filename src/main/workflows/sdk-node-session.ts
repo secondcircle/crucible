@@ -28,8 +28,8 @@ import type {
 
 // A node is a fresh π session with two injected tools and no interactive
 // user: in-memory session and settings managers, so nothing of π's state is
-// read or written (ADR 0015), and a full prompt override composed of the
-// node's role and the standing prompt (ADR 0012).
+// read or written, and a full prompt override composed of the node's role
+// and the standing prompt.
 
 type Sdk = typeof import('@earendil-works/pi-coding-agent')
 

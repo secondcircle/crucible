@@ -3,10 +3,10 @@ import { existsSync } from 'node:fs'
 import { access, constants } from 'node:fs/promises'
 import { join } from 'node:path'
 
-// The other half of ADR 0014. `.crucible/worktree` is the whole mechanism for
-// making a worktree, which is why a run cannot use it: a run's worktree is
-// branched from a commit named at kickoff and may have to continue a
-// predecessor's branch (ADR 0016), and none of that is a script's to decide.
+// `.crucible/worktree` is the whole mechanism for making a worktree, which
+// is why a run cannot use it: a run's worktree is branched from a commit
+// named at kickoff and may have to continue a predecessor's branch, and none
+// of that is a script's to decide.
 //
 // What a repository does know, and Crucible never can, is what turns a fresh
 // checkout into one an agent can work in: the env file, the install, the

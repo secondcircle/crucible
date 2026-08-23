@@ -3,7 +3,7 @@ import { workflow } from 'crucible:workflow'
 
 // The tracer bullet: one node running a prompt file, in the run's own
 // worktree. Ported from the legacy system; the venue choice is gone because
-// every run works in a worktree now (ADR 0016).
+// every run works in a worktree now.
 
 export default workflow({
   description: 'one node running a prompt file, in a worktree',

@@ -8,7 +8,7 @@ import './overlay.css'
 // misses — the ledger's reader is an agent, and a human scrolling a thousand
 // JSONL lines was never the point.
 //
-// Every input here names its feedback (ADR 0010): Reset disables in the
+// Every input here names its feedback: Reset disables in the
 // click's frame, Investigate says it is working, and Copy path says it
 // copied.
 

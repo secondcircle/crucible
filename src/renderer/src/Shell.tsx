@@ -1090,7 +1090,7 @@ export function Shell({
       // Only claim the key where there is a board to open. The shortcut is
       // global, so someone who learned it in a repository will press it in a
       // plain folder too, and swallowing it there leaves the app looking
-      // broken rather than looking like it has no board (ADR 0010).
+      // broken rather than looking like it has no board.
       if (!boardReachable) return
       pressed.preventDefault()
       openBoard()
@@ -1100,7 +1100,7 @@ export function Shell({
   }, [boardOpen, boardReachable, openBoard, closeRegion])
 
   // ⌘I, on exactly the same terms: claimed where there is an issue board to
-  // open, and left to the OS where there is not (ADR 0010).
+  // open, and left to the OS where there is not.
   useEffect(() => {
     function onKeyDown(pressed: KeyboardEvent): void {
       if (pressed.key !== 'i' && pressed.key !== 'I') return
@@ -1195,7 +1195,7 @@ export function Shell({
       // no beep.
       if (next === undefined) return
       // Cleared here rather than on arrival, so the pip is gone in the frame
-      // the key was pressed and not a round trip later (ADR 0010).
+      // the key was pressed and not a round trip later.
       setMarks((current) => withoutMark(current, next.id))
       activateSession(next.id)
     }
@@ -1804,7 +1804,7 @@ export function Shell({
 
   // One click: a new session in this workspace, in a new worktree, with the
   // interview already sent. The command is Crucible's own and expands in main
-  // before it crosses the port (ADR 0007).
+  // before it crosses the port.
   function alignOn(row: IssueRow, kind: 'align' | 'quick-align'): void {
     const workspaceId = activeWorkspaceId
     const workspace = active
@@ -1825,7 +1825,7 @@ export function Shell({
         if (!created.ok) {
           // The session stays open holding the script's whole output, and the
           // command is not sent. No silent fall back to the checkout: an
-          // interview would then run in the live working directory (ADR 0013).
+          // interview would then run in the live working directory.
           setWorktreeOutput({ sessionId, output: created.output })
           return
         }

@@ -38,7 +38,7 @@ export interface WorkflowRunService {
   /** Live-only: no replay, no backlog. */
   onEvent(listener: WorkflowRunListener): Unsubscribe
 
-  // The run view's two mechanical buttons (ADR 0017). Everything
+  // The run view's two mechanical buttons. Everything
   // conversational goes through the orchestrator instead.
   pause(runId: WorkflowRunId): Promise<void>
   resume(runId: WorkflowRunId): Promise<void>
