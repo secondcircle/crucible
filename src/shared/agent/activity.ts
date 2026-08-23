@@ -1,4 +1,5 @@
 import type { TranscriptItem } from './port'
+import { SKILL_TOOL, splitSkillSummary } from './skill-tool'
 
 // The dim line a session tree shows between two user messages. Both adapters
 // build it from real entries here, so one conversation never reads two ways.
@@ -12,6 +13,11 @@ export function summarizeActivity(items: readonly TranscriptItem[]): string | un
   let stopped = false
   let failed = false
   let shared = 0
+  // Every other name on this line counts calls, because every other name is an
+  // action. `skill` names a thing, so `2 skill` would read as two skills where
+  // one was opened twice. Counting skills instead also matches the chain head,
+  // which keeps one turn from carrying two numbers.
+  const skillsSeen = new Set<string>()
 
   for (const item of items) {
     switch (item.kind) {
@@ -21,9 +27,15 @@ export function summarizeActivity(items: readonly TranscriptItem[]): string | un
       case 'thinking':
         thinking = true
         break
-      case 'tool':
+      case 'tool': {
+        if (item.name === SKILL_TOOL) {
+          const { skill } = splitSkillSummary(item.summary)
+          if (skillsSeen.has(skill)) break
+          skillsSeen.add(skill)
+        }
         tools.set(item.name, (tools.get(item.name) ?? 0) + 1)
         break
+      }
       case 'bashRun':
         shared += 1
         break
