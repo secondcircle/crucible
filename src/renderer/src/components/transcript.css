@@ -225,6 +225,24 @@
   white-space: nowrap;
 }
 
+/* The marker beside the tool name on a skill read. */
+.toolbadge {
+  flex: none;
+  font: 10px/1.4 var(--font);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--dim);
+  background: var(--panel2);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 0 5px;
+}
+
+/* The supporting file's path inside the skill, under the skill's own name. */
+.toolunder {
+  color: var(--faint);
+}
+
 .toolstate {
   margin-left: auto;
   color: var(--faint);

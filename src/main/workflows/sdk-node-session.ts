@@ -19,6 +19,7 @@ import {
   type StoredMessage
 } from '../agent/sdk-transcript.ts'
 import { retentionInForce } from '../cache/retention.ts'
+import { forPi, type LoadedSkill } from '../skills/service.ts'
 import type {
   NodeSession,
   NodeSessionFactory,
@@ -134,12 +135,16 @@ export function createSdkNodeSessionFactory({
         )
       ]
 
+      const skills = request.skills ?? []
       const resourceLoader = new pi.DefaultResourceLoader({
         cwd: request.cwd,
         agentDir,
         noExtensions: true,
         noPromptTemplates: true,
+        // π's own folders stay unread; the node's skills are handed in whole
+        // and never re-read, because a node is one task start to finish.
         noSkills: true,
+        skillsOverride: () => ({ skills: forPi(skills), diagnostics: [] }),
         systemPromptOverride: () =>
           composeSystemPrompt({ role: request.rolePrompt, standing: standingPrompt }),
         appendSystemPromptOverride: () => []
@@ -163,7 +168,7 @@ export function createSdkNodeSessionFactory({
 
       // A node's turns are watched for cache misses exactly as a session's
       // are: same mirror, same arithmetic, and the engine writes the entry.
-      return wrap(session, {
+      return wrap(session, { skills, cwd: request.cwd }, {
         listedCacheReadPerMillion: (provider, id) => models.getModel(provider, id)?.cost.cacheRead,
         ...(request.onCacheMiss === undefined ? {} : { onCacheMiss: request.onCacheMiss })
       })
@@ -175,7 +180,14 @@ interface CacheWatch extends CacheMissTrackerOptions {
   readonly onCacheMiss?: (miss: ObservedCacheMiss) => void
 }
 
-function wrap(session: AgentSession, cache: CacheWatch): NodeSession {
+// The run view renders a node's transcript through the chat's own transcript
+// code, so a skill read reads there exactly as it does in a session.
+interface NodeSkills {
+  readonly skills: readonly LoadedSkill[]
+  readonly cwd: string
+}
+
+function wrap(session: AgentSession, skills: NodeSkills, cache: CacheWatch): NodeSession {
   const activityListeners = new Set<(now: string | undefined) => void>()
   const inflight = new Map<string, string>()
   const { retention } = retentionInForce()
@@ -238,7 +250,7 @@ function wrap(session: AgentSession, cache: CacheWatch): NodeSession {
     for (const [at, miss] of pathSeams(session.sessionManager.getEntries(), messages, cache)) {
       seams.set(at, seamFacts(miss))
     }
-    return toTranscript(messages, seams)
+    return toTranscript(messages, seams, skills)
   }
 
   const unsubscribe = session.subscribe((event) => {

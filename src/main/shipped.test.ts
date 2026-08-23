@@ -2,17 +2,19 @@
 //
 // What Crucible ships inside the app, read through the same service and the
 // same assembly the running app uses.
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { DOCS_INDEX_PLACEHOLDER } from './agent/system-prompt'
 import { createCommandService } from './commands/service'
+import { createSkillService, type LoadedSkill } from './skills/service'
 import {
   readShippedRolePrompt,
   readShippedStandingPrompt,
   shippedCommandsPath,
   shippedDocsIndexPath,
+  shippedSkillsPath,
   shippedSystemPrompt
 } from './shipped'
 
@@ -181,6 +183,178 @@ describe('the shipped commands doc', () => {
   })
 })
 
+describe('the built-in skills', () => {
+  // The real service, pointed at the shipped folder and nothing else, so what
+  // is asserted is what π's own loader makes of the files that ship.
+  const loaded = async (): Promise<readonly LoadedSkill[]> =>
+    (await createSkillService({
+      roots: { builtIn: shippedSkillsPath(APP), user: join(workspace, 'no-user-folder') }
+    }).resolve(workspace)) ?? []
+
+  const body = (): string =>
+    readFileSync(join(shippedSkillsPath(APP), 'writing-agent-prompts', 'SKILL.md'), 'utf8')
+
+  it('are exactly one skill, and it loads through π’s own loader', async () => {
+    const skills = await loaded()
+
+    expect(skills.map((skill) => skill.name)).toEqual(['writing-agent-prompts'])
+    expect(skills[0].filePath).toBe(
+      join(shippedSkillsPath(APP), 'writing-agent-prompts', 'SKILL.md')
+    )
+  })
+
+  it('describe what they cover and when to read them', async () => {
+    const [skill] = await loaded()
+
+    expect(skill.description).toMatch(/instructions/)
+    expect(skill.description).toMatch(/[Rr]ead it before/)
+    expect(skill.description.length).toBeLessThanOrEqual(1024)
+  })
+
+  it('carry the doctrine forward: the goal, and why a rubric is not one', () => {
+    const text = body()
+
+    expect(text).toMatch(/## What a prompt carries/)
+    for (const carried of ['The goal', 'The reason', 'The constraints']) {
+      expect(text).toContain(carried)
+    }
+    // The load-bearing reason, not just the rule.
+    expect(text).toMatch(/a goal survives a model upgrade untouched/)
+    expect(text).toMatch(/rubric\s+encodes the weaknesses/)
+  })
+
+  it('correct the doctrine: the shape, the fragility, the omissions', () => {
+    const text = body()
+
+    // An example of the answer stays banned; an example of the shape is how
+    // format and tone are steered.
+    expect(text).toMatch(/expected answer\* is the one thing an example must never be/)
+    expect(text).toMatch(/example of the \*shape\*/)
+    expect(text).toMatch(/## Specificity matches fragility/)
+    expect(text).toMatch(/Where exactly one route works, give it exactly/)
+    expect(text).toMatch(/How far the work goes/)
+    expect(text).toMatch(/when to stop/)
+    expect(text).toMatch(/do not ask an agent to verify what it\s+already verifies/)
+    // Deliberate vagueness under-delivers rather than producing variety.
+    expect(text).toMatch(/smallest defensible interpretation/)
+  })
+
+  it('are behavior, never model trivia: no model named and no dated claim', () => {
+    for (const text of [body(), supporting()]) {
+      expect(text).not.toMatch(/\d{4}/)
+      expect(text).not.toMatch(/\bas of\b/i)
+      for (const model of ['claude', 'gpt', 'opus', 'sonnet', 'haiku', 'gemini', 'llama']) {
+        expect(text.toLowerCase()).not.toContain(model)
+      }
+    }
+  })
+
+  it('are portable in fact: no Crucible, no π, no path inside this repository', () => {
+    for (const text of [body(), supporting()]) {
+      expect(text).not.toMatch(/crucible/i)
+      expect(text).not.toMatch(PI_BY_NAME)
+      expect(text).not.toContain('\u03c0')
+      expect(text).not.toContain('src/')
+      expect(text).not.toContain('docs/adr')
+      expect(text).not.toContain('.crucible')
+    }
+  })
+
+  // Short body, detail behind a relative path: the progressive disclosure the
+  // transcript's skill marker is there to make visible.
+  const supporting = (): string =>
+    readFileSync(
+      join(shippedSkillsPath(APP), 'writing-agent-prompts', 'scope-boundaries.md'),
+      'utf8'
+    )
+
+  it('keep the body short and put the long part behind a relative path', () => {
+    expect(body().split('\n').length).toBeLessThan(200)
+    expect(body()).toContain('`scope-boundaries.md`')
+    expect(supporting()).toMatch(/# Scope boundaries/)
+  })
+
+  it('ship markdown and nothing else', () => {
+    const folder = join(shippedSkillsPath(APP), 'writing-agent-prompts')
+    expect(readdirSync(folder).sort()).toEqual(['SKILL.md', 'scope-boundaries.md'])
+  })
+})
+
+describe('the shipped skills doc', () => {
+  const doc = (): string =>
+    readFileSync(join(dirname(shippedDocsIndexPath(APP)), 'skills.md'), 'utf8')
+
+  it('says what a skill is and that the model reaches for it on its own', () => {
+    const text = doc()
+    expect(text).toContain('SKILL.md')
+    expect(text).toMatch(/read for yourself/)
+    expect(text).toMatch(/Nobody invokes a\s+skill/)
+  })
+
+  it('names all three folders, the built-in origin and the precedence', () => {
+    const text = doc()
+    expect(text).toContain('~/.crucible/skills/')
+    expect(text).toContain('.crucible/skills/')
+    expect(text).toContain('built-in')
+    expect(text).toMatch(/workspace first, then user,\s+then built-in/)
+  })
+
+  it('gives the frontmatter contract, both fields and their limits', () => {
+    const text = doc()
+    expect(text).toContain('name')
+    expect(text).toContain('description')
+    expect(text).toContain('64 characters')
+    expect(text).toContain('1024 characters')
+    expect(text).toMatch(/third person/)
+    expect(text).toMatch(/resolve against that skill’s own directory|against that skill's own directory/)
+  })
+
+  it('says discovery is re-read on use, so a skill written now works next message', () => {
+    expect(doc()).toMatch(/fresh on every turn/)
+    expect(doc()).toMatch(/very next message/)
+    expect(doc()).toMatch(/No\s+restart, no reload/)
+  })
+
+  it('says π’s own skill folders are invisible, and that there is no slash invocation', () => {
+    const text = doc()
+    expect(text).toContain('.pi/skills')
+    expect(text).toMatch(/does not read/)
+    expect(text).toContain('/skill:name')
+    expect(text).toMatch(/never will be/)
+  })
+
+  it('says a workflow node may narrow its skills', () => {
+    const text = doc()
+    expect(text).toContain("skills: ['writing-agent-prompts']")
+    expect(text).toMatch(/an empty\s+list means none at all/)
+    expect(text).toMatch(/matching no skill is ignored/)
+  })
+
+  it('ends with a worked example, the way the commands doc does', () => {
+    const text = doc()
+    expect(text).toContain('## A worked example')
+    expect(text.indexOf('## A worked example')).toBeGreaterThan(text.length / 2)
+    expect(text).toContain('.crucible/skills/writing-migrations/SKILL.md')
+  })
+
+  it('is the file that ships, byte for byte', () => {
+    expect(doc()).toBe(readFileSync(join(APP, 'resources', 'agent-docs', 'skills.md'), 'utf8'))
+  })
+})
+
+describe('the shipped workflow-authoring doc', () => {
+  const doc = (): string =>
+    readFileSync(join(dirname(shippedDocsIndexPath(APP)), 'workflow-authoring.md'), 'utf8')
+
+  it('documents the skills field: its default, an empty list, an unknown name', () => {
+    const text = doc()
+    expect(text).toContain('`skills`')
+    expect(text).toMatch(/Omitted means every skill/)
+    expect(text).toMatch(/empty\s+list means none at all/)
+    expect(text).toMatch(/matching no skill is ignored/)
+  })
+})
+
 describe('the shipped worktrees doc', () => {
   const doc = (): string =>
     readFileSync(join(dirname(shippedDocsIndexPath(APP)), 'worktrees.md'), 'utf8')
@@ -313,6 +487,11 @@ describe('the shipped docs index', () => {
   it('names jira.md, and when to read it', () => {
     expect(index()).toContain('jira.md')
     expect(index()).toMatch(/connect a repository to Jira/)
+  })
+
+  it('names skills.md, and when to read it', () => {
+    expect(index()).toContain('skills.md')
+    expect(index()).toMatch(/asks about Crucible's skills/)
   })
 
   it('says the docs it lists resolve beside itself', () => {
