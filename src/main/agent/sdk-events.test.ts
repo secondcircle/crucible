@@ -362,6 +362,35 @@ describe('queued messages', () => {
       expect(mapper.map(start, TARGET)).toMatchObject({ images: [SHOT] })
     })
 
+    // π's own `steer()` rewrites the text before it pushes it: a `/skill:name`
+    // command becomes the skill's body, and a `/name` that matches one of π's
+    // prompt templates becomes that template. Crucible hands `/`-leading text
+    // straight over, because its renderer only expands its own commands and
+    // passes anything else through. What π then reports is not what was handed
+    // to it, but the pictures still belong to that message.
+    it('rides a message π rewrote on its way into the queue', () => {
+      const queued = createQueuedImages()
+      queued.add('steering', '/skill:review look at this', [SHOT])
+      const mapper = createEventMapper(undefined, queued)
+      const rewritten = '<skill name="review" location="/s/review.md">…</skill>\n\nlook at this'
+
+      expect(
+        mapper.map(sdk({ type: 'queue_update', steering: [rewritten], followUp: [] }), TARGET)
+      ).toMatchObject({ steering: [{ text: rewritten, images: [SHOT] }] })
+
+      // Delivered: the transcript entry and the model both get the picture.
+      mapper.map(sdk({ type: 'queue_update', steering: [], followUp: [] }), TARGET)
+      expect(
+        mapper.map(
+          sdk({
+            type: 'message_start',
+            message: { role: 'user', content: [{ type: 'text', text: rewritten }] }
+          }),
+          TARGET
+        )
+      ).toMatchObject({ text: rewritten, images: [SHOT] })
+    })
+
     // Removing one queued message costs π's queue a clear and a requeue, which
     // empties this memory and fills it again. Neither is a delivery: what left
     // the queue is the memory's own answer, and it says nothing left.
