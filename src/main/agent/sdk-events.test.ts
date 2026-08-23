@@ -334,6 +334,33 @@ describe('queued messages', () => {
         images: [SHOT]
       })
     })
+
+    // Two queued messages can hold the same words with different pictures, and
+    // π delivers the older one first: it removes the first text that matches
+    // and its own queue is oldest-first. So the picture left in the queue is
+    // the younger message's, and the picture announced is the older one's.
+    const OTHER: ImageAttachment = { mimeType: 'image/jpeg', data: 'BBBBBB==' }
+
+    it('stays with its own message when two of them read alike', () => {
+      const queued = createQueuedImages()
+      queued.add('steering', 'again', [SHOT])
+      queued.add('steering', 'again', [OTHER])
+      const mapper = createEventMapper(undefined, queued)
+      const start = sdk({
+        type: 'message_start',
+        message: { role: 'user', content: [{ type: 'text', text: 'again' }] }
+      })
+
+      mapper.map(sdk({ type: 'queue_update', steering: ['again', 'again'], followUp: [] }), TARGET)
+      // π delivered the older one, so the row still waiting is the younger.
+      const shrunk = mapper.map(
+        sdk({ type: 'queue_update', steering: ['again'], followUp: [] }),
+        TARGET
+      )
+
+      expect(shrunk).toMatchObject({ steering: [{ text: 'again', images: [OTHER] }] })
+      expect(mapper.map(start, TARGET)).toMatchObject({ images: [SHOT] })
+    })
   })
 })
 

@@ -342,6 +342,34 @@ describe('pulling the pictures back', () => {
     // the composer share a name.
     expect(chips()).toEqual(['image 2', 'later.png'])
   })
+
+  // Counting past what is held is only a way of reaching the promise: no two
+  // chips in the composer share a name. Removing one restored chip lowers the
+  // count the next restore starts from, and the name comes round again.
+  it('names them apart even after one restored chip has been removed', async () => {
+    const port = await shellWithSession()
+    await working()
+    await paste(png('one.png', 3), png('two.png', 6))
+    type('the first message')
+    await press('Enter')
+    await paste(png('three.png', 9))
+    type('the second message')
+    await press('Enter')
+    expect(port.queueOf('s1')?.steering).toHaveLength(2)
+
+    await act(async () => {
+      fireEvent.click(screen.getAllByRole('button', { name: /queued/ })[0])
+    })
+    await act(async () => {
+      fireEvent.click(screen.getByLabelText('Remove image 1'))
+    })
+    type('')
+    await act(async () => {
+      fireEvent.click(screen.getAllByRole('button', { name: /queued/ })[0])
+    })
+
+    expect(new Set(chips()).size).toBe(chips().length)
+  })
 })
 
 describe('a flush', () => {
