@@ -53,8 +53,16 @@ export interface ScriptedPort extends AgentPort {
   // Held open where a test wants a jump still in flight — a summarize takes
   // real seconds, and everything about owning one happens during them.
   holdJump?: boolean
-  /** Settles a held jump, the way π settles one. */
+  // Settles the oldest held jump, the way π settles one. Held jumps queue, so
+  // a test can have two in flight at once and settle the one that started
+  // first — which is how a chain outlives the screen that started it.
   settleJump(outcome: 'jumped' | 'cancelled' | { readonly failure: string }): void
+  // Held open where a test wants the round trip a summarize door makes before
+  // it asks π for anything: nothing has been spent yet during it, so what
+  // Escape does elsewhere in that window is only visible here.
+  holdTree?: boolean
+  /** Answers one session's held tree read with the tree scripted for it. */
+  settleTree(id: SessionId): void
   /** π's own retry of a branch summary, exactly as main announces one. */
   summarizeRetry(
     sessionId: SessionId,
@@ -236,6 +244,11 @@ export function createScriptedPort(initial: Partial<ShellSnapshot> = {}): Script
     return Promise.resolve()
   }
 
+  /** The tree scripted for a session, or the empty one a fresh session has. */
+  function treeOf(id: SessionId): SessionTree {
+    return port.trees.get(id) ?? { roots: [], path: [] }
+  }
+
   /** What a jump that genuinely happened answers with. */
   function jumped(): { cancelled: boolean; editorText?: string } {
     return port.jumpText === undefined
@@ -244,12 +257,11 @@ export function createScriptedPort(initial: Partial<ShellSnapshot> = {}): Script
   }
 
   let held: ((outcome: 'delivered' | 'dropped') => void) | undefined
-  let heldJump:
-    | {
-        resolve: (outcome: { cancelled: boolean; editorText?: string }) => void
-        reject: (cause: Error) => void
-      }
-    | undefined
+  const heldJumps: {
+    resolve: (outcome: { cancelled: boolean; editorText?: string }) => void
+    reject: (cause: Error) => void
+  }[] = []
+  const heldTrees = new Map<SessionId, (tree: SessionTree) => void>()
   let heldWorktree: (() => void) | undefined
   let login: { resolve: () => void; reject: (cause: Error) => void } | undefined
 
@@ -473,14 +485,24 @@ export function createScriptedPort(initial: Partial<ShellSnapshot> = {}): Script
     },
 
     sessionTree(id: SessionId): Promise<SessionTree> {
-      return record('sessionTree', [id], port.trees.get(id) ?? { roots: [], path: [] })
+      if (port.holdTree !== true) return record('sessionTree', [id], treeOf(id))
+      calls.push({ op: 'sessionTree', args: [id] })
+      return new Promise<SessionTree>((resolve) => {
+        heldTrees.set(id, resolve)
+      })
+    },
+
+    settleTree(id: SessionId): void {
+      const waiting = heldTrees.get(id)
+      heldTrees.delete(id)
+      waiting?.(treeOf(id))
     },
 
     jump(id: SessionId, ref: string, options: { readonly summarize: boolean }) {
       calls.push({ op: 'jump', args: [id, ref, options] })
       if (port.holdJump === true) {
         return new Promise<{ cancelled: boolean; editorText?: string }>((resolve, reject) => {
-          heldJump = { resolve, reject }
+          heldJumps.push({ resolve, reject })
         })
       }
       if (port.jumpRefusal !== undefined) return Promise.reject(new Error(port.jumpRefusal))
@@ -489,8 +511,7 @@ export function createScriptedPort(initial: Partial<ShellSnapshot> = {}): Script
     },
 
     settleJump(outcome): void {
-      const held = heldJump
-      heldJump = undefined
+      const held = heldJumps.shift()
       if (held === undefined) return
       if (outcome === 'jumped') held.resolve(jumped())
       else if (outcome === 'cancelled') held.resolve({ cancelled: true })

@@ -30,6 +30,30 @@ function prefix(over: Partial<CachedPrefix> = {}): CachedPrefix {
   }
 }
 
+/** Two sessions in one workspace, A active, and B's cache gone or not. */
+function twoSessions(b: 'expired' | 'fresh'): ShellSnapshot {
+  const both = {
+    workspaceId: 'w1',
+    createdAt: '2026-08-20T10:00:00.000Z',
+    working: false,
+    fresh: false
+  }
+  return {
+    workspaces: [{ id: 'w1', name: 'crucible', path: '/repos/crucible' }],
+    activeWorkspaceId: 'w1',
+    sessions: [
+      { ...both, id: 's1', title: 'session A', cachedPrefix: prefix() },
+      {
+        ...both,
+        id: 's2',
+        title: 'session B',
+        ...(b === 'expired' ? { cachedPrefix: prefix() } : {})
+      }
+    ],
+    activeSessionId: 's1'
+  }
+}
+
 const TREE: SessionTree = {
   roots: [
     {
@@ -395,31 +419,7 @@ describe('escape', () => {
 
 describe('the choice belongs to one session', () => {
   it('is dismissed by landing somewhere else, draft intact', async () => {
-    const twoSessions: ShellSnapshot = {
-      workspaces: [{ id: 'w1', name: 'crucible', path: '/repos/crucible' }],
-      activeWorkspaceId: 'w1',
-      sessions: [
-        {
-          id: 's1',
-          workspaceId: 'w1',
-          createdAt: '2026-08-20T10:00:00.000Z',
-          title: 'session A',
-          working: false,
-          fresh: false,
-          cachedPrefix: prefix()
-        },
-        {
-          id: 's2',
-          workspaceId: 'w1',
-          createdAt: '2026-08-20T10:00:00.000Z',
-          title: 'session B',
-          working: false,
-          fresh: false
-        }
-      ],
-      activeSessionId: 's1'
-    }
-    await mount(twoSessions)
+    await mount(twoSessions('fresh'))
     await type('half a thought')
     expect(choice()).not.toBeNull()
 
@@ -440,32 +440,7 @@ describe('the choice belongs to one session', () => {
   })
 
   it('never dismisses a choice another session raised while its summary landed', async () => {
-    const twoSessions: ShellSnapshot = {
-      workspaces: [{ id: 'w1', name: 'crucible', path: '/repos/crucible' }],
-      activeWorkspaceId: 'w1',
-      sessions: [
-        {
-          id: 's1',
-          workspaceId: 'w1',
-          createdAt: '2026-08-20T10:00:00.000Z',
-          title: 'session A',
-          working: false,
-          fresh: false,
-          cachedPrefix: prefix()
-        },
-        {
-          id: 's2',
-          workspaceId: 'w1',
-          createdAt: '2026-08-20T10:00:00.000Z',
-          title: 'session B',
-          working: false,
-          fresh: false,
-          cachedPrefix: prefix()
-        }
-      ],
-      activeSessionId: 's1'
-    }
-    const port = await mount(twoSessions)
+    const port = await mount(twoSessions('expired'))
     port.holdJump = true
     await type('carry on in A')
     await press('s')
@@ -496,32 +471,108 @@ describe('the choice belongs to one session', () => {
     expect(composer()).toHaveValue('carry on in B')
   })
 
+  it('never dismisses the fresh choice a second send raised in its own session', async () => {
+    const port = await mount(twoSessions('expired'))
+    port.holdJump = true
+    await type('carry on in A')
+    await press('s')
+
+    // Away and back: the wait state is dismissed by the landing, the summary
+    // goes on, and A's composer is live again with the draft in it. A second
+    // send there meets a fresh choice of its own — the cache is still gone.
+    await act(async () => {
+      fireEvent.click(sessionRows()[1] as HTMLElement)
+    })
+    await settled()
+    await act(async () => {
+      fireEvent.click(sessionRows()[0] as HTMLElement)
+    })
+    await settled()
+    await type('and one more thing')
+    expect(choice()).not.toBeNull()
+
+    port.transcripts.set('s1', [
+      { kind: 'summary', text: 'Carried forward: the branch was summarized.' }
+    ])
+    await act(async () => {
+      port.settleJump('jumped')
+    })
+    await settled()
+
+    expect(port.calls).toContainEqual({ op: 'prompt', args: ['s1', 'carry on in A'] })
+    // Same session, but not the same dialog: the landing chain closes the
+    // wait state it put up, and the choice waiting on an answer stays.
+    expect(choice()).not.toBeNull()
+    expect(composer()).toHaveValue('and one more thing')
+  })
+
+  it('closes the wait state it put up when a second one is already on screen', async () => {
+    const port = await mount(twoSessions('expired'))
+    port.holdJump = true
+    await type('carry on in A')
+    await press('s')
+
+    // Away and back, then a second send in A, and its door two as well: two
+    // summaries in flight in one session, the second one's dialog on screen.
+    await act(async () => {
+      fireEvent.click(sessionRows()[1] as HTMLElement)
+    })
+    await settled()
+    await act(async () => {
+      fireEvent.click(sessionRows()[0] as HTMLElement)
+    })
+    await settled()
+    await type('and one more thing')
+    await press('s')
+    expect(waiting()).not.toBeNull()
+
+    // The first summary lands under the second one's wait state.
+    await act(async () => {
+      port.settleJump('jumped')
+    })
+    await settled()
+
+    expect(port.calls).toContainEqual({ op: 'prompt', args: ['s1', 'carry on in A'] })
+    // The dialog on screen belongs to the second press, which is still
+    // waiting: only the chain that raised a wait state ever takes it down.
+    expect(waiting()).not.toBeNull()
+  })
+
+  it('lets a summary another session started run on when Escape retires this one', async () => {
+    const port = await mount(twoSessions('expired'))
+    port.holdTree = true
+    await type('carry on in A')
+    await press('s')
+    // A's chain is in the round trip before π is asked for anything.
+    expect(opsOf(port)).toContain('sessionTree')
+    expect(opsOf(port)).not.toContain('jump')
+
+    // In that window the user goes to B, meets B's own choice and backs out
+    // of it. Escape retires B's gesture, and B's alone.
+    await act(async () => {
+      fireEvent.click(sessionRows()[1] as HTMLElement)
+    })
+    await settled()
+    await type('carry on in B')
+    await escape()
+    expect(choice()).toBeNull()
+
+    port.transcripts.set('s1', [
+      { kind: 'summary', text: 'Carried forward: the branch was summarized.' }
+    ])
+    await act(async () => {
+      port.settleTree('s1')
+    })
+    await settled()
+
+    // A's summary was asked for and A's message went out: the door A took is
+    // still being honoured.
+    expect(port.calls).toContainEqual({ op: 'jump', args: ['s1', 'n1', { summarize: true }] })
+    expect(port.calls).toContainEqual({ op: 'prompt', args: ['s1', 'carry on in A'] })
+  })
+
   it('never destroys words typed while the summary was being written', async () => {
-    const twoSessions: ShellSnapshot = {
-      workspaces: [{ id: 'w1', name: 'crucible', path: '/repos/crucible' }],
-      activeWorkspaceId: 'w1',
-      sessions: [
-        {
-          id: 's1',
-          workspaceId: 'w1',
-          createdAt: '2026-08-20T10:00:00.000Z',
-          title: 'session A',
-          working: false,
-          fresh: false,
-          cachedPrefix: prefix()
-        },
-        {
-          id: 's2',
-          workspaceId: 'w1',
-          createdAt: '2026-08-20T10:00:00.000Z',
-          title: 'session B',
-          working: false,
-          fresh: false
-        }
-      ],
-      activeSessionId: 's1'
-    }
-    const port = await mount(twoSessions)
+    const port = await mount(twoSessions('fresh'))
     port.holdJump = true
     await type('carry on')
     await press('s')
