@@ -38,6 +38,18 @@ skill and rendered in the tool chain as `skill` rather than `read`, so whether a
 shipped skill is earning its place is visible in the transcript and greppable in
 Crucible's own logs.
 
+Discovery re-reads the folders when Crucible starts a turn, which fixes the skill
+set for the whole of that turn. A steering message or a follow-up into a turn
+already running keeps the set that turn began with, so a skill written mid-turn
+reaches the next thing the user sends rather than the work in flight. Two smaller
+consequences follow from the same place. An unreadable folder cannot be allowed
+to fail a send, because discovery sits on the path that echoes the user's own
+message back into the transcript, and π's loader reports an unreadable folder as
+an empty one anyway, so the two cases are indistinguishable from here. And a
+session whose skill set has not changed returns `undefined` rather than an equal
+array, because handing back a fresh array re-bills the prompt cache for a prefix
+that did not move.
+
 ## Considered Options
 
 Owning the whole mechanism the way commands are owned — Crucible's own file

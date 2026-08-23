@@ -188,8 +188,12 @@ _Avoid_: new session, clear chat.
 **Role prompt**:
 The replaceable identity of an agent Crucible starts — what kind of agent it
 is and the generic guidelines of that job. Authored by Crucible and passed as
-a full override; π's stock prompt is never used. One role exists today: the
-interactive coding agent.
+a full override; π's stock prompt is never used. Two roles exist today: the
+interactive coding agent, and the **node role** every workflow node is started
+with — the one that says a node has no interactive user, must produce its
+declared outputs, is not done until it calls `complete_node`, raises a blocker
+rather than improvising, and never fabricates a result it did not verify. A
+node prompt is written on top of that role, not instead of it.
 _Avoid_: system prompt (the composed whole), base prompt.
 
 **Quota strip**:

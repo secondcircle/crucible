@@ -75,6 +75,15 @@ repository — node outputs land there, never in the worktree.
     `result.verdict`.
   - `model` — `"provider/model-id:thinkingLevel"`, e.g.
     `"anthropic/claude-opus-5:high"`. Omitted means the engine's default.
+    `thinkingLevel` is π's name for the suffix and the reason it reads that
+    way here, but what it sets is effort, and effort governs the whole turn
+    rather than the depth of thinking alone. Lower it and the node makes
+    fewer tool calls, writes less preamble and answers more tersely; raise it
+    and it searches harder before it acts. Pick by how much work the node
+    should do, not by how hard you want it to think: a node that reads three
+    files and fills in a template wants a low level, a node that has to find
+    something wants a high one. It is a poor lever for output length, which a
+    node prompt controls better by saying what to write.
   - `tools` — built-in tool names; defaults to
     read/bash/edit/write/grep/find/ls.
   - `skills` — skill names this node may use. Omitted means every skill the
@@ -100,6 +109,22 @@ repository — node outputs land there, never in the worktree.
   Not idempotent: two calls stage two runs.
 
 ## What a node is told
+
+Before your prompt arrives, the engine has already given the node a role
+prompt. Do not restate any of it. Verbatim, it tells the node that it has no
+interactive user and works autonomously; that its task lists required input
+files and it should read the ones it needs; that it must produce every
+declared output file with real, complete content; that it is not done until
+it calls `complete_node`, and ending a message is not completion; that a
+broken environment or malformed input means `raise_blocker` rather than
+improvising or asking in plain text, because nobody is reading plain text;
+that after raising one it stops and waits; and that it must never fabricate a
+result, but verify claims by running tools.
+
+So a node prompt that opens with "you are an autonomous agent", or closes by
+reminding the node to call `complete_node` and not to make things up, is
+spending its opening and closing lines on what the node was already told.
+Write the task instead.
 
 Every node is a fresh agent with no interactive user. Beyond its built-in
 tools it gets exactly two more: `complete_node(summary, verdict?)` — the
