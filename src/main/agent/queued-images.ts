@@ -5,31 +5,23 @@ import type {
   QueueState
 } from '../../shared/agent/port'
 
-// π's `steer()` and `followUp()` take images, but its queue is reported and
-// handed back as text. So the pictures wait here, per session, and are paired
-// back onto π's own lists whenever the queue is read.
+// π's queue is reported and handed back as text, so the pictures a queued
+// message carries wait here, per session, until that message leaves.
 
-/** π's queue as this memory reads it, and what dropped out of it. */
 export interface PairedQueue extends QueueState {
-  // Remembered messages π no longer lists, oldest first. π drops a message
-  // from its list immediately before delivering it, so this is what is on its
-  // way into the transcript. It is this memory's answer because this memory
-  // holds the pairing rule; a second rule elsewhere could only disagree.
+  // π drops a message from its list immediately before delivering it, so what
+  // this memory no longer sees listed is on its way into the transcript.
   readonly left: readonly QueuedEntry[]
 }
 
 export interface QueuedImages {
-  // A message just handed to π's queue, and whatever rides with it. The call
-  // handed back takes it out again, for a message π refused: it never reached
-  // the queue, and a memory one entry longer than π's queue would put every
-  // later picture on the message before it. Once π has reported the queue the
-  // message is genuinely in it, and the call then does nothing.
+  // The call handed back forgets the message again, for one π refused: the
+  // pairing is by position, and an extra entry would shift every later picture.
   add(kind: QueuedKind, text: string, images?: readonly ImageAttachment[]): () => void
-  // π's two lists, paired back up with what was handed over, and kept as the
-  // new memory: anything π no longer lists has left the queue for good.
+  // Anything π no longer lists has left the queue for good.
   pair(steering: readonly string[], followUp: readonly string[]): PairedQueue
-  // What is held now, with the memory emptied. Read before clearing π's queue,
-  // because clearing it is itself a queue event and would empty this first.
+  // Read before clearing π's queue: the clear is itself a queue event, and
+  // would empty this first.
   take(): QueueState
 }
 
@@ -72,7 +64,6 @@ export function createQueuedImages(): QueuedImages {
   }
 }
 
-/** π's list of texts, holding the pictures each of those messages came with. */
 export function withImages(
   texts: readonly string[],
   held: readonly QueuedEntry[]
@@ -80,18 +71,9 @@ export function withImages(
   return align(texts, held).entries
 }
 
-// Paired by position rather than by text, because π's text is not the text it
-// was handed: `steer()` expands a `/skill:name` message into the skill's body,
-// and a `/name` that matches one of π's prompt templates into that template,
-// before pushing anything. Position holds where text does not, because the two
-// lists are one queue filled in lockstep — `queueInto` remembers a message
-// immediately before handing it over, and π pushes it with nothing awaited in
-// between. They are aligned at the tail, where a new message arrives with this
-// memory already holding it; π only ever removes from the head, its queue being
-// FIFO and the list it reports having lost the delivered text's first
-// occurrence. Whatever π reports for an entry becomes that entry's text here:
-// that is the text π will deliver it under, hand back on a flush, and name it
-// by in a dequeue.
+// Paired by position rather than by text, because π rewrites a message on its
+// way in and the text it reports is not the text it was handed. The two lists
+// are one FIFO queue, aligned at the tail, filled in lockstep.
 function align(
   texts: readonly string[],
   held: readonly QueuedEntry[]

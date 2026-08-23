@@ -89,9 +89,8 @@ export interface ScriptedPort extends AgentPort {
   holdShare?: boolean
   /** Settles a held share, as the port does when it reaches its delivery point. */
   settleShare(outcome: 'delivered' | 'dropped'): void
-  // Set only where a test needs the race: it makes `dequeue` answer with
-  // nothing, as main does for a message delivered while the click was in
-  // flight. Otherwise the double answers with the entry it really removed.
+  // Set only where a test needs the race main loses: a message delivered while
+  // the click was in flight. Otherwise the double answers with what it removed.
   dequeueMisses?: boolean
   /** What `exhibit` answers with, per tab id. */
   readonly exhibits: Map<TabId, string>

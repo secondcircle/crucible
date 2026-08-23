@@ -208,8 +208,7 @@ export function Composer({
     modelId === undefined ? undefined : (MODEL_ALIASES[modelId] ?? model?.label ?? modelId)
 
   // Sending and queueing ask the same question of a draft: some text, and a
-  // session settled enough to answer it. Chips ride whichever it turns out to
-  // be, so they never hold a message back.
+  // session settled enough to answer it.
   //
   // Nothing is sent while a worktree is being made: the directory the message
   // would be answered in is not settled yet.

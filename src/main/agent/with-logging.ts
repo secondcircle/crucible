@@ -173,9 +173,8 @@ function describeEntry(entry: QueuedEntry): Described {
     : { ...entry, images: entry.images.map(describeImage) }
 }
 
-// A queued 10 MB screenshot rides every state record for as long as it sits in
-// the queue, so the bytes are cut out of every event that carries them and
-// each attachment's type and size stand in their place.
+// A queued 10 MB screenshot would otherwise ride every state record, as
+// base64, for as long as it sits in the queue.
 function describeEvent(event: PortEvent): Described & { readonly type: string } {
   if (event.type === 'state') {
     return {

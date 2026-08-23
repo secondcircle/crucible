@@ -558,9 +558,8 @@ describe('images on a queued message', () => {
     })
   })
 
-  // Nothing to steer, so it becomes the next prompt: the picture appears once,
-  // at the moment the turn starts, and is not dropped for having come through
-  // the steering door.
+  // Nothing to steer, so the message becomes the next prompt: the picture has
+  // to survive that door and be announced once, when the turn starts.
   it('rides the prompt a message with nothing to steer becomes', async () => {
     const { sessionId } = await withSession()
     events.length = 0

@@ -29,8 +29,7 @@ export function QueuedStrip({
               {label(entry.kind)}
             </span>
             {/* Empty alternative text on purpose: the row's accessible name
-                stays the badge and the words, as it was before pictures
-                rode along. */}
+                stays the badge and the words. */}
             {images.length === 0 ? null : (
               <span className="qthumbs">
                 {images.slice(0, THUMBNAILS).map((image, at) => (

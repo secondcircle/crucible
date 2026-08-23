@@ -1457,8 +1457,7 @@ export function createSdkAdapter({
     },
 
     // `running` rather than the SDK's `isStreaming`, which lags by a microtask
-    // and would answer 'idle' for a run genuinely under way. π's own `steer()`
-    // has always taken images.
+    // and would answer 'idle' for a run genuinely under way.
     async steer(
       sessionId: SessionId,
       text: string,
@@ -1482,8 +1481,7 @@ export function createSdkAdapter({
     },
 
     // π removes queued messages only as a whole, so one entry leaves by
-    // clearing the queue and putting the rest back in order — pictures
-    // included, because taking one message out may not cost the others theirs.
+    // clearing the queue and putting the rest back in order, pictures included.
     async dequeue(
       sessionId: SessionId,
       kind: QueuedKind,
@@ -1491,7 +1489,8 @@ export function createSdkAdapter({
     ): Promise<QueuedEntry | undefined> {
       const bound = sessions.get(sessionId)
       if (bound === undefined) return undefined
-      // Read before the clear, for the same reason the flush above reads first.
+      // Read first: clearing π's queue raises a queue event of its own, which
+      // would empty this memory before the pictures could be paired back on.
       const held = bound.queuedImages.take()
       const cleared = bound.session.clearQueue()
       const steering = [...withImages(cleared.steering, held.steering)]

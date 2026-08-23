@@ -135,8 +135,7 @@ const SUMMARY_LIMIT = 160
 
 // `inForce` is the turn's own skill set, read fresh on the way into it: what a
 // turn is displayed against never changes under it mid-turn. `queued` is the
-// session's memory of the pictures π's text-only queue cannot carry; without
-// one, every queued message reads as text.
+// session's memory of the pictures π's text-only queue cannot carry.
 export function createEventMapper(
   inForce?: SkillsInForce,
   queued: QueuedImages = createQueuedImages()
@@ -150,9 +149,7 @@ export function createEventMapper(
   // π says a message left its queue immediately before that message starts, so
   // what left is exactly what is being delivered. A prompt leaves no trace.
   // The entries rather than their text, because a delivered message is
-  // announced with the pictures it carried. Which entry left is the memory's
-  // own answer: it is the one holding the pairing rule, and a second rule here
-  // could only disagree with it.
+  // announced with the pictures it carried.
   const delivering: QueuedEntry[] = []
 
   return {

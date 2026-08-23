@@ -572,7 +572,7 @@ describe('images on a queued message', () => {
   const SHOT: ImageAttachment = { mimeType: 'image/png', data: 'AAAAAA==' }
   const OTHER: ImageAttachment = { mimeType: 'image/jpeg', data: 'BBBBBB==' }
 
-  /** Queues through `at`, once, the first time that event type arrives. */
+  /** Acts once, the first time that event type arrives. */
   function once(
     adapter: ReturnType<typeof createFakeAdapter>,
     type: AdapterEvent['type'],

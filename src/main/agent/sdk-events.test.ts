@@ -335,10 +335,8 @@ describe('queued messages', () => {
       })
     })
 
-    // Two queued messages can hold the same words with different pictures, and
-    // π delivers the older one first: it removes the first text that matches
-    // and its own queue is oldest-first. So the picture left in the queue is
-    // the younger message's, and the picture announced is the older one's.
+    // π delivers the older of two look-alike messages first: its queue is
+    // oldest-first and it removes the first text that matches.
     const OTHER: ImageAttachment = { mimeType: 'image/jpeg', data: 'BBBBBB==' }
 
     it('stays with its own message when two of them read alike', () => {
@@ -362,12 +360,8 @@ describe('queued messages', () => {
       expect(mapper.map(start, TARGET)).toMatchObject({ images: [SHOT] })
     })
 
-    // π's own `steer()` rewrites the text before it pushes it: a `/skill:name`
-    // command becomes the skill's body, and a `/name` that matches one of π's
-    // prompt templates becomes that template. Crucible hands `/`-leading text
-    // straight over, because its renderer only expands its own commands and
-    // passes anything else through. What π then reports is not what was handed
-    // to it, but the pictures still belong to that message.
+    // Crucible hands `/`-leading text straight over, and π's `steer()` expands
+    // a `/skill:` command or a prompt-template name before it pushes anything.
     it('rides a message π rewrote on its way into the queue', () => {
       const queued = createQueuedImages()
       queued.add('steering', '/skill:review look at this', [SHOT])
@@ -391,9 +385,8 @@ describe('queued messages', () => {
       ).toMatchObject({ text: rewritten, images: [SHOT] })
     })
 
-    // Removing one queued message costs π's queue a clear and a requeue, which
-    // empties this memory and fills it again. Neither is a delivery: what left
-    // the queue is the memory's own answer, and it says nothing left.
+    // A dequeue costs π's queue a clear and a requeue, and neither is a
+    // delivery.
     it('says nothing about a message a dequeue merely put back', () => {
       const queued = createQueuedImages()
       queued.add('steering', 'the first', [SHOT])
@@ -404,8 +397,7 @@ describe('queued messages', () => {
         TARGET
       )
 
-      // What the adapter's dequeue does: read the memory out, clear π's queue,
-      // then queue the survivor back in.
+      // The adapter's dequeue, re-enacted.
       queued.take()
       mapper.map(sdk({ type: 'queue_update', steering: [], followUp: [] }), TARGET)
       queued.add('steering', 'the second', [OTHER])

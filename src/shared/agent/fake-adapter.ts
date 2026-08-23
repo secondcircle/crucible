@@ -406,9 +406,8 @@ interface Bound {
   model: ModelId
   thinkingLevel: ThinkingLevel
   running?: RunningTurn
-  // π's two queues, oldest first, undelivered only. Each entry carries the
-  // images the message was queued with, because the strip shows them and a
-  // dequeue or a flush hands them back.
+  // π's two queues, oldest first, undelivered only. Each entry carries its own
+  // images, because a dequeue or a flush hands them back.
   readonly steering: QueuedEntry[]
   readonly followUp: QueuedEntry[]
   // Bash runs waiting for a delivery point. They are not queued messages: they
@@ -1138,9 +1137,8 @@ export function createFakeAdapter({
         const message = queue.shift() ?? { text: '' }
         settleSpoken()
         add(message.text)
-        // A delivered message is a user message with its pictures, the shape a
-        // prompt image already has, and it is kept in the conversation so a
-        // reopened session shows the same thumbnails.
+        // Kept in the conversation as a user message, so a reopened session
+        // shows the same thumbnails.
         const carried = message.images === undefined ? {} : { images: [...message.images] }
         pending.push({ kind: 'user', text: message.text, ...carried })
         emit({ type: 'user_message', sessionId, turnId, text: message.text, ...carried })

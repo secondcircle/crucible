@@ -85,8 +85,8 @@ describe('the composer footer', () => {
     expect(footer().textContent).toBe('runs locally in the workspace — nothing goes to the model')
   })
 
-  // Chips are ordinary now: they ride whatever the next keystroke sends, so
-  // the row says what it says for a text-only steer and nothing more.
+  // Chips ride whatever the next keystroke sends, so the row says what it
+  // says for a text-only steer and nothing more.
   it('reads the same key map with chips attached', async () => {
     const port = await shellWithSession()
     await attach()

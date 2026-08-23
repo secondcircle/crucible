@@ -46,9 +46,8 @@ describe('pairing π’s queue back up', () => {
     ])
   })
 
-  // π's queue is FIFO and the list it reports loses its first occurrence of the
-  // delivered text, so a run of look-alikes that shrinks lost its oldest. The
-  // row still queued is the younger one, holding its own picture.
+  // π's queue is FIFO and the list it reports loses its first occurrence of
+  // the delivered text, so a run of look-alikes that shrinks lost its oldest.
   it('leaves the younger of two look-alikes queued when one is delivered', () => {
     const queued = createQueuedImages()
     queued.add('steering', 'again', [SHOT])
@@ -76,10 +75,8 @@ describe('pairing π’s queue back up', () => {
     })
   })
 
-  // π's own `steer()` expands a `/skill:` command into the skill's body, and a
-  // `/name` that matches a prompt template into the template, before it pushes
-  // anything. So the text it reports for a message is routinely not the text it
-  // was handed, and the message is still that message.
+  // π's `steer()` expands a `/skill:` command or a prompt-template name before
+  // pushing, so the text it reports is routinely not the text it was handed.
   describe('a message π rewrote on its way in', () => {
     const REWRITTEN = '<skill name="review" location="/s/review.md">…</skill>\n\nlook at this'
 
@@ -118,8 +115,7 @@ describe('pairing π’s queue back up', () => {
   })
 
   // π throws on a message naming one of its extension commands rather than
-  // queueing it, and the pairing is by position, so a message that never
-  // reached the queue may not be left here.
+  // queueing it, and the pairing is by position.
   it('takes back a message π refused, so the next one keeps its own picture', () => {
     const queued = createQueuedImages()
     const forget = queued.add('steering', '/pi-extension-command', [SHOT])
@@ -169,8 +165,7 @@ describe('what a dequeue leaves the others holding', () => {
     expect(withImages(['queued elsewhere'], [])).toEqual([{ text: 'queued elsewhere' }])
   })
 
-  // Nothing left the queue here, because π handed the whole of it back, so two
-  // look-alikes keep the pictures they were queued with, in that order.
+  // Nothing left the queue here: π handed the whole of it back.
   it('is each look-alike’s own picture when the whole queue comes back', () => {
     const held = [
       { text: 'again', images: [SHOT] },

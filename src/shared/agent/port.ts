@@ -539,10 +539,8 @@ export interface AgentPort {
     text: string,
     images?: readonly ImageAttachment[]
   ): Promise<void>
-  // Named by content, because delivery may have shifted any index, and
-  // answered with the entry that left: two queued messages can hold the same
-  // words with different pictures. Nothing removed means the message was
-  // delivered or flushed while the request was in flight.
+  // Named by content, because delivery may have shifted any index; answered
+  // with the entry that left, because two queued messages can read alike.
   dequeue(
     sessionId: SessionId,
     kind: QueuedKind,

@@ -633,12 +633,8 @@ export function Shell({
     })
   }, [])
 
-  // The pictures of a message coming back become chips again, ahead of the
-  // composer's own. The file name never crossed the port, so a restored chip
-  // is named by its place in the composer. Past the chips already held, and
-  // past the highest `image N` among them: removing a restored chip lowers
-  // that count, and the name it had would come round again on the next
-  // restore. The point of the name is that no two chips share one.
+  // The file name never crossed the port, so a restored chip is named by its
+  // place, counted past the highest `image N` held so no two chips share one.
   const restoreChips = useCallback(
     (sessionId: SessionId, images: readonly ImageAttachment[]): void => {
       if (images.length === 0) return
@@ -1507,10 +1503,8 @@ export function Shell({
     })
   }
 
-  // The chips leave the composer with the draft, in the same frame as the
-  // keystroke, so a picture pasted for one message never attaches itself to
-  // the next. Absent rather than empty: a message with no pictures carries no
-  // image list across the port.
+  // The chips leave the composer in the same frame as the keystroke, so a
+  // picture pasted for one message never attaches itself to the next.
   function takeChips(id: SessionId): readonly ImageAttachment[] | undefined {
     const held = attachments[id] ?? []
     if (held.length === 0) return undefined

@@ -248,7 +248,7 @@ describe('pulling a queued message back', () => {
   })
 })
 
-// Variant A: the picture is why the message exists, so the row carries it.
+// The picture is often why the message exists, so the row carries it.
 describe('a queued row with images', () => {
   async function queuedWith(...files: readonly File[]): Promise<ScriptedPort> {
     const port = await shellWithSession()
@@ -263,7 +263,7 @@ describe('a queued row with images', () => {
     await queuedWith(png('one.png', 3))
 
     expect(thumbnails()).toEqual(['data:image/png;base64,AAAA'])
-    // Decorative: the row's accessible name says what it said before.
+    // Decorative: the row's accessible name stays the badge and the words.
     expect(screen.getAllByRole('button', { name: /queued/ })[0]?.textContent).toBe(
       'steerlook at thesequeued · click or ⌥↑ to edit'
     )
@@ -291,7 +291,7 @@ describe('a queued row with images', () => {
 
     expect(thumbnails()).toHaveLength(3)
     expect(document.querySelector('.qmore')?.textContent).toBe('+1')
-    // No count text was invented: variant B was the rejected option.
+    // The remainder is a marker, never a sentence counting the images.
     expect(strip()?.textContent).not.toContain('4 images')
   })
 
@@ -343,9 +343,8 @@ describe('pulling the pictures back', () => {
     expect(chips()).toEqual(['image 2', 'later.png'])
   })
 
-  // Counting past what is held is only a way of reaching the promise: no two
-  // chips in the composer share a name. Removing one restored chip lowers the
-  // count the next restore starts from, and the name comes round again.
+  // Removing a restored chip lowers the count the next restore would start
+  // from, so the name it had could come round again.
   it('names them apart even after one restored chip has been removed', async () => {
     const port = await shellWithSession()
     await working()

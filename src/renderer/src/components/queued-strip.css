@@ -59,8 +59,8 @@
   align-self: center;
 }
 
-/* A group of their own: 4px apart from each other, and 10px from the row's
-   own neighbors like every other child. */
+/* A wrapper, so the thumbnails sit 4px apart while the row keeps its own gap
+   to them. */
 .qthumbs {
   display: flex;
   gap: 4px;
