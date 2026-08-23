@@ -147,12 +147,12 @@ export function createEventMapper(
   // Argument characters streamed per call, so the count that crosses is
   // cumulative and monotonic rather than per-frame.
   const argChars = new Map<string, number>()
-  /** The queue as the last `queue_update` reported it, oldest first. */
-  let held: readonly QueuedEntry[] = []
   // π says a message left its queue immediately before that message starts, so
   // what left is exactly what is being delivered. A prompt leaves no trace.
   // The entries rather than their text, because a delivered message is
-  // announced with the pictures it carried.
+  // announced with the pictures it carried. Which entry left is the memory's
+  // own answer: it is the one holding the pairing rule, and a second rule here
+  // could only disagree with it.
   const delivering: QueuedEntry[] = []
 
   return {
@@ -160,14 +160,7 @@ export function createEventMapper(
       switch (event.type) {
         case 'queue_update': {
           const paired = queued.pair(event.steering, event.followUp)
-          const now = [...paired.steering, ...paired.followUp]
-          const left = [...held]
-          for (const entry of now) {
-            const at = left.findIndex((candidate) => candidate.text === entry.text)
-            if (at !== -1) left.splice(at, 1)
-          }
-          delivering.push(...left)
-          held = now
+          delivering.push(...paired.left)
           return {
             type: 'queue_changed',
             sessionId,

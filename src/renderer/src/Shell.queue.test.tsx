@@ -368,6 +368,9 @@ describe('pulling the pictures back', () => {
       fireEvent.click(screen.getAllByRole('button', { name: /queued/ })[0])
     })
 
+    // Counted past the `image 2` still held rather than past the one chip
+    // there is, so the name that was removed does not come round again.
+    expect(chips()).toEqual(['image 3', 'image 2'])
     expect(new Set(chips()).size).toBe(chips().length)
   })
 })

@@ -16,7 +16,8 @@ describe('pairing π’s queue back up', () => {
 
     expect(queued.pair(['plain words'], [])).toEqual({
       steering: [{ text: 'plain words' }],
-      followUp: []
+      followUp: [],
+      left: []
     })
   })
 
@@ -27,13 +28,14 @@ describe('pairing π’s queue back up', () => {
 
     expect(queued.pair(['look at this'], ['and this after'])).toEqual({
       steering: [{ text: 'look at this', images: [SHOT] }],
-      followUp: [{ text: 'and this after', images: [OTHER] }]
+      followUp: [{ text: 'and this after', images: [OTHER] }],
+      left: []
     })
   })
 
   // Two queued messages can hold the same words with different pictures, so
   // position decides which is which.
-  it('claims the first unclaimed match when two messages read alike', () => {
+  it('keeps two look-alike messages in π’s order', () => {
     const queued = createQueuedImages()
     queued.add('steering', 'again', [SHOT])
     queued.add('steering', 'again', [OTHER])
@@ -44,13 +46,30 @@ describe('pairing π’s queue back up', () => {
     ])
   })
 
+  // π's queue is FIFO and the list it reports loses its first occurrence of the
+  // delivered text, so a run of look-alikes that shrinks lost its oldest. The
+  // row still queued is the younger one, holding its own picture.
+  it('leaves the younger of two look-alikes queued when one is delivered', () => {
+    const queued = createQueuedImages()
+    queued.add('steering', 'again', [SHOT])
+    queued.add('steering', 'again', [OTHER])
+    queued.pair(['again', 'again'], [])
+
+    expect(queued.pair(['again'], [])).toEqual({
+      steering: [{ text: 'again', images: [OTHER] }],
+      followUp: [],
+      left: [{ text: 'again', images: [SHOT] }]
+    })
+  })
+
   it('forgets what π no longer lists, because it has left the queue', () => {
     const queued = createQueuedImages()
     queued.add('steering', 'delivered', [SHOT])
     queued.add('steering', 'still waiting', [OTHER])
 
-    queued.pair(['still waiting'], [])
-
+    expect(queued.pair(['still waiting'], []).left).toEqual([
+      { text: 'delivered', images: [SHOT] }
+    ])
     expect(queued.take()).toEqual({
       steering: [{ text: 'still waiting', images: [OTHER] }],
       followUp: []
@@ -84,5 +103,16 @@ describe('what a dequeue leaves the others holding', () => {
 
   it('is nothing at all for a message this memory never saw', () => {
     expect(withImages(['queued elsewhere'], [])).toEqual([{ text: 'queued elsewhere' }])
+  })
+
+  // Nothing left the queue here, because π handed the whole of it back, so two
+  // look-alikes keep the pictures they were queued with, in that order.
+  it('is each look-alike’s own picture when the whole queue comes back', () => {
+    const held = [
+      { text: 'again', images: [SHOT] },
+      { text: 'again', images: [OTHER] }
+    ]
+
+    expect(withImages(['again', 'again'], held)).toEqual(held)
   })
 })

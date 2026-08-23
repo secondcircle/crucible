@@ -361,6 +361,41 @@ describe('queued messages', () => {
       expect(shrunk).toMatchObject({ steering: [{ text: 'again', images: [OTHER] }] })
       expect(mapper.map(start, TARGET)).toMatchObject({ images: [SHOT] })
     })
+
+    // Removing one queued message costs π's queue a clear and a requeue, which
+    // empties this memory and fills it again. Neither is a delivery: what left
+    // the queue is the memory's own answer, and it says nothing left.
+    it('says nothing about a message a dequeue merely put back', () => {
+      const queued = createQueuedImages()
+      queued.add('steering', 'the first', [SHOT])
+      queued.add('steering', 'the second', [OTHER])
+      const mapper = createEventMapper(undefined, queued)
+      mapper.map(
+        sdk({ type: 'queue_update', steering: ['the first', 'the second'], followUp: [] }),
+        TARGET
+      )
+
+      // What the adapter's dequeue does: read the memory out, clear π's queue,
+      // then queue the survivor back in.
+      queued.take()
+      mapper.map(sdk({ type: 'queue_update', steering: [], followUp: [] }), TARGET)
+      queued.add('steering', 'the second', [OTHER])
+      const back = mapper.map(
+        sdk({ type: 'queue_update', steering: ['the second'], followUp: [] }),
+        TARGET
+      )
+
+      expect(back).toMatchObject({ steering: [{ text: 'the second', images: [OTHER] }] })
+      expect(
+        mapper.map(
+          sdk({
+            type: 'message_start',
+            message: { role: 'user', content: [{ type: 'text', text: 'the second' }] }
+          }),
+          TARGET
+        )
+      ).toBeUndefined()
+    })
   })
 })
 

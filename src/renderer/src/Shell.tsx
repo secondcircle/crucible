@@ -635,15 +635,18 @@ export function Shell({
 
   // The pictures of a message coming back become chips again, ahead of the
   // composer's own. The file name never crossed the port, so a restored chip
-  // is named by its place in the composer, counting past what is already held
-  // so no two chips share a name.
+  // is named by its place in the composer. Past the chips already held, and
+  // past the highest `image N` among them: removing a restored chip lowers
+  // that count, and the name it had would come round again on the next
+  // restore. The point of the name is that no two chips share one.
   const restoreChips = useCallback(
     (sessionId: SessionId, images: readonly ImageAttachment[]): void => {
       if (images.length === 0) return
       setAttachments((current) => {
         const held = current[sessionId] ?? []
+        const from = Math.max(held.length, ...held.map(restoredNumber))
         const restored = images.map((image, index): Attachment => {
-          const number = held.length + index + 1
+          const number = from + index + 1
           return { id: `restored-${Date.now()}-${Math.random()}`, name: `image ${number}`, ...image }
         })
         return { ...current, [sessionId]: [...restored, ...held] }
@@ -2647,6 +2650,13 @@ export function Shell({
       ) : null}
     </div>
   )
+}
+
+// The N a restored chip was named with, or 0 for a chip that came from a file
+// and kept its own name.
+function restoredNumber(attachment: { readonly name: string }): number {
+  const named = /^image (\d+)$/.exec(attachment.name)
+  return named === null ? 0 : Number(named[1])
 }
 
 /** Display-safe text of a refusal, which is all a banner ever shows. */
