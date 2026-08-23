@@ -85,7 +85,9 @@ describe('the composer footer', () => {
     expect(footer().textContent).toBe('runs locally in the workspace — nothing goes to the model')
   })
 
-  it('warns that images are held back, ahead of the working state', async () => {
+  // Chips ride whatever the next keystroke sends, so the row says what it
+  // says for a text-only steer and nothing more.
+  it('reads the same key map with chips attached', async () => {
     const port = await shellWithSession()
     await attach()
 
@@ -93,9 +95,9 @@ describe('the composer footer', () => {
       await port.prompt('s1', 'go')
     })
 
-    expect(footer().textContent).toBe(
-      'images go with the next prompt — stop the agent first to send them now'
-    )
+    expect(footer()).toHaveTextContent('agent working')
+    expect(footer()).toHaveTextContent('⏎ steer · ⌥⏎ follow-up · esc stop')
+    expect(document.body.textContent).not.toContain('images go with the next prompt')
   })
 
   it('keeps the row in place through every state', async () => {

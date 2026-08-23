@@ -4,6 +4,7 @@ import type {
   AgentPort,
   CachedPrefix,
   HistoryMatch,
+  ImageAttachment,
   ModelId,
   QueuedKind,
   SessionId,
@@ -640,6 +641,24 @@ export function Shell({
     })
   }, [])
 
+  // The file name never crossed the port, so a restored chip is named by its
+  // place, counted past the highest `image N` held so no two chips share one.
+  const restoreChips = useCallback(
+    (sessionId: SessionId, images: readonly ImageAttachment[]): void => {
+      if (images.length === 0) return
+      setAttachments((current) => {
+        const held = current[sessionId] ?? []
+        const from = Math.max(held.length, ...held.map(restoredNumber))
+        const restored = images.map((image, index): Attachment => {
+          const number = from + index + 1
+          return { id: `restored-${Date.now()}-${Math.random()}`, name: `image ${number}`, ...image }
+        })
+        return { ...current, [sessionId]: [...restored, ...held] }
+      })
+    },
+    []
+  )
+
   // Arriving at a session means seeing that session: everything that covers
   // or crowds the chat goes, in the same frame as the click and without
   // waiting for any round trip. `landing` is the session being
@@ -742,6 +761,12 @@ export function Shell({
       // composer of the session they were queued in, active or not.
       if (event.type === 'queue_flushed') {
         restore(event.sessionId, ...event.messages.map((message) => message.text))
+        // In the order the messages were handed back: a stop that dropped the
+        // screenshot would be the same defect as a dequeue that dropped it.
+        restoreChips(
+          event.sessionId,
+          event.messages.flatMap((message) => [...(message.images ?? [])])
+        )
       }
       // A show opens the panel of whichever session it happened in: the active
       // one at once, a background one by the time the user switches to it.
@@ -778,7 +803,7 @@ export function Shell({
       .then((listed) => dispatch({ type: 'models', models: listed }))
       .catch(report)
     return stop
-  }, [port, report, restore, refreshQuota, finished, arrive])
+  }, [port, report, restore, restoreChips, refreshQuota, finished, arrive])
 
   useEffect(() => {
     sessionsNow.current = snapshot.sessions
@@ -1440,9 +1465,6 @@ export function Shell({
     if (id === undefined) return
     const text = draft.trim()
     if (text === '') return
-    // Steering and follow-up carry text only in this cut, so a message with
-    // chips waits rather than losing them.
-    if (working && chips.length > 0) return
     // The cache expiry choice, decided in the frame of the gesture and before
     // anything is expanded, cleared or sent. Only a send that would start a
     // turn can meet it: a live turn's cache is warm, and nothing the run
@@ -1475,24 +1497,31 @@ export function Shell({
   // asked for it, active or not.
   function sendText(id: SessionId, text: string): void {
     const busy = railNow.current.sessions.find((one) => one.id === id)?.working === true
-    const held = attachments[id] ?? []
-    if (busy && held.length > 0) return
     expanded(id, text, (delivered) => {
       clearSent(id, text)
       clearFailure(id)
+      const images = takeChips(id)
       if (busy) {
         // Nothing is echoed into the transcript: a queued message appears only
-        // in the strip until the port says it was delivered.
-        void port.steer(id, delivered).catch(report)
+        // in the strip, thumbnails and all, until the port says it was
+        // delivered.
+        void port.steer(id, delivered, images).catch(report)
         return
       }
-      const images = held.map((chip) => ({ mimeType: chip.mimeType, data: chip.data }))
-      setAttachments((current) => ({ ...current, [id]: [] }))
       // What was sent stands in the transcript at once; the turn it starts
       // arrives as events.
       dispatch({ type: 'sent', sessionId: id, text: delivered, images })
-      void port.prompt(id, delivered, images.length === 0 ? undefined : images).catch(report)
+      void port.prompt(id, delivered, images).catch(report)
     })
+  }
+
+  // The chips leave the composer in the same frame as the keystroke, so a
+  // picture pasted for one message never attaches itself to the next.
+  function takeChips(id: SessionId): readonly ImageAttachment[] | undefined {
+    const held = attachments[id] ?? []
+    if (held.length === 0) return undefined
+    setAttachments((current) => ({ ...current, [id]: [] }))
+    return held.map((chip) => ({ mimeType: chip.mimeType, data: chip.data }))
   }
 
   // Door one. The send proceeds exactly as an ordinary send from this moment:
@@ -1593,13 +1622,12 @@ export function Shell({
       send()
       return
     }
-    if (chips.length > 0) return
     const text = draft.trim()
     if (text === '') return
     expanded(id, text, (delivered) => {
       clearSent(id, text)
       clearFailure(id)
-      void port.followUp(id, delivered).catch(report)
+      void port.followUp(id, delivered, takeChips(id)).catch(report)
     })
   }
 
@@ -1609,10 +1637,13 @@ export function Shell({
     void port
       .dequeue(id, kind, text)
       .then((removed) => {
-        // A false answer means the message was delivered or flushed while the
+        // Nothing removed means the message was delivered or flushed while the
         // click was in flight, and the state event already took the entry off.
-        if (!removed) return
-        restore(id, text)
+        if (removed === undefined) return
+        // What genuinely left the queue, not what the clicked row happened to
+        // be showing: two queued messages can hold the same words.
+        restore(id, removed.text)
+        restoreChips(id, removed.images ?? [])
         box.current?.focus()
       })
       .catch(report)
@@ -2625,6 +2656,13 @@ export function Shell({
       ) : null}
     </div>
   )
+}
+
+// The N a restored chip was named with, or 0 for a chip that came from a file
+// and kept its own name.
+function restoredNumber(attachment: { readonly name: string }): number {
+  const named = /^image (\d+)$/.exec(attachment.name)
+  return named === null ? 0 : Number(named[1])
 }
 
 /** Display-safe text of a refusal, which is all a banner ever shows. */

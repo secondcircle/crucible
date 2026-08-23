@@ -228,7 +228,7 @@ describe('sending a command', () => {
     await press('Enter')
 
     const delivered = 'Review the pull request at https://example.invalid/pr/7.'
-    expect(port.queueOf('s1')?.steering).toEqual([delivered])
+    expect(port.queueOf('s1')?.steering).toEqual([{ text: delivered }])
     // Nothing command-shaped is in the strip either: it shows what will be
     // delivered, and taking it back is by that same text.
     expect(screen.getByText(delivered)).toBeInTheDocument()
@@ -279,7 +279,7 @@ describe('sending a command', () => {
 
     expect(port.calls.filter((call) => call.op === 'steer')).toHaveLength(1)
     expect(port.queueOf('s1')?.steering).toEqual([
-      'Review the pull request at https://example.invalid/pr/7.'
+      { text: 'Review the pull request at https://example.invalid/pr/7.' }
     ])
   })
 

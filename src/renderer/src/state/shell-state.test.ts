@@ -40,6 +40,22 @@ describe('a message the port delivered itself', () => {
     ])
   })
 
+  // The existing user item, thumbnails and all: nothing tells a steered
+  // picture apart from a prompted one.
+  it('carries the images the delivered message held', () => {
+    const images = [{ mimeType: 'image/png', data: 'AAAAAA==' }]
+
+    const state = heard(working(), {
+      type: 'user_message',
+      sessionId: 's1',
+      turnId: 't-1',
+      text: 'look at this',
+      images
+    })
+
+    expect(items(state)).toEqual([{ kind: 'user', text: 'look at this', images }])
+  })
+
   it('changes nothing when it names a turn that is over', () => {
     const state = working()
 

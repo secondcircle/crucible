@@ -4,6 +4,8 @@
 // a paid call.
 import { describe, expect, it } from 'vitest'
 import type { AgentSessionEvent } from '@earendil-works/pi-coding-agent'
+import type { ImageAttachment } from '../../shared/agent/port'
+import { createQueuedImages } from './queued-images'
 import {
   createEventMapper,
   displayToolCall,
@@ -230,7 +232,7 @@ describe('queued messages', () => {
     expect(map({ type: 'queue_update', steering: ['redirect'], followUp: [] })).toEqual({
       type: 'queue_changed',
       sessionId: 's1',
-      steering: ['redirect'],
+      steering: [{ text: 'redirect' }],
       followUp: []
     })
   })
@@ -286,6 +288,135 @@ describe('queued messages', () => {
         TARGET
       )
     ).toBeUndefined()
+  })
+
+  // π's queue is text, so the pictures are paired back on from the memory the
+  // adapter fills when it hands a message over.
+  describe('the pictures π’s queue cannot carry', () => {
+    const SHOT: ImageAttachment = { mimeType: 'image/png', data: 'AAAAAA==' }
+
+    function withImage(): ReturnType<typeof createEventMapper> {
+      const queued = createQueuedImages()
+      queued.add('steering', 'look at this', [SHOT])
+      return createEventMapper(undefined, queued)
+    }
+
+    it('rides the queue it reports', () => {
+      const mapper = withImage()
+
+      expect(
+        mapper.map(sdk({ type: 'queue_update', steering: ['look at this'], followUp: [] }), TARGET)
+      ).toEqual({
+        type: 'queue_changed',
+        sessionId: 's1',
+        steering: [{ text: 'look at this', images: [SHOT] }],
+        followUp: []
+      })
+    })
+
+    it('is announced with the message that carried it, and not before', () => {
+      const mapper = withImage()
+      const start = sdk({
+        type: 'message_start',
+        message: { role: 'user', content: [{ type: 'text', text: 'look at this' }] }
+      })
+      mapper.map(sdk({ type: 'queue_update', steering: ['look at this'], followUp: [] }), TARGET)
+
+      // Still queued: nothing is said about it at all.
+      expect(mapper.map(start, TARGET)).toBeUndefined()
+
+      mapper.map(sdk({ type: 'queue_update', steering: [], followUp: [] }), TARGET)
+      expect(mapper.map(start, TARGET)).toEqual({
+        type: 'user_message',
+        sessionId: 's1',
+        turnId: 't-1',
+        text: 'look at this',
+        images: [SHOT]
+      })
+    })
+
+    // π delivers the older of two look-alike messages first: its queue is
+    // oldest-first and it removes the first text that matches.
+    const OTHER: ImageAttachment = { mimeType: 'image/jpeg', data: 'BBBBBB==' }
+
+    it('stays with its own message when two of them read alike', () => {
+      const queued = createQueuedImages()
+      queued.add('steering', 'again', [SHOT])
+      queued.add('steering', 'again', [OTHER])
+      const mapper = createEventMapper(undefined, queued)
+      const start = sdk({
+        type: 'message_start',
+        message: { role: 'user', content: [{ type: 'text', text: 'again' }] }
+      })
+
+      mapper.map(sdk({ type: 'queue_update', steering: ['again', 'again'], followUp: [] }), TARGET)
+      // π delivered the older one, so the row still waiting is the younger.
+      const shrunk = mapper.map(
+        sdk({ type: 'queue_update', steering: ['again'], followUp: [] }),
+        TARGET
+      )
+
+      expect(shrunk).toMatchObject({ steering: [{ text: 'again', images: [OTHER] }] })
+      expect(mapper.map(start, TARGET)).toMatchObject({ images: [SHOT] })
+    })
+
+    // Crucible hands `/`-leading text straight over, and π's `steer()` expands
+    // a `/skill:` command or a prompt-template name before it pushes anything.
+    it('rides a message π rewrote on its way into the queue', () => {
+      const queued = createQueuedImages()
+      queued.add('steering', '/skill:review look at this', [SHOT])
+      const mapper = createEventMapper(undefined, queued)
+      const rewritten = '<skill name="review" location="/s/review.md">…</skill>\n\nlook at this'
+
+      expect(
+        mapper.map(sdk({ type: 'queue_update', steering: [rewritten], followUp: [] }), TARGET)
+      ).toMatchObject({ steering: [{ text: rewritten, images: [SHOT] }] })
+
+      // Delivered: the transcript entry and the model both get the picture.
+      mapper.map(sdk({ type: 'queue_update', steering: [], followUp: [] }), TARGET)
+      expect(
+        mapper.map(
+          sdk({
+            type: 'message_start',
+            message: { role: 'user', content: [{ type: 'text', text: rewritten }] }
+          }),
+          TARGET
+        )
+      ).toMatchObject({ text: rewritten, images: [SHOT] })
+    })
+
+    // A dequeue costs π's queue a clear and a requeue, and neither is a
+    // delivery.
+    it('says nothing about a message a dequeue merely put back', () => {
+      const queued = createQueuedImages()
+      queued.add('steering', 'the first', [SHOT])
+      queued.add('steering', 'the second', [OTHER])
+      const mapper = createEventMapper(undefined, queued)
+      mapper.map(
+        sdk({ type: 'queue_update', steering: ['the first', 'the second'], followUp: [] }),
+        TARGET
+      )
+
+      // The adapter's dequeue, re-enacted.
+      queued.take()
+      mapper.map(sdk({ type: 'queue_update', steering: [], followUp: [] }), TARGET)
+      queued.add('steering', 'the second', [OTHER])
+      const back = mapper.map(
+        sdk({ type: 'queue_update', steering: ['the second'], followUp: [] }),
+        TARGET
+      )
+
+      expect(back).toMatchObject({ steering: [{ text: 'the second', images: [OTHER] }] })
+      expect(
+        mapper.map(
+          sdk({
+            type: 'message_start',
+            message: { role: 'user', content: [{ type: 'text', text: 'the second' }] }
+          }),
+          TARGET
+        )
+      ).toBeUndefined()
+    })
   })
 })
 

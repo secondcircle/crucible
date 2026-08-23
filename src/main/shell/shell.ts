@@ -16,6 +16,7 @@ import type {
   PortEvent,
   PortEventListener,
   ProviderState,
+  QueuedEntry,
   QueuedKind,
   QueueState,
   SessionId,
@@ -70,7 +71,12 @@ export interface ShellOptions {
 // What this shell put into the conversation itself and therefore owes an
 // announcement for; a caller of `prompt()` echoes its own message and needs none.
 type Announcement =
-  | { readonly kind: 'text'; readonly text: string }
+  | {
+      readonly kind: 'text'
+      readonly text: string
+      /** Present only for images the message genuinely carried. */
+      readonly images?: readonly ImageAttachment[]
+    }
   | { readonly kind: 'bashRun'; readonly run: BashRunShare }
 
 // 'stopped' is every end the user asked for. Work parked on a turn has to know
@@ -497,7 +503,13 @@ export function createShell({
     const announce = turn.announce
     if (announce === undefined) return
     if (announce.kind === 'text') {
-      emit({ type: 'user_message', sessionId, turnId, text: announce.text })
+      emit({
+        type: 'user_message',
+        sessionId,
+        turnId,
+        text: announce.text,
+        ...(announce.images === undefined ? {} : { images: announce.images })
+      })
       return
     }
     // A shared bash run is not a user message and never reads as one.
@@ -602,6 +614,7 @@ export function createShell({
     sessionId: SessionId,
     kind: QueuedKind,
     text: string,
+    images: readonly ImageAttachment[] | undefined,
     turn: LiveTurn
   ): Promise<boolean> {
     try {
@@ -611,8 +624,8 @@ export function createShell({
       if (live.get(sessionId) !== turn) return false
       const answer =
         kind === 'steering'
-          ? await adapter.steer(sessionId, text)
-          : await adapter.followUp(sessionId, text)
+          ? await adapter.steer(sessionId, text, images)
+          : await adapter.followUp(sessionId, text, images)
       return answer === 'queued'
     } catch {
       // The turn already reports a failed bind as its own error, and refusing
@@ -626,22 +639,26 @@ export function createShell({
   async function queueMessage(
     sessionId: SessionId,
     kind: QueuedKind,
-    text: string
+    text: string,
+    images?: readonly ImageAttachment[]
   ): Promise<void> {
     requireSession(sessionId)
 
     for (;;) {
       const turn = live.get(sessionId)
       if (turn === undefined) break
-      if (await offerToTurn(sessionId, kind, text, turn)) return
+      if (await offerToTurn(sessionId, kind, text, images, turn)) return
       // Waited out and offered again, because a message the user typed is
       // never lost whichever way the turn ended.
       await turn.over
     }
 
-    beginTurn(sessionId, (turnId) => adapter.prompt(sessionId, turnId, text), {
+    // The pictures ride the prompt this becomes, and the announcement below
+    // carries them, so they appear once and at the moment the turn starts.
+    beginTurn(sessionId, (turnId) => adapter.prompt(sessionId, turnId, text, images), {
       kind: 'text',
-      text
+      text,
+      ...(images === undefined || images.length === 0 ? {} : { images })
     })
     // A queued message with no turn left to take it becomes the next prompt,
     // and a prompt is a user instruction whatever key sent it.
@@ -1243,19 +1260,31 @@ export function createShell({
       return shareRun(sessionId, share)
     },
 
-    async steer(sessionId: SessionId, text: string): Promise<void> {
-      await queueMessage(sessionId, 'steering', text)
+    async steer(
+      sessionId: SessionId,
+      text: string,
+      images?: readonly ImageAttachment[]
+    ): Promise<void> {
+      await queueMessage(sessionId, 'steering', text, images)
     },
 
-    async followUp(sessionId: SessionId, text: string): Promise<void> {
-      await queueMessage(sessionId, 'followUp', text)
+    async followUp(
+      sessionId: SessionId,
+      text: string,
+      images?: readonly ImageAttachment[]
+    ): Promise<void> {
+      await queueMessage(sessionId, 'followUp', text, images)
     },
 
-    async dequeue(sessionId: SessionId, kind: QueuedKind, text: string): Promise<boolean> {
+    async dequeue(
+      sessionId: SessionId,
+      kind: QueuedKind,
+      text: string
+    ): Promise<QueuedEntry | undefined> {
       requireSession(sessionId)
       // Nothing can be queued behind a session that was never bound, and
       // binding one to say so would be work for no answer.
-      if (bindings.get(sessionId) === undefined) return false
+      if (bindings.get(sessionId) === undefined) return undefined
       await ensureBound(sessionId)
       return adapter.dequeue(sessionId, kind, text)
     },

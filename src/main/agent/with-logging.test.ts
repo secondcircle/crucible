@@ -21,6 +21,12 @@ function stubShell(): { shell: Shell; emit: (event: PortEvent) => void } {
       if (text === 'refuse me') throw new Error('That session is already working.')
       return `t-for-${sessionId}`
     },
+    steer: async () => undefined,
+    followUp: async () => undefined,
+    dequeue: async (_sessionId: string, _kind: string, text: string) => ({
+      text,
+      images: [{ mimeType: 'image/png', data: 'AAAAAA==' }]
+    }),
     jump: async (_sessionId: string, ref: string) => {
       if (ref === 'n7') throw new Error('Opus is overloaded')
       return { cancelled: false }
@@ -126,6 +132,65 @@ describe('what the run log holds', () => {
       args: ['s1', 'n7', { summarize: true }],
       message: 'Opus is overloaded'
     })
+  })
+
+  // A queued 10 MB screenshot would otherwise be re-serialized as base64 into
+  // every state record for as long as it sat in the queue.
+  it('is an attachment’s type and size, on every path that carries one', async () => {
+    const sink = createMemorySink()
+    const { shell, emit } = stubShell()
+    const image = { mimeType: 'image/png', data: 'AAAAAA==' }
+    const bytes = { mimeType: 'image/png', bytes: 6 }
+
+    const logged = withLogging(shell, sink, 'fake')
+    await logged.steer('s1', 'look at this', [image])
+    await logged.followUp('s1', 'and this', [image])
+    await logged.dequeue('s1', 'steering', 'look at this')
+    emit({
+      type: 'state',
+      snapshot: {
+        workspaces: [],
+        sessions: [
+          {
+            id: 's1',
+            workspaceId: 'w1',
+            createdAt: '2026-08-23T10:00:00.000Z',
+            working: true,
+            fresh: false,
+            queue: { steering: [{ text: 'look at this', images: [image] }], followUp: [] }
+          }
+        ]
+      }
+    })
+    emit({
+      type: 'user_message',
+      sessionId: 's1',
+      turnId: 't-1',
+      text: 'look at this',
+      images: [image]
+    })
+    emit({
+      type: 'queue_flushed',
+      sessionId: 's1',
+      messages: [{ kind: 'steering', text: 'look at this', images: [image] }]
+    })
+
+    const written = sink.lines.join('\n')
+    expect(written).not.toContain('AAAAAA==')
+    expect(records(sink.lines)).toMatchObject([
+      { event: 'steer', args: ['s1', 'look at this', [bytes]] },
+      { event: 'followUp', args: ['s1', 'and this', [bytes]] },
+      { event: 'dequeue' },
+      { event: 'dequeue_answered', result: { text: 'look at this', images: [bytes] } },
+      {
+        event: 'state',
+        snapshot: {
+          sessions: [{ queue: { steering: [{ text: 'look at this', images: [bytes] }] } }]
+        }
+      },
+      { event: 'user_message', images: [bytes] },
+      { event: 'queue_flushed', messages: [{ kind: 'steering', images: [bytes] }] }
+    ])
   })
 
   it('leaves the snapshot unlogged: the state records already say it', async () => {

@@ -40,6 +40,7 @@ import type {
   ModelId,
   ModelInfo,
   ProviderState,
+  QueuedEntry,
   QueuedKind,
   QueuedMessage,
   SessionId,
@@ -68,6 +69,7 @@ import {
 import { forPi, type LoadedSkill, type SkillService } from '../skills/service.ts'
 import { toProviderState, type AuthFacts, type ProviderFacts } from './providers.ts'
 import { crucibleAgentDir, workspaceSessionDir } from './paths.ts'
+import { createQueuedImages, withImages, type QueuedImages } from './queued-images.ts'
 import {
   createEventMapper,
   jumpOutcome,
@@ -101,6 +103,9 @@ interface Bound {
   summarizing?: boolean
   /** Bash runs waiting for the boundary that delivers them, oldest first. */
   readonly shares: PendingShare[]
+  // π reports its queue as text, so the pictures a queued message carries wait
+  // here until that message leaves the queue, one way or the other.
+  readonly queuedImages: QueuedImages
   /** The last numbers reported for this conversation, so a still count is not re-sent. */
   reported?: ReportedUsage
   // What Crucible itself did to this session since the last request it
@@ -526,13 +531,46 @@ export function createSdkAdapter({
   // `clearQueue()` removes and returns in one step, so nothing can be
   // delivered between reading the queue and emptying it.
   function flushQueue(bound: Bound, sessionId: SessionId): void {
+    // Read first: clearing π's queue raises a queue event of its own, which
+    // would empty this memory before the pictures could be paired back on.
+    const held = bound.queuedImages.take()
     const { steering, followUp } = bound.session.clearQueue()
     const messages: QueuedMessage[] = [
-      ...steering.map((text): QueuedMessage => ({ kind: 'steering', text })),
-      ...followUp.map((text): QueuedMessage => ({ kind: 'followUp', text }))
+      ...withImages(steering, held.steering).map(
+        (entry): QueuedMessage => ({ kind: 'steering', ...entry })
+      ),
+      ...withImages(followUp, held.followUp).map(
+        (entry): QueuedMessage => ({ kind: 'followUp', ...entry })
+      )
     ]
     if (messages.length === 0) return
     emit({ type: 'queue_flushed', sessionId, messages })
+  }
+
+  /** One message into π's queue, with the memory of its pictures beside it. */
+  async function queueInto(
+    bound: Bound,
+    kind: QueuedKind,
+    text: string,
+    images?: readonly ImageAttachment[]
+  ): Promise<void> {
+    // Remembered first, because π reports its queue from inside the call
+    // below with nothing awaited in between: by the time the queue event
+    // arrives the pictures have to be here already.
+    const forget = bound.queuedImages.add(kind, text, images)
+    const attached = images === undefined || images.length === 0
+      ? undefined
+      : images.map(toImageContent)
+    try {
+      if (kind === 'steering') await bound.session.steer(text, attached)
+      else await bound.session.followUp(text, attached)
+    } catch (refused) {
+      // π refuses a message naming one of its extension commands, and never
+      // queues it. Keeping it here would leave this memory a message longer
+      // than π's queue, and the pairing is by position.
+      forget()
+      throw refused
+    }
   }
 
   // π's retries of a branch summary, for as long as the jump that asked for
@@ -590,7 +628,7 @@ export function createSdkAdapter({
   ): Promise<void> {
     const bound = requireBound(sessionId)
     const { session } = bound
-    const mapper = createEventMapper(await skillsForTurn(bound))
+    const mapper = createEventMapper(await skillsForTurn(bound), bound.queuedImages)
 
     let cancelled = false
     let abandoned = false
@@ -998,6 +1036,7 @@ export function createSdkAdapter({
         workspacePath: request.workspacePath,
         token: tokenOf(session),
         shares: [],
+        queuedImages: createQueuedImages(),
         // Nothing of this conversation's earlier turns was watched here, so
         // the first miss compares against a request this launch never saw.
         thinkingChanged: false,
@@ -1036,6 +1075,9 @@ export function createSdkAdapter({
       )
       bound.session = session
       bound.token = tokenOf(session)
+      // Nothing was queued behind the conversation this session no longer has,
+      // so the pictures waiting for that queue go with it.
+      bound.queuedImages.take()
       // The old conversation's numbers described a conversation this session
       // no longer has, and so did the span its next miss would be measured
       // over.
@@ -1068,6 +1110,7 @@ export function createSdkAdapter({
         workspacePath: request.workspacePath,
         token: tokenOf(session),
         shares: [],
+        queuedImages: createQueuedImages(),
         thinkingChanged: false,
         jumped: false,
         promptChanged: false,
@@ -1415,33 +1458,49 @@ export function createSdkAdapter({
 
     // `running` rather than the SDK's `isStreaming`, which lags by a microtask
     // and would answer 'idle' for a run genuinely under way.
-    async steer(sessionId: SessionId, text: string): Promise<'queued' | 'idle'> {
+    async steer(
+      sessionId: SessionId,
+      text: string,
+      images?: readonly ImageAttachment[]
+    ): Promise<'queued' | 'idle'> {
       const bound = requireBound(sessionId)
       if (bound.running === undefined) return 'idle'
-      await bound.session.steer(text)
+      await queueInto(bound, 'steering', text, images)
       return 'queued'
     },
 
-    async followUp(sessionId: SessionId, text: string): Promise<'queued' | 'idle'> {
+    async followUp(
+      sessionId: SessionId,
+      text: string,
+      images?: readonly ImageAttachment[]
+    ): Promise<'queued' | 'idle'> {
       const bound = requireBound(sessionId)
       if (bound.running === undefined) return 'idle'
-      await bound.session.followUp(text)
+      await queueInto(bound, 'followUp', text, images)
       return 'queued'
     },
 
     // π removes queued messages only as a whole, so one entry leaves by
-    // clearing the queue and putting the rest back in order.
-    async dequeue(sessionId: SessionId, kind: QueuedKind, text: string): Promise<boolean> {
+    // clearing the queue and putting the rest back in order, pictures included.
+    async dequeue(
+      sessionId: SessionId,
+      kind: QueuedKind,
+      text: string
+    ): Promise<QueuedEntry | undefined> {
       const bound = sessions.get(sessionId)
-      if (bound === undefined) return false
-      const { session } = bound
-      const { steering, followUp } = session.clearQueue()
+      if (bound === undefined) return undefined
+      // Read first: clearing π's queue raises a queue event of its own, which
+      // would empty this memory before the pictures could be paired back on.
+      const held = bound.queuedImages.take()
+      const cleared = bound.session.clearQueue()
+      const steering = [...withImages(cleared.steering, held.steering)]
+      const followUp = [...withImages(cleared.followUp, held.followUp)]
       const wanted = kind === 'steering' ? steering : followUp
-      const at = wanted.indexOf(text)
-      if (at !== -1) wanted.splice(at, 1)
-      for (const queued of steering) await session.steer(queued)
-      for (const queued of followUp) await session.followUp(queued)
-      return at !== -1
+      const at = wanted.findIndex((entry) => entry.text === text)
+      const removed = at === -1 ? undefined : wanted.splice(at, 1)[0]
+      for (const entry of steering) await queueInto(bound, 'steering', entry.text, entry.images)
+      for (const entry of followUp) await queueInto(bound, 'followUp', entry.text, entry.images)
+      return removed
     },
 
     // Stop what this session is doing, whatever that is. A summarizing jump

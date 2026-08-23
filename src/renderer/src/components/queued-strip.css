@@ -47,6 +47,34 @@
   border-color: var(--thinking);
 }
 
+/* Small enough that a row with pictures is the same height as one without,
+   and centered against a row whose other children sit on the baseline. */
+.qthumb {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  border-radius: 4px;
+  border: 1px solid var(--line);
+  object-fit: cover;
+  align-self: center;
+}
+
+/* A wrapper, so the thumbnails sit 4px apart while the row keeps its own gap
+   to them. */
+.qthumbs {
+  display: flex;
+  gap: 4px;
+  flex: none;
+  align-self: center;
+}
+
+.qmore {
+  flex: none;
+  font-size: 11px;
+  color: var(--faint);
+  align-self: center;
+}
+
 .qtext {
   overflow: hidden;
   text-overflow: ellipsis;

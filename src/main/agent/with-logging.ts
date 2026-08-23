@@ -1,4 +1,4 @@
-import type { ImageAttachment } from '../../shared/agent/port'
+import type { ImageAttachment, PortEvent, QueuedEntry } from '../../shared/agent/port'
 import type { Shell } from '../shell/shell'
 import type { LogSink } from '../log/sink'
 
@@ -8,7 +8,7 @@ export function withLogging(shell: Shell, log: LogSink, adapter: string): Shell 
   shell.onEvent((event) => {
     // The event's own `type` names the record, so the log reads back as the
     // sequence the port produced.
-    const { type, ...detail } = event
+    const { type, ...detail } = describeEvent(event)
     log.append({ source: 'main', event: type, adapter, ...detail })
   })
 
@@ -113,9 +113,24 @@ export function withLogging(shell: Shell, log: LogSink, adapter: string): Shell 
         images === undefined ? [sessionId, text] : [sessionId, text, images.map(describeImage)]
     ),
     shareBashRun: op('shareBashRun', (sessionId, run) => shell.shareBashRun(sessionId, run)),
-    steer: op('steer', (sessionId, text) => shell.steer(sessionId, text)),
-    followUp: op('followUp', (sessionId, text) => shell.followUp(sessionId, text)),
-    dequeue: op('dequeue', (sessionId, kind, text) => shell.dequeue(sessionId, kind, text)),
+    steer: op(
+      'steer',
+      (sessionId, text, images) => shell.steer(sessionId, text, images),
+      describeQueueCall
+    ),
+    followUp: op(
+      'followUp',
+      (sessionId, text, images) => shell.followUp(sessionId, text, images),
+      describeQueueCall
+    ),
+    dequeue: op(
+      'dequeue',
+      (sessionId, kind, text) => shell.dequeue(sessionId, kind, text),
+      undefined,
+      // The answer carries the pictures that left the queue, and those are the
+      // one thing a log line must not repeat.
+      (removed) => (removed === undefined ? removed : describeEntry(removed))
+    ),
 
     activateTab: op('activateTab', (sessionId, tabId) => shell.activateTab(sessionId, tabId)),
     closeTab: op('closeTab', (sessionId, tabId) => shell.closeTab(sessionId, tabId)),
@@ -139,4 +154,54 @@ function describeImage(image: ImageAttachment): { mimeType: string; bytes: numbe
   // The base64 length, which is within a few bytes of the file's own size and
   // costs nothing to measure.
   return { mimeType: image.mimeType, bytes: Math.floor((image.data.length * 3) / 4) }
+}
+
+function describeQueueCall(
+  sessionId: string,
+  text: string,
+  images?: readonly ImageAttachment[]
+): unknown[] {
+  return images === undefined ? [sessionId, text] : [sessionId, text, images.map(describeImage)]
+}
+
+/** A record as the log holds it: the port's own fields, bytes excepted. */
+type Described = { readonly [field: string]: unknown }
+
+function describeEntry(entry: QueuedEntry): Described {
+  return entry.images === undefined
+    ? { ...entry }
+    : { ...entry, images: entry.images.map(describeImage) }
+}
+
+// A queued 10 MB screenshot would otherwise ride every state record, as
+// base64, for as long as it sits in the queue.
+function describeEvent(event: PortEvent): Described & { readonly type: string } {
+  if (event.type === 'state') {
+    return {
+      ...event,
+      snapshot: {
+        ...event.snapshot,
+        sessions: event.snapshot.sessions.map((session) =>
+          session.queue === undefined
+            ? session
+            : {
+                ...session,
+                queue: {
+                  steering: session.queue.steering.map(describeEntry),
+                  followUp: session.queue.followUp.map(describeEntry)
+                }
+              }
+        )
+      }
+    }
+  }
+  if (event.type === 'user_message') {
+    return event.images === undefined
+      ? event
+      : { ...event, images: event.images.map(describeImage) }
+  }
+  if (event.type === 'queue_flushed') {
+    return { ...event, messages: event.messages.map(describeEntry) }
+  }
+  return event
 }

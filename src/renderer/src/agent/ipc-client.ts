@@ -8,6 +8,7 @@ import type {
   ModelInfo,
   PortEventListener,
   ProviderState,
+  QueuedEntry,
   QueuedKind,
   SessionId,
   SessionTree,
@@ -103,10 +104,18 @@ export function createIpcClient(): AgentPort {
         : call<TurnId>('prompt', sessionId, text, images),
     shareBashRun: (sessionId: SessionId, run: BashRunShare) =>
       call<'delivered' | 'dropped'>('shareBashRun', sessionId, run),
-    steer: (sessionId: SessionId, text: string) => call<void>('steer', sessionId, text),
-    followUp: (sessionId: SessionId, text: string) => call<void>('followUp', sessionId, text),
+    // Nothing optional is sent as an absent argument, exactly as the prompt
+    // above does it.
+    steer: (sessionId: SessionId, text: string, images?: readonly ImageAttachment[]) =>
+      images === undefined || images.length === 0
+        ? call<void>('steer', sessionId, text)
+        : call<void>('steer', sessionId, text, images),
+    followUp: (sessionId: SessionId, text: string, images?: readonly ImageAttachment[]) =>
+      images === undefined || images.length === 0
+        ? call<void>('followUp', sessionId, text)
+        : call<void>('followUp', sessionId, text, images),
     dequeue: (sessionId: SessionId, kind: QueuedKind, text: string) =>
-      call<boolean>('dequeue', sessionId, kind, text),
+      call<QueuedEntry | undefined>('dequeue', sessionId, kind, text),
 
     activateTab: (sessionId: SessionId, tabId: TabId) =>
       call<void>('activateTab', sessionId, tabId),

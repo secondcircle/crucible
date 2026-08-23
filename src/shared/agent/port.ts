@@ -33,16 +33,22 @@ export interface WorkspaceState {
 // next boundary between tool calls, a follow-up waits until the agent stops.
 export type QueuedKind = 'steering' | 'followUp'
 
-export interface QueuedMessage {
-  readonly kind: QueuedKind
+// One undelivered message and whatever rides with it. `images` is present only
+// for images genuinely attached to it.
+export interface QueuedEntry {
   readonly text: string
+  readonly images?: readonly ImageAttachment[]
+}
+
+export interface QueuedMessage extends QueuedEntry {
+  readonly kind: QueuedKind
 }
 
 export interface QueueState {
   /** Undelivered steering messages, oldest first. */
-  readonly steering: readonly string[]
+  readonly steering: readonly QueuedEntry[]
   /** Undelivered follow-up messages, oldest first. */
-  readonly followUp: readonly string[]
+  readonly followUp: readonly QueuedEntry[]
 }
 
 export type TabId = string
@@ -367,6 +373,8 @@ export type PortEvent =
       readonly sessionId: SessionId
       readonly turnId: TurnId
       readonly text: string
+      /** Present only for images the delivered message genuinely carried. */
+      readonly images?: readonly ImageAttachment[]
     }
   // Announced at the moment a shared bash run genuinely enters the
   // conversation, which is its delivery point and never before it.
@@ -524,10 +532,20 @@ export interface AgentPort {
 
   // Never lost and never refused: with no live turn to take it, the message is
   // sent as the next prompt. Nothing enters the transcript at queue time.
-  steer(sessionId: SessionId, text: string): Promise<void>
-  followUp(sessionId: SessionId, text: string): Promise<void>
-  /** By content, because delivery may have shifted any index. */
-  dequeue(sessionId: SessionId, kind: QueuedKind, text: string): Promise<boolean>
+  // Images ride a queued message exactly as they ride a prompt.
+  steer(sessionId: SessionId, text: string, images?: readonly ImageAttachment[]): Promise<void>
+  followUp(
+    sessionId: SessionId,
+    text: string,
+    images?: readonly ImageAttachment[]
+  ): Promise<void>
+  // Named by content, because delivery may have shifted any index; answered
+  // with the entry that left, because two queued messages can read alike.
+  dequeue(
+    sessionId: SessionId,
+    kind: QueuedKind,
+    text: string
+  ): Promise<QueuedEntry | undefined>
 
   /** User clicked a tab. Unknown ids are a harmless no-op. */
   activateTab(sessionId: SessionId, tabId: TabId): Promise<void>

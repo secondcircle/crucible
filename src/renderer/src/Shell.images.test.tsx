@@ -245,17 +245,56 @@ describe('while the session works', () => {
     return port
   }
 
-  it('holds images back rather than dropping them from a steering message', async () => {
+  it('carries the chips on a steering message and empties the composer', async () => {
     const port = await working()
     await paste(png())
     await type('and look at this')
 
-    expect(screen.getByText(/images go with the next prompt/)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Stop/ })).toBeInTheDocument()
+    expect(document.body.textContent).not.toContain('images go with the next prompt')
 
     await act(async () => {
       fireEvent.keyDown(box(), { key: 'Enter' })
     })
+
+    expect(port.calls).toContainEqual({
+      op: 'steer',
+      args: ['s1', 'and look at this', [{ mimeType: 'image/png', data: 'AAAAAA==' }]]
+    })
+    // The chips leave with the draft, so the next message starts clean.
+    expect(chips()).toEqual([])
+    expect(box()).toHaveValue('')
+  })
+
+  it('carries them on a follow-up too', async () => {
+    const port = await working()
+    await paste(png())
+    await type('and this once you are done')
+
+    await act(async () => {
+      fireEvent.keyDown(box(), { key: 'Enter', altKey: true })
+    })
+
+    expect(port.calls).toContainEqual({
+      op: 'followUp',
+      args: ['s1', 'and this once you are done', [{ mimeType: 'image/png', data: 'AAAAAA==' }]]
+    })
+    expect(chips()).toEqual([])
+  })
+
+  it('queues nothing for chips alone while it works: text is still required', async () => {
+    const port = await working()
+    await paste(png())
+
+    await act(async () => {
+      fireEvent.keyDown(box(), { key: 'Enter' })
+    })
+    await act(async () => {
+      fireEvent.keyDown(box(), { key: 'Enter', altKey: true })
+    })
+
     expect(port.calls.map((call) => call.op)).not.toContain('steer')
+    expect(port.calls.map((call) => call.op)).not.toContain('followUp')
     expect(chips()).toEqual(['screenshot.png'])
   })
 

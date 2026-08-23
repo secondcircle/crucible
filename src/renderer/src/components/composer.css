@@ -212,7 +212,7 @@
 }
 
 /* Height is reserved in every state, so nothing above or below moves when
-   the working, bash or held-back state lands. */
+   the working or bash state lands. */
 .esc {
   text-align: center;
   font-size: 11.5px;
@@ -354,11 +354,6 @@ kbd {
 
 .esc .bashnote {
   color: var(--accent2);
-}
-
-/* images held back from a queued message are said out loud, never dropped */
-.esc .heldback {
-  color: var(--error);
 }
 
 .chips {
