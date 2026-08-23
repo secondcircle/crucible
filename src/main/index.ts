@@ -121,6 +121,17 @@ const cache = createCacheLedger({
   }
 })
 
+// One store for the launch, whatever is on screen: two windows, two workspaces
+// or a dozen sessions never multiply the requests. The cache is Crucible's own
+// and lives under Crucible's state, so it follows the dev/installed split and
+// touches nothing of π's. Before the engine, which asks it what a node may
+// spend on.
+useQuotaCacheDir(app.getPath('userData'))
+const quota = selectQuotaService(
+  decideFlavor(process.env.CRUCIBLE_AGENT, app.isPackaged).flavor,
+  log
+)
+
 // The workflow engine exists before the adapter, because the run tools ride
 // every composed agent. A run speaks by messaging its orchestrator session,
 // and the shell that carries the message is built later — the indirection
@@ -135,6 +146,7 @@ const workflowRuns = selectWorkflowRunService(
     appPath: app.getAppPath(),
     stateDir: app.getPath('userData'),
     cache,
+    quota,
     ...(cannedWorkspacePath === undefined ? {} : { cannedWorkspacePath }),
     // The renderer gets no path-opening capability of its own; Reveal in the
     // artifact reader asks the service, which asks this.
@@ -172,12 +184,6 @@ const workspace = selectWorkspaceService(flavor, log, (url: string) => {
   void electronShell.openExternal(url)
 })
 const commands = selectCommandService(flavor, log, app.getAppPath())
-// One store for the launch, whatever is on screen: two windows, two workspaces
-// or a dozen sessions never multiply the requests. The cache is Crucible's own
-// and lives under Crucible's state, so it follows the dev/installed split and
-// touches nothing of π's.
-useQuotaCacheDir(app.getPath('userData'))
-const quota = selectQuotaService(flavor, log)
 
 // Installed only: install-stable replaces the bundle in place, so watching
 // our own stamp file is how the running app learns a newer build is waiting.

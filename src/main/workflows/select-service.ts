@@ -2,6 +2,8 @@ import { mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { basename, join } from 'node:path'
 import type { SessionId } from '../../shared/agent/port'
+import { swapModel } from '../../shared/quota/model-swap'
+import type { QuotaService } from '../../shared/quota/service'
 import {
   createFakeWorkflowRunService,
   type FakeArtifactFiles
@@ -30,6 +32,11 @@ export interface WorkflowRunWiring {
   readonly deliver: (sessionId: SessionId, text: string) => void
   /** The cache ledger every observed miss is appended to, sessions and runs alike. */
   readonly cache?: CacheRecorder
+  /**
+   * What a node's model is checked against before it starts. Absent, every
+   * node runs the model its workflow declared.
+   */
+  readonly quota?: QuotaService
   /** Shows a file in the OS file manager, for the artifact reader's Reveal. */
   readonly reveal?: (path: string) => void
   // Fake flavor only: the workspace the canned runs claim. Investigate needs
@@ -71,6 +78,16 @@ function scriptedArtifactFiles(root: string): FakeArtifactFiles {
         return undefined
       }
     }
+  }
+}
+
+// `refresh` rather than `read`: a run may work for hours with no window
+// asking, and a node is about to spend on the answer. The store's TTL makes
+// this at most one request a minute however many nodes start.
+export function chooserFrom(quota: QuotaService): (model: string) => Promise<string> {
+  return async (model: string): Promise<string> => {
+    const providerId = model.split('/')[0]
+    return swapModel(model, await quota.refresh({ providers: [providerId] }))
   }
 }
 
@@ -128,6 +145,7 @@ export function selectWorkflowRunService(
     }),
     deliver: wiring.deliver,
     ...(wiring.cache === undefined ? {} : { cache: wiring.cache }),
+    ...(wiring.quota === undefined ? {} : { chooseModel: chooserFrom(wiring.quota) }),
     onChanged: () => {
       for (const listener of [...changeListeners]) listener()
     },

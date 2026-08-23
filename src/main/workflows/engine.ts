@@ -89,6 +89,12 @@ export interface EngineOptions {
   readonly log?: (event: Record<string, unknown>) => void
   /** "provider/model-id:thinkingLevel" for nodes that name none. */
   readonly defaultModel?: string
+  /**
+   * The last word on which model a node runs, asked once when the run is
+   * planned and again as each node starts — usage moves while a run works, and
+   * a forecast made an hour ago should not decide what gets spent now.
+   */
+  readonly chooseModel?: (model: string) => Promise<string> | string
   /** Test knobs; production leaves them alone. */
   readonly pollMs?: number
   readonly watchdogMs?: number
@@ -182,6 +188,7 @@ export function createWorkflowEngine(options: EngineOptions): WorkflowEngine {
     onChanged,
     log,
     defaultModel = 'anthropic/claude-opus-5:high',
+    chooseModel = (model: string) => model,
     pollMs = 1000,
     watchdogMs = 15_000,
     quietAbortMs = 5 * 60_000,
@@ -224,6 +231,25 @@ export function createWorkflowEngine(options: EngineOptions): WorkflowEngine {
   function save(run: LiveRun): void {
     store.save(run as RunRecord)
     onChanged()
+  }
+
+  // A chooser that throws must never cost a node its turn, so the declared
+  // model stands and the trouble goes to the log instead.
+  async function modelFor(declared: string, where: Record<string, unknown>): Promise<string> {
+    let chosen: string
+    try {
+      chosen = await chooseModel(declared)
+    } catch (cause) {
+      log?.({
+        event: 'model_choice_failed',
+        ...where,
+        model: declared,
+        message: cause instanceof Error ? cause.message : String(cause)
+      })
+      return declared
+    }
+    if (chosen !== declared) log?.({ event: 'model_swapped', ...where, from: declared, to: chosen })
+    return chosen
   }
 
   function requireRecord(runId: WorkflowRunId): LiveRun {
@@ -314,6 +340,12 @@ export function createWorkflowEngine(options: EngineOptions): WorkflowEngine {
     })
     const artifactDir = store.artifactDir(id)
 
+    // The rail's forecast names what the run would spend on now; every node
+    // asks again for itself when it starts.
+    const plannedModels = await Promise.all(
+      planned.map((plan) => modelFor(plan.model ?? defaultModel, { runId: id, nodeId: plan.id }))
+    )
+
     const run: LiveRun = {
       id,
       workflow: resolved.name,
@@ -328,11 +360,11 @@ export function createWorkflowEngine(options: EngineOptions): WorkflowEngine {
       inputDescs: { ...def.inputs },
       dir: store.runDir(id),
       nodes: planned.map(
-        (plan): LiveNode => ({
+        (plan, at): LiveNode => ({
           id: plan.id,
           status: 'pending',
           parents: plan.parents ?? [],
-          model: plan.model ?? defaultModel,
+          model: plannedModels[at],
           reads: [],
           // A ghost carries what the plan says it will write, so the rail has
           // the whole shape of the run from the first minute.
@@ -441,12 +473,14 @@ export function createWorkflowEngine(options: EngineOptions): WorkflowEngine {
       const parents = [...new Set([...declared, ...inferred])].filter((parent) => parent !== id)
       for (const path of Object.values(outputPaths)) producerByArtifact.set(path, id)
 
+      const model = await modelFor(spec.model ?? defaultModel, { runId: run.id, nodeId: id })
+
       // The record currently carrying this session; revisions swap it.
       let node: LiveNode = {
         id,
         status: 'running',
         parents,
-        model: spec.model ?? defaultModel,
+        model,
         reads: (spec.reads ?? []).map((path) => ({
           name: basename(path),
           path,
@@ -465,7 +499,7 @@ export function createWorkflowEngine(options: EngineOptions): WorkflowEngine {
 
       const session: NodeSession = await sessions.start({
         cwd,
-        model: node.model ?? defaultModel,
+        model,
         rolePrompt: nodeRolePrompt(id, run.workflow, cwd),
         tools: spec.tools ?? DEFAULT_TOOLS,
         onComplete(done) {

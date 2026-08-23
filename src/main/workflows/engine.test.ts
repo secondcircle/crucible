@@ -20,7 +20,7 @@ import type { ObservedCacheMiss } from '../../shared/agent/adapter'
 import type { SessionId, TranscriptItem } from '../../shared/agent/port'
 import type { CacheRecorder, RecordedCacheMiss } from '../cache/ledger'
 import type { PlannedNode, WorkflowDef } from './authoring'
-import { createWorkflowEngine, type WorkflowEngine } from './engine'
+import { createWorkflowEngine, type EngineOptions, type WorkflowEngine } from './engine'
 import type {
   NodeBlocker,
   NodeCompletion,
@@ -87,12 +87,15 @@ function outputPath(prompt: string, file: string): string {
 
 function scriptedSessions(
   scriptFor: (nodeId: string) => NodeScript
-): NodeSessionFactory & { readonly prompts: string[] } {
+): NodeSessionFactory & { readonly prompts: string[]; readonly models: string[] } {
   const prompts: string[] = []
+  const models: string[] = []
   return {
     prompts,
+    models,
     async start(request: NodeSessionRequest): Promise<NodeSession> {
       const nodeId = /^You are "([^"]+)"/.exec(request.rolePrompt)?.[1] ?? 'unknown'
+      models.push(`${nodeId}: ${request.model}`)
       const script = scriptFor(nodeId)
       let turn = 0
       let disposed = false
@@ -165,7 +168,8 @@ interface Rig {
 
 function rig(
   defs: Record<string, WorkflowDef>,
-  scriptFor: (nodeId: string) => NodeScript
+  scriptFor: (nodeId: string) => NodeScript,
+  extra: Partial<EngineOptions> = {}
 ): Rig {
   const repo = tempRepo()
   const stateDir = tempDir('crucible-engine-state-')
@@ -190,7 +194,8 @@ function rig(
     pollMs: 5,
     watchdogMs: 60_000,
     quietAbortMs: 600_000,
-    releaseWaitMs: 100
+    releaseWaitMs: 100,
+    ...extra
   })
   return { engine, repo, stateDir, delivered, sessions, recorded }
 }
@@ -564,6 +569,70 @@ describe('the engine end to end', () => {
     // And it is a record, not a ghost: the live-only operations say so
     // plainly rather than pretending to work.
     expect(() => engine.cancel('aa11')).toThrow(/not live/)
+  })
+})
+
+// Which model a node runs is not settled when the workflow is written: the
+// engine asks, and what it is told is what gets spent.
+describe('choosing the model a node runs', () => {
+  const FABLE = 'anthropic/claude-fable-5:high'
+  const OPUS = 'anthropic/claude-opus-5:high'
+
+  const fableNode: WorkflowDef = {
+    description: 'one node that asks for fable',
+    inputs: { prompt: 'the task file' },
+    plan: () => [{ id: 'work', model: FABLE }],
+    run: async (ctx) => {
+      const result = await ctx.node('work', {
+        prompt: 'do the thing',
+        model: FABLE,
+        outputs: { report: { file: 'report.md', desc: 'what happened' } }
+      })
+      return { summary: result.summary }
+    }
+  }
+
+  const writesReport: NodeScript = (prompt, tools) => {
+    writeFileSync(outputPath(prompt, 'report.md'), 'the report\n')
+    tools.complete({ summary: 'did the thing' })
+  }
+
+  it('runs the model it is handed, and shows it on the ghost before the node starts', async () => {
+    const asked: string[] = []
+    const { engine, repo, sessions } = rig({ solo: fableNode }, () => writesReport, {
+      chooseModel: (model) => {
+        asked.push(model)
+        return OPUS
+      }
+    })
+
+    const task = join(repo, 'task.md')
+    writeFileSync(task, 'the task\n')
+    const started = await engine.start(startRequest(repo, 'solo', { prompt: task }))
+
+    // The forecast on the rail is already the swapped model, before a session exists.
+    expect(started.nodes[0].model).toBe(OPUS)
+
+    await until(() => engine.runs()[0].status === 'complete')
+    // Asked twice for the one node: once for the plan, once as it started.
+    expect(asked).toEqual([FABLE, FABLE])
+    expect(sessions.models).toEqual(['work: ' + OPUS])
+    expect(engine.runs()[0].nodes[0].model).toBe(OPUS)
+  })
+
+  it('runs the declared model when the chooser throws, so no node loses its turn', async () => {
+    const { engine, repo, sessions } = rig({ solo: fableNode }, () => writesReport, {
+      chooseModel: () => {
+        throw new Error('the meters are unreachable')
+      }
+    })
+
+    const task = join(repo, 'task.md')
+    writeFileSync(task, 'the task\n')
+    await engine.start(startRequest(repo, 'solo', { prompt: task }))
+
+    await until(() => engine.runs()[0].status === 'complete')
+    expect(sessions.models).toEqual(['work: ' + FABLE])
   })
 })
 
