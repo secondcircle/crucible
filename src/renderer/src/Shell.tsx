@@ -313,10 +313,9 @@ export function Shell({
   const cancelChoice = useRef<((chose: 'cancelled' | 'kept') => void) | undefined>(undefined)
   /** The engine's records, whole on every event. */
   const [runsSnapshot, setRunsSnapshot] = useState<RunsSnapshot | undefined>(undefined)
-  // The same records for the needs-you verdict, which is taken inside an event
-  // rather than during a render. Written where the snapshot arrives rather than
-  // in an effect, so a turn ending in the same batch as a run's change is
-  // judged on the newer record.
+  // A ref, not the state above: the needs-you verdict is taken inside an event,
+  // and written where the snapshot arrives rather than in an effect so a turn
+  // ending in the same batch is judged on the newer record.
   const runsNow = useRef<readonly RunRecord[]>([])
   // Lives here rather than in the run view because Escape unwinds one surface
   // at a time and this is where that ladder is; the reader is a step of it,
@@ -447,11 +446,9 @@ export function Shell({
     setToast({ sessionId: owner ?? railNow.current.activeSessionId, text })
   }, [])
 
-  // A turn ended in a session nobody was watching and nothing is working in
-  // that session's name, so it needs the user. The rule is the module's and
-  // this adds none of its own: it applies the verdict, marks, and announces.
-  // Whether the mark also leaves the window is main's call, because main is
-  // what knows whether this window has focus.
+  // The rule itself lives in the needs-you module; this only applies it. Whether
+  // the mark also leaves the window is main's call, because main is what knows
+  // whether this window has focus.
   const finished = useCallback(
     (sessionId: SessionId, outcome: 'ended' | 'errored'): void => {
       const rail = railNow.current

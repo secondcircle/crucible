@@ -36,7 +36,6 @@ function runOf(overrides: Partial<RunRecord> = {}): RunRecord {
   }
 }
 
-/** s2 finished its turn while the user was on s1, which is the unwatched case. */
 function ended(runs: readonly RunRecord[]): boolean {
   return finishedAsking(
     { sessionId: 's2', outcome: 'ended' },
@@ -85,8 +84,6 @@ describe('what counts as unwatched', () => {
   })
 })
 
-// The condition this file exists to pin: a turn that ended while something is
-// working in the session's name is not news, whatever the turn was about.
 describe('what a working run hushes', () => {
   it('says nothing at all when the session has a run working', () => {
     expect(ended([runOf({})])).toBe(false)

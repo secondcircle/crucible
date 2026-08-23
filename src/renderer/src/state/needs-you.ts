@@ -2,10 +2,8 @@ import type { SessionId, SessionState, ShellSnapshot } from '../../../shared/age
 import type { RunRecord } from '../../../shared/workflows/run'
 import { runIsWorking } from '../runs/bands'
 
-// A session whose turn ended while the user was not looking at it, and with
-// nothing working in its name, needs them. Everything about that state is
-// decided here, so the rules are readable in one place and testable without a
-// document.
+// Everything about the needs-you state is decided here, so the rules are
+// readable in one place and testable without a document.
 //
 // The marks live as long as the launch does and no longer: nothing runs while
 // Crucible is closed, so there is nothing to remember across a restart.
@@ -16,30 +14,26 @@ export type Marks = ReadonlySet<SessionId>
 /**
  * Whether a turn that just finished leaves its session asking.
  *
- * Three things have to hold: the turn ended or errored, the user was not
- * looking, and nothing was working in the session's name. Looking is per
- * window, not per session: a turn that ends while Crucible is behind another
- * app was not watched, whichever session was on screen.
+ * Looking is per window, not per session: a turn that ends while Crucible is
+ * behind another app was not watched, whichever session was on screen.
  *
- * The verdict is taken here and never revisited. A run that later stops and
- * cannot move without the user messages its orchestrator, and the turn that
- * message opens marks when it ends, because by then the run is not working.
+ * The verdict is taken once and never revisited, because a run that stops later
+ * speaks to its orchestrator and that turn's own ending marks.
  */
 export function finishedAsking(
   finished: { readonly sessionId: SessionId; readonly outcome: 'ended' | 'errored' },
   world: {
     readonly activeSessionId?: SessionId
     readonly windowFocused: boolean
-    /** Every run the renderer holds; the rule picks out this session's own. */
+    /** Unfiltered: the rule picks out this session's own. */
     readonly runs: readonly RunRecord[]
   }
 ): boolean {
   const unwatched = !world.windowFocused || finished.sessionId !== world.activeSessionId
   if (!unwatched) return false
-  // An error in the orchestrator session is that session's own news, and no
-  // run will ever deliver it. So a working run does not hush it.
+  // An error is the session's own news and no run will ever deliver it, so a
+  // working run does not hush one.
   if (finished.outcome === 'errored') return true
-  // Only the session's own runs, and a run with no session is nobody's.
   return !world.runs.some((run) => run.sessionId === finished.sessionId && runIsWorking(run))
 }
 

@@ -98,7 +98,6 @@ async function rail(
   return { port, workflowRuns }
 }
 
-/** A run of s2's own, working unless the test says otherwise. */
 function runOf(overrides: Partial<RunRecord> = {}): RunRecord {
   return {
     id: 'en42',
@@ -221,9 +220,7 @@ describe('the mark', () => {
   })
 })
 
-// The externally observable end of the rule: what the user would see, or in
-// this case would not. A session with a run working in its name has already
-// said everything its turn's ending had to say.
+// The unit rule again, this time through the sidebar the user actually reads.
 describe('a session with a run working in its name', () => {
   it('finishes a turn unwatched and asks for nothing at all', async () => {
     const service = recorder()
@@ -231,7 +228,6 @@ describe('a session with a run working in its name', () => {
 
     await turn(port, 's2')
 
-    // The row says the run is working and stops there: no "needs you" in it.
     expect(screen.getByRole('button', { name: `${NEARBY} (run working)` })).toBeInTheDocument()
     expect(screen.queryByTitle(/waiting on you/)).toBeNull()
     expect(service.counts.at(-1)).toBe(0)

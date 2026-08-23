@@ -57,9 +57,8 @@ describe('which band a run is in', () => {
   })
 })
 
-// The sidebar reads this to decide a turn's ending is not news, and ⌘R reads
-// `bandOf` to file the same run under Running. Every record is put to both, so
-// an edit to either that pulls them apart fails here rather than in the app.
+// The sidebar reads this and ⌘R reads `bandOf`, so every record goes to both:
+// an edit that pulls them apart fails here rather than in the app.
 describe('what counts as working on the session\'s behalf', () => {
   const STATUSES: readonly RunStatus[] = ['running', 'paused', 'complete', 'failed', 'cancelled']
   const WAITING: readonly (boolean | undefined)[] = [undefined, false, true]
@@ -75,8 +74,7 @@ describe('what counts as working on the session\'s behalf', () => {
     }
   })
 
-  // Spelled out as well as agreed, so the pair cannot agree on a wrong answer:
-  // a run is working while it runs and nobody owes it one.
+  // Spelled out as well as agreed, so the pair cannot agree on a wrong answer.
   it('is a run that is running, owed no answer and not dismissed, and nothing else', () => {
     expect(EVERY_RECORD.filter((shape) => runIsWorking(runOf(shape)))).toEqual([
       { status: 'running', waiting: undefined, dismissedAt: undefined },

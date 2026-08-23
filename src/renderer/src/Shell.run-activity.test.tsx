@@ -199,9 +199,8 @@ describe('the one slot, and who owns it', () => {
     expect(nameOf(RUNNING)).toBe(`${RUNNING} (working, run working)`)
   })
 
-  // The run is parked on an unanswered check-in, because that is what leaves
-  // the turn markable at all: a run still working hushes its session's turn,
-  // and then there is no needs-you state to win the slot.
+  // Parked on an unanswered check-in, because a run still working would hush
+  // the turn and leave no needs-you state to win the slot.
   it('gives it to needs-you, which outranks a run', async () => {
     const { port } = await rail([runOf({ waiting: true })])
 
