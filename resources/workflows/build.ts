@@ -5,8 +5,8 @@ import { workflow, type PlannedNode } from 'crucible:workflow'
 // Spec, a fresh-context builder, a review loop, and the merge gate that was
 // once a workflow of its own. What a run leaves is a branch; pulling it in is
 // the orchestrator's judgment and merging it the human's act. Venue machinery
-// is gone (every run works in its own worktree, ADR 0016); check-ins go to
-// the orchestrator, never to a dashboard (ADR 0017).
+// is gone (every run works in its own worktree); check-ins go to
+// the orchestrator, never to a dashboard.
 
 const DOCUMENT_MODEL = 'anthropic/claude-fable-5:high'
 const CODE_MODEL = 'anthropic/claude-opus-5:high'
@@ -439,8 +439,8 @@ never creep.
    name: whatever ruling its existence traces to, its *visual form* was never
    approved. This is how silent inventions reach the human.
 4. **Acknowledgment** — every user input the diff adds or changes, and the
-   immediate feedback it produces. This repository has ruled it
-   (\`docs/adr/0010\`): every input acknowledges in the same frame it lands,
+   immediate feedback it produces. This repository has ruled it:
+   every input acknowledges in the same frame it lands,
    and work taking real time shows a waiting state for its whole duration. An
    input whose feedback you cannot name is a defect on par with wrong data,
    never a note.

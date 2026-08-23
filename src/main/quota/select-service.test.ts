@@ -40,7 +40,7 @@ describe('choosing a quota service', () => {
     const log = memorySink()
     // Pointed somewhere inspectable, because an agent-driven check must never
     // go near the human's quota. Crucible's own state directory, never π's:
-    // nothing here knows what PI_CODING_AGENT_DIR is (ADR 0015).
+    // nothing here knows what PI_CODING_AGENT_DIR is.
     const home = mkdtempSync(join(tmpdir(), 'crucible-quota-flavor-'))
     useQuotaCacheDir(home)
     const fetching = vi.spyOn(globalThis, 'fetch')

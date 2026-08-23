@@ -107,7 +107,7 @@ const panel = createPanelModel({ persistence: storePanelPersistence(store) })
 
 // The cache ledger, before anything that could observe a miss: one file per
 // installation, directly under Crucible's own state directory, flavor-scoped
-// like everything there and never pruned (ADR 0015, ADR 0019). A fake-flavor
+// like everything there and never pruned. A fake-flavor
 // launch writes to the dev ledger, which is what makes the whole loop
 // drivable by an agent.
 useCacheLedgerDir(app.getPath('userData'))
@@ -175,7 +175,7 @@ const commands = selectCommandService(flavor, log, app.getAppPath())
 // One store for the launch, whatever is on screen: two windows, two workspaces
 // or a dozen sessions never multiply the requests. The cache is Crucible's own
 // and lives under Crucible's state, so it follows the dev/installed split and
-// touches nothing of π's (ADR 0015).
+// touches nothing of π's.
 useQuotaCacheDir(app.getPath('userData'))
 const quota = selectQuotaService(flavor, log)
 
@@ -236,7 +236,7 @@ const shell = withLogging(
 )
 
 // A run's message is a follow-up: queued while the orchestrator works,
-// prompted the moment it is idle — never lost, never refused (ADR 0017).
+// prompted the moment it is idle — never lost, never refused.
 orchestratorInbox = (sessionId, text) => {
   void shell.followUp(sessionId, text).catch((cause: unknown) => {
     log.append({

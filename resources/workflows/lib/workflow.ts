@@ -5,8 +5,8 @@
  * executes is a run. Nodes are fresh-context agent sessions with pushed
  * inputs (file paths) and declared output artifacts, validated on
  * completion. Kept from the legacy system essentially as-is, venue concepts
- * excepted: every run works in a worktree of its own, branched from a commit
- * (ADR 0016), so nothing here chooses where a run happens.
+ * excepted: every run works in a worktree of its own, branched from a
+ * commit, so nothing here chooses where a run happens.
  *
  * Workflow files import this surface as `crucible:workflow`; the loader
  * aliases that to the shipped copy of this module, so a workflow in any
@@ -104,7 +104,7 @@ export interface OpenNode {
  * What a workflow says when it schedules a successor: a workflow name and its
  * inputs. The engine starts the successor directly when THIS run completes
  * cleanly, in a fresh worktree continuing this run's branch from its final
- * commit (ADR 0016). The name resolves at stage time through the origin
+ * commit. The name resolves at stage time through the origin
  * ladder — workspace over user over built-in — so a wrapper at an outer
  * origin can name a workflow further in.
  */

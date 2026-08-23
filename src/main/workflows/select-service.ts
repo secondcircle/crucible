@@ -24,7 +24,7 @@ export function userWorkflowsPath(home = homedir()): string {
 
 export interface WorkflowRunWiring {
   readonly appPath: string
-  /** Crucible's own state directory; run records live under it (ADR 0015). */
+  /** Crucible's own state directory; run records live under it. */
   readonly stateDir: string
   /** How a run speaks: a message to its orchestrator session's agent. */
   readonly deliver: (sessionId: SessionId, text: string) => void

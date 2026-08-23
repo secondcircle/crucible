@@ -8,7 +8,7 @@ import { retentionInForce } from './retention'
 
 // The cache ledger: one append-only JSONL file recording every cache miss
 // Crucible observes, plus a line for each counter reset. Permanent and never
-// pruned (ADR 0019) — the questions it answers are longitudinal, and a miss
+// pruned — the questions it answers are longitudinal, and a miss
 // filtered out as uninteresting is a hole in exactly the evidence being
 // reasoned over. An agent reads this file, so the line schema below is a
 // product contract rather than an implementation detail.
@@ -93,7 +93,7 @@ export function createCacheLedger(options: CacheLedgerOptions = {}): CacheLedger
   const retention = options.retention ?? retentionInForce()
   const now = options.clock ?? ((): string => new Date().toISOString())
   const listeners = new Set<CacheHealthListener>()
-  // Sessions run concurrently (ADR 0003), so appends are serialized here: one
+  // Sessions run concurrently, so appends are serialized here: one
   // complete JSON line per write. Different flavors write different files, so
   // there is no cross-process contention to solve.
   let queue: Promise<unknown> = Promise.resolve()

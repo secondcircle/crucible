@@ -1,7 +1,7 @@
 import type { CacheRetention, Unsubscribe } from '../agent/port'
 
 // Beside the agent port, not behind it: the cache ledger is global, one file
-// per installation across every workspace, session and run (ADR 0019), and
+// per installation across every workspace, session and run, and
 // main-side code with no port still writes to it.
 
 export type CacheHealthListener = (health: CacheHealth) => void

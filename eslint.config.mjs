@@ -41,7 +41,7 @@ export default tseslint.config(
           selector:
             "MemberExpression[object.name=/^(window|globalThis|self)$/][property.name='crucible']",
           message:
-            'The renderer reaches agents only through the agent port (ADR 0001) and the OS only through the workspace service (ADR 0005). Take them as props; only src/renderer/src/bridge.ts may touch window.crucible.'
+            'The renderer reaches agents only through the agent port and the OS only through the workspace service. Take them as props; only src/renderer/src/bridge.ts may touch window.crucible.'
         },
         // Both spellings: the JSX attribute, and the object property that
         // catches createElement props and spread objects.

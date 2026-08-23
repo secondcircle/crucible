@@ -34,7 +34,7 @@ export interface NodeSessionRequest {
   readonly onBlocker: (blocker: NodeBlocker) => string
   // A cache miss on one of this node's turns, detected the way a session's
   // is. A run is observed, never conversed with: this reaches the ledger and
-  // the run's chip and becomes no message to anybody (ADR 0017).
+  // the run's chip and becomes no message to anybody.
   readonly onCacheMiss?: (miss: ObservedCacheMiss) => void
 }
 

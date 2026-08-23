@@ -28,11 +28,10 @@ import { commitRunWorktree, createRunWorktree } from './worktree'
 
 // The engine: executes runs in-process, one seam away from agents. Ported
 // from the legacy runner with the venue machinery deleted — every run works
-// in a worktree of its own, branched from a commit named at kickoff (ADR
-// 0016) — and the dashboard's answer channel replaced by the orchestrator:
+// in a worktree of its own, branched from a commit named at kickoff — and
+// the dashboard's answer channel replaced by the orchestrator:
 // every check-in, blocker, stall and completion is delivered as a message to
-// the run's session agent, and answers come back through crucible_answer
-// (ADR 0017).
+// the run's session agent, and answers come back through crucible_answer.
 
 const DEFAULT_TOOLS = ['read', 'bash', 'edit', 'write', 'grep', 'find', 'ls']
 
@@ -478,7 +477,7 @@ export function createWorkflowEngine(options: EngineOptions): WorkflowEngine {
           return 'Blocker recorded. End your turn and wait for a response.'
         },
         // A miss inside a run marks the chip and enters the ledger. It never
-        // becomes a message to the orchestrator (ADR 0017): nobody is asked
+        // becomes a message to the orchestrator: nobody is asked
         // about it, and the evidence is read later.
         onCacheMiss(miss) {
           node.cacheMisses = (node.cacheMisses ?? 0) + 1
@@ -995,7 +994,7 @@ export function createWorkflowEngine(options: EngineOptions): WorkflowEngine {
     tell(run, endingText(run, outcome, committed))
 
     // Chains: successors start directly on clean completion, continuing this
-    // run's branch from its final commit (ADR 0016).
+    // run's branch from its final commit.
     if (outcome === 'complete') {
       for (const staged of handle.staged) {
         try {
