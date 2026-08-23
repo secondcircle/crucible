@@ -17,9 +17,8 @@ export interface SdkOptions {
   // Called only for the sdk flavor, so a launch on the fake still starts when
   // no prompt can be read.
   readonly systemPrompt: () => string
-  // Also sdk-only, which is the whole of B6's seam: a fake-flavor launch
-  // never builds a skill service, so it reads no skill folder and composes no
-  // skills block.
+  // Also sdk-only: a fake-flavor launch never builds a skill service, so it
+  // reads no skill folder and composes no skills block.
   readonly skills: () => SkillService
   /** Opening the OS browser during a login; only main can do it. */
   readonly openExternal?: (url: string) => void

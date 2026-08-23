@@ -33,11 +33,8 @@ export const BASH_RUN_TYPE = 'crucible.bashRun'
 // in `messages`, so a restored conversation shows the miss immediately above
 // the assistant message it happened on.
 //
-// `skills` are the ones present as the transcript is built, which is what a
-// reopened conversation is read against: attribution is computed, never
-// stored, so nothing of Crucible's is written into a π session file (ADR
-// 0015) and a file that has stopped being part of a skill reads as an
-// ordinary read.
+// Attribution against `skills` is computed here rather than stored, so nothing
+// of Crucible's is written into a π session file.
 export function toTranscript(
   messages: readonly StoredMessage[],
   seams?: ReadonlyMap<number, CacheMissFacts>,

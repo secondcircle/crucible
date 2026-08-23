@@ -313,9 +313,8 @@ describe('drilling into a chain', () => {
   })
 })
 
-// A skill read is its own tool name, so a glance at a collapsed chain says
-// whether a skill fired. Attribution happened before the event crossed the
-// port; here it is only rendered.
+// Attribution happened before the event crossed the port; what is under test
+// here is only the rendering of it.
 describe('a skill read in a chain', () => {
   it('counts under skill in the head, beside every other tool', async () => {
     const port = await streaming()

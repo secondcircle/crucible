@@ -1,9 +1,8 @@
 // @vitest-environment node
 //
-// The origin ladder against real directories, through π's own loader: the
-// loader is the decision (ADR 0021), so a test against a substitute would
-// prove nothing about it. No session is constructed, no model is called and
-// nothing is spent.
+// The origin ladder against real directories, through π's own loader, because
+// the loader is the decision and a substitute would prove nothing about it. No
+// session is constructed, no model is called and nothing is spent.
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -118,13 +117,6 @@ describe('a skill that cannot be used', () => {
   })
 })
 
-// An origin that exists but cannot be listed is the one failure the caller is
-// meant to survive rather than absorb: `undefined` is how this service says
-// "read nothing, keep what you have", and the alternative is a turn that
-// silently goes out without skills the user still has on disk — and, in a live
-// session, a composed prompt rewritten and a prompt cache re-billed for a set
-// nobody changed.
-//
 // Root ignores the permission bits, so the folder stays readable and the test
 // would prove nothing there.
 const asRoot = process.getuid?.() === 0

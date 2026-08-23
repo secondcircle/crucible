@@ -141,9 +141,8 @@ export function createSdkNodeSessionFactory({
         agentDir,
         noExtensions: true,
         noPromptTemplates: true,
-        // π's own folders stay unread; the node's skills were resolved at
-        // Crucible's three origins and are handed in whole (ADR 0021). A node
-        // session never re-reads them: it is one task, start to finish.
+        // π's own folders stay unread; the node's skills are handed in whole
+        // and never re-read, because a node is one task start to finish.
         noSkills: true,
         skillsOverride: () => ({ skills: forPi(skills), diagnostics: [] }),
         systemPromptOverride: () =>

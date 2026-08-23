@@ -138,9 +138,8 @@ interface ScriptedCall {
 
 // Three names and one failure, so a single scripted turn exercises a tool
 // chain's multi-name counts, its skill marker and its failure marker without a
-// paid call. The two skill calls are one skill read twice — its SKILL.md and a
-// supporting file — so the head reads `1 skill`, which is the whole point of
-// counting skills rather than skill reads.
+// paid call. The two skill calls are one skill read twice, so the head reads
+// `1 skill` rather than two.
 const CHAIN: readonly ScriptedCall[] = [
   {
     name: 'skill',

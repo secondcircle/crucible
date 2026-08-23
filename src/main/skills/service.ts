@@ -4,9 +4,8 @@ import { join } from 'node:path'
 import type { Skill } from '@earendil-works/pi-coding-agent'
 import { crucibleAgentDir } from '../agent/paths'
 
-// The three-origin ladder commands already resolve on, pointed at π's own
-// loader: the file format and the discovery rules stay π's (ADR 0021), and
-// Crucible decides only which folders are read and in what order.
+// The file format and the discovery rules stay π's; Crucible decides only
+// which folders are read and in what order.
 
 /** π's `Skill`, narrowed to what Crucible's own seams read off one. */
 export interface LoadedSkill {
@@ -18,9 +17,8 @@ export interface LoadedSkill {
   readonly baseDir: string
 }
 
-// π's loader made these, so they carry the fields π reads that Crucible does
-// not — `disable-model-invocation` among them, which is why the objects are
-// passed back whole rather than rebuilt from the four fields above.
+// π's loader made these, and they carry fields π reads that Crucible does not
+// (`disable-model-invocation` among them), so they go back whole.
 export function forPi(skills: readonly LoadedSkill[]): Skill[] {
   return skills as Skill[]
 }
@@ -45,19 +43,16 @@ export function userSkillsPath(home = homedir()): string {
 }
 
 export interface SkillService {
-  // Every skill the workspace offers, resolved fresh: a skill written a moment
-  // ago is in this answer, and a folder that does not exist contributes
-  // nothing. Never rejects. `undefined` means an origin folder is there but
-  // could not be read, so the answer would be missing skills the user still
-  // has: whatever the caller holds stays in force instead.
+  // Never rejects. `undefined` means an origin folder is there but could not be
+  // read, so the caller keeps the set it holds rather than losing skills the
+  // user still has on disk.
   resolve(workspacePath: string): Promise<readonly LoadedSkill[] | undefined>
 }
 
 export interface SkillServiceOptions {
   readonly roots: SkillRoots
-  // Where π's loader diagnostics go: a skill with no description, an
-  // unreadable folder, a name collision. The run log is where the diagnosis
-  // happens, because nothing about a bad skill reaches the UI.
+  // Nothing about a bad skill reaches the UI, so the run log is where the
+  // diagnosis happens.
   readonly onDiagnostic?: (diagnostic: { path?: string; message: string }) => void
 }
 
@@ -71,14 +66,9 @@ function absent(cause: unknown): boolean {
   return code === 'ENOENT' || code === 'ENOTDIR'
 }
 
-// π's loader never reports this. Its directory walk wraps `readdir` in a bare
-// `try {} catch {}`, so a folder nobody may open comes back empty, with no
-// diagnostic, reading exactly like a folder holding no skills. That
-// difference is the whole of B5: an empty origin contributes nothing, an
-// unreadable one leaves the previous set in force. So the service asks the
-// question itself, before the load, of the three origins it hands in. A
-// subdirectory further down that π cannot open stays π's silence; Crucible
-// speaks only for the folders it names.
+// π's loader reads a folder nobody may open as a folder holding no skills, and
+// those two must part ways here: an empty origin contributes nothing, an
+// unreadable one leaves the previous set in force.
 function unreadableFolders(folders: readonly string[]): readonly { path: string; cause: unknown }[] {
   const unreadable: { path: string; cause: unknown }[] = []
   for (const path of folders) {
@@ -105,9 +95,8 @@ export function createSkillService({ roots, onDiagnostic }: SkillServiceOptions)
       const folders = foldersFor(roots, workspacePath)
       const unreadable = unreadableFolders(folders)
       if (unreadable.length > 0) {
-        // The load is not even attempted: what it answered would be short the
-        // skills of that folder, and a caller cannot tell a short answer from
-        // a true one.
+        // The load is not even attempted: its answer would be short the skills
+        // of that folder, and a caller cannot tell that from a true one.
         for (const { path, cause } of unreadable) {
           onDiagnostic?.({
             path,
@@ -120,18 +109,17 @@ export function createSkillService({ roots, onDiagnostic }: SkillServiceOptions)
         const pi = await sdk()
         const loaded = pi.loadSkills({
           cwd: workspacePath,
-          // Crucible's own agent dir, so π's `.pi` folders are named nowhere
-          // (ADR 0015). With `includeDefaults` off nothing under it is read
-          // either: the three paths below are the whole of discovery.
+          // Crucible's own agent dir, so π's own folders are named nowhere.
+          // With `includeDefaults` off nothing under it is read either: the
+          // three paths below are the whole of discovery.
           agentDir: crucibleAgentDir(homedir()),
           skillPaths: [...folders],
           includeDefaults: false
         })
         for (const diagnostic of loaded.diagnostics) {
-          // A diagnostic about an origin folder itself is π saying it is not
-          // there, which is the ordinary state of two of the three and would
-          // put two lines on the log for every turn ever taken. What is worth
-          // reporting names a file inside one.
+          // π reporting an origin folder itself means it is not there, the
+          // ordinary state of two of the three, so it is not worth a log line
+          // on every turn ever taken.
           if (diagnostic.path !== undefined && folders.includes(diagnostic.path)) continue
           onDiagnostic?.({
             ...(diagnostic.path === undefined ? {} : { path: diagnostic.path }),
@@ -150,9 +138,8 @@ export function createSkillService({ roots, onDiagnostic }: SkillServiceOptions)
 }
 
 /**
- * The skills a node may use: every one by default, the named subset when the
- * node asked for one, and nothing at all for an empty list. A name matching no
- * skill is ignored.
+ * Absent names means every skill, an empty list none at all; a name matching no
+ * skill is ignored rather than an error.
  */
 export function narrowSkills(
   skills: readonly LoadedSkill[],

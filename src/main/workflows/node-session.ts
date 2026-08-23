@@ -29,9 +29,8 @@ export interface NodeSessionRequest {
   readonly rolePrompt: string
   /** Built-in tool names the node gets, complete_node and raise_blocker aside. */
   readonly tools: readonly string[]
-  // The skills this node is offered, already resolved at the worktree's own
-  // three origins and already narrowed to what its spec asked for. Absent
-  // means none: a node is offered nothing this does not name.
+  // Already resolved and already narrowed to what the node's spec asked for:
+  // a node is offered nothing this does not name.
   readonly skills?: readonly LoadedSkill[]
   /** The agent called complete_node; the return is the tool's answer text. */
   readonly onComplete: (completion: NodeCompletion) => string

@@ -50,9 +50,8 @@ export interface NodeSpec {
   /** Built-in tool names. Defaults to read/bash/edit/write/grep/find/ls. */
   tools?: string[]
   /**
-   * Skill names this node may use. Absent means every skill available in the
-   * worktree; an empty array means none at all. A name matching no skill is
-   * ignored.
+   * Skill names this node may use. Absent means every skill in the worktree,
+   * an empty array none at all; a name matching no skill is ignored.
    */
   skills?: readonly string[]
   /**

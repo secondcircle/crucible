@@ -197,7 +197,7 @@ export function createSdkAdapter({
     readonly settingsManager: SettingsManager
     /** Replaced whole on every re-read; π's loader is never reloaded for it. */
     resolved: readonly LoadedSkill[]
-    /** π's own `<available_skills>` text for that set, which is what changed. */
+    /** π's own `<available_skills>` text for that set, so a change is one string compare. */
     block: string
   }
 
@@ -262,7 +262,7 @@ export function createSdkAdapter({
         // and two command systems in one composer would be two grammars.
         noPromptTemplates: true,
         // π's own skill folders are never read; Crucible's three origins are
-        // handed in through `getSkills` below instead (ADR 0021).
+        // handed in through `getSkills` below instead.
         noSkills: true,
         // The base is ignored, so π's own prompt never reaches a session and a
         // system-prompt file discovered in any folder is dead.
@@ -548,14 +548,9 @@ export function createSdkAdapter({
     }
   }
 
-  // The skill folders, read again on the way into every turn Crucible starts,
-  // so a skill an agent wrote mid-session is offered to the very next thing
-  // the user types. A steering or follow-up message into a live turn goes
-  // through none of this: that turn keeps the skills it started with.
-  //
-  // The user is already looking at their echoed message by now (ADR 0010), and
-  // a folder that cannot be read leaves the previous set in force rather than
-  // turning a send into an error.
+  // Read again here, so a skill an agent wrote mid-session is offered to the
+  // very next thing the user types; a folder that cannot be read leaves the
+  // previous set in force rather than turning a send into an error.
   async function skillsForTurn(bound: Bound): Promise<SkillsInForce> {
     const held = await workspaceResources(bound.workspacePath)
     const resolved = await skills?.resolve(bound.workspacePath)
@@ -565,10 +560,8 @@ export function createSdkAdapter({
     }
 
     if (bound.carriedBlock !== held.block) {
-      // The set this session was composed with is no longer the set in force,
-      // so its system prompt is rewritten before the turn goes out. π rebuilds
-      // it from the loader, which now answers with the new skills; the tool
-      // set handed back is the one the session already had.
+      // Setting the tool set is what makes π recompose the system prompt, and
+      // the set handed back is the one the session already had.
       bound.session.setActiveToolsByName(bound.session.getActiveToolNames())
       bound.carriedBlock = held.block
       // Rewriting the prompt re-bills the cache, so the next miss in this
@@ -826,8 +819,7 @@ export function createSdkAdapter({
           compaction: 'no',
           // The tool set cannot change within one bound conversation in one
           // launch; the composed prompt can, when the skills in force change
-          // under the session. Across launches Crucible genuinely does not
-          // know either.
+          // under it. Across launches Crucible genuinely does not know either.
           tools: span.watched ? 'no' : 'unknown',
           rolePrompt: span.watched ? fact(span.promptChanged) : 'unknown'
         }
@@ -1460,10 +1452,8 @@ export function createSdkAdapter({
   }
 }
 
-// π's loader with one answer replaced: the skills a session is composed with
-// are the ones Crucible resolved at its own three origins. Everything else —
-// the prompt override, the emptied extensions, π's `<available_skills>` block
-// built from whatever `getSkills` says — is π's, untouched.
+// One answer replaced and every other left π's own: the skills a session is
+// composed with are the ones Crucible resolved at its own three origins.
 function withCrucibleSkills(
   base: DefaultResourceLoader,
   current: () => readonly LoadedSkill[]

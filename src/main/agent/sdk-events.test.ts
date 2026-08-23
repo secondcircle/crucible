@@ -421,9 +421,8 @@ describe('what navigateTree answered', () => {
   })
 })
 
-// A read of a file a skill claims is displayed as the tool `skill`, summarized
-// by the skill's name. Attribution is by directory, which is what makes
-// progressive disclosure visible instead of scattered among ordinary reads.
+// Attribution is by directory, so what these pin down is where one skill's
+// claim on a path stops.
 describe('a read attributed to a skill', () => {
   const CWD = '/repos/crucible'
 

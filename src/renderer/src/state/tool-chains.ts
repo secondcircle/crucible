@@ -17,10 +17,9 @@ export interface ToolCount {
 /** The tool name a skill read is displayed under, as the port sends it. */
 export const SKILL_TOOL = 'skill'
 
-// A skill row's summary is the skill's name, and for a supporting file the
-// name, then ` · `, then that file's path inside the skill. The split is the
-// contract between the port's format and everything that reads it: the count
-// in the chain head, and the faint tail in the row.
+// The port sends a supporting file as the skill's name, ` · `, then the path
+// inside the skill, and both the head's count and the row's faint tail turn on
+// that one format.
 export function splitSkillSummary(summary: string): {
   readonly skill: string
   readonly within?: string
@@ -80,9 +79,8 @@ export function groupIntoChains(items: readonly ViewItem[]): readonly Transcript
 
 function describe(calls: readonly ToolItem[], startedAt: number): ToolChain {
   const counts: ToolCount[] = []
-  // Two reads of one skill are `1 skill`: progressive disclosure inside a
-  // skill must not inflate the number, so what is counted is the skills, not
-  // the calls.
+  // Two reads of one skill are `1 skill`: progressive disclosure inside a skill
+  // must not inflate the number.
   const skillsSeen = new Set<string>()
   let errors = 0
   let running = false

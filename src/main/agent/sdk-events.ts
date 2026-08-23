@@ -31,7 +31,6 @@ export interface AttributableSkill {
 /** The skills in force for a turn, and where a relative path resolves. */
 export interface SkillsInForce {
   readonly skills: readonly AttributableSkill[]
-  /** The session's working directory. */
   readonly cwd: string
 }
 
@@ -40,12 +39,9 @@ export interface DisplayedCall {
   readonly summary: string
 }
 
-// A read of a file a skill claims is displayed as the tool `skill`, summarized
-// by the skill's name rather than by a path. Attribution is by directory, so a
-// supporting file read after the SKILL.md counts as the same skill and
-// progressive disclosure stays visible instead of scattering among ordinary
-// reads. Only `read` is re-attributed: a grep or a bash command that touches a
-// skill directory stays what it was.
+// Attribution is by directory, so a supporting file read after the SKILL.md is
+// still that skill and progressive disclosure stays visible in the tool chain.
+// Only a `read` is re-attributed: a grep of a skill directory stays a grep.
 export function displayToolCall(
   name: string,
   args: unknown,
@@ -77,10 +73,8 @@ export function displayToolCall(
 /** The tool name a skill read is displayed under. */
 export const SKILL_TOOL = 'skill'
 
-// What the skill claims of this path: its own file, a path under its
-// directory, or nothing. A skill that is a loose `.md` at an origin root
-// claims only that file — its directory is the origin, full of other people's
-// skills.
+// A skill that is a loose `.md` at an origin root claims only that file: its
+// directory is the origin, full of other people's skills.
 function claimed(skill: AttributableSkill, path: string): string | undefined {
   if (path === resolve(skill.filePath)) return ''
   if (basename(skill.filePath) !== 'SKILL.md') return undefined

@@ -230,11 +230,8 @@ describe('the built-in skills', () => {
     // format and tone are steered.
     expect(text).toMatch(/expected answer\* is the one thing an example must never be/)
     expect(text).toMatch(/example of the \*shape\*/)
-    // Specificity matches fragility.
     expect(text).toMatch(/## Specificity matches fragility/)
     expect(text).toMatch(/Where exactly one route works, give it exactly/)
-    // The scope boundary, and the ban on asking for verification that already
-    // happens.
     expect(text).toMatch(/How far the work goes/)
     expect(text).toMatch(/when to stop/)
     expect(text).toMatch(/do not ask an agent to verify what it\s+already verifies/)

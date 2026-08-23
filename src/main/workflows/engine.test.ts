@@ -1004,8 +1004,7 @@ function stateDirOf(runId: string, built: Rig): string {
 }
 
 // Every node gets every skill of the run's worktree by default; a workflow
-// narrows a node when it wants a lean context. Observable here because the
-// scripted factory sees exactly what each node was started with.
+// narrows a node when it wants a lean context.
 describe('what skills a node is started with', () => {
   const three: readonly LoadedSkill[] = [
     {

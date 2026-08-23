@@ -129,7 +129,7 @@ describe('the scripted turn', () => {
   })
 
   // Two reads of the same skill, so a chain head that counted skill reads
-  // rather than skills would say `2 skill` where the mock says `1 skill`.
+  // rather than skills would say `2 skill` where it must say `1 skill`.
   it('reads one skill twice: its SKILL.md and a supporting file inside it', async () => {
     const { adapter, events } = await withSession()
 
