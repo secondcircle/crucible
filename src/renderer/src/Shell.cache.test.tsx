@@ -239,7 +239,7 @@ describe('the cache health view', () => {
     expect(path?.textContent).toBe('~/Library/Application Support/Crucible/cache-misses.jsonl')
     expect(path?.getAttribute('title')).toBe(LEDGER)
     expect(dialog.querySelector('.cretention')?.textContent).toBe(
-      'Retention in force · 5 min (π default)'
+      'Retention in force · 5 min (PI_CACHE_RETENTION override)'
     )
     // No list of misses: the ledger's reader is an agent.
     expect(dialog.textContent).not.toContain('118k')
@@ -253,7 +253,7 @@ describe('the cache health view', () => {
     await openDialog(container)
 
     expect(screen.getByRole('dialog').querySelector('.cretention')?.textContent).toBe(
-      'Retention in force · 1 hour (PI_CACHE_RETENTION=long)'
+      'Retention in force · 1 hour (Crucible default)'
     )
   })
 
@@ -337,7 +337,7 @@ describe('the cache health view', () => {
     // Everything the agent needs to begin: the file, the boundary, the setting.
     expect(text).toContain(LEDGER)
     expect(text).toContain(SINCE.toISOString())
-    expect(text).toContain('5 minutes (π default)')
+    expect(text).toContain('5 minutes (PI_CACHE_RETENTION override)')
     expect(text).toContain('after the last reset')
     expect(text).toContain('Judge nothing away')
     // The prompt echoes in the transcript, as any prompt does.

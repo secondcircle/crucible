@@ -157,7 +157,9 @@ describe('the retention in force', () => {
   it('reads as the setting, and says where the setting came from', () => {
     expect(retentionText('5m')).toBe('5 min')
     expect(retentionText('1h')).toBe('1 hour')
-    expect(retentionSource('5m')).toBe('π default')
-    expect(retentionSource('1h')).toBe('PI_CACHE_RETENTION=long')
+    // The hour is what Crucible asks for on every launch, so five minutes is
+    // only ever somebody's override, and the line names the variable.
+    expect(retentionSource('1h')).toBe('Crucible default')
+    expect(retentionSource('5m')).toBe('PI_CACHE_RETENTION override')
   })
 })

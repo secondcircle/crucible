@@ -10,7 +10,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import type { CacheMissChanges } from '../../shared/agent/adapter'
 import { createCacheLedger, type RecordedCacheMiss } from './ledger'
 import { cacheLedgerPath, LEDGER_FILE_NAME, useCacheLedgerDir } from './paths'
-import { retentionInForce } from './retention'
+import { retentionInForce, useLongRetention } from './retention'
 
 const directories: string[] = []
 
@@ -218,8 +218,20 @@ describe('the cache ledger', () => {
 
     const dir = tempDir()
     const ledger = createCacheLedger({ dir })
-    // Crucible records the setting; it never sets it.
+    // Every miss carries whatever the launch is running, unasked.
     expect(ledger.retention).toBe(retentionInForce())
+  })
+
+  it('asks for the hour, and yields to an environment that already chose', () => {
+    const asked: NodeJS.ProcessEnv = {}
+    expect(useLongRetention(asked)).toBe('1h')
+    expect(asked.PI_CACHE_RETENTION).toBe('long')
+
+    // An explicit setting wins, which is what keeps the before-and-after in
+    // the ledger runnable off one build.
+    const chosen: NodeJS.ProcessEnv = { PI_CACHE_RETENTION: 'short' }
+    expect(useLongRetention(chosen)).toBe('5m')
+    expect(chosen.PI_CACHE_RETENTION).toBe('short')
   })
 
   it('never fails a turn over a write it could not make', async () => {

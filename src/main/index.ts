@@ -6,6 +6,7 @@ import { type AppUpdateChannel, serveAppUpdateChannel } from './app-update/chann
 import { type CacheChannel, serveCacheChannel } from './cache/channel'
 import { createCacheLedger } from './cache/ledger'
 import { useCacheLedgerDir } from './cache/paths'
+import { useLongRetention } from './cache/retention'
 import { createAppUpdateService, stillAppUpdateService } from './app-update/service'
 import { decideFlavor, selectAdapter } from './agent/select-adapter'
 import { withLogging } from './agent/with-logging'
@@ -36,6 +37,14 @@ import { selectWorkflowRunService } from './workflows/select-service'
 // Before anything else, because a scheme's privileges are only settable while
 // the app is still starting.
 registerExhibitScheme()
+
+// One hour of prompt retention, for every launch and every flavor. π reads
+// this off the environment when it builds a request, and nothing that starts
+// Crucible — Dock, dev script, a run's engine — carries a shell environment
+// worth inheriting, so main is the only place the choice can be made. It runs
+// ahead of the ledger and the adapters, both of which snapshot the setting.
+// Set `PI_CACHE_RETENTION` yourself and that wins.
+const retention = useLongRetention()
 
 if (app.isPackaged) {
   // Dock-launched apps inherit the bare GUI PATH, and the agent's tools need
@@ -73,7 +82,8 @@ log.append({
   pid: process.pid,
   electron: process.versions.electron,
   packaged: app.isPackaged,
-  dev: Boolean(process.env.ELECTRON_RENDERER_URL)
+  dev: Boolean(process.env.ELECTRON_RENDERER_URL),
+  retention
 })
 
 // Crucible's own state file in Crucible's own directory: nothing of π's is read

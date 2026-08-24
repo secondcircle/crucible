@@ -93,9 +93,13 @@ export function retentionText(retention: CacheRetention): string {
   return retention === '1h' ? '1 hour' : '5 min'
 }
 
-/** The dialog's line: the setting, and where it came from. */
+// The dialog's line: the setting, and where it came from. Crucible asks for
+// the hour on every launch, so the hour is Crucible's own choice and five
+// minutes can only mean a `PI_CACHE_RETENTION` in the environment that beat
+// it. Naming the variable on the line that is off the default is what tells
+// the reader where to look.
 export function retentionSource(retention: CacheRetention): string {
-  return retention === '1h' ? 'PI_CACHE_RETENTION=long' : 'π default'
+  return retention === '1h' ? 'Crucible default' : 'PI_CACHE_RETENTION override'
 }
 
 // An unknown fact is omitted rather than guessed: honest data holds, and a

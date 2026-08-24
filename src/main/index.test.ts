@@ -129,6 +129,9 @@ beforeEach(async () => {
   vi.resetModules()
   vi.stubEnv('CRUCIBLE_AGENT', undefined)
   vi.stubEnv('CRUCIBLE_WORKSPACE', undefined)
+  // Cleared per launch: main writes this one itself, so a previous test's
+  // launch would otherwise be the environment the next one inherits.
+  vi.stubEnv('PI_CACHE_RETENTION', undefined)
   await import('./index')
 })
 
@@ -154,6 +157,14 @@ describe('what a launch does', () => {
     expect(records()[1]).toMatchObject({ service: 'fake' })
     expect(records()[5]).toMatchObject({ event: 'quota_service_selected', service: 'canned' })
     expect(harness.windowsCreated).toBe(0)
+  })
+
+  it('asks π for the hour before anything can read the setting', () => {
+    // π reads this when it builds a request, and a Dock launch inherits no
+    // shell, so main writing it is the whole mechanism. The first record of
+    // the launch already carries the answer.
+    expect(process.env.PI_CACHE_RETENTION).toBe('long')
+    expect(records()[0]).toMatchObject({ event: 'app_starting', retention: '1h' })
   })
 
   it('starts though it can read no shipped prompt file, because the fake needs none', () => {
