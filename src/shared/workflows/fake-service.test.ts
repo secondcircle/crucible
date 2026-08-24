@@ -85,12 +85,27 @@ describe('the fake workflow run service', () => {
     expect(cleared?.branch).toBe(failed?.branch)
     expect(cleared?.nodes).toHaveLength(failed?.nodes.length ?? 0)
 
-    // Dismissing twice says nothing new, and a live run is refused outright.
+    // Dismissing twice says nothing new.
     await service.dismiss('b1n7')
     expect(
       (await service.snapshot()).runs.find((run) => run.id === 'b1n7')?.dismissedAt
     ).toBe(cleared?.dismissedAt)
-    await expect(service.dismiss('g8x2')).rejects.toThrow(/still working/)
+
+    // A live run with an orchestrator listening is still refused outright:
+    // the session it reports to can stop it, and Cancel is where that lives.
+    await service.tools.start('s1', '/repos/resume-site', 'adhoc', {})
+    const attended = (await service.snapshot()).runs.find(
+      (run) => run.sessionId === 's1' && run.status === 'running'
+    )
+    expect(attended).toBeDefined()
+    await expect(service.dismiss(attended?.id ?? '')).rejects.toThrow(/still working/)
+
+    // A live run with none is parked, and dismissing it is the whole act: it
+    // stops where it stands and is cleared in one go.
+    await service.dismiss('g8x2')
+    const parked = (await service.snapshot()).runs.find((run) => run.id === 'g8x2')
+    expect(parked?.status).toBe('cancelled')
+    expect(parked?.dismissedAt).toBeDefined()
     service.dispose()
   })
 

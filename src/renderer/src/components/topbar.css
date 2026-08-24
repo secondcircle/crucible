@@ -52,6 +52,11 @@
   color: var(--accent);
 }
 
+/* Teal: the run color everywhere, and the schedule chip is a run surface. */
+.top .tchip.runs .g {
+  color: var(--run);
+}
+
 .top .tchip b {
   color: var(--dim);
   font-weight: 600;

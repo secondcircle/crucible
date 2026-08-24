@@ -10,6 +10,7 @@ import { REQUEST_CHANNEL } from '../shared/agent/channels'
 import { EXHIBIT_SCHEME } from '../shared/agent/exhibit-url'
 import { COMMAND_REQUEST_CHANNEL } from '../shared/commands/channels'
 import { NEEDS_YOU_REQUEST_CHANNEL } from '../shared/needs-you/channels'
+import { SCHEDULE_REQUEST_CHANNEL } from '../shared/schedules/channels'
 import { QUOTA_REQUEST_CHANNEL } from '../shared/quota/channels'
 import { WORKSPACE_REQUEST_CHANNEL } from '../shared/workspace/channels'
 import type { LogRecord } from './log/sink'
@@ -146,16 +147,19 @@ describe('what a launch does', () => {
     expect(events()).toEqual([
       'app_starting',
       'workflow_run_service_selected',
+      'schedule_service_selected',
       'adapter_selected',
       'workspace_service_selected',
       'command_service_selected',
       'quota_service_selected'
     ])
-    expect(records()[2]).toMatchObject({ adapter: 'fake' })
+    expect(records()[3]).toMatchObject({ adapter: 'fake' })
     // One flavor decision governs every seam: the fake launch runs scripted
-    // runs, reads no credential and never touches the machine's quota cache.
+    // runs, evaluates no schedule on a clock, reads no credential and never
+    // touches the machine's quota cache.
     expect(records()[1]).toMatchObject({ service: 'fake' })
-    expect(records()[5]).toMatchObject({ event: 'quota_service_selected', service: 'canned' })
+    expect(records()[2]).toMatchObject({ service: 'fake' })
+    expect(records()[6]).toMatchObject({ event: 'quota_service_selected', service: 'canned' })
     expect(harness.windowsCreated).toBe(0)
   })
 
@@ -170,7 +174,7 @@ describe('what a launch does', () => {
   it('starts though it can read no shipped prompt file, because the fake needs none', () => {
     // Nothing is shipped under this launch's app directory, prompts included.
     expect(existsSync(join(harness.appPath, 'resources'))).toBe(false)
-    expect(records()[2]).toMatchObject({ event: 'adapter_selected', adapter: 'fake' })
+    expect(records()[3]).toMatchObject({ event: 'adapter_selected', adapter: 'fake' })
   })
 
   it('opens one window when Electron is ready and serves the port over it', async () => {
@@ -185,9 +189,11 @@ describe('what a launch does', () => {
     expect(harness.ipcHandlers.has(COMMAND_REQUEST_CHANNEL)).toBe(true)
     expect(harness.ipcHandlers.has(QUOTA_REQUEST_CHANNEL)).toBe(true)
     expect(harness.ipcHandlers.has(NEEDS_YOU_REQUEST_CHANNEL)).toBe(true)
+    expect(harness.ipcHandlers.has(SCHEDULE_REQUEST_CHANNEL)).toBe(true)
     expect(events()).toEqual([
       'app_starting',
       'workflow_run_service_selected',
+      'schedule_service_selected',
       'adapter_selected',
       'workspace_service_selected',
       'command_service_selected',

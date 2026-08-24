@@ -38,6 +38,13 @@ import {
 } from '../shared/quota/channels'
 import type { QuotaSnapshot } from '../shared/quota/types'
 import {
+  SCHEDULE_EVENT_CHANNEL,
+  SCHEDULE_REQUEST_CHANNEL,
+  type ScheduleEvent,
+  type ScheduleRequest,
+  type ScheduleResult
+} from '../shared/schedules/channels'
+import {
   WORKSPACE_EVENT_CHANNEL,
   WORKSPACE_REQUEST_CHANNEL,
   type WorkspaceRequest,
@@ -128,6 +135,17 @@ contextBridge.exposeInMainWorld('crucible', {
 
     onEvent: (listener: (event: WorkflowRunEvent) => void): (() => void) =>
       forwarder(WORKFLOW_RUN_EVENT_CHANNEL, listener)
+  },
+
+  // Schedules: what a repo declares, when each fires next, and the three
+  // commands the board issues. Runs never cross here — they have their own
+  // seam, and nothing about a run is restated on this one.
+  schedules: {
+    request: (request: ScheduleRequest): Promise<ScheduleResult> =>
+      ipcRenderer.invoke(SCHEDULE_REQUEST_CHANNEL, request),
+
+    onEvent: (listener: (event: ScheduleEvent) => void): (() => void) =>
+      forwarder(SCHEDULE_EVENT_CHANNEL, listener)
   },
 
   // The installed app's update seam: one question, one event, one restart.

@@ -117,6 +117,14 @@ function pageWithPreload(
           value: { runs: [] }
         }),
         onEvent: (): (() => void) => () => {}
+      },
+      // No workspace has been answered for, so no schedule chip renders.
+      schedules: {
+        request: async (): Promise<{ ok: true; value: unknown }> => ({
+          ok: true,
+          value: { workspaces: [] }
+        }),
+        onEvent: (): (() => void) => () => {}
       }
     },
     configurable: true

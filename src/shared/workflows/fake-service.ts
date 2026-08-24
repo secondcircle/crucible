@@ -13,6 +13,7 @@ import type {
   ArtifactView,
   MainWorkflowRunService,
   RunsSnapshot,
+  ScheduledFireRequest,
   WorkflowRunListener
 } from './service'
 
@@ -107,6 +108,7 @@ interface LiveRun {
   workspacePath: string
   workspaceName: string
   sessionId?: SessionId
+  scheduled?: true
   worktreePath?: string
   branch?: string
   baseCommit?: string
@@ -443,6 +445,62 @@ export function createFakeWorkflowRunService({
     return found
   }
 
+  // One scripted run, however it was asked for: an agent's crucible_run, or a
+  // schedule firing with no session and nothing handed in.
+  function beginRun({
+    workingDir,
+    workflow,
+    inputs,
+    sessionId,
+    scheduled
+  }: {
+    readonly workingDir: string
+    readonly workflow: string
+    readonly inputs: Readonly<Record<string, string>>
+    readonly sessionId?: SessionId
+    readonly scheduled?: true
+  }): LiveRun {
+    minted += 1
+    const id = `fk${minted}${Math.floor(Math.random() * 90 + 10)}`
+    const dir = artifactDir(id)
+    const nodes: LiveNode[] = scriptOf(workflow).map((script) => ({
+      id: script.id,
+      status: 'pending',
+      parents: [...script.parents],
+      model: script.model,
+      reads: [],
+      artifacts: script.planned
+        ? script.outputs.map((output) => ({
+            name: output.name,
+            path: `${dir}/${output.file}`,
+            desc: output.desc
+          }))
+        : []
+    }))
+    const run: LiveRun = {
+      id,
+      workflow,
+      status: 'running',
+      workspacePath: workingDir,
+      workspaceName: lastSegment(workingDir),
+      ...(sessionId === undefined ? {} : { sessionId }),
+      ...(scheduled === undefined ? {} : { scheduled }),
+      worktreePath: `${workingDir}/.crucible/worktrees/run-${id}`,
+      branch: `crucible/run-${id}`,
+      baseCommit: '6c90bb0fake',
+      inputs: { ...inputs },
+      inputDescs: describeInputs(workflow, inputs),
+      nodes,
+      createdAt: nowIso(),
+      startedAt: nowIso(),
+      dir: runDir(id)
+    }
+    records.unshift(run)
+    changed()
+    startNode(run, 0, 0.61)
+    return run
+  }
+
   /** One beat later — unless the run is paused, in which case wait it out. */
   function beat(run: LiveRun, then: () => void): void {
     const tick = (): void => {
@@ -599,6 +657,26 @@ export function createFakeWorkflowRunService({
     }
   }
 
+  /** Stops a live scripted run where it stands. */
+  function cancelRun(runId: WorkflowRunId): void {
+    const run = requireRun(runId)
+    if (run.status !== 'running' && run.status !== 'paused') return
+    run.status = 'cancelled'
+    run.endedAt = nowIso()
+    paused.delete(runId)
+    waiting.delete(runId)
+    const timer = timers.get(runId)
+    if (timer !== undefined) clearTimeout(timer)
+    for (const node of run.nodes) {
+      if (node.status === 'running' || node.status === 'blocked') {
+        node.status = 'failed'
+        node.endedAt = nowIso()
+        delete node.now
+      }
+    }
+    changed()
+  }
+
   const tools: RunTools = {
     async workflows(): Promise<string> {
       return [
@@ -615,45 +693,9 @@ export function createFakeWorkflowRunService({
       workflow: string,
       inputs: Readonly<Record<string, string>>
     ): Promise<string> {
-      minted += 1
-      const id = `fk${minted}${Math.floor(Math.random() * 90 + 10)}`
-      const dir = artifactDir(id)
-      const nodes: LiveNode[] = scriptOf(workflow).map((script) => ({
-        id: script.id,
-        status: 'pending',
-        parents: [...script.parents],
-        model: script.model,
-        reads: [],
-        artifacts: script.planned
-          ? script.outputs.map((output) => ({
-              name: output.name,
-              path: `${dir}/${output.file}`,
-              desc: output.desc
-            }))
-          : []
-      }))
-      const run: LiveRun = {
-        id,
-        workflow,
-        status: 'running',
-        workspacePath: workingDir,
-        workspaceName: lastSegment(workingDir),
-        sessionId,
-        worktreePath: `${workingDir}/.crucible/worktrees/run-${id}`,
-        branch: `crucible/run-${id}`,
-        baseCommit: '6c90bb0fake',
-        inputs: { ...inputs },
-        inputDescs: describeInputs(workflow, inputs),
-        nodes,
-        createdAt: nowIso(),
-        startedAt: nowIso(),
-        dir: runDir(id)
-      }
-      records.unshift(run)
-      changed()
-      startNode(run, 0, 0.61)
+      const run = beginRun({ workingDir, workflow, inputs, sessionId })
       return (
-        `Run ${id} of "${workflow}" started · branch ${run.branch} · worktree ` +
+        `Run ${run.id} of "${workflow}" started · branch ${run.branch} · worktree ` +
         `${run.worktreePath} · base 6c90bb0.\nIt works unattended and reports back to this ` +
         'session. Ending your turn now is the normal thing to do. (Scripted: no cost.)'
       )
@@ -709,7 +751,15 @@ export function createFakeWorkflowRunService({
 
     async dismiss(runId: WorkflowRunId): Promise<void> {
       const run = requireRun(runId)
-      if (run.status === 'running' || run.status === 'paused') throw new Error(dismissRefusal(runId))
+      if (run.status === 'running' || run.status === 'paused') {
+        // With an orchestrator listening, a live run is stopped from the run
+        // view rather than cleared. With none, dismissing is the whole act:
+        // the run stops and is cleared in one go.
+        if (run.sessionId !== undefined) throw new Error(dismissRefusal(runId))
+        if (run.dismissedAt === undefined) run.dismissedAt = nowIso()
+        cancelRun(runId)
+        return
+      }
       if (run.dismissedAt !== undefined) return
       run.dismissedAt = nowIso()
       changed()
@@ -725,22 +775,7 @@ export function createFakeWorkflowRunService({
     },
 
     async cancel(runId: WorkflowRunId): Promise<void> {
-      const run = requireRun(runId)
-      if (run.status !== 'running' && run.status !== 'paused') return
-      run.status = 'cancelled'
-      run.endedAt = nowIso()
-      paused.delete(runId)
-      waiting.delete(runId)
-      const timer = timers.get(runId)
-      if (timer !== undefined) clearTimeout(timer)
-      for (const node of run.nodes) {
-        if (node.status === 'running' || node.status === 'blocked') {
-          node.status = 'failed'
-          node.endedAt = nowIso()
-          delete node.now
-        }
-      }
-      changed()
+      cancelRun(runId)
     },
 
     async nodeTranscript(): Promise<readonly TranscriptItem[]> {
@@ -765,6 +800,15 @@ export function createFakeWorkflowRunService({
     },
 
     tools,
+
+    async startScheduled(fire: ScheduledFireRequest): Promise<RunRecord> {
+      return beginRun({
+        workingDir: fire.workspacePath,
+        workflow: fire.workflow,
+        inputs: {},
+        scheduled: true
+      }) as RunRecord
+    },
 
     toggleOverview(): void {
       for (const listener of [...listeners]) listener({ type: 'toggle-overview' })
@@ -820,6 +864,9 @@ function cannedFinished(
     status: 'complete',
     workspacePath: workspace.path,
     workspaceName: workspace.name,
+    // Fired by the workspace's `build` schedule, so the fake flavor's board
+    // has a clean run to read a report from.
+    scheduled: true,
     worktreePath: `${workspace.path}/.crucible/worktrees/run-d3p8`,
     branch: 'crucible/run-d3p8',
     baseCommit: 'a11ce0fake',
@@ -934,7 +981,9 @@ function cannedFailed(
     status: 'failed',
     workspacePath: workspace.path,
     workspaceName: workspace.name,
-    // A session that is not in the sidebar and never will be again.
+    scheduled: true,
+    // A session that is not in the sidebar and never will be again. Adopted
+    // and then failed, which is why the board files it under Recent runs.
     sessionId: 'fake-removed-session',
     worktreePath: `${workspace.path}/.crucible/worktrees/run-b1n7`,
     branch: 'crucible/run-b1n7',
@@ -1011,6 +1060,8 @@ function cannedUnattended(
     status: 'running',
     workspacePath: workspace.path,
     workspaceName: workspace.name,
+    // Parked: fired by a schedule, waiting with no orchestrator to hear it.
+    scheduled: true,
     worktreePath: `${workspace.path}/.crucible/worktrees/run-g8x2`,
     branch: 'crucible/run-g8x2',
     baseCommit: 'c4rl0fake',

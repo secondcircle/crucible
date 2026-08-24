@@ -20,6 +20,7 @@ import type { NeedsYouService } from '../../shared/needs-you/service'
 import { boardCounts } from '../../shared/workspace/classify-board'
 import { issueCounts, withSessions } from '../../shared/workspace/classify-issues'
 import type { QuotaService } from '../../shared/quota/service'
+import type { ScheduleService, SchedulesSnapshot } from '../../shared/schedules/service'
 import type {
   BoardRow,
   IssueBoardAnswer,
@@ -47,6 +48,7 @@ import { ResumeOverlay } from './components/ResumeOverlay'
 import { SessionTree } from './components/SessionTree'
 import { RunsOverview, type RunActOutcome } from './components/RunsOverview'
 import { RunStrip } from './components/RunStrip'
+import { ScheduleBoard } from './components/ScheduleBoard'
 import { Settings, type SettingsSection } from './components/Settings'
 import { Sidebar } from './components/Sidebar'
 import { WorkflowRunView } from './components/WorkflowRunView'
@@ -59,6 +61,7 @@ import { readAttachment, refuse } from './images'
 import { contextPercent, UNTITLED } from './labels'
 import { useQuota } from './quota/use-quota'
 import { runActivity } from './runs/activity'
+import { parkedRuns, parkedWalk } from './schedules/board'
 import { useAuth } from './settings/use-auth'
 import {
   jumpCancellable,
@@ -91,6 +94,7 @@ type Popover = 'none' | 'model' | 'thinking' | 'sessionMenu'
 type Occupant =
   | { readonly kind: 'board'; readonly workspaceId: WorkspaceId }
   | { readonly kind: 'issues'; readonly workspaceId: WorkspaceId }
+  | { readonly kind: 'schedules'; readonly workspaceId: WorkspaceId }
   | { readonly kind: 'tree' }
   | { readonly kind: 'settings'; readonly section: SettingsSection }
   | { readonly kind: 'runs' }
@@ -126,7 +130,8 @@ export function Shell({
   quota,
   cache: cacheService,
   needsYou: needsYouService,
-  workflowRuns
+  workflowRuns,
+  schedules: scheduleService
 }: {
   readonly port: AgentPort
   readonly workspace: WorkspaceService
@@ -151,6 +156,10 @@ export function Shell({
   // seam, and the tools that drive them live with the agent. Without this
   // service no run surface renders at all.
   readonly workflowRuns?: WorkflowRunService
+  // Beside the run seam, never behind it: a schedule is a fact about the
+  // repository's workflow files, and a run is a fact about the engine.
+  // Without this service no chip and no schedule board render at all.
+  readonly schedules?: ScheduleService
 }): React.JSX.Element {
   const [state, dispatch] = useReducer(reduce, NOTHING_YET)
   const quotaHold = useQuota(quota)
@@ -280,6 +289,18 @@ export function Shell({
   const cancelChoice = useRef<((chose: 'cancelled' | 'kept') => void) | undefined>(undefined)
   /** The engine's records, whole on every event. */
   const [runsSnapshot, setRunsSnapshot] = useState<RunsSnapshot | undefined>(undefined)
+  /** The scheduler's answer, whole on every event; nothing here is patched. */
+  const [schedulesSnapshot, setSchedulesSnapshot] = useState<SchedulesSnapshot | undefined>(
+    undefined
+  )
+  // The run the schedule board's reading pane shows. It lives here because Tab
+  // moves it: the walk steps the selection while the board is open.
+  const [selectedRunId, setSelectedRunId] = useState<WorkflowRunId | undefined>(undefined)
+  // A Tab landing that had to switch workspaces first: the activation empties
+  // the region on its way, and this is what puts the board back.
+  const landingOnRun = useRef<
+    { readonly workspaceId: WorkspaceId; readonly runId: WorkflowRunId } | undefined
+  >(undefined)
   // Lives here rather than in the run view because Escape unwinds one surface
   // at a time and this is where that ladder is; the reader is a step of it,
   // above the run occupying the region.
@@ -534,11 +555,33 @@ export function Shell({
   const issuesOpen =
     occupant?.kind === 'issues' && occupant.workspaceId === activeWorkspaceId && issuesReachable
 
+  // What the scheduler answered for the workspace on screen. Absent means it
+  // has answered nothing yet, which is why no chip renders rather than an
+  // empty one flashing.
+  const scheduleEntry = schedulesSnapshot?.workspaces.find(
+    (candidate) => candidate.workspacePath === active?.path
+  )
+  const schedulesOpen =
+    occupant?.kind === 'schedules' && occupant.workspaceId === activeWorkspaceId
+  // This workspace's parked runs: what the chip counts and the board's Needs
+  // you group holds, derived from run records and nothing else.
+  const parkedHere = useMemo(
+    () => (active === undefined ? [] : parkedRuns(allRuns, active.path)),
+    [allRuns, active]
+  )
+  // The Tab walk's second half: every workspace's parked runs, rail order
+  // outside and newest first inside.
+  const parkedQueue = useMemo(
+    () => parkedWalk(allRuns, snapshot.workspaces.map((workspace) => workspace.path)),
+    [allRuns, snapshot.workspaces]
+  )
+
   // Emptied in the same render, so a close cannot come back true when the
   // workspace is switched away from and back to. The same for a tree with no
   // session left to draw.
   if (occupant?.kind === 'board' && !boardOpen) setRegion([])
   if (occupant?.kind === 'issues' && !issuesOpen) setRegion([])
+  if (occupant?.kind === 'schedules' && !schedulesOpen) setRegion([])
   if (occupant?.kind === 'tree' && session === undefined) setRegion([])
 
   // A confirm names the session it was raised on, so the render that lands an
@@ -559,11 +602,13 @@ export function Shell({
   // state, so an occupant whose data has not arrived shows no region at all
   // rather than a dim over an empty frame.
   const treeShown = treeOpen && session !== undefined
+  const schedulesShown = schedulesOpen && scheduleService !== undefined && active !== undefined
   const runShown = openRun !== undefined && workflowRuns !== undefined
   const cacheShown = cacheOpen && cacheService !== undefined && cacheHealth !== undefined
   const occupied =
     boardOpen ||
     issuesOpen ||
+    schedulesShown ||
     treeShown ||
     runsOverviewOpen ||
     runShown ||
@@ -634,6 +679,20 @@ export function Shell({
     []
   )
 
+  // The schedule seam, on the same terms as the run seam: one snapshot, then
+  // whole snapshots on every change. Nothing about a run rides it.
+  useEffect(() => {
+    if (scheduleService === undefined) return
+    const stop = scheduleService.onEvent((event) => {
+      if (event.type === 'schedules') setSchedulesSnapshot(event.snapshot)
+    })
+    void scheduleService
+      .snapshot()
+      .then(setSchedulesSnapshot)
+      .catch(() => {})
+    return stop
+  }, [scheduleService])
+
   // The run seam: one snapshot, then whole snapshots on every change. ⌘R
   // arrives here too when main intercepted it before the menu could.
   useEffect(() => {
@@ -665,6 +724,17 @@ export function Shell({
         event.snapshot.activeSessionId !== railNow.current.activeSessionId
       ) {
         arrive(event.snapshot.activeSessionId)
+      }
+      // A Tab landing on a parked run is an arrival at that run, not at a
+      // session: the workspace switch it needed wipes the region on its way
+      // through, and the board it was opening goes back up here.
+      if (event.type === 'state' && landingOnRun.current !== undefined) {
+        const landing = landingOnRun.current
+        if (event.snapshot.activeWorkspaceId === landing.workspaceId) {
+          landingOnRun.current = undefined
+          setSelectedRunId(landing.runId)
+          setRegion([{ kind: 'schedules', workspaceId: landing.workspaceId }])
+        }
       }
       // π's own retry of a summary, narrated in the session paying for it.
       // A failure or a cancellation that already landed stands: this event
@@ -1062,6 +1132,36 @@ export function Shell({
     refreshIssues(activeWorkspaceId)
   }, [activeWorkspaceId, refreshIssues, occupy])
 
+  // The chip's click: the board is up in the same frame, because everything it
+  // draws is already in this document. The topmost parked run comes selected,
+  // which is the one the chip is lit for.
+  const openSchedules = useCallback((): void => {
+    if (activeWorkspaceId === undefined) return
+    setSelectedRunId(parkedHere[0]?.id)
+    occupy({ kind: 'schedules', workspaceId: activeWorkspaceId })
+  }, [activeWorkspaceId, occupy, parkedHere])
+
+  // Where the Tab walk lands on a parked run: its workspace, its board, that
+  // run in the reading pane. A run in a workspace the sidebar no longer holds
+  // is not landed on — there is nowhere to land.
+  const landOnParkedRun = useCallback(
+    (run: RunRecord): void => {
+      const workspace = railNow.current.workspaces.find(
+        (candidate) => candidate.path === run.workspacePath
+      )
+      if (workspace === undefined) return
+      setSelectedRunId(run.id)
+      setRegion([{ kind: 'schedules', workspaceId: workspace.id }])
+      if (workspace.id === railNow.current.activeWorkspaceId) return
+      landingOnRun.current = { workspaceId: workspace.id, runId: run.id }
+      void port.activateWorkspace(workspace.id).catch((cause: unknown) => {
+        landingOnRun.current = undefined
+        report(cause)
+      })
+    },
+    [port, report]
+  )
+
   // ⌘, opens Settings on Providers. Nothing on screen names the chord; the
   // gear at the sidebar foot is the affordance.
   useEffect(() => {
@@ -1188,16 +1288,26 @@ export function Shell({
       if (liveLogin !== undefined || question !== undefined) return
       if (settingsOpen || cacheOpen) return
       if (popover !== 'none' || browsingCommands || fileToken !== undefined) return
+      // The schedule board is not in this list: Tab steps its selection while
+      // it is open, which is the whole of the parked walk's second half.
       if (boardOpen || issuesOpen || treeOpen || resumeOpen) return
       pressed.preventDefault()
       const next = nextAsking(snapshot, asking)
-      // Nothing asking, nothing happens: no wrap to an arbitrary session and
-      // no beep.
-      if (next === undefined) return
-      // Cleared here rather than on arrival, so the pip is gone in the frame
-      // the key was pressed and not a round trip later.
-      setMarks((current) => withoutMark(current, next.id))
-      activateSession(next.id)
+      // Sessions first, in rail order, and every one of them before any run.
+      if (next !== undefined) {
+        // Cleared here rather than on arrival, so the pip is gone in the frame
+        // the key was pressed and not a round trip later.
+        setMarks((current) => withoutMark(current, next.id))
+        activateSession(next.id)
+        return
+      }
+      // Then parked runs, newest first, workspaces in rail order. Landing does
+      // not clear the need: being parked is a fact, not a mark, so pressing
+      // Tab again steps to the next one and cycles.
+      if (parkedQueue.length === 0) return
+      const at = parkedQueue.findIndex((run) => run.id === selectedRunId)
+      const target = parkedQueue[(at + 1) % parkedQueue.length]
+      if (target !== undefined) landOnParkedRun(target)
     }
     document.addEventListener('keydown', onKeyDown)
     return () => document.removeEventListener('keydown', onKeyDown)
@@ -1215,7 +1325,10 @@ export function Shell({
     boardOpen,
     issuesOpen,
     treeOpen,
-    resumeOpen
+    resumeOpen,
+    parkedQueue,
+    selectedRunId,
+    landOnParkedRun
   ])
 
   // Paste and drag are the only ways in, and they do nothing with no session
@@ -1955,6 +2068,45 @@ export function Shell({
     [workflowRuns, port, report, closeRegion, allRuns]
   )
 
+  // The board's Dismiss: the row goes in the frame the click lands, and the
+  // record is stamped behind it. A refusal is reported and rethrown, so the
+  // board puts the row back rather than hiding a run that is still there.
+  const dismissFromBoard = useCallback(
+    async (runId: WorkflowRunId): Promise<void> => {
+      if (workflowRuns === undefined) throw new Error('This launch has no run service.')
+      try {
+        await workflowRuns.dismiss(runId)
+      } catch (cause) {
+        report(cause)
+        throw cause
+      }
+    },
+    [workflowRuns, report]
+  )
+
+  const runNowFromBoard = useCallback(
+    async (workflow: string): Promise<void> => {
+      if (scheduleService === undefined || active === undefined) return
+      try {
+        await scheduleService.runNow(active.path, workflow)
+      } catch (cause) {
+        // The row's own warning cell carries what went wrong; this is the
+        // ordinary place a refusal is also said.
+        report(cause)
+        throw cause
+      }
+    },
+    [scheduleService, active, report]
+  )
+
+  const boardArtifact = useCallback(
+    (runId: WorkflowRunId, path: string): Promise<ArtifactView> =>
+      workflowRuns === undefined
+        ? Promise.reject(new Error('This launch has no run service.'))
+        : workflowRuns.artifact(runId, path),
+    [workflowRuns]
+  )
+
   const runTranscript = useCallback(
     (nodeId: string) =>
       workflowRuns === undefined || openRunId === undefined
@@ -2064,6 +2216,15 @@ export function Shell({
               counts === undefined
                 ? undefined
                 : { landed: counts.landed, needYou: counts.needYou, onOpen: openBoard }
+            }
+            schedules={
+              scheduleEntry === undefined || scheduleEntry.schedules.length === 0
+                ? undefined
+                : {
+                    count: scheduleEntry.schedules.length,
+                    needYou: parkedHere.length,
+                    onOpen: openSchedules
+                  }
             }
             update={
               updateCommit === undefined || appUpdate === undefined
@@ -2235,6 +2396,27 @@ export function Shell({
                 onOpenSession={activateSession}
                 onOpenIssue={openIssue}
                 onCopy={copyReference}
+                onClose={closeRegion}
+              />
+            ) : null}
+
+            {schedulesShown && active !== undefined && scheduleService !== undefined ? (
+              <ScheduleBoard
+                workspaceName={active.name}
+                workspacePath={active.path}
+                {...(scheduleEntry === undefined ? {} : { schedules: scheduleEntry })}
+                runs={allRuns}
+                {...(selectedRunId === undefined ? {} : { selectedRunId })}
+                onSelectRun={setSelectedRunId}
+                onSetEnabled={(workflow, enabled) =>
+                  scheduleService.setEnabled(active.path, workflow, enabled)
+                }
+                onSetAllPaused={(paused) => scheduleService.setAllPaused(active.path, paused)}
+                onRunNow={runNowFromBoard}
+                onTakeToSession={investigateRun}
+                onOpenRunView={openWorkflowRun}
+                onDismiss={dismissFromBoard}
+                artifact={boardArtifact}
                 onClose={closeRegion}
               />
             ) : null}

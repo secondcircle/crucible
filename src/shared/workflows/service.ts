@@ -66,10 +66,20 @@ export interface WorkflowRunService {
   revealArtifact(runId: WorkflowRunId, path: string): Promise<void>
 }
 
+/** A fire from the schedule surface: a workflow, in a workspace, and nothing else. */
+export interface ScheduledFireRequest {
+  readonly workspacePath: string
+  readonly workflow: string
+}
+
 // What main holds beyond the channel: the tool behaviors the adapters mount
 // on composed agents, and the ⌘R toggle main's key interception fires.
 export interface MainWorkflowRunService extends WorkflowRunService {
   readonly tools: RunTools
+  // Starts a run from the schedule surface: no session, no inputs, branched
+  // from the trunk tip fetched fresh, and marked scheduled. It never crosses
+  // to the renderer — the schedule seam is what the board asks.
+  startScheduled(fire: ScheduledFireRequest): Promise<RunRecord>
   /** Emits `toggle-overview` to every listener; main calls it on ⌘R. */
   toggleOverview(): void
   // The gate's question, as the exhibit scheme's handler needs it: the on-disk

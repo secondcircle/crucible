@@ -19,6 +19,8 @@ import { type NeedsYouChannel, serveNeedsYouChannel } from './needs-you/channel'
 import { selectNeedsYouService } from './needs-you/select-service'
 import type { LiveNeedsYouService } from './needs-you/service'
 import { registerExhibitScheme, serveExhibitScheme } from './panel/exhibit-scheme'
+import { serveScheduleChannel, type ScheduleChannel } from './schedules/channel'
+import { selectScheduleService } from './schedules/select-service'
 import { type QuotaChannel, serveQuotaChannel } from './quota/channel'
 import { useQuotaCacheDir } from './quota/paths'
 import { selectQuotaService } from './quota/select-service'
@@ -158,6 +160,22 @@ const workflowRuns = selectWorkflowRunService(
   }
 )
 
+// The scheduler, beside the run service and above it: it fires runs through
+// that seam and reads the records back through it, and knows nothing about
+// sessions. Its workspaces are the sidebar's, read fresh at every evaluation
+// — a schedule fires for the workspace that declares it and no other.
+const schedules = selectScheduleService(
+  decideFlavor(process.env.CRUCIBLE_AGENT, app.isPackaged).flavor,
+  log,
+  {
+    appPath: app.getAppPath(),
+    stateDir: app.getPath('userData'),
+    workspaces: () => store.state.workspaces.map((workspace) => workspace.path),
+    runs: workflowRuns,
+    ...(cannedWorkspacePath === undefined ? {} : { cannedWorkspacePath })
+  }
+)
+
 // Decided once, before any window exists: one adapter for the launch, whichever
 // window is holding it at the time.
 const { adapter, flavor } = selectAdapter(
@@ -267,6 +285,7 @@ let cacheChannel: CacheChannel | undefined
 let needsYouChannel: NeedsYouChannel | undefined
 let needsYou: LiveNeedsYouService | undefined
 let workflowRunChannel: WorkflowRunChannel | undefined
+let scheduleChannel: ScheduleChannel | undefined
 
 function openWindow(reason?: 'activate'): void {
   const window = createMainWindow()
@@ -288,6 +307,7 @@ function openWindow(reason?: 'activate'): void {
   })
   needsYouChannel = serveNeedsYouChannel(needsYou, window)
   workflowRunChannel = serveWorkflowRunChannel(workflowRuns, window)
+  scheduleChannel = serveScheduleChannel(schedules.service, window)
   // ⌘R is the global runs view (Q15). Taken here, before the menu can spend
   // it on reload; dev reloads keep ⇧⌘R. On non-mac the chord is Ctrl+R.
   window.webContents.on('before-input-event', (event, input) => {
@@ -314,6 +334,11 @@ void app.whenReady().then(() => {
 
   openWindow()
 
+  // The clock starts once, after the window exists, so the first evaluation's
+  // catch-up fire has a surface to land on. Whatever passed while Crucible was
+  // closed is found here and fires once, late and unbothered.
+  schedules.scheduler?.begin()
+
   // macOS: the app stays alive with no windows; re-open one on dock activate.
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length > 0) return
@@ -329,6 +354,8 @@ app.on('window-all-closed', () => {
 app.on('will-quit', () => {
   // Whatever was still running is dropped rather than left running unseen.
   channel?.dispose()
+  scheduleChannel?.dispose()
+  schedules.service.dispose()
   workflowRunChannel?.dispose()
   workflowRuns.dispose()
   workspaceChannel?.dispose()

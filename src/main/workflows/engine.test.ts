@@ -799,6 +799,121 @@ describe('dismissing and adopting a run', () => {
   })
 })
 
+// A run a schedule fired has no orchestrator until a session adopts it.
+// What that means to the engine is here: it delivers nothing, it parks
+// rather than speaking, and dismissing it is the whole act.
+describe('a run with no orchestrator', () => {
+  /** A scheduled fire: no session, no inputs, the scheduled marker. */
+  function scheduledRequest(repo: string, workflow: string): {
+    workspacePath: string
+    workspaceName: string
+    workflow: string
+    inputs: Record<string, string>
+    base: string
+    scheduled: true
+  } {
+    return {
+      workspacePath: repo,
+      workspaceName: 'engine-test',
+      workflow,
+      inputs: {},
+      base: 'HEAD',
+      scheduled: true
+    }
+  }
+
+  const noInputs: WorkflowDef = {
+    description: 'one node, nothing handed in',
+    inputs: {},
+    plan: () => [{ id: 'work' }],
+    run: async (ctx) => {
+      const result = await ctx.node('work', {
+        prompt: 'do the thing',
+        outputs: { report: { file: 'report.md', desc: 'what happened' } }
+      })
+      return { summary: result.summary }
+    }
+  }
+
+  it('parks on a blocker with nothing delivered anywhere', async () => {
+    const { engine, repo, delivered } = rig({ solo: noInputs }, () => (_prompt, tools, turn) => {
+      if (turn === 1) {
+        tools.block({ reason: 'the labels force one or the other' })
+        return
+      }
+      writeFileSync(outputPath(tools.taskPrompt, 'report.md'), 'after the answer\n')
+      tools.complete({ summary: 'done once somebody answered' })
+    })
+
+    const started = await engine.start(scheduledRequest(repo, 'solo'))
+    await until(() => engine.runs()[0].waiting === true)
+
+    const parked = engine.runs()[0]
+    expect(parked.scheduled).toBe(true)
+    expect(parked.sessionId).toBeUndefined()
+    expect(parked.question?.reason).toContain('the labels force one or the other')
+    expect(parked.nodes[0].status).toBe('blocked')
+    // Nobody was told: a run with no orchestrator has no voice at all.
+    expect(delivered).toEqual([])
+
+    // It waits indefinitely at no cost until a session takes it on.
+    engine.adopt(started.id, 'investigator-9')
+    expect(engine.runs()[0].sessionId).toBe('investigator-9')
+    engine.answer(started.id, 'default to bug')
+    await until(() => engine.runs()[0].status === 'complete')
+    expect(delivered.every((message) => message.sessionId === 'investigator-9')).toBe(true)
+  })
+
+  it('parks on a failure, and keeps the marker across the store', async () => {
+    const { engine, repo, stateDir, delivered } = rig({ solo: noInputs }, () => () => {
+      throw new Error('the node blew up')
+    })
+
+    await engine.start(scheduledRequest(repo, 'solo'))
+    await until(() => engine.runs()[0].status === 'failed')
+
+    expect(delivered).toEqual([])
+    const reloaded = createRunStore(stateDir).load()[0]
+    expect(reloaded.scheduled).toBe(true)
+    expect(reloaded.sessionId).toBeUndefined()
+    expect(reloaded.status).toBe('failed')
+  })
+
+  it('never carries the marker on a run an agent started', async () => {
+    const { engine, repo } = rig({ solo: oneNode }, () => (prompt, tools) => {
+      writeFileSync(outputPath(prompt, 'report.md'), 'the report\n')
+      tools.complete({ summary: 'did the thing' })
+    })
+    const task = join(repo, 'task.md')
+    writeFileSync(task, 'the task\n')
+
+    await engine.start(startRequest(repo, 'solo', { prompt: task }))
+    await until(() => engine.runs()[0].status === 'complete')
+
+    expect(engine.runs()[0].scheduled).toBeUndefined()
+  })
+
+  it('is cancelled and stamped in one act when it is dismissed', async () => {
+    const { engine, repo } = rig({ solo: noInputs }, () => (_prompt, tools) => {
+      tools.block({ reason: 'nobody is listening' })
+    })
+    const started = await engine.start(scheduledRequest(repo, 'solo'))
+    await until(() => engine.runs()[0].waiting === true)
+
+    engine.dismiss(started.id)
+
+    expect(engine.runs()[0].dismissedAt).toBeDefined()
+    await until(() => engine.runs()[0].status === 'cancelled')
+    // The worktree is left exactly where it stands, as every ending leaves it.
+    expect(existsSync(engine.runs()[0].worktreePath ?? '')).toBe(true)
+
+    // Dismissing twice still says nothing new.
+    const stamped = engine.runs()[0].dismissedAt
+    engine.dismiss(started.id)
+    expect(engine.runs()[0].dismissedAt).toBe(stamped)
+  })
+})
+
 /** Where a run's artifacts live, as the store lays them out. */
 function stateDirOf(runId: string, built: Rig): string {
   return join(built.stateDir, runId, 'artifacts')

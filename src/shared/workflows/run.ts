@@ -85,8 +85,13 @@ export interface RunRecord {
   /** What the global view groups by. */
   readonly workspaceName: string
   // The orchestrator session. Every question and the completion go to its
-  // agent; absent only for a future unattended run (none is built yet).
+  // agent; absent only for an unattended run — one a schedule fired, which
+  // has no orchestrator until a session adopts it.
   readonly sessionId?: SessionId
+  // Fired from the schedule surface: a clock fire or the board's Run now. It
+  // marks where the run came from and changes nothing about what a run is.
+  // Runs started by agents or any other path never carry it.
+  readonly scheduled?: true
   /** The run's own worktree; every run gets one. */
   readonly worktreePath?: string
   readonly branch?: string
@@ -176,4 +181,18 @@ export function currentNode(run: RunRecord): RunNode | undefined {
 /** Live in the sense the strip cares about: it may still change. */
 export function runIsLive(run: RunRecord): boolean {
   return run.status === 'running' || run.status === 'paused'
+}
+
+/**
+ * Parked: a run with no orchestrator to hear it, stopped on something. It has
+ * no `sessionId`, has not been dismissed, and is either waiting on an answer
+ * (a question, a blocker, a stall) or has settled `failed`. A parked run waits
+ * indefinitely at no cost until a session adopts it or the user dismisses it.
+ * Clean completions and cancellations are never parked.
+ */
+export function runIsParked(run: RunRecord): boolean {
+  if (run.sessionId !== undefined) return false
+  if (run.dismissedAt !== undefined) return false
+  if (run.status === 'failed') return true
+  return runIsLive(run) && run.waiting === true
 }

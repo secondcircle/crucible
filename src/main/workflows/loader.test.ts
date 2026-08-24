@@ -103,6 +103,52 @@ describe('workflow loader', () => {
     )
   })
 
+  // A schedule changes nothing about what a workflow is: the loader neither
+  // requires the field nor validates it, so a schedule can never stop its
+  // workflow being listed or run by hand.
+  it('loads a definition with a schedule exactly as one without', async () => {
+    const workspace = tempDir()
+    const folder = join(workspace, '.crucible', 'workflows')
+    mkdirSync(folder, { recursive: true })
+    writeFileSync(
+      join(folder, 'triage.ts'),
+      `import { workflow } from 'crucible:workflow'\n` +
+        `export default workflow({\n` +
+        `  description: 'label untriaged issues',\n` +
+        `  inputs: {},\n` +
+        `  schedule: { cron: '0 9 * * *', check: () => true },\n` +
+        `  run: async () => {}\n` +
+        `})\n`,
+      'utf8'
+    )
+
+    const loader = loaderOver(tempDir(), tempDir())
+    const listed = await loader.list(workspace)
+    expect(listed.map((workflow) => workflow.name)).toEqual(['triage'])
+
+    const resolved = await loader.resolve(workspace, 'triage')
+    expect(resolved.def.schedule?.cron).toBe('0 9 * * *')
+    expect(resolved.def.description).toBe('label untriaged issues')
+
+    // And a nonsense schedule is still a loadable workflow: what it cannot do
+    // is fire, which the board says and the loader does not.
+    writeFileSync(
+      join(folder, 'odd.ts'),
+      `import { workflow } from 'crucible:workflow'\n` +
+        `export default workflow({\n` +
+        `  description: 'a schedule nothing can fire',\n` +
+        `  inputs: {},\n` +
+        `  schedule: { cron: 'every morning' },\n` +
+        `  run: async () => {}\n` +
+        `})\n`,
+      'utf8'
+    )
+    expect((await loader.list(workspace)).map((workflow) => workflow.name)).toEqual([
+      'odd',
+      'triage'
+    ])
+  })
+
   it('sees an edit on the very next resolve', async () => {
     const builtIn = tempDir()
     workflowFile(builtIn, 'adhoc', 'first wording')
