@@ -43,6 +43,61 @@ The constraints:
   something ephemeral rots; a reference to something durable means the
   explanation lives in the wrong place.`
 
+/**
+ * Shipped inline for the same reason the comment doctrine is: a workspace
+ * that disagrees shadows the whole file. Fed to every agent that designs or
+ * judges design; the gate hears only the structural-work tier (ADR 0025).
+ */
+const DESIGN_DOCTRINE = `\
+# Design doctrine
+
+Code is designed twice: once when its data is shaped, once when its modules
+are bounded. Both outlive the feature that forced them, and both are judged
+here.
+
+## The vocabulary — use these words exactly
+
+- **Module** — anything with an interface and an implementation: a function,
+  a class, a package, a tier-spanning slice.
+- **Interface** — everything a caller must know to use a module correctly:
+  the types, but also invariants, ordering constraints, error modes, and
+  performance characteristics.
+- **Depth** — behavior per unit of interface. A module is deep when a lot of
+  behavior sits behind a small interface, shallow when the interface is
+  nearly as complex as what it hides. Design deep modules.
+- **Seam** — a place where behavior can be altered without editing in that
+  place; where an interface lives, and where tests attach. Placing the seam
+  is its own decision, distinct from what goes behind it.
+- **Leverage** — what callers get from depth: more capability per unit of
+  interface learned.
+- **Locality** — what maintainers get from depth: change, bugs, and
+  verification concentrate in one place instead of spreading across callers.
+
+## Data structures
+
+Representation shapes implementation: choose the right structure and the
+code around it becomes obvious; mis-choose it and every later feature pays
+again. Tests cannot catch a bad representation — they stay green while the
+codebase devolves one convenient choice at a time. The principles, stated
+for any language:
+
+- **Invalid states are unrepresentable**, to the extent the repository's
+  language allows. Where two flags can contradict each other, one
+  three-state value cannot.
+- **One source of truth per fact.** A second copy of anything is a state the
+  system can disagree with itself about.
+- **Invariants live in the structure**, not in code that polices them at
+  every touch point.
+- **Weigh the next likely feature.** A representation is judged by how the
+  system will change around it, not by the feature in hand alone.
+
+## Structural work is feature work
+
+When the best way to hold a feature is to reshape a module or a data
+structure that already exists — even one tertiary to the feature — that
+reshaping belongs in the plan and in the work. Forcing a feature in around
+structures that should change is the anti-goal.`
+
 /** A machine-readable conclusion the loop branches on, as plain JSON schema. */
 const VERDICT = {
   type: 'object',
@@ -160,6 +215,15 @@ become buildable instruction.
   repository's existing test seams already cover it, and why any new seam —
   the fewest and highest that suffice — earns its place. Good tests here
   prove external behavior, never implementation detail.
+- The design is settled here, under the design doctrine below, in a section
+  of its own: the chosen data representation as a compact formal fragment in
+  this repository's own language and the invalid states it excludes, the
+  module boundaries the work touches or creates, and any structural work on
+  existing code with the argument for it. Reshaping an existing module or
+  data structure — even one tertiary to the feature — is yours to rule when
+  it is the right way to hold this work, and only what this section rules is
+  licensed. Work that touches no data representation says so in one line;
+  the section never silently disappears.
 - The spec speaks this repository's language — \`CONTEXT.md\` terms exactly —
   and respects what \`docs/adr/\` has already decided.
 
@@ -188,7 +252,130 @@ become buildable instruction.
 **Context**: you are in a worktree of this repository, on the branch where the
 work will be built. The repository's glossary is \`CONTEXT.md\` at the root; its
 decisions live in \`docs/adr/\`; the intent document above is the authority on
-what was agreed.`
+what was agreed.
+
+${DESIGN_DOCTRINE}`
+
+export const specReviewerPrompt = (
+  intent: string,
+  spec: string,
+  corrections: string[] = []
+): string => `\
+# Review the Spec's design
+
+**Goal**: judge the design ruled by the Spec at \`${spec}\` against the design
+doctrine below, and deliver one verdict — \`approved\` when a builder should
+build from it as it stands, \`changes-required\` when the design must change
+first — with the findings written down where the agent who revises the Spec
+can work from them.
+
+**Why it matters**: the builder and every reviewer after it inherit the
+Spec's design without question — a representation that can hold an invalid
+state, a shallow module, a seam in the wrong place will be built faithfully,
+pass every test, and tax every feature that follows. This is the one pass
+that judges the design while it is still a document. It is not adversarial:
+your work is to weigh the representations and boundaries the planner did not,
+and to say so where a materially better one exists.
+
+**The standard**: the design doctrine at the end of this prompt. The intent
+document at \`${intent}\` rules *what* is being built and is not reopened
+here; the Spec's other duties — done-ness, boundary, testing intent — have
+their own judges downstream. Spend your judgment on the design alone.
+
+**What a finding is**:
+
+- A data representation that violates the doctrine's principles — an
+  expressible invalid state, a second source of truth, an invariant policed
+  in code — where this repository's language offers better.
+- A module boundary or seam the doctrine argues against: a shallow module, a
+  seam placed where behavior cannot be altered or tested without editing in
+  place.
+- An alternative representation or boundary that is materially better for
+  the system as a whole — argued concretely against what the Spec chose,
+  never aesthetically.
+- Structural work on existing code the Spec should have ruled and did not,
+  or ruled without an argument — the Spec's design section is what licenses
+  that work, so a missing ruling forfeits it.
+- A missing or evasive design section: the Spec must state its
+  representation as a formal fragment and its invalid states, or say in one
+  line that no representation is touched.
+- A preference without an argument is not a finding, and nits are not
+  findings.
+
+**Constraints on you**:
+
+- Explore the worktree as freely as you need to judge the design against the
+  code that exists, and change nothing in it — the Spec is the planner's and
+  the revision is the fixer's.
+- \`approved\` only when nothing about the design must change before a
+  builder works from it. What you leave ambiguous belongs in your reason.
+- Your review is read by agents — the spec fixer, and the design reviews
+  after yours — so it is plain markdown, written for them.
+
+${DESIGN_DOCTRINE}${standingCorrections(corrections)}`
+
+export const specFixerPrompt = (
+  intent: string,
+  spec: string,
+  latestReview: string,
+  corrections: string[] = []
+): string => `\
+# Revise the Spec
+
+**Goal**: revise the Spec at \`${spec}\` — in place, it stays the one file
+the builder reads — so the next design review can approve it. The latest
+review, \`${latestReview}\`, is the standing judgment and comes first; the
+earlier ones show what has already been asked and what may have been missed
+twice.
+
+**Why you**: you arrive with a fresh context because the planner could not
+see what the reviewer saw. A finding that survives your round comes back as
+the same argument one review later, so what you resolve, resolve properly.
+
+**Constraints**:
+
+- The intent document at \`${intent}\` still rules what is being built: a
+  revision changes the design, never the scope, and reopens no ruling.
+- The Spec must leave your hands still whole — done-ness enumerated, the
+  boundary explicit, testing intent settled, the design section ruling what
+  it builds — because the builder reads nothing else.
+- Where you judge a finding mistaken, leave the Spec as it is on that point
+  and say why in your completion summary. A finding silently dropped costs
+  the loop a round.
+- Explore the worktree freely and change nothing in it; your product is the
+  revised Spec.
+
+${DESIGN_DOCTRINE}${standingCorrections(corrections)}`
+
+/** Exported so the text can be asserted without running a build. */
+export const specCheckInPrompt = (branch: string, changesRequired: number): string => `\
+# Check-in: is this design review loop on task?
+
+**Goal**: rule on the design review loop shaping the Spec for \`${branch}\`,
+where ${changesRequired} reviews have now come back \`changes-required\`. The
+question is whether the findings are real design problems, whether the
+reviewer is holding the Spec to the design doctrine or to taste, and whether
+the revisions are resolving findings or trading one representation for
+another. Your answer resumes the run: continue, or continue with a
+correction — a standing judgment on this Spec's design, carried into every
+design reviewer and spec fixer that follows.
+
+**Why you are asked**: you hold the human's intent for this work, while the
+agents in the loop hold only the documents and each of them sees one round.
+No code has been built yet — this loop is cheap compared to building from a
+bad design, but a loop that is circling looks from the inside exactly like
+one that is converging, and nothing else will end it: there is no cap, and
+the builder waits until a design review approves.
+
+**Constraints on your ruling**: a correction rules on design — what the
+reviewer weighs, what representation stands, what structural work the Spec
+may rule. It never adds scope the intent document did not agree to: changing
+*what* is being built is the human's call, and so is killing the run — that
+is Cancel on the run, never an answer.
+
+**Context**: the intent document, the Spec, and every design review this run
+has produced come with this check-in; the arc across the reviews is what
+shows whether the loop is converging.`
 
 export const builderPrompt = (intent: string, spec: string): string => `\
 # Build the Spec
@@ -211,13 +398,18 @@ whatever you leave out or bend, it has every means to notice.
   won't pass cleanly, a shape that needs a workaround — step back and ask
   whether the structure you chose is the problem, and if it is, change the
   structure. No quick-and-dirty plugs.
+- Where the Spec's design section rules a representation or a boundary,
+  build it as ruled; where the Spec is silent, the design doctrine below
+  governs what you improvise.
 - The work stays in this worktree; nothing is merged or pushed anywhere.
 
 **Context**: you are in a worktree of this repository, on the branch where
 this work lives. The repository's glossary is \`CONTEXT.md\` at the root — use
 its terms exactly; its decisions live in \`docs/adr/\`. Your product is the
 worktree: the changes you leave behind are what the run commits on this
-branch, and your completion summary is what the graph shows of your work.`
+branch, and your completion summary is what the graph shows of your work.
+
+${DESIGN_DOCTRINE}`
 
 /** Empty before the first check-in, so early rounds read as a run that never checked in. */
 const standingCorrections = (corrections: string[]): string =>
@@ -278,6 +470,11 @@ the authority behind it.
   why X will not happen.
 - **An unasked-for behavior**: the code does something neither document asked
   of it.
+- **A design departure**: the code departs from the design the Spec's design
+  section ruled — a different representation, a moved seam — or, where the
+  Spec left design unsaid, improvises one that violates the design doctrine
+  below. Show the departure against the Spec's ruling, or name the doctrine
+  principle violated and the concrete cost.
 - Nits are not findings. Formatting, style, wording, "this may not be
   done" — none of it, ever.
 
@@ -308,7 +505,9 @@ the authority behind it.
 - \`approved\` only when nothing you found must change before a human decides
   this branch's fate. What you leave ambiguous belongs in your reason.
 - Your review is read by agents — the fixer, and the reviews after yours — so
-  it is plain markdown, written for them and not rendered for anyone.${standingCorrections(corrections)}`
+  it is plain markdown, written for them and not rendered for anyone.
+
+${DESIGN_DOCTRINE}${standingCorrections(corrections)}`
 
 export const fixerPrompt = (
   target: string,
@@ -356,7 +555,9 @@ document at \`${intent}\` is the agreement behind the Spec.
 **Context**: the repository's glossary is \`CONTEXT.md\` at the root — use its
 terms exactly; its decisions live in \`docs/adr/\`. Your product is the
 worktree: the changes you leave behind are what the run commits on this
-branch, and your completion summary is what the graph shows of your work.${standingCorrections(corrections)}`
+branch, and your completion summary is what the graph shows of your work.
+
+${DESIGN_DOCTRINE}${standingCorrections(corrections)}`
 
 /** Exported so the text can be asserted without running a build. */
 export const checkInPrompt = (branch: string, changesRequired: number): string => `\
@@ -390,6 +591,7 @@ whether the loop is converging. The branch itself carries the work.`
 export const gateAlignmentPrompt = (
   target: string,
   intent: string,
+  spec: string,
   corrections: string[] = []
 ): string => `\
 # Alignment check
@@ -414,18 +616,26 @@ to it.
 
 **The standard**: the intent document at \`${intent}\`. Read it in full before
 you judge anything, and work from the document itself rather than a guess at
-what it probably says. It is the sole standard: a requirement it never states
-is not a shortfall, however desirable, and work it explicitly rules in is
-never creep.
+what it probably says. It is the sole authority on *what feature* was agreed:
+a requirement it never states is not a shortfall, however desirable, and work
+it explicitly rules in is never creep. One question consults a second
+document: the Spec at \`${spec}\` is the authority on what *structural work*
+this build licensed — its design section, and only that — per this
+repository's ADR 0025.
 
 **What your report must answer**:
 
 1. **Coverage** — does the branch accomplish everything the intent document
    asked for? Where it falls short, show exactly what is missing or partial.
 2. **Unasked work** — what did the branch do that the intent document never
-   asked for? Split it honestly into two tiers that never blur:
-   - **Scope creep**: work serving no requirement in the intent document and
-     not incidental to executing one. Argue for reverting it.
+   asked for? Split it honestly into three tiers that never blur:
+   - **Structural work the Spec ruled**: reshaping of existing modules or
+     data structures that the Spec's design section argued for as the right
+     way to hold this feature. Judge only whether the Spec actually ruled and
+     argued it; it is never creep and never argued for reverting.
+   - **Scope creep**: work serving no requirement in the intent document,
+     not ruled by the Spec's design section as structural work, and not
+     incidental to executing a requirement. Argue for reverting it.
    - **Incidental extras**: unrequested work that was incidental to the asked
      work — a bug fixed in passing, a rename the work forced. Note it for the
      human's information; it is never held against the branch.
@@ -643,7 +853,18 @@ export default workflow({
         spec: { file: 'spec.md', desc: 'the Spec: what to build, derived from the intent document' }
       }
     },
-    { id: 'builder', model: CODE_MODEL, parents: ['planner'] },
+    {
+      id: 'spec-review-1',
+      model: DOCUMENT_MODEL,
+      parents: ['planner'],
+      outputs: {
+        review: {
+          file: 'spec-review-1.md',
+          desc: "the Spec's design judged against the design doctrine"
+        }
+      }
+    },
+    { id: 'builder', model: CODE_MODEL, parents: ['spec-review-1'] },
     {
       id: 'review-1',
       model: DOCUMENT_MODEL,
@@ -679,9 +900,61 @@ export default workflow({
     })
     const spec = planner.outputs.spec
 
+    // The design is judged while it is still a document: built code passes
+    // its tests whether or not its representation is sound, so this is the
+    // last point the choice is cheap to change. Nothing here touches the
+    // worktree, so the loop commits nothing.
+    const specReviews: string[] = []
+    const specCorrections: string[] = []
+    let sinceSpecCheckIn = 0
+    let designApprovedBy: string
+    for (let round = 1; ; round++) {
+      const specReview = await ctx.node(`spec-review-${round}`, {
+        prompt: specReviewerPrompt(intent, spec, specCorrections),
+        from: [round === 1 ? 'planner' : `spec-fixer-${round - 1}`],
+        reads: [intent, spec, ...specReviews],
+        outputs: {
+          review: {
+            file: `spec-review-${round}.md`,
+            desc: "the Spec's design judged against the design doctrine"
+          }
+        },
+        verdict: VERDICT,
+        model: DOCUMENT_MODEL
+      })
+      specReviews.push(specReview.outputs.review)
+      const { verdict } = specReview.verdict as { verdict: string; reason: string }
+      if (verdict === 'approved') {
+        designApprovedBy = `spec-review-${round}`
+        break
+      }
+
+      sinceSpecCheckIn += 1
+      if (sinceSpecCheckIn === REVIEWS_PER_CHECK_IN) {
+        specCorrections.push(
+          await ctx.ask({
+            reason: specCheckInPrompt(currentBranch(ctx.cwd), round),
+            artifacts: {
+              intent,
+              spec,
+              ...Object.fromEntries(specReviews.map((path, at) => [`spec-review-${at + 1}`, path]))
+            }
+          })
+        )
+        sinceSpecCheckIn = 0
+      }
+
+      await ctx.node(`spec-fixer-${round}`, {
+        prompt: specFixerPrompt(intent, spec, specReview.outputs.review, specCorrections),
+        from: [`spec-review-${round}`],
+        reads: [intent, spec, ...specReviews],
+        model: DOCUMENT_MODEL
+      })
+    }
+
     await ctx.node('builder', {
       prompt: builderPrompt(intent, spec),
-      from: ['planner'],
+      from: [designApprovedBy],
       reads: [intent, spec],
       model: CODE_MODEL
     })
@@ -757,9 +1030,9 @@ export default workflow({
       // First in the round, so it judges the diff the branch's agents left
       // rather than one the police has already edited.
       const alignment = await ctx.node(`gate-alignment-${round}`, {
-        prompt: gateAlignmentPrompt(target, intent, gateCorrections),
+        prompt: gateAlignmentPrompt(target, intent, spec, gateCorrections),
         from: [round === 1 ? approvedBy : `gate-fixer-${round - 1}`],
-        reads: [intent, ...coverageReports],
+        reads: [intent, spec, ...coverageReports],
         outputs: {
           report: {
             file: `gate-alignment-${round}.html`,

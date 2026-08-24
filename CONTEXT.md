@@ -319,6 +319,14 @@ and leaves the branch ready for the human to merge. A phase, not a workflow of
 its own, and it never merges anything.
 _Avoid_: PR review, final review, the gate workflow.
 
+**Design doctrine**:
+The rules the build workflow holds a plan and its code to: deep modules
+behind small interfaces, testing at the seams, and data representations
+that cannot express invalid states — principles, never one language's
+constructs. Ships inside the build workflow like the comment doctrine; a
+workspace that disagrees replaces the whole workflow.
+_Avoid_: design guide, architecture standards, best practices.
+
 **Comment doctrine**:
 The rules a comment must satisfy to survive the merge gate: it explains why
 something non-obvious was done, in a line or two, referencing nothing outside

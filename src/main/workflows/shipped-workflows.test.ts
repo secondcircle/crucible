@@ -205,13 +205,21 @@ describe('the workflows Crucible ships', () => {
     // and belongs in what a human sees before anything costs money.
     expect(planned.map((node) => `${node.id}<-${(node.parents ?? []).join(',')}`)).toEqual([
       'planner<-',
-      'builder<-planner',
+      'spec-review-1<-planner',
+      'builder<-spec-review-1',
       'review-1<-builder',
       'gate-alignment-1<-review-1',
       'gate-comments-1<-gate-alignment-1',
       'gate-verdict-1<-gate-alignment-1,gate-comments-1'
     ])
-    for (const conditional of ['gate-fixer-1', 'gate-alignment-2', 'fixer-1', 'review-2']) {
+    for (const conditional of [
+      'gate-fixer-1',
+      'gate-alignment-2',
+      'fixer-1',
+      'review-2',
+      'spec-fixer-1',
+      'spec-review-2'
+    ]) {
       expect(ids.has(conditional), 'a conditional node must not haunt the preview').toBe(false)
     }
 
@@ -225,6 +233,7 @@ describe('the workflows Crucible ships', () => {
     )
     expect(files).toEqual({
       planner: ['spec.md'],
+      'spec-review-1': ['spec-review-1.md'],
       builder: [],
       'review-1': ['review-1.md'],
       'gate-alignment-1': [],

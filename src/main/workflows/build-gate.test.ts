@@ -241,6 +241,7 @@ describe('the merge gate, the final phase of a build', () => {
 
     expect(rig.events).toEqual([
       'node:planner',
+      'node:spec-review-1',
       'node:builder',
       'node:review-1',
       'node:gate-alignment-1',
@@ -280,6 +281,7 @@ describe('the merge gate, the final phase of a build', () => {
 
     expect(rig.events).toEqual([
       'node:planner',
+      'node:spec-review-1',
       'node:builder',
       'node:review-1',
       'node:gate-alignment-1',
@@ -299,6 +301,7 @@ describe('the merge gate, the final phase of a build', () => {
     // as persisting; the fixer reads every report so far.
     expect(rig.node('gate-alignment-2').reads).toEqual([
       rig.intent,
+      join(rig.artifactDir, 'spec.md'),
       join(rig.artifactDir, 'gate-alignment-1.html')
     ])
     expect(rig.node('gate-fixer-1').reads).toEqual([
@@ -455,6 +458,143 @@ describe('the merge-cleanliness test', () => {
   })
 })
 
+// The design is judged while it is still a document: the loop between the
+// planner and the builder is what keeps a bad representation from being
+// built faithfully, and none of its sequencing is observable anywhere else
+// short of a paid run.
+describe('the design review loop, between the planner and the builder', () => {
+  it('refusal dispatches a fresh spec fixer, and the builder follows the review that approved', async () => {
+    const rig = await build(tempRepo(), {
+      verdicts: { 'spec-review-1': 'changes-required' }
+    })
+
+    expect(rig.events.slice(0, 5)).toEqual([
+      'node:planner',
+      'node:spec-review-1',
+      'node:spec-fixer-1',
+      'node:spec-review-2',
+      'node:builder'
+    ])
+    // The plan's forecast of spec-review-1 would draw a lying edge; the
+    // second round is what the builder actually followed.
+    expect(rig.node('builder').from).toEqual(['spec-review-2'])
+
+    // Judging and revising a document both run on the document model.
+    expect(rig.node('spec-review-1').model).toBe('anthropic/claude-fable-5:high')
+    expect(rig.node('spec-fixer-1').model).toBe('anthropic/claude-fable-5:high')
+
+    // Round 2 reads round 1's review, so a persisting finding reads as
+    // persisting; the fixer reads every review so far.
+    expect(rig.node('spec-review-2').reads).toEqual([
+      rig.intent,
+      join(rig.artifactDir, 'spec.md'),
+      join(rig.artifactDir, 'spec-review-1.md')
+    ])
+    expect(rig.node('spec-fixer-1').reads).toEqual([
+      rig.intent,
+      join(rig.artifactDir, 'spec.md'),
+      join(rig.artifactDir, 'spec-review-1.md')
+    ])
+  })
+
+  it('touches no code: the worktree is exactly as the planner left it when the builder starts', async () => {
+    const repo = tempRepo()
+    const rig = await build(repo, { verdicts: { 'spec-review-1': 'changes-required' } })
+
+    expect(rig.node('builder').head).toBe('first')
+    expect(rig.node('builder').dirty).toBe('')
+    expect(git(repo, 'rev-list', '--count', 'HEAD')).toBe('1')
+  })
+
+  it('parks on the third refusal before dispatching that fixer, with every design review so far', async () => {
+    const rig = await build(tempRepo(), {
+      verdicts: {
+        'spec-review-1': 'changes-required',
+        'spec-review-2': 'changes-required',
+        'spec-review-3': 'changes-required'
+      }
+    })
+
+    expect(rig.events.filter((event) => event === 'ask' || event.startsWith('node:spec-'))).toEqual(
+      [
+        'node:spec-review-1',
+        'node:spec-fixer-1',
+        'node:spec-review-2',
+        'node:spec-fixer-2',
+        'node:spec-review-3',
+        'ask',
+        'node:spec-fixer-3',
+        'node:spec-review-4'
+      ]
+    )
+
+    expect(rig.asks[0].reason).toContain('design review loop')
+    expect(rig.asks[0].reason).toContain('crucible/run-test')
+    expect(rig.asks[0].reason).toContain('3 reviews have now come back')
+    expect(Object.keys(rig.asks[0].artifacts)).toEqual([
+      'intent',
+      'spec',
+      'spec-review-1',
+      'spec-review-2',
+      'spec-review-3'
+    ])
+  })
+
+  it('carries design rulings into every later spec agent, and into no builder, reviewer or gate', async () => {
+    const rig = await build(tempRepo(), {
+      verdicts: {
+        'spec-review-1': 'changes-required',
+        'spec-review-2': 'changes-required',
+        'spec-review-3': 'changes-required'
+      },
+      answers: ['DESIGN RULING: one map, keyed by label']
+    })
+
+    for (const id of ['spec-fixer-3', 'spec-review-4']) {
+      expect(rig.prompt(id), id).toContain('DESIGN RULING')
+    }
+    for (const dispatch of rig.nodes.filter((node) => !node.id.startsWith('spec-'))) {
+      expect(dispatch.prompt, dispatch.id).not.toContain('DESIGN RULING')
+    }
+  })
+})
+
+describe('what the build tells its agents about design', () => {
+  it('gives the planner, both loops and the builder the design doctrine verbatim', async () => {
+    const rig = await build(tempRepo(), {
+      verdicts: { 'spec-review-1': 'changes-required', 'review-1': 'changes-required' }
+    })
+
+    for (const id of [
+      'planner',
+      'spec-review-1',
+      'spec-fixer-1',
+      'builder',
+      'review-1',
+      'fixer-1'
+    ]) {
+      expect(rig.prompt(id), id).toContain('# Design doctrine')
+      expect(rig.prompt(id), id).toContain('Invalid states are unrepresentable')
+      expect(rig.prompt(id), id).toContain('Structural work is feature work')
+    }
+
+    // The gate hears only the structural-work tier, never the doctrine.
+    for (const id of ['gate-alignment-1', 'gate-comments-1', 'gate-verdict-1']) {
+      expect(rig.prompt(id), id).not.toContain('# Design doctrine')
+    }
+  })
+
+  it('requires the spec to rule its design, and licenses structural work there alone', async () => {
+    const rig = await build(tempRepo())
+
+    expect(rig.prompt('planner')).toContain('The design is settled here')
+    expect(rig.prompt('planner')).toContain('says so in one line')
+    expect(rig.prompt('spec-review-1')).toContain('`approved` when a builder should')
+    expect(rig.prompt('builder')).toContain("Where the Spec's design section rules")
+    expect(rig.prompt('gate-alignment-1')).toContain('what *structural work*')
+  })
+})
+
 // A graph that is right only because the renderer guessed well is not fixed:
 // the workflow says what each node follows, including the nodes a plan() can
 // never enumerate because a runtime loop gives birth to them.
@@ -470,7 +610,8 @@ describe('the edges the build workflow declares', () => {
       // The planner takes only the kickoff input, so it is a root and says so
       // by declaring nothing.
       'planner<-',
-      'builder<-planner',
+      'spec-review-1<-planner',
+      'builder<-spec-review-1',
       'review-1<-builder',
       'fixer-1<-review-1',
       'review-2<-fixer-1',
@@ -537,11 +678,12 @@ describe('what the gate tells its agents', () => {
     expect(prompt).toContain('dark-mode HTML document')
   })
 
-  it('sends the alignment check after both tiers, the mocks and the acknowledgments', async () => {
+  it('sends the alignment check after all three tiers, the mocks and the acknowledgments', async () => {
     const rig = await build(tempRepo())
     const prompt = rig.prompt('gate-alignment-1')
 
     expect(prompt).toContain('**Coverage**')
+    expect(prompt).toContain('**Structural work the Spec ruled**')
     expect(prompt).toContain('**Scope creep**')
     expect(prompt).toContain('**Incidental extras**')
     expect(prompt).toContain('**Mock fidelity**')
@@ -549,7 +691,8 @@ describe('what the gate tells its agents', () => {
     expect(prompt).toContain('the mocks the intent document cites')
     expect(prompt).toContain('every input acknowledges in the same frame it lands')
     expect(prompt).toContain('a defect on par with wrong data')
-    expect(prompt).toContain('It is the sole standard')
+    expect(prompt).toContain('the sole authority on *what feature* was agreed')
+    expect(prompt).toContain('never creep and never argued for reverting')
     expect(prompt).toContain('Review only')
     expect(prompt).toContain('dark-mode HTML document')
   })
