@@ -6,9 +6,11 @@ import { mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
+import { monthlyResetAfter } from '../../shared/quota/month'
 import type { QuotaMeter } from '../../shared/quota/types'
+import { anthropicAdapter } from './adapters/anthropic'
 import { ADAPTERS } from './adapters/index'
-import type { AdapterResult, ProviderAdapter } from './adapters/types'
+import type { AdapterResult, FetchLike, ProviderAdapter } from './adapters/types'
 import { KNOWN_PROVIDER_IDS } from './paths'
 import { readQuota } from './reader'
 import { type AuthLike, createQuotaStore, credentialTypeFrom } from './store'
@@ -35,6 +37,20 @@ function meter(over: Partial<QuotaMeter> = {}): QuotaMeter {
 }
 
 const ok = (meters: QuotaMeter[]): AdapterResult => ({ ok: true, meters })
+
+// The work account, captured live from the usage endpoint and kept byte for
+// byte: an empty `limits[]`, a $5,000 budget at $2,119.26, and a `cinder_cove`
+// pool pinned at 100% that nothing here may read. These are the wire bytes
+// rather than a parsed object, because what is under test is the whole path
+// from the response body to the read seam.
+const WORK_ACCOUNT_BODY = String.raw`{"five_hour":null,"seven_day":null,"seven_day_oauth_apps":null,"seven_day_opus":null,"seven_day_sonnet":null,"seven_day_cowork":null,"seven_day_omelette":null,"tangelo":null,"iguana_necktie":null,"omelette_promotional":null,"nimbus_quill":{"utilization":0.0,"resets_at":null,"limit_dollars":null,"used_dollars":null,"remaining_dollars":null},"cinder_cove":{"utilization":100.0,"resets_at":"2026-09-22T18:55:57.572982+00:00","limit_dollars":1000,"used_dollars":1000.0,"remaining_dollars":0.0},"amber_ladder":null,"extra_usage":{"is_enabled":true,"monthly_limit":500000,"used_credits":211926.0,"utilization":42.3852,"currency":"USD","decimal_places":2,"disabled_reason":null,"user_disabled":false,"spend_limit_reached":false,"credits_ever_enabled":true,"daily":null,"weekly":null},"limits":[],"spend":{"used":{"amount_minor":211926,"currency":"USD","exponent":2},"limit":{"amount_minor":500000,"currency":"USD","exponent":2},"percent":42,"severity":"normal","enabled":true,"disabled_reason":null,"cap":{"money":null,"credits":{"amount_minor":500000,"exponent":2}},"balance":null,"auto_reload":null,"disclaimer":"Usage credits cover you when you hit your plan limits.","can_purchase_credits":false,"can_toggle":false},"member_dashboard_available":true}`
+
+/** Answers the usage endpoint with those bytes and opens no socket. */
+const workAccountWire: FetchLike = async () => ({
+  ok: true,
+  status: 200,
+  text: async () => WORK_ACCOUNT_BODY
+})
 
 const bearer = async (): Promise<AuthLike> => ({ auth: { apiKey: 'token' } })
 
@@ -368,5 +384,44 @@ describe('the quota store', () => {
     expect(readQuota({ dir, now: harnessed.now }).providers.xai.meters).toEqual([
       meter({ usedPercent: 61 })
     ])
+  })
+
+  it('carries the work account’s spend meter from the wire to the read seam', async () => {
+    const dir = tempDir()
+    // The one clock the store does not govern: the adapter stamps the spend
+    // meter's reset off the wall clock, so the store is handed that same
+    // instant and the expectation below is computed from it, never written
+    // down as a date.
+    const at = Date.now()
+    const store = createQuotaStore({
+      getAuth: bearer,
+      adapters: [anthropicAdapter],
+      dir,
+      now: () => at,
+      log: () => {},
+      fetchImpl: workAccountWire
+    })
+
+    await store.refresh()
+    // Read back off the file, through the same gate the renderer's snapshot
+    // comes through. This round trip returned `meters: []` before the gate
+    // learned the kind, which is the whole bug.
+    const quota = store.read().providers.anthropic
+
+    expect(quota.meters).toHaveLength(1)
+    const [spend] = quota.meters
+    expect(spend).toMatchObject({
+      kind: 'monthly',
+      label: 'MO',
+      usedDollars: 2119.26,
+      limitDollars: 5000,
+      resetsAt: monthlyResetAfter(at)
+    })
+    expect(spend.usedPercent).toBeCloseTo(42.3852, 4)
+    // Midnight UTC on the 1st, which is the window the pace tick measures.
+    const reset = new Date(spend.resetsAt as number)
+    expect([reset.getUTCDate(), reset.getUTCHours(), reset.getUTCMinutes()]).toEqual([1, 0, 0])
+    // The rotating credit pool sits at a permanent 100% and is never a meter.
+    expect(readFileSync(join(dir, 'anthropic.json'), 'utf8')).not.toContain('cinder_cove')
   })
 })

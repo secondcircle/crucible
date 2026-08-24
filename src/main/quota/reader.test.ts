@@ -6,6 +6,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
+import { cannedQuotaSnapshot } from '../../shared/quota/fake-service'
 import type { QuotaMeter, QuotaSnapshot } from '../../shared/quota/types'
 import {
   isStale,
@@ -17,6 +18,8 @@ import {
 
 const MINUTE = 60 * 1000
 const NOW = Date.UTC(2026, 7, 15, 12, 0, 0)
+/** The month NOW sits in closes here, which is what a spend meter resets on. */
+const MONTH_END = Date.UTC(2026, 8, 1)
 
 const directories: string[] = []
 
@@ -34,6 +37,19 @@ afterEach(() => {
 
 function meter(over: Partial<QuotaMeter> = {}): QuotaMeter {
   return { kind: 'weekly', label: '7D', usedPercent: 20, resetsAt: null, ...over }
+}
+
+/** The work account's meter, as the Anthropic adapter parses it. */
+function spendMeter(over: Partial<QuotaMeter> = {}): QuotaMeter {
+  return {
+    kind: 'monthly',
+    label: 'MO',
+    usedPercent: 42.3852,
+    resetsAt: MONTH_END,
+    usedDollars: 2119.26,
+    limitDollars: 5000,
+    ...over
+  }
 }
 
 /** Writes a cache file the way the store writes one, or as damaged as asked. */
@@ -191,5 +207,106 @@ describe('the quota reader', () => {
     const quota = snapshotOf(dir).providers.xai
     expect(quota.error).toBe('unauthorized')
     expect(quota.meters).toEqual([meter({ usedPercent: 61 })])
+  })
+})
+
+// This gate is where the work account's row went dark: the kind was not in the
+// allow-list and the dollars were dropped from the kinds that were.
+describe('the spend meter through the cache gate', () => {
+  it('reads a cached monthly meter back whole, dollars included', () => {
+    const dir = tempDir()
+    writeCache(dir, 'anthropic', goodEntry('anthropic', [spendMeter()]))
+
+    expect(snapshotOf(dir).providers.anthropic.meters).toEqual([spendMeter()])
+  })
+
+  it('drops a monthly meter whose dollars it cannot trust, and keeps the row’s others', () => {
+    const dir = tempDir()
+    const survivor = meter({ usedPercent: 29, resetsAt: NOW + MINUTE })
+    const untrustworthy: Array<Record<string, unknown>> = [
+      {},
+      { usedDollars: 2119.26 },
+      { limitDollars: 5000 },
+      { usedDollars: -0.01, limitDollars: 5000 },
+      { usedDollars: 2119.26, limitDollars: 0 },
+      { usedDollars: 2119.26, limitDollars: -5000 },
+      { usedDollars: '2119.26', limitDollars: 5000 }
+    ]
+
+    for (const dollars of untrustworthy) {
+      writeCache(dir, 'anthropic', {
+        v: 1,
+        providerId: 'anthropic',
+        fetchedAt: NOW,
+        attemptedAt: NOW,
+        windows: [
+          { kind: 'monthly', label: 'MO', usedPercent: 42.3852, resetsAt: MONTH_END, ...dollars },
+          survivor
+        ]
+      })
+
+      // Never percent-only and never with a zero filled in: an amount this
+      // process invented would read exactly like one somebody spent.
+      expect(snapshotOf(dir).providers.anthropic.meters).toEqual([survivor])
+    }
+  })
+
+  it('drops a monthly meter carrying a non-finite amount, either side of it', () => {
+    const dir = tempDir()
+    // A JSON file cannot hold a bare `NaN`, but `1e999` parses as Infinity: an
+    // infinite budget prints every amount as 0%, and an infinite spend prints
+    // as `$Infinityk`.
+    writeFileSync(
+      join(dir, 'anthropic.json'),
+      `{"v":1,"providerId":"anthropic","fetchedAt":${NOW},"attemptedAt":${NOW},"windows":[` +
+        '{"kind":"monthly","label":"MO","usedPercent":42,"resetsAt":null,' +
+        '"usedDollars":2119.26,"limitDollars":1e999},' +
+        '{"kind":"monthly","label":"MO","usedPercent":42,"resetsAt":null,' +
+        '"usedDollars":1e999,"limitDollars":5000}]}'
+    )
+
+    expect(snapshotOf(dir).providers.anthropic.meters).toEqual([])
+  })
+
+  it('never publishes dollars smuggled onto a meter of another kind', () => {
+    const dir = tempDir()
+    writeCache(dir, 'anthropic', {
+      v: 1,
+      providerId: 'anthropic',
+      fetchedAt: NOW,
+      attemptedAt: NOW,
+      windows: [
+        { kind: 'weekly', label: '7D', usedPercent: 20, resetsAt: null, usedDollars: 40, limitDollars: 100 }
+      ]
+    })
+
+    const [shown] = snapshotOf(dir).providers.anthropic.meters
+    expect(shown).toEqual(meter())
+    expect(Object.keys(shown)).not.toContain('usedDollars')
+  })
+
+  it('answers the monthly percent as the worst on a work account, being a real number', () => {
+    const dir = tempDir()
+    writeCache(dir, 'anthropic', goodEntry('anthropic', [spendMeter()]))
+
+    // Derived from two real amounts, so it is a reading rather than a guess.
+    expect(worstUsedPercent(snapshotOf(dir), 'anthropic', NOW)).toBeCloseTo(42.3852, 4)
+  })
+
+  it('reads every canned meter back exactly, so the fake flavor cannot diverge', () => {
+    const dir = tempDir()
+    const canned = cannedQuotaSnapshot(NOW)
+
+    for (const quota of Object.values(canned.providers)) {
+      writeCache(dir, quota.providerId, goodEntry(quota.providerId, [...quota.meters]))
+    }
+
+    // `npm run dev` hands the renderer this snapshot without going near the
+    // gate, which is how the work account's row shipped empty. Pinning the two
+    // together means a shape the fake shows is a shape the reader publishes.
+    const read = snapshotOf(dir)
+    for (const quota of Object.values(canned.providers)) {
+      expect(read.providers[quota.providerId].meters).toEqual(quota.meters)
+    }
   })
 })

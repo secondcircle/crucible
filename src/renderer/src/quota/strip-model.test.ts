@@ -330,7 +330,7 @@ describe('the rows', () => {
     expect(rows[0].meters.map((shown) => shown.label)).toEqual(['5H', '7D', 'FABLE', 'MO'])
   })
 
-  it('counts down to the monthly reset, which outlasts every other meter', () => {
+  it('counts down to the weekly reset even though the monthly one outlasts it', () => {
     const rows = quotaRows(
       snapshotOf({
         anthropic: {
@@ -344,8 +344,31 @@ describe('the rows', () => {
       NOW
     )
 
-    expect(rows[0].right).toBe(countdownText(MONTH_END, NOW))
-    expect(rows[0].right).toBe('⟳16d12')
+    // Q2: the spend meter contributes no reset instant to the right-hand side,
+    // so the weekly window takes the slot back. That is the number worth a
+    // countdown anyway.
+    expect(rows[0].right).toBe(countdownText(NOW - 3 * DAY + WEEK, NOW))
+    expect(rows[0].right).toBe('⟳4d00')
+    expect(rows[0].right).not.toBe(countdownText(MONTH_END, NOW))
+  })
+
+  it('leaves the right-hand side blank on a row the spend meter holds alone', () => {
+    const rows = quotaRows(snapshotOf({ anthropic: { meters: [monthly(2119.26)] } }), NOW)
+
+    // The work account. Not a dash and not a zero: the empty string an
+    // all-null-reset row already produces, because a calendar month needs no
+    // counting.
+    expect(rows[0]).toMatchObject({ state: 'ok', right: '' })
+    expect(rows[0].meters.map((shown) => shown.label)).toEqual(['MO'])
+    // The reset instant it does not lend the countdown still paces the bar.
+    expect(rows[0].meters[0].tickPercent).toBeDefined()
+  })
+
+  it('still projects a work account past its budget, because a word is not a countdown', () => {
+    const rows = quotaRows(snapshotOf({ anthropic: { meters: [monthly(4600)] } }), NOW)
+
+    expect(rows[0].outWord).toMatch(/^out /)
+    expect(rows[0].right).toBe('')
   })
 
   it('drops a lapsed monthly meter at the month boundary, as it drops any other', () => {

@@ -218,6 +218,38 @@ describe('the quota strip', () => {
     expect(row.meters.map((shown) => shown.fill)).toEqual(['73%', '29%', '22%'])
   })
 
+  it('draws a work account as the spend meter alone, with nothing on the right', async () => {
+    const container = await shellWith(
+      createScriptedQuota(
+        snapshotOf({
+          anthropic: {
+            meters: [
+              {
+                kind: 'monthly',
+                label: 'MO',
+                usedPercent: 42.3852,
+                resetsAt: Date.UTC(2026, 8, 1),
+                usedDollars: 2119.26,
+                limitDollars: 5000
+              }
+            ]
+          }
+        })
+      )
+    )
+
+    const row = readRow(rows(container)[0])
+    expect(row.name).toBe('Anthropic')
+    expect(row.meters.map((shown) => `${shown.label} ${shown.text}`)).toEqual([
+      'MO $2.1k/$5k · 42%'
+    ])
+    // Blank, not a dash and not a zero: the spend meter lends no countdown and
+    // there is no other meter to lend one.
+    expect(row.right).toBe('')
+    // The pace tick is a clock fact and stays.
+    expect(row.meters[0].tick).toBeDefined()
+  })
+
   it('renders a scoped meter at zero like any other, per Q1', async () => {
     const container = await shellWith(
       createScriptedQuota(
@@ -461,8 +493,9 @@ describe('the quota strip', () => {
 
     const [anthropic, codex, grok] = rows(container).map(readRow)
 
-    // The monthly reset outlasts the weekly one, so it is what counts down.
-    expect(anthropic.right).toBe('⟳12d00')
+    // The monthly reset outlasts the weekly one and still lends no countdown
+    // (Q2), so the weekly window keeps the slot.
+    expect(anthropic.right).toBe('⟳4d11')
     expect(anthropic.meters.map((shown) => `${shown.label} ${shown.text}`)).toEqual([
       '5H 73%',
       '7D 29%',

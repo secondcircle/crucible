@@ -216,7 +216,14 @@ export function quotaRows(snapshot: QuotaSnapshot | undefined, now: number): rea
       }
 
       const stale = isStale(quota, now)
+      // The spend meter contributes no countdown (Q2): a reader knows when the
+      // month ends, so counting down to it says nothing. Its reset instant
+      // still drives the pace tick, the projection and lapse detection; what
+      // Q2 removed is a countdown, not a clock fact. A row with no other meter,
+      // which is the work account's case, ends up with the empty right-hand
+      // side an all-null-reset row already produces.
       const resets = live
+        .filter((meter) => meter.kind !== 'monthly')
         .map((meter) => meter.resetsAt)
         .filter((resetsAt): resetsAt is number => resetsAt !== null)
       const longest = resets.length === 0 ? undefined : Math.max(...resets)
