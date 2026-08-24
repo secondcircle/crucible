@@ -758,11 +758,18 @@
 
 /* ---------- the artifact reader ---------- */
 
+/* Every element between the run view's body and a scroll container inside the
+   detail pane must be allowed to shrink below its content in the column
+   direction, or the scroll container never engages and the pane grows past
+   the window instead. This is the one that cannot by default: a column-flex
+   item whose automatic minimum height resolves to its whole content. The
+   sibling occupant's scroller (.chat) carries the same declaration itself. */
 .reader {
   flex: 1;
   display: flex;
   flex-direction: column;
   min-width: 0;
+  min-height: 0;
   background: var(--bg);
 }
 

@@ -150,6 +150,10 @@ interface ScriptedNode {
   readonly verdict?: { readonly verdict: string; readonly reason: string }
 }
 
+// Deliberately long: the only artifact body in the fake flavor that overflows
+// any plausible window, so the reader's scrolling is checkable under
+// `npm run dev`. Every other canned body stays short, which keeps the
+// no-scrollbar case checkable too.
 const SPEC_BODY = `# Spec — the scripted build
 
 The planner's product: what the builder implements and the reviewer judges.
@@ -159,6 +163,196 @@ The planner's product: what the builder implements and the reviewer judges.
 - The rail lists every artifact this run touched, inputs first.
 - Clicking one opens it here, in place of the node transcript.
 - Nothing in the view writes, deletes or re-runs anything.
+
+## The defect this run was started for
+
+A run's artifacts were reachable only through the node that produced them.
+Open a run, pick the node, read the strip at its foot, click the file. Three
+steps to answer "what did this run actually write", and the answer was
+scattered across as many nodes as the graph had. Nothing showed the run's
+product as one list.
+
+The rail is that list. It stands to the right of the detail pane for as long
+as the window has room for it, and it names every file the record knows
+about, in the order the run first mentioned each one.
+
+## The rail
+
+### What it holds
+
+1. The run's inputs, in the order the kickoff named them.
+2. Every artifact any node declared, whether or not it was written.
+3. Nothing else. A file a node touched without declaring is not the run's product and does not appear.
+
+### Ordering
+
+First appearance, and first appearance only. A node that starts late and
+declares a path the record has not seen puts that path at the end of the
+list. A path that was already there stays where it was, even if a later node
+rewrites it. The order is remembered for as long as the run view is open;
+reopening the run derives it from record order again.
+
+The alternative, sorting by write time, was rejected: rows would jump under
+the pointer while a run walks, and a rail that reorders itself mid-read is
+worse than one that occasionally looks stale.
+
+### Row states
+
+- **Written.** The file exists and has a stamp. The row is fully lit and clicking it opens the reader.
+- **Pending.** A node declared it and has not written it yet. The row is dimmed with a dashed marker.
+- **Never.** The node that owed it failed. The row stays, dimmed, marked never written. It does not disappear: a file that was promised and never arrived is a fact about the run, and dropping the row hides it.
+
+A pruned ghost is the one row that leaves. When the record stops naming a
+path the plan had only guessed at, its row goes and, if the reader was
+showing it, the node's transcript comes back by itself.
+
+### The count
+
+The rail's header counts artifacts, not nodes. Six files across three nodes
+reads "6 artifacts". The count gives way before the controls do: at the
+pane's narrowest the number is what gets ellipsized.
+
+## The reader
+
+### Opening
+
+A rail row opens the reader. So does a chip in the node strip, and so does
+the artifact name anywhere else in the view. The reader takes the detail
+pane, in place of the node transcript. The graph does not move. The rail does
+not move. The run view's header does not move.
+
+### Its header
+
+One row: the file's name, then where it came from and when, then the two
+actions, then the way out.
+
+- The name, in the mono face, accented.
+- The provenance line: written by which node, how long ago, how large. An input reads "handed in at kickoff" instead. A never-written file reads "never written" and names the node that failed.
+- **Reveal in Finder**, on written files only. There is nothing to reveal for a file that does not exist.
+- **Copy path**, on every state. It says "Copied" for a moment and then says what it does again.
+- **esc back to the node**, right-aligned, which is also what the Escape key does.
+
+Below the header, the full path on its own row, ellipsized from the right
+when the pane is narrow.
+
+### The body
+
+Three kinds, one container.
+
+| Kind | Rendered as | Notes |
+| --- | --- | --- |
+| Markdown | The app's own renderer | No HTML is parsed from the string |
+| Plain text | Preformatted, wrapped | Long tokens break rather than overflow |
+| HTML | A sandboxed frame | Served under its own origin, never inlined |
+
+The body scrolls. The header and the path row do not. This holds for a file
+of any length, which is the whole point of a reader: a spec of two hundred
+lines is read by scrolling, not by resizing the window and hoping.
+
+HTML is the exception to the container, not to the rule. It fills the space
+below the path row and scrolls inside its own frame, because a document from
+another origin scrolls itself.
+
+### Placeholders
+
+- Not written yet: "This file has not been written yet."
+- Never written: "This file was never written."
+- In flight: "Reading…".
+- Refused or unreadable: whatever the read said went wrong, in the body, with the rail row left alone.
+
+None of these is an error dialog. A file that is not there yet is an ordinary
+state of a running run.
+
+### Read-only, without exception
+
+The reader shows. It does not edit, it does not delete, it does not re-run
+the node that wrote the file. The two header actions are about the file on
+disk and never about the run. This is not a matter of what is convenient to
+build; it is what the view is for.
+
+## The gate
+
+Every read is checked against the run's own record, by exact string equality
+against the paths the record names. Not by resolving against the filesystem,
+not by prefix matching a directory. A path the record does not name is
+refused with "That file is not one this run touched", and the refusal reads
+the same in both flavors of the service because both ask the same function.
+
+What this buys: a relative path climbing out of the artifact directory
+matches no entry, so it is refused for the same reason any other unknown path
+is. There is no separate traversal check to keep correct.
+
+## Refresh
+
+A written artifact is read when the reader opens it and again when a slot the
+reader is watching fills. Nothing tails the file. The key carries the run,
+the path and the write stamp, so a rewrite refetches and a quiet file does
+not.
+
+While a read is in flight, nothing of another artifact is ever shown under
+this one's name. The answer that arrives is matched against the key that was
+asked for and dropped if they disagree.
+
+## Keyboard
+
+Escape unwinds one layer at a time, outermost last: full screen, then the
+reader, then the run view. Nothing else in the reader binds a key. There is
+no scroll shortcut, no jump-to-top, no find. The platform's own scrolling is
+what the mocks draw and it is what ships.
+
+## Geometry
+
+The graph pane starts at 640px and is dragged wider by the splitter. The
+splitter's width is remembered for the whole app, in the profile's own
+storage, so a dev launch and the installed app cannot move each other's
+divider.
+
+Room is given up in a fixed order as the window narrows: the rail goes first,
+then the graph is clamped, and the detail pane keeps a floor of 400px because
+below that it stops being a reading surface. Full screen puts the detail
+column away without taking it apart, so leaving full screen lands on the same
+transcript, scrolled where it was.
+
+## What this does not do
+
+These bind as strongly as the list above.
+
+- No editing, no deleting, no re-running from the rail or the reader.
+- No search across a run's artifacts. One file at a time.
+- No diff between two versions of the same file. The reader shows what is on disk now.
+- No download, no export, no share. Reveal in Finder is the door out.
+- No scroll-position memory. Closing and reopening a file starts at the top.
+- No new IPC. Every read rides the channel the run service already has.
+
+## Testing intent
+
+The rail's ordering, the row states, the gate's refusals and the reader's
+placeholders are all unit-testable and are tested at the shell seam against
+the fake service. Layout is not: the test environment computes none, so what
+a pane does with a tall child is checked in the running app under the fake
+flavor and nowhere else.
+
+This file is itself a fixture for that check. It is long on purpose.
+
+## Rejected alternatives
+
+**A modal over the graph.** Reading an artifact and looking at the node that
+wrote it are the same thought; a modal makes them alternatives.
+
+**A fourth column.** The window does not have the room, and the reader would
+be a column of forty characters on any laptop.
+
+**Rendering HTML inline after sanitizing it.** A sanitizer is a thing you can
+misconfigure. A frame under its own origin is a thing you cannot.
+
+**Tailing written files.** Interesting for a log, wrong for an artifact:
+artifacts are written once, at the end of a node, and a tail would spend its
+life idle.
+
+## Open questions
+
+None. The intent document ruled on every one of them, and the ones it did not
+reach were decided here and marked for veto.
 `
 
 const CHANGES_BODY = `# Changes
