@@ -799,9 +799,9 @@ describe('dismissing and adopting a run', () => {
   })
 })
 
-// A run a schedule fired has no orchestrator until a session adopts it (ADR
-// 0023). What that means to the engine is here: it delivers nothing, it
-// parks rather than speaking, and dismissing it is the whole act.
+// A run a schedule fired has no orchestrator until a session adopts it.
+// What that means to the engine is here: it delivers nothing, it parks
+// rather than speaking, and dismissing it is the whole act.
 describe('a run with no orchestrator', () => {
   /** A scheduled fire: no session, no inputs, the scheduled marker. */
   function scheduledRequest(repo: string, workflow: string): {

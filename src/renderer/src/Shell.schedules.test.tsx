@@ -308,7 +308,7 @@ describe('the board groups', () => {
       'Schedule issue-watch',
       'Schedule triage'
     ])
-    // The human reading beside the raw expression, as the mock prints it.
+    // The human reading beside the raw expression.
     const watch = scheduleRow('issue-watch')
     expect(watch).toHaveTextContent('every 5 min · */5 * * * * · check')
     expect(watch).toHaveTextContent('next in 2 min')

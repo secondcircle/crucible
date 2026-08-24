@@ -2,8 +2,8 @@
 //
 // When schedules fire, proved with no app, no git and no real time. The
 // scheduler's clock, its workflow listing, its run starting and its state
-// persistence are all injected, which is what makes ADR 0024's no-trace rule
-// checkable at all: the only way to prove a falsy check left nothing is to
+// persistence are all injected, which is what makes "a falsy check leaves
+// no trace" checkable at all: the only way to prove it left nothing is to
 // watch the run starter never being called.
 import { describe, expect, it } from 'vitest'
 import type { RunRecord } from '../../shared/workflows/run'
@@ -398,11 +398,9 @@ describe('run now', () => {
 })
 
 describe('run now beside a standing check warning', () => {
-  // S6: a check warning "clears on the next evaluation that completes, truthy
-  // or falsy", and the board shows "how long the check has been failing
-  // (first-failure instant kept)". Run now skips the check entirely, so it
-  // says nothing about the check: the warning and its since-instant must
-  // stand until an evaluation actually completes.
+  // Run now skips the check entirely, so it says nothing about the check:
+  // the warning and its first-failure instant must stand until an evaluation
+  // actually completes.
   it('leaves the warning and its first-failure instant standing', async () => {
     const held = rig({
       now: at(2026, 8, 24, 8, 0),
@@ -431,8 +429,8 @@ describe('run now beside a standing check warning', () => {
   })
 
   // A schedule shows one warning at a time, so a manual fire that fails takes
-  // the cell (B7). The check's first-failure instant must survive that: when
-  // the check warning comes back it is still aged from when the check broke.
+  // the cell. The check's first-failure instant must survive that: when the
+  // check warning comes back it is still aged from when the check broke.
   it('shows a failed manual kickoff without losing when the check first broke', async () => {
     const held = rig({
       now: at(2026, 8, 24, 8, 0),
@@ -462,9 +460,9 @@ describe('run now beside a standing check warning', () => {
     expect(held.view('triage')?.warning?.since).toBe(since)
   })
 
-  // S10, the same rule from the other side: Run now ignores the cron, so a
-  // fire that works says nothing about an expression Crucible still cannot
-  // parse. Only the file changing clears that one.
+  // The same rule from the other side: Run now ignores the cron, so a fire
+  // that works says nothing about an expression Crucible still cannot parse.
+  // Only the file changing clears that one.
   it('leaves an unparsable cron saying so', async () => {
     const held = rig({ now: at(2026, 8, 24, 8, 0), schedules: [daily({ cron: 'nonsense' })] })
     await held.scheduler.evaluate()

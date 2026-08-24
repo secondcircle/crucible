@@ -16,8 +16,8 @@ import {
 // The scheduler: when schedules fire, and nothing else. Its clock, its
 // workflow listing, its run starting and its state persistence are all
 // injected, so every rule below is provable with no app, no git and no real
-// time — including ADR 0024's no-trace rule, which is only provable by
-// observing that the run starter was never called.
+// time — including that a falsy check leaves no trace, which is only
+// provable by observing that the run starter was never called.
 //
 // One instant governs a whole evaluation: dueness, consumption and the
 // stamps a fire leaves are all measured against it, so a slow check cannot
@@ -79,7 +79,7 @@ export interface Scheduler {
 /** A check that takes longer than this has failed, whatever it is doing. */
 const DEFAULT_CHECK_MS = 30_000
 
-/** At least once a minute, with room for a slow evaluation (S1). */
+/** At least once a minute, with room for a slow evaluation. */
 const DEFAULT_TICK_MS = 30_000
 
 /** Every warning kind there is, for the cases that forget a schedule whole. */

@@ -32,7 +32,7 @@ export function parkedNote(run: RunRecord): string {
 
 export interface RunStateCell {
   readonly text: string
-  /** What the mock colors it: amber for a wait, red for a failure. */
+  /** Amber for a wait, red for a failure. */
   readonly tone: 'blocked' | 'failed' | 'done' | 'live'
 }
 

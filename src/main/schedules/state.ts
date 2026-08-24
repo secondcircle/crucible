@@ -2,7 +2,7 @@ import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { dirname } from 'node:path'
 
 // What the scheduler remembers between launches, in Crucible's own state
-// directory — never the repository, and never anything of π's (ADR 0015).
+// directory — never the repository, and never anything of π's.
 // Per workspace path: each schedule's toggle, each schedule's last-considered
 // instant, and the workspace's pause-all flag. Warning state is not here: it
 // is rebuilt by the next evaluation.

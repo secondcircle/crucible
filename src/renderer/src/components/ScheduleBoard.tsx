@@ -25,7 +25,7 @@ import './schedule-board.css'
 // The schedule board: what the repo declares, what it fired, and what is
 // waiting for a person. It reports, toggles schedules and hands runs to
 // sessions. It never answers a run — a run's only voice is a message to its
-// orchestrator (ADR 0017), gained by adoption and no other way.
+// orchestrator, gained by adoption and no other way.
 
 /** The row ages read as a clock while the board is open. */
 const TICK_MS = 30_000

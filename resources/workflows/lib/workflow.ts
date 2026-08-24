@@ -165,9 +165,8 @@ export interface PlannedNode {
 
 /**
  * The firing rule a repo workflow may declare: a cron expression, optionally
- * gated by a check. Only workflows in `<workspace>/.crucible/workflows/` are
- * scheduled; the field is ignored on user and built-in workflows. A schedule
- * never blocks running its workflow by hand.
+ * gated by a check. The field is ignored on user and built-in workflows. A
+ * schedule never blocks running its workflow by hand.
  */
 export interface ScheduleSpec {
   /** Standard 5-field cron (min hour dom mon dow), evaluated in local time. */

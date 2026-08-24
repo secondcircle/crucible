@@ -86,7 +86,7 @@ export interface RunRecord {
   readonly workspaceName: string
   // The orchestrator session. Every question and the completion go to its
   // agent; absent only for an unattended run — one a schedule fired, which
-  // has no orchestrator until a session adopts it (ADR 0023).
+  // has no orchestrator until a session adopts it.
   readonly sessionId?: SessionId
   // Fired from the schedule surface: a clock fire or the board's Run now. It
   // marks where the run came from and changes nothing about what a run is.

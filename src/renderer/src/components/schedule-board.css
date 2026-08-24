@@ -198,7 +198,7 @@
   color: var(--run);
 }
 
-/* Paused rows dim and say so in italics, exactly as the mock draws them. */
+/* Paused rows dim and say so in italics. */
 .board.schedules .srow.off .sname,
 .board.schedules .srow.off .scron,
 .board.schedules .srow.off .snext {
@@ -220,8 +220,8 @@
   opacity: 0;
 }
 
-/* On the row's hover, as the mock's behavior notes place it — and whenever it
-   is being used, so a fire under way is never invisible. */
+/* On the row's hover, and whenever it is being used, so a fire under way is
+   never invisible. */
 .board.schedules .srow:hover .srun,
 .board.schedules .srun:focus,
 .board.schedules .srun:disabled {
