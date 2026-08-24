@@ -204,6 +204,40 @@ describe('the shipped worktrees doc', () => {
     expect(text).toMatch(/crucible\/</)
   })
 
+  it('gives the run invocation exactly: both variables, all three cases', () => {
+    const text = doc()
+    expect(text).toContain('CRUCIBLE_WORKTREE_BASE')
+    expect(text).toContain('CRUCIBLE_WORKTREE_BRANCH')
+    // A session is told neither, and the base needs no resolving.
+    expect(text).toMatch(/unset/)
+    expect(text).toMatch(/full sha/)
+    // The example is the whole answer: a branch of it per case.
+    expect(text).toContain('if [ -n "${CRUCIBLE_WORKTREE_BRANCH:-}" ]; then')
+    expect(text).toContain('elif [ -n "${CRUCIBLE_WORKTREE_BASE:-}" ]; then')
+  })
+
+  it('says a continued branch needs a forced checkout, and why', () => {
+    const text = doc()
+    expect(text).toContain('git worktree add --force "$path" "$CRUCIBLE_WORKTREE_BRANCH"')
+    expect(text).toMatch(/still checked out in the predecessor's worktree/)
+  })
+
+  it('says exit 0 is not enough for a run, and what a mismatch costs', () => {
+    const text = doc()
+    expect(text).toMatch(/HEAD` is exactly `CRUCIBLE_WORKTREE_BASE/)
+    expect(text).toMatch(/detached HEAD is a failure/)
+    expect(text).toMatch(/refused at kickoff/)
+    // Nothing is tidied away behind the failure.
+    expect(text).toMatch(/Nothing is cleaned up/)
+  })
+
+  it('no longer scopes the creation script to sessions, or setup to runs', () => {
+    const text = doc()
+    expect(text).not.toContain('Sessions only.')
+    expect(text).not.toContain('It is what runs need')
+    expect(text).not.toContain('Workflow runs always create their')
+  })
+
   it('says branch names are throwaway and renaming later is the agent’s job', () => {
     const text = doc()
     expect(text).toMatch(/throwaway/)
