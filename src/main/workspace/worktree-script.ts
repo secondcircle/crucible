@@ -3,16 +3,10 @@ import { access, constants } from 'node:fs/promises'
 import { isAbsolute, join } from 'node:path'
 import { capture, headline, lastLine } from './capture'
 
-// One script owns worktree creation for sessions and runs both. A session's
-// invocation is bare and the script picks everything; a run's names the base
-// commit, and a chained successor's also names the branch to continue. Which
-// variables exist is how a script tells the three cases apart, so the caller
-// that has nothing to say says nothing at all.
-//
-// This module runs the script and checks the one thing every caller checks:
-// that what came back is an absolute path to a directory. What a run
-// additionally verifies about that worktree — commit and branch — belongs to
-// the run, and lives with it.
+// Which variables exist is how the script tells its invocations apart, so a
+// caller with nothing to say sets nothing at all. Only the check every
+// caller shares lives here; what a run further verifies — commit and
+// branch — belongs to the run.
 
 /** What a repository claims the creation mechanism by placing there. */
 export const WORKTREE_SCRIPT = join('.crucible', 'worktree')
@@ -38,10 +32,8 @@ export function hasWorktreeScript(workspacePath: string): boolean {
 }
 
 /**
- * Run the repository's creation script from the checkout and read back the
- * worktree it reports. Presence of the file decides that this is the
- * mechanism; a file that cannot be executed fails here rather than falling
- * through to git behind the repository's back.
+ * Presence of the file made it the mechanism, so one that cannot be executed
+ * fails here, never a quiet fall-through to git.
  */
 export async function runWorktreeScript(
   workspacePath: string,

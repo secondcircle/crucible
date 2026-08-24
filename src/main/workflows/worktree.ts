@@ -11,15 +11,10 @@ import {
 } from '../workspace/worktree-script'
 import { setUpWorktree } from '../workspace/worktree-setup'
 
-// A run's worktree is made the same two ways a session's is: the repository's
-// own `.crucible/worktree` when it has one, plain git plus
-// `.crucible/worktree-setup` when it does not. What differs is what the
-// script is told — the base commit, and for a chained successor the branch to
-// continue — and that Crucible verifies what came back rather than trusting
-// it, because a script that ignores the base leaves the run working on the
-// wrong commit with nobody the wiser. A mismatch refuses the run at kickoff,
-// before a node has cost anything. Nothing here ever removes a worktree or a
-// branch, verification failure included.
+// The repository's script is verified, never trusted: one that ignores the
+// base leaves the run working on the wrong commit with nobody the wiser, so
+// a mismatch refuses the run before a node has cost anything. Nothing here
+// ever removes a worktree or a branch, verification failure included.
 
 const WORKTREES = join('.crucible', 'worktrees')
 
@@ -49,10 +44,8 @@ export async function createRunWorktree(request: RunWorktreeRequest): Promise<Ru
     : await fromGit(request)
 }
 
-// The whole mechanism when the repository has one. It is told the base as a
-// full sha, and a chained successor's branch when there is one; it reports a
-// *ready* worktree, so setup is not run afterwards and none of the plain-git
-// path's directories or ignore files are made.
+// The script reports a *ready* worktree, so setup is never run after it and
+// none of the plain-git path's directories or ignore files are made.
 async function fromScript(request: RunWorktreeRequest): Promise<RunWorktree> {
   const { workspacePath, runId } = request
   // Before the script is invoked at all: a base that names no commit is
@@ -104,9 +97,8 @@ async function fromScript(request: RunWorktreeRequest): Promise<RunWorktree> {
   return { path: ran.path, branch, baseCommit }
 }
 
-// Plain git for a repository that owns no creation script: the same
-// directory family as session worktrees, the same self-ignoring .gitignore,
-// then the repository's setup.
+// Plain git, shaped exactly like a session's fallback worktree: same
+// directory family, same self-ignoring .gitignore.
 async function fromGit(request: RunWorktreeRequest): Promise<RunWorktree> {
   const { workspacePath, runId } = request
   const root = join(workspacePath, WORKTREES)

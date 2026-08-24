@@ -37,7 +37,7 @@ function setupScript(repo: string, body: string): void {
 }
 
 /**
- * The script the agent docs describe: all three invocations, worktrees of its
+ * The well-behaved script: all three invocations honored, worktrees of its
  * own choosing well away from `.crucible/worktrees/`, and a line per
  * invocation recording exactly what it was told.
  */

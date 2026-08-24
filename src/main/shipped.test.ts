@@ -227,7 +227,6 @@ describe('the shipped worktrees doc', () => {
     expect(text).toMatch(/HEAD` is exactly `CRUCIBLE_WORKTREE_BASE/)
     expect(text).toMatch(/detached HEAD is a failure/)
     expect(text).toMatch(/refused at kickoff/)
-    // Nothing is tidied away behind the failure.
     expect(text).toMatch(/Nothing is cleaned up/)
   })
 
