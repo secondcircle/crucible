@@ -397,6 +397,40 @@ describe('run now', () => {
   })
 })
 
+describe('run now beside a standing check warning', () => {
+  // S6: a check warning "clears on the next evaluation that completes, truthy
+  // or falsy", and the board shows "how long the check has been failing
+  // (first-failure instant kept)". Run now skips the check entirely, so it
+  // says nothing about the check: the warning and its since-instant must
+  // stand until an evaluation actually completes.
+  it('leaves the warning and its first-failure instant standing', async () => {
+    const held = rig({
+      now: at(2026, 8, 24, 8, 0),
+      schedules: [
+        daily({
+          check: () => {
+            throw new Error('403 from api.github.com')
+          }
+        })
+      ]
+    })
+    await held.scheduler.evaluate()
+    held.set(at(2026, 8, 24, 9, 1))
+    await held.scheduler.evaluate()
+    expect(held.view('triage')?.warning?.kind).toBe('check')
+    const since = held.view('triage')?.warning?.since
+
+    held.set(at(2026, 8, 24, 10, 0))
+    await held.scheduler.runNow(WORKSPACE, 'triage')
+    expect(held.fired).toHaveLength(1)
+
+    // The check is still broken and no evaluation has completed since the
+    // manual fire: the warning stands, aged from its first failure.
+    expect(held.view('triage')?.warning?.kind).toBe('check')
+    expect(held.view('triage')?.warning?.since).toBe(since)
+  })
+})
+
 describe('a schedule that cannot fire', () => {
   it('says why, never fires, and shows no next fire', async () => {
     const held = rig({
