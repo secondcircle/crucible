@@ -194,9 +194,24 @@ and cost), limits, meters panel.
 **Quota meter**:
 One window of one plan in the quota strip — a short label, a percent used, and
 the instant it resets. A provider has as many as its plan reports; nothing in
-Crucible fixes the count or the labels.
+Crucible fixes the count or the labels. Most meter a percent; the spend meter
+meters dollars.
 _Avoid_: window (the payload's word, ambiguous beside the context window),
 bar, gauge.
+
+**Spend meter**:
+The quota meter for an account's monthly dollar budget, labelled `MO` and
+printing dollars used over dollars allowed rather than a bare percent. It is
+the only meter that contributes no countdown to its row, because a calendar
+month needs no counting.
+_Avoid_: budget bar, credit meter, overage meter, monthly quota, MO meter.
+
+**Work account**:
+An Anthropic subscription that meters a monthly dollar budget and no usage
+windows at all: `limits: []` and a live `.spend`. It signs in through the same
+OAuth flow as a personal one, so nothing but the payload tells them apart, and
+its row carries the spend meter alone.
+_Avoid_: enterprise account, team plan, business subscription.
 
 **Pace tick**:
 The hairline on a windowed quota meter — weekly or monthly — marking where an
