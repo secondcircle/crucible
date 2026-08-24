@@ -429,6 +429,54 @@ describe('run now beside a standing check warning', () => {
     expect(held.view('triage')?.warning?.kind).toBe('check')
     expect(held.view('triage')?.warning?.since).toBe(since)
   })
+
+  // A schedule shows one warning at a time, so a manual fire that fails takes
+  // the cell (B7). The check's first-failure instant must survive that: when
+  // the check warning comes back it is still aged from when the check broke.
+  it('shows a failed manual kickoff without losing when the check first broke', async () => {
+    const held = rig({
+      now: at(2026, 8, 24, 8, 0),
+      schedules: [
+        daily({
+          check: () => {
+            throw new Error('403 from api.github.com')
+          }
+        })
+      ],
+      start: async () => {
+        throw new Error('no origin/HEAD, main or master')
+      }
+    })
+    await held.scheduler.evaluate()
+    held.set(at(2026, 8, 24, 9, 1))
+    await held.scheduler.evaluate()
+    const since = held.view('triage')?.warning?.since
+
+    held.set(at(2026, 8, 24, 10, 0))
+    await expect(held.scheduler.runNow(WORKSPACE, 'triage')).rejects.toThrow(/origin\/HEAD/)
+    expect(held.view('triage')?.warning?.kind).toBe('kickoff')
+
+    held.set(at(2026, 8, 25, 9, 1))
+    await held.scheduler.evaluate()
+    expect(held.view('triage')?.warning?.kind).toBe('check')
+    expect(held.view('triage')?.warning?.since).toBe(since)
+  })
+
+  // S10, the same rule from the other side: Run now ignores the cron, so a
+  // fire that works says nothing about an expression Crucible still cannot
+  // parse. Only the file changing clears that one.
+  it('leaves an unparsable cron saying so', async () => {
+    const held = rig({ now: at(2026, 8, 24, 8, 0), schedules: [daily({ cron: 'nonsense' })] })
+    await held.scheduler.evaluate()
+    const since = held.view('triage')?.warning?.since
+
+    held.set(at(2026, 8, 24, 10, 0))
+    await held.scheduler.runNow(WORKSPACE, 'triage')
+
+    expect(held.fired).toHaveLength(1)
+    expect(held.view('triage')?.warning?.kind).toBe('cron')
+    expect(held.view('triage')?.warning?.since).toBe(since)
+  })
 })
 
 describe('a schedule that cannot fire', () => {

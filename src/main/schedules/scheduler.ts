@@ -82,6 +82,9 @@ const DEFAULT_CHECK_MS = 30_000
 /** At least once a minute, with room for a slow evaluation (S1). */
 const DEFAULT_TICK_MS = 30_000
 
+/** Every warning kind there is, for the cases that forget a schedule whole. */
+const WARNING_KINDS: readonly ScheduleWarning['kind'][] = ['cron', 'inputs', 'check', 'kickoff']
+
 const INPUTS_WARNING =
   'This workflow declares inputs, and a scheduled fire has nobody to supply them. ' +
   'It never fires on the clock; run it by hand with its inputs instead.'
@@ -107,6 +110,11 @@ export function createScheduler(options: SchedulerOptions): Scheduler {
   // Warning state, in memory: an evaluation rebuilds it, and a relaunch has
   // none until the first evaluation says otherwise.
   const warnings = new Map<string, ScheduleWarning>()
+  // Per kind, the instant that kind's condition first held. A schedule shows
+  // one warning at a time, so a manual fire that fails displaces a standing
+  // check warning; the check's first-failure instant waits here and comes
+  // back with it. Only the rule that owns a kind forgets that instant.
+  const firstHeld = new Map<string, string>()
   let evaluating = false
   let timer: ReturnType<typeof setInterval> | undefined
   let disposed = false
@@ -165,7 +173,7 @@ export function createScheduler(options: SchedulerOptions): Scheduler {
     const survivors = Object.entries(workspace.schedules).filter(([name]) => names.has(name))
     if (survivors.length === Object.keys(workspace.schedules).length) return
     for (const name of Object.keys(workspace.schedules)) {
-      if (!names.has(name)) warnings.delete(keyOf(workspacePath, name))
+      if (!names.has(name)) clearWarning(workspacePath, name, WARNING_KINDS)
     }
     state = {
       workspaces: {
@@ -184,17 +192,27 @@ export function createScheduler(options: SchedulerOptions): Scheduler {
     message: string,
     at: number
   ): void {
-    const key = keyOf(workspacePath, workflow)
-    const standing = warnings.get(key)
-    const since =
-      standing !== undefined && standing.kind === kind
-        ? standing.since
-        : new Date(at).toISOString()
-    warnings.set(key, { kind, message, since })
+    const held = `${keyOf(workspacePath, workflow)}\u0000${kind}`
+    const since = firstHeld.get(held) ?? new Date(at).toISOString()
+    firstHeld.set(held, since)
+    warnings.set(keyOf(workspacePath, workflow), { kind, message, since })
   }
 
-  function clearWarning(workspacePath: string, workflow: string): void {
-    warnings.delete(keyOf(workspacePath, workflow))
+  // Every warning kind is cleared by the rule that owns it, and by no other:
+  // a `check` warning goes when an evaluation completes, `cron` and `inputs`
+  // when the file stops declaring the thing they name, `kickoff` when a fire
+  // works. So clearing always names the kinds it can speak for, and a
+  // standing warning of any other kind is left where it is.
+  function clearWarning(
+    workspacePath: string,
+    workflow: string,
+    kinds: readonly ScheduleWarning['kind'][]
+  ): void {
+    const key = keyOf(workspacePath, workflow)
+    for (const kind of kinds) firstHeld.delete(`${key}\u0000${kind}`)
+    const standing = warnings.get(key)
+    if (standing === undefined || !kinds.includes(standing.kind)) return
+    warnings.delete(key)
   }
 
   /** The gate's answer, bounded: anything but a clean truthy/falsy is an error. */
@@ -226,7 +244,10 @@ export function createScheduler(options: SchedulerOptions): Scheduler {
   async function fire(workspacePath: string, workflow: string, at: number): Promise<void> {
     try {
       await start({ workspacePath, workflow })
-      clearWarning(workspacePath, workflow)
+      // A fire that works answers for the last fire that did not, and for
+      // nothing else. Run now reaches here having skipped the check and
+      // ignored the cron, so it has no standing to clear what those said.
+      clearWarning(workspacePath, workflow, ['kickoff'])
       log?.({ event: 'schedule_fired', workspace: workspacePath, workflow })
     } catch (cause) {
       const message = cause instanceof Error ? cause.message : String(cause)
@@ -304,10 +325,7 @@ export function createScheduler(options: SchedulerOptions): Scheduler {
     }
     // A structural warning that no longer applies goes the moment the file is
     // right again; check and kickoff warnings are cleared by their own rules.
-    const standing = warnings.get(keyOf(workspacePath, workflow))
-    if (standing?.kind === 'cron' || standing?.kind === 'inputs') {
-      clearWarning(workspacePath, workflow)
-    }
+    clearWarning(workspacePath, workflow, ['cron', 'inputs'])
 
     const remembered = stateOf(workspacePath, workflow)
     // Never seen here before: baselined now, due for nothing earlier.
@@ -351,9 +369,7 @@ export function createScheduler(options: SchedulerOptions): Scheduler {
     }
     // The gate answered, truthy or falsy: whatever a previous evaluation had
     // to say about the check is over.
-    if (warnings.get(keyOf(workspacePath, workflow))?.kind === 'check') {
-      clearWarning(workspacePath, workflow)
-    }
+    clearWarning(workspacePath, workflow, ['check'])
     if (!gate.fire) {
       // Nothing exists anywhere: no run, no worktree, no board entry, and
       // nothing a user meets on the log.
@@ -483,6 +499,7 @@ export function createScheduler(options: SchedulerOptions): Scheduler {
       if (timer !== undefined) clearInterval(timer)
       timer = undefined
       warnings.clear()
+      firstHeld.clear()
       seen.clear()
     }
   }
