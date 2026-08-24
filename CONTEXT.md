@@ -247,6 +247,34 @@ directory, outside the repo. The files handed in at kickoff are shown beside
 them but are the repo's, not the run's.
 _Avoid_: output file, deliverable, exhibit (an exhibit is a context panel tab).
 
+**Schedule**:
+The firing rule a repo workflow may declare — a cron expression, optionally
+gated by a schedule check, in the workflow file, versioned with the repo. It
+starts runs on its own while the app is running and never blocks running
+that workflow by hand.
+_Avoid_: cron job, timer, automation.
+
+**Schedule check**:
+The optional predicate a schedule may declare beside its cron expression —
+plain TypeScript the scheduler evaluates in-process at fire time. Falsy
+means no run and no record anywhere; truthy fires the run. A check that
+errors puts its schedule in a warning state on the schedule board and never
+lights the chip.
+_Avoid_: trigger, condition, sensor, poll.
+
+**Schedule board**:
+The workspace-scoped overlay behind the schedule chip in the top bar:
+parked runs first, then every schedule with its cadence and last outcome,
+then recent runs and their reports. It reports, toggles schedules, and
+hands runs to sessions; it never answers a run itself.
+_Avoid_: schedules view, cron panel, automation dashboard.
+
+**Parked**:
+The state of a scheduled run stopped on a question, a stall, or a failure
+with no orchestrator to hear it. It waits — lighting the schedule chip and
+walking with Tab — until a session adopts it or the user dismisses it.
+_Avoid_: blocked (π's word for an interactive run's wait), stuck, orphaned.
+
 **Run graph**:
 The drawn picture of a run's nodes and the edges between them, layered
 top-down in the run view's left pane: what followed what, what fanned out in
