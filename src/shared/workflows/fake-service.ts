@@ -150,10 +150,8 @@ interface ScriptedNode {
   readonly verdict?: { readonly verdict: string; readonly reason: string }
 }
 
-// Deliberately long: the only artifact body in the fake flavor that overflows
-// any plausible window, so the reader's scrolling is checkable under
-// `npm run dev`. Every other canned body stays short, which keeps the
-// no-scrollbar case checkable too.
+// Deliberately long so the reader's scrolling is checkable in the fake flavor;
+// every other canned body stays short, keeping the no-scrollbar case checkable.
 const SPEC_BODY = `# Spec — the scripted build
 
 The planner's product: what the builder implements and the reviewer judges.
