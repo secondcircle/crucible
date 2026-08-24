@@ -12,7 +12,7 @@ import type { Flavor } from '../agent/select-adapter'
 import type { LogSink } from '../log/sink'
 import { readShippedStandingPrompt, shippedWorkflowLibPath, shippedWorkflowsPath } from '../shipped'
 import { createWorkflowEngine } from './engine'
-import { createWorkflowLoader } from './loader'
+import { createWorkflowLoader, type WorkflowLoader } from './loader'
 import { createLiveWorkflowRunService } from './service'
 import { createSdkNodeSessionFactory } from './sdk-node-session'
 import { createRunStore } from './store'
@@ -20,6 +20,24 @@ import { createRunStore } from './store'
 /** Never created here: discovery only ever reads. */
 export function userWorkflowsPath(home = homedir()): string {
   return join(home, '.crucible', 'workflows')
+}
+
+// One loader shape for the launch: the engine resolves the workflow a run
+// executes through it, and the scheduler reads the schedules a repo declares
+// through it. Its module cache is off, so both see an edited file at once.
+export function shippedWorkflowLoader(appPath: string, log: LogSink): WorkflowLoader {
+  return createWorkflowLoader({
+    roots: { builtIn: shippedWorkflowsPath(appPath), user: userWorkflowsPath() },
+    authoringModule: shippedWorkflowLibPath(appPath),
+    onUnloadable: (path, cause) => {
+      log.append({
+        source: 'main',
+        event: 'workflow_file_unloadable',
+        path,
+        message: cause instanceof Error ? cause.message : String(cause)
+      })
+    }
+  })
 }
 
 export interface WorkflowRunWiring {
@@ -93,21 +111,7 @@ export function selectWorkflowRunService(
     })
   }
 
-  const loader = createWorkflowLoader({
-    roots: {
-      builtIn: shippedWorkflowsPath(wiring.appPath),
-      user: userWorkflowsPath()
-    },
-    authoringModule: shippedWorkflowLibPath(wiring.appPath),
-    onUnloadable: (path, cause) => {
-      log.append({
-        source: 'main',
-        event: 'workflow_file_unloadable',
-        path,
-        message: cause instanceof Error ? cause.message : String(cause)
-      })
-    }
-  })
+  const loader = shippedWorkflowLoader(wiring.appPath, log)
 
   const store = createRunStore(join(wiring.stateDir, 'workflow-runs'), (path, cause) => {
     log.append({

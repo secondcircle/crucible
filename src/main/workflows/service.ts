@@ -8,10 +8,12 @@ import type {
   ArtifactView,
   MainWorkflowRunService,
   RunsSnapshot,
+  ScheduledFireRequest,
   WorkflowRunListener
 } from '../../shared/workflows/service'
 import type { StartRunRequest, WorkflowEngine } from './engine'
 import type { WorkflowLoader } from './loader'
+import { scheduledBase } from './scheduled-base'
 import { checkoutRootOf, headOf } from './worktree'
 
 // The live service: one engine, fanned out three ways — the IPC channel that
@@ -28,6 +30,9 @@ export interface LiveWorkflowRunOptions {
   readonly loader: WorkflowLoader
   /** Called when the engine's state changed; wired to engine.onChanged. */
   readonly changes: { subscribe(listener: () => void): void }
+  // Where a scheduled fire branches from: the trunk tip, fetched fresh. An
+  // argument so the rule is drivable without a repository.
+  readonly base?: (workspacePath: string) => Promise<string>
   /** Shows a file in the OS file manager; absent leaves Reveal unable to act. */
   readonly reveal?: (path: string) => void
 }
@@ -39,6 +44,7 @@ export function createLiveWorkflowRunService({
   engine,
   loader,
   changes,
+  base = scheduledBase,
   reveal
 }: LiveWorkflowRunOptions): MainWorkflowRunService {
   const listeners = new Set<WorkflowRunListener>()
@@ -218,6 +224,20 @@ export function createLiveWorkflowRunService({
     },
 
     tools,
+
+    // The whole of what a scheduled fire is beyond an ordinary run: the trunk
+    // for a base, nothing handed in, nobody to report to, and the marker that
+    // puts it on the schedule board.
+    async startScheduled(fire: ScheduledFireRequest) {
+      return engine.start({
+        workspacePath: fire.workspacePath,
+        workspaceName: basename(fire.workspacePath),
+        workflow: fire.workflow,
+        inputs: {},
+        base: await base(fire.workspacePath),
+        scheduled: true
+      })
+    },
 
     toggleOverview(): void {
       for (const listener of [...listeners]) listener({ type: 'toggle-overview' })

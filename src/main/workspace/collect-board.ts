@@ -16,9 +16,9 @@ import {
   parseNameWithOwner,
   parsePullRequests,
   parseRefs,
-  parseTrunkRef,
   PR_FIELDS
 } from './board-facts'
+import { findTrunk, NO_TRUNK, refreshRefs } from './trunk'
 
 // The commands arrive as a runner rather than being spawned here, so this
 // whole path is drivable from captured output.
@@ -78,21 +78,12 @@ export async function collectBoard(
   if (!repository.ok) return { kind: 'noRepository' }
 
   const email = await git('config', '--get', 'user.email')
-  const origin = await git('remote', 'get-url', 'origin')
-  const originUrl = origin.ok ? origin.stdout.trim() : ''
-
-  if (originUrl !== '') {
-    // So ahead/behind and remote presence are told against reality rather than
-    // against a stale ref. Offline, it simply fails and the refs on hand stand.
-    await git('fetch', '--prune', 'origin')
-  }
+  // So ahead/behind and remote presence are told against reality rather than
+  // against a stale ref. Offline, it simply fails and the refs on hand stand.
+  const { originUrl } = await refreshRefs(git)
 
   const trunk = await findTrunk(git, originUrl !== '')
-  if (trunk === undefined) {
-    throw new Error(
-      'Crucible could not tell which branch is the trunk here — no origin/HEAD, main or master.'
-    )
-  }
+  if (trunk === undefined) throw new Error(NO_TRUNK)
 
   const head = await git('symbolic-ref', '--quiet', '--short', 'HEAD')
   const checkedOut = head.ok ? head.stdout.trim() : ''
@@ -117,23 +108,6 @@ export async function collectBoard(
 }
 
 type Git = (...args: readonly string[]) => Promise<CommandOutcome>
-
-/** The remote default branch, then a local main, then a local master. */
-async function findTrunk(
-  git: Git,
-  hasOrigin: boolean
-): Promise<{ readonly name: string; readonly ref: string } | undefined> {
-  if (hasOrigin) {
-    const pointer = await git('symbolic-ref', '--quiet', 'refs/remotes/origin/HEAD')
-    const name = pointer.ok ? parseTrunkRef(pointer.stdout) : undefined
-    if (name !== undefined) return { name, ref: `refs/remotes/origin/${name}` }
-  }
-  for (const name of ['main', 'master']) {
-    const local = await git('show-ref', '--verify', '--quiet', `refs/heads/${name}`)
-    if (local.ok) return { name, ref: `refs/heads/${name}` }
-  }
-  return undefined
-}
 
 const REF_FIELDS = [
   '%(refname)',

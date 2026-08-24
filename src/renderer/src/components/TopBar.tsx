@@ -18,6 +18,7 @@ export function TopBar({
   onJumpToCacheMiss,
   issues,
   board,
+  schedules,
   update
 }: {
   readonly session?: SessionState
@@ -39,6 +40,14 @@ export function TopBar({
   // answered with a board for this workspace.
   readonly board?: {
     readonly landed: number
+    readonly needYou: number
+    readonly onOpen: () => void
+  }
+  // The schedule board's whole resting surface, on the same terms: absent
+  // until the scheduler has answered for this workspace, and absent for a
+  // workspace that declares no schedules at all.
+  readonly schedules?: {
+    readonly count: number
     readonly needYou: number
     readonly onOpen: () => void
   }
@@ -88,6 +97,24 @@ export function TopBar({
           </span>{' '}
           <b>{board.landed} landed</b>
           {board.needYou > 0 ? <u> · {board.needYou} need you</u> : null}
+        </button>
+      )}
+
+      {/* Teal-glyphed because it is a run surface, and lit exactly while one
+          of this workspace's scheduled runs is parked. */}
+      {schedules === undefined ? null : (
+        <button
+          className={`tchip runs${schedules.needYou > 0 ? ' lit' : ''}`}
+          aria-label="Schedule board"
+          onClick={schedules.onOpen}
+        >
+          <span className="g" aria-hidden="true">
+            ⟳
+          </span>{' '}
+          <b>
+            {schedules.count} schedule{schedules.count === 1 ? '' : 's'}
+          </b>
+          {schedules.needYou > 0 ? <u> · {schedules.needYou} needs you</u> : null}
         </button>
       )}
 

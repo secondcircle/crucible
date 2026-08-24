@@ -163,6 +163,23 @@ export interface PlannedNode {
   outputs?: Record<string, OutputSpec>
 }
 
+/**
+ * The firing rule a repo workflow may declare: a cron expression, optionally
+ * gated by a check. Only workflows in `<workspace>/.crucible/workflows/` are
+ * scheduled; the field is ignored on user and built-in workflows. A schedule
+ * never blocks running its workflow by hand.
+ */
+export interface ScheduleSpec {
+  /** Standard 5-field cron (min hour dom mon dow), evaluated in local time. */
+  cron: string
+  /**
+   * Optional gate, evaluated in-process at fire time. Truthy fires the run;
+   * falsy leaves no trace anywhere. Day one it is boolean only: no payload
+   * reaches the run, which re-queries what it needs.
+   */
+  check?(ctx: { readonly workspacePath: string }): boolean | Promise<boolean>
+}
+
 export interface WorkflowDef {
   /** One line: what a run of this accomplishes. Shown to orchestrators. */
   description: string
@@ -183,6 +200,13 @@ export interface WorkflowDef {
    * the nodes certain to run.
    */
   plan?(inputs: Record<string, string>): PlannedNode[]
+  /**
+   * Optional firing rule. A scheduled fire supplies no inputs and has no
+   * orchestrator, so a workflow that declares both a schedule and inputs is a
+   * schedule in permanent warning state on the schedule board; running it by
+   * hand with inputs is untouched.
+   */
+  schedule?: ScheduleSpec
   run(ctx: RunContext): Promise<Record<string, unknown> | void>
 }
 

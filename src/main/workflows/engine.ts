@@ -46,8 +46,11 @@ const INTERRUPTED =
 export interface StartRunRequest {
   readonly workspacePath: string
   readonly workspaceName: string
-  /** The orchestrator session; every run has one this milestone. */
+  // The orchestrator session. Absent is an unattended run: it speaks to
+  // nobody and parks on anything it cannot resolve, until a session adopts it.
   readonly sessionId?: SessionId
+  /** Fired from the schedule surface: a clock fire, or the board's Run now. */
+  readonly scheduled?: boolean
   /** The workflow's name, resolved through the origin ladder. */
   readonly workflow: string
   readonly inputs: Readonly<Record<string, string>>
@@ -126,6 +129,7 @@ interface LiveRun {
   workspacePath: string
   workspaceName: string
   sessionId?: SessionId
+  scheduled?: true
   worktreePath?: string
   branch?: string
   baseCommit?: string
@@ -321,6 +325,7 @@ export function createWorkflowEngine(options: EngineOptions): WorkflowEngine {
       workspacePath: request.workspacePath,
       workspaceName: request.workspaceName,
       ...(request.sessionId === undefined ? {} : { sessionId: request.sessionId }),
+      ...(request.scheduled === true ? { scheduled: true as const } : {}),
       worktreePath: worktree.path,
       branch: worktree.branch,
       baseCommit: worktree.baseCommit,
@@ -1003,6 +1008,9 @@ export function createWorkflowEngine(options: EngineOptions): WorkflowEngine {
               workspacePath: run.workspacePath,
               workspaceName: run.workspaceName,
               ...(run.sessionId === undefined ? {} : { sessionId: run.sessionId }),
+              // A successor of a scheduled run came from that fire too, so it
+              // lands on the same board and parks where its predecessor would.
+              ...(run.scheduled === true ? { scheduled: true } : {}),
               workflow: staged.workflow,
               inputs: staged.inputs,
               base: run.finalCommit ?? run.baseCommit ?? 'HEAD'
@@ -1074,6 +1082,17 @@ export function createWorkflowEngine(options: EngineOptions): WorkflowEngine {
     )
   }
 
+  /** Stops a live run where it stands; its record keeps what it reached. */
+  function cancelRun(runId: WorkflowRunId): void {
+    const handle = handles.get(runId)
+    if (handle === undefined) throw new Error(`The run "${runId}" is not live.`)
+    if (handle.cancelRequested) return
+    handle.desired = 'cancelled'
+    handle.cancelRequested = true
+    rejectWaiters(handle, 'the run was cancelled')
+    void releaseLiveNodes(handle)
+  }
+
   return {
     runs(): readonly RunRecord[] {
       return records as readonly RunRecord[]
@@ -1100,19 +1119,21 @@ export function createWorkflowEngine(options: EngineOptions): WorkflowEngine {
       save(handle.run)
     },
 
-    cancel(runId: WorkflowRunId): void {
-      const handle = handles.get(runId)
-      if (handle === undefined) throw new Error(`The run "${runId}" is not live.`)
-      if (handle.cancelRequested) return
-      handle.desired = 'cancelled'
-      handle.cancelRequested = true
-      rejectWaiters(handle, 'the run was cancelled')
-      void releaseLiveNodes(handle)
-    },
+    cancel: cancelRun,
 
     dismiss(runId: WorkflowRunId): void {
       const run = requireRecord(runId)
-      if (run.status === 'running' || run.status === 'paused') throw new Error(dismissRefusal(runId))
+      if (run.status === 'running' || run.status === 'paused') {
+        // A run with an orchestrator is stopped from the run view, never
+        // cleared: the session it reports to is still listening.
+        if (run.sessionId !== undefined) throw new Error(dismissRefusal(runId))
+        // A parked run has nobody listening, so dismissing it is the whole
+        // act: it stops working and is cleared in one go.
+        if (run.dismissedAt === undefined) run.dismissedAt = nowIso()
+        save(run)
+        cancelRun(runId)
+        return
+      }
       // The first stamp stands: dismissing twice says nothing new.
       if (run.dismissedAt !== undefined) return
       run.dismissedAt = nowIso()

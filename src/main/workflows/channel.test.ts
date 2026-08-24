@@ -16,6 +16,9 @@ function serviceRecorder(): MainWorkflowRunService {
     artifact: vi.fn(async () => ({ kind: 'markdown' as const, body: '# spec', bytes: 6 })),
     revealArtifact: vi.fn(async () => {}),
     artifactFile: vi.fn(() => undefined),
+    startScheduled: vi.fn(async () => {
+      throw new Error('the channel never carries a scheduled fire')
+    }),
     tools: {
       workflows: async () => '',
       start: async () => '',

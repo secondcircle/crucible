@@ -78,12 +78,17 @@ const loader: WorkflowLoader = {
   }
 }
 
-function serviceOver(runs: RunRecord[], subscribers: Array<() => void> = []) {
+function serviceOver(
+  runs: RunRecord[],
+  subscribers: Array<() => void> = [],
+  base?: (workspacePath: string) => Promise<string>
+) {
   const engine = engineOf(runs)
   const service = createLiveWorkflowRunService({
     engine,
     loader,
-    changes: { subscribe: (listener) => subscribers.push(listener) }
+    changes: { subscribe: (listener) => subscribers.push(listener) },
+    ...(base === undefined ? {} : { base })
   })
   return { engine, service }
 }
@@ -157,6 +162,46 @@ describe('the live run service', () => {
     } finally {
       vi.useRealTimers()
     }
+  })
+
+  // A scheduled fire is an ordinary run with three things settled for it: the
+  // trunk to branch from, nothing handed in, and nobody to report to.
+  it('fires a scheduled run from the trunk, with no session and no inputs', async () => {
+    const asked: string[] = []
+    const { engine, service } = serviceOver([], [], async (workspacePath) => {
+      asked.push(workspacePath)
+      return 'refs/remotes/origin/main'
+    })
+
+    const run = await service.startScheduled({
+      workspacePath: '/repos/thing',
+      workflow: 'triage'
+    })
+
+    expect(asked).toEqual(['/repos/thing'])
+    expect(engine.started).toEqual([
+      {
+        workspacePath: '/repos/thing',
+        workspaceName: 'thing',
+        workflow: 'triage',
+        inputs: {},
+        base: 'refs/remotes/origin/main',
+        scheduled: true
+      }
+    ])
+    expect(run.id).toBe('new1')
+  })
+
+  it('refuses a scheduled fire whose trunk cannot be resolved', async () => {
+    const { engine, service } = serviceOver([], [], async () => {
+      throw new Error('no origin/HEAD, main or master')
+    })
+
+    await expect(
+      service.startScheduled({ workspacePath: '/repos/thing', workflow: 'triage' })
+    ).rejects.toThrow(/no origin\/HEAD/)
+    // Nothing was started: the failure is the schedule's, before a run exists.
+    expect(engine.started).toEqual([])
   })
 
   it('announces toggle-overview to whoever listens', () => {
