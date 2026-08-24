@@ -49,10 +49,8 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 /**
- * The spend meter's two amounts, in major currency units. `null` where either
- * one fails, because a meter that prints one real number beside a missing one
- * is worse than no meter: the reader cannot tell a fabricated zero from an
- * amount somebody actually spent.
+ * `null` unless both amounts hold: a fabricated zero would read exactly like
+ * an amount somebody actually spent, so half a reading is worse than none.
  */
 function validDollars(
   used: unknown,
@@ -79,9 +77,8 @@ function validMeter(raw: unknown): QuotaMeter | null {
   if (usedPercent < 0 || usedPercent > 100) return null
   if (resetsAt !== null && (typeof resetsAt !== 'number' || !Number.isFinite(resetsAt))) return null
 
-  // Dollars come through exactly where the published contract promises them:
-  // a monthly meter carries both amounts or is dropped whole, and no other
-  // kind carries them whatever the file says.
+  // Dollars on any other kind are stripped rather than fatal: the percent
+  // there is still a reading worth keeping.
   let dollars: { usedDollars: number; limitDollars: number } | null = null
   if (kind === 'monthly') {
     dollars = validDollars(raw['usedDollars'], raw['limitDollars'])

@@ -493,8 +493,8 @@ describe('the quota strip', () => {
 
     const [anthropic, codex, grok] = rows(container).map(readRow)
 
-    // The monthly reset outlasts the weekly one and still lends no countdown
-    // (Q2), so the weekly window keeps the slot.
+    // The monthly reset outlasts the weekly one and still lends no countdown,
+    // so the weekly window keeps the slot.
     expect(anthropic.right).toBe('⟳4d11')
     expect(anthropic.meters.map((shown) => `${shown.label} ${shown.text}`)).toEqual([
       '5H 73%',

@@ -38,11 +38,8 @@ function meter(over: Partial<QuotaMeter> = {}): QuotaMeter {
 
 const ok = (meters: QuotaMeter[]): AdapterResult => ({ ok: true, meters })
 
-// The work account, captured live from the usage endpoint and kept byte for
-// byte: an empty `limits[]`, a $5,000 budget at $2,119.26, and a `cinder_cove`
-// pool pinned at 100% that nothing here may read. These are the wire bytes
-// rather than a parsed object, because what is under test is the whole path
-// from the response body to the read seam.
+// The work account's usage response, captured live and kept byte for byte:
+// what is under test is the whole path from the response body to the read seam.
 const WORK_ACCOUNT_BODY = String.raw`{"five_hour":null,"seven_day":null,"seven_day_oauth_apps":null,"seven_day_opus":null,"seven_day_sonnet":null,"seven_day_cowork":null,"seven_day_omelette":null,"tangelo":null,"iguana_necktie":null,"omelette_promotional":null,"nimbus_quill":{"utilization":0.0,"resets_at":null,"limit_dollars":null,"used_dollars":null,"remaining_dollars":null},"cinder_cove":{"utilization":100.0,"resets_at":"2026-09-22T18:55:57.572982+00:00","limit_dollars":1000,"used_dollars":1000.0,"remaining_dollars":0.0},"amber_ladder":null,"extra_usage":{"is_enabled":true,"monthly_limit":500000,"used_credits":211926.0,"utilization":42.3852,"currency":"USD","decimal_places":2,"disabled_reason":null,"user_disabled":false,"spend_limit_reached":false,"credits_ever_enabled":true,"daily":null,"weekly":null},"limits":[],"spend":{"used":{"amount_minor":211926,"currency":"USD","exponent":2},"limit":{"amount_minor":500000,"currency":"USD","exponent":2},"percent":42,"severity":"normal","enabled":true,"disabled_reason":null,"cap":{"money":null,"credits":{"amount_minor":500000,"exponent":2}},"balance":null,"auto_reload":null,"disclaimer":"Usage credits cover you when you hit your plan limits.","can_purchase_credits":false,"can_toggle":false},"member_dashboard_available":true}`
 
 /** Answers the usage endpoint with those bytes and opens no socket. */
@@ -388,10 +385,8 @@ describe('the quota store', () => {
 
   it('carries the work account’s spend meter from the wire to the read seam', async () => {
     const dir = tempDir()
-    // The one clock the store does not govern: the adapter stamps the spend
-    // meter's reset off the wall clock, so the store is handed that same
-    // instant and the expectation below is computed from it, never written
-    // down as a date.
+    // The adapter stamps the spend meter's reset off the wall clock, which the
+    // store does not govern, so the expectation is computed from this instant.
     const at = Date.now()
     const store = createQuotaStore({
       getAuth: bearer,
@@ -403,9 +398,8 @@ describe('the quota store', () => {
     })
 
     await store.refresh()
-    // Read back off the file, through the same gate the renderer's snapshot
-    // comes through. This round trip returned `meters: []` before the gate
-    // learned the kind, which is the whole bug.
+    // The same gate the renderer's snapshot comes through: this round trip
+    // returned `meters: []` before the gate learned the kind.
     const quota = store.read().providers.anthropic
 
     expect(quota.meters).toHaveLength(1)

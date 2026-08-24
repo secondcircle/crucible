@@ -253,9 +253,8 @@ describe('the spend meter through the cache gate', () => {
 
   it('drops a monthly meter carrying a non-finite amount, either side of it', () => {
     const dir = tempDir()
-    // A JSON file cannot hold a bare `NaN`, but `1e999` parses as Infinity: an
-    // infinite budget prints every amount as 0%, and an infinite spend prints
-    // as `$Infinityk`.
+    // A JSON file cannot hold a bare `NaN`, but `1e999` parses as Infinity,
+    // which would print as a 0% budget or a `$Infinityk` spend.
     writeFileSync(
       join(dir, 'anthropic.json'),
       `{"v":1,"providerId":"anthropic","fetchedAt":${NOW},"attemptedAt":${NOW},"windows":[` +
@@ -301,9 +300,8 @@ describe('the spend meter through the cache gate', () => {
       writeCache(dir, quota.providerId, goodEntry(quota.providerId, [...quota.meters]))
     }
 
-    // `npm run dev` hands the renderer this snapshot without going near the
-    // gate, which is how the work account's row shipped empty. Pinning the two
-    // together means a shape the fake shows is a shape the reader publishes.
+    // The fake flavor hands the renderer this snapshot without ever crossing
+    // this gate, so a shape the fake shows must be one the reader publishes.
     const read = snapshotOf(dir)
     for (const quota of Object.values(canned.providers)) {
       expect(read.providers[quota.providerId].meters).toEqual(quota.meters)
