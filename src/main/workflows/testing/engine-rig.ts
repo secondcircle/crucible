@@ -132,7 +132,7 @@ export function loaderOf(defs: Record<string, WorkflowDef>): WorkflowLoader {
   function loaded(name: string): LoadedWorkflow {
     const def = defs[name]
     if (def === undefined) throw new Error(`No workflow is named "${name}".`)
-    return { name, origin: 'built-in', path: `/shipped/${name}.ts`, def }
+    return { name, origin: 'workspace', path: `/workspace/.crucible/workflows/${name}.ts`, def }
   }
   return {
     async list() {

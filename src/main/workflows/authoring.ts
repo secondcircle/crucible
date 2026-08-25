@@ -3,4 +3,4 @@
 // workflow file (`crucible:workflow`). This re-export is how the engine
 // reaches it without a second copy that could drift.
 
-export * from '../../../resources/workflows/lib/workflow'
+export * from '../../../resources/workflow-lib/workflow'

@@ -1,10 +1,11 @@
 // @vitest-environment node
 //
-// The built-ins Crucible ships, loaded the way the app loads them: the real
-// folder, the real jiti loader, the real `crucible:workflow` alias. Nothing
-// else covers these files at runtime — typechecking sees them, but a broken
-// alias or a default export that is not a workflow would only ever surface as
-// a failed kickoff in front of a human.
+// The example workflows Crucible ships beside the agent docs, loaded through
+// the real jiti loader and the real `crucible:workflow` alias. The app never
+// loads these files — they exist to be copied into a workflow folder — so a
+// broken example would otherwise only surface in front of the user who copied
+// it. This repo's own `.crucible/workflows/` copies are covered here too,
+// loaded the way the app loads them.
 //
 // No SDK session is constructed and no model is called: loading a workflow
 // is reading a file.
@@ -13,7 +14,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { shippedWorkflowLibPath, shippedWorkflowsPath } from '../shipped'
+import { shippedExamplesPath, shippedWorkflowLibPath } from '../shipped'
 import type { NodeResult, NodeSpec, RunContext } from './authoring'
 import { createWorkflowLoader } from './loader'
 
@@ -25,12 +26,14 @@ afterEach(() => {
   for (const dir of cleanUp.splice(0)) rmSync(dir, { recursive: true, force: true })
 })
 
-/** A user folder that exists nowhere, so only the built-ins are found. */
-const NO_USER_FOLDER = join(APP, 'resources', 'workflows', 'no-such-user-folder')
+/** A workspace that exists nowhere, so only the example folder is found. */
+const NO_WORKSPACE = join(APP, 'resources', 'agent-docs', 'no-such-workspace')
 
-function shippedLoader(): ReturnType<typeof createWorkflowLoader> {
+// The example folder stood up as the loader's user root: the app never reads
+// the examples, so the test that keeps them loadable mounts them itself.
+function exampleLoader(): ReturnType<typeof createWorkflowLoader> {
   return createWorkflowLoader({
-    roots: { builtIn: shippedWorkflowsPath(APP), user: NO_USER_FOLDER },
+    roots: { user: shippedExamplesPath(APP) },
     authoringModule: shippedWorkflowLibPath(APP),
     onUnloadable: (path, cause) => {
       throw new Error(`${path} did not load: ${String(cause)}`)
@@ -85,7 +88,7 @@ async function driveAdrAudit(
   const headAt: Record<string, string> = {}
   const dirtyAt: Record<string, string> = {}
 
-  const adrAudit = await shippedLoader().resolve(APP, 'adr-audit')
+  const adrAudit = await exampleLoader().resolve(NO_WORKSPACE, 'adr-audit')
   const outputs = await adrAudit.def.run({
     inputs: {},
     artifactDir,
@@ -115,10 +118,9 @@ async function driveAdrAudit(
   return { dispatched, outputs, artifactDir, headAt, dirtyAt }
 }
 
-describe('the workflows Crucible ships', () => {
+describe('the example workflows Crucible ships', () => {
   it('all load, and each says what it is and what it needs', async () => {
-    // A workspace with no workflow folder of its own: the built-ins stand alone.
-    const listed = await shippedLoader().list(APP)
+    const listed = await exampleLoader().list(NO_WORKSPACE)
 
     expect(listed.map((workflow) => workflow.name)).toEqual(['adhoc', 'adr-audit', 'build'])
 
@@ -127,7 +129,6 @@ describe('the workflows Crucible ships', () => {
     expect(listed.find((workflow) => workflow.name === 'adr-audit')?.def.inputs).toEqual({})
 
     for (const workflow of listed) {
-      expect(workflow.origin).toBe('built-in')
       expect(workflow.def.description.trim()).not.toBe('')
       // Every input is described, because the description is all an
       // orchestrator has to go on when it fills one in.
@@ -137,10 +138,28 @@ describe('the workflows Crucible ships', () => {
     }
   })
 
-  it('plans a graph from its inputs before anything costs money', async () => {
-    const loader = shippedLoader()
+  // This repository keeps its own copies enrolled, so retiring the built-ins
+  // never broke its build path. Loaded exactly as the app would: a user root
+  // that finds nothing, this checkout as the workspace.
+  it("finds this repo's own workflows at the workspace rung", async () => {
+    const loader = createWorkflowLoader({
+      roots: { user: NO_WORKSPACE },
+      authoringModule: shippedWorkflowLibPath(APP),
+      onUnloadable: (path, cause) => {
+        throw new Error(`${path} did not load: ${String(cause)}`)
+      }
+    })
+    const listed = await loader.list(APP)
+    expect(listed.map((workflow) => [workflow.name, workflow.origin])).toEqual([
+      ['adr-audit', 'workspace'],
+      ['build', 'workspace']
+    ])
+  })
 
-    const adhoc = await loader.resolve(APP, 'adhoc')
+  it('plans a graph from its inputs before anything costs money', async () => {
+    const loader = exampleLoader()
+
+    const adhoc = await loader.resolve(NO_WORKSPACE, 'adhoc')
     expect(adhoc.def.plan?.({ prompt: '/tmp/task.md' })).toEqual([
       {
         id: 'work',
@@ -155,7 +174,7 @@ describe('the workflows Crucible ships', () => {
 
     // All three audit nodes are certain to run, so all three are ghosts from
     // kickoff, each already naming the artifact it will write.
-    const audit = await loader.resolve(APP, 'adr-audit')
+    const audit = await loader.resolve(NO_WORKSPACE, 'adr-audit')
     expect(audit.def.plan?.({})).toEqual([
       {
         id: 'audit',
@@ -193,7 +212,7 @@ describe('the workflows Crucible ships', () => {
 
     // The plan is what the run view draws as pending ghosts, so its parents
     // have to name nodes the plan itself declares.
-    const build = await loader.resolve(APP, 'build')
+    const build = await loader.resolve(NO_WORKSPACE, 'build')
     const planned = build.def.plan?.({ intent: '/tmp/intent.md' }) ?? []
     expect(planned.length).toBeGreaterThan(0)
     const ids = new Set(planned.map((node) => node.id))
@@ -251,7 +270,7 @@ describe('the workflows Crucible ships', () => {
     writeFileSync(prompt, 'do the thing\n')
 
     const dispatched: NodeSpec[] = []
-    const adhoc = await shippedLoader().resolve(APP, 'adhoc')
+    const adhoc = await exampleLoader().resolve(NO_WORKSPACE, 'adhoc')
     await adhoc.def.run({
       inputs: { prompt },
       artifactDir: scratch,
@@ -318,7 +337,7 @@ describe('the workflows Crucible ships', () => {
   })
 
   it('says which workflow a name misses', async () => {
-    await expect(shippedLoader().resolve(APP, 'nonesuch')).rejects.toThrow(
+    await expect(exampleLoader().resolve(NO_WORKSPACE, 'nonesuch')).rejects.toThrow(
       /Known workflows: adhoc, adr-audit, build/
     )
   })

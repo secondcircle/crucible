@@ -10,7 +10,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { createWorkflowLoader } from '../workflows/loader'
 import { loaderSchedules } from './source'
 
-const AUTHORING = join(__dirname, '..', '..', '..', 'resources', 'workflows', 'lib', 'workflow.ts')
+const AUTHORING = join(__dirname, '..', '..', '..', 'resources', 'workflow-lib', 'workflow.ts')
 
 const scratch: string[] = []
 
@@ -44,10 +44,8 @@ function workflowFile(folder: string, name: string, extra: string, inputs = '{}'
   )
 }
 
-function reader(builtIn: string, user: string) {
-  return loaderSchedules(
-    createWorkflowLoader({ roots: { builtIn, user }, authoringModule: AUTHORING })
-  )
+function reader(user: string) {
+  return loaderSchedules(createWorkflowLoader({ roots: { user }, authoringModule: AUTHORING }))
 }
 
 describe('what the scheduler reads', () => {
@@ -59,7 +57,7 @@ describe('what the scheduler reads', () => {
       `  schedule: { cron: '0 9 * * *', check: () => true },\n`
     )
 
-    const declared = await reader(tempDir(), tempDir())(workspace)
+    const declared = await reader(tempDir())(workspace)
 
     expect(declared).toHaveLength(1)
     expect(declared[0]).toMatchObject({
@@ -74,15 +72,13 @@ describe('what the scheduler reads', () => {
     expect(await declared[0]?.check?.({ workspacePath: workspace })).toBe(true)
   })
 
-  it('ignores a schedule on a user or built-in workflow', async () => {
-    const builtIn = tempDir()
+  it('ignores a schedule on a user workflow', async () => {
     const user = tempDir()
     const workspace = tempDir()
-    workflowFile(builtIn, 'shipped', `  schedule: { cron: '0 9 * * *' },\n`)
     workflowFile(user, 'mine', `  schedule: { cron: '0 9 * * *' },\n`)
     workflowFile(join(workspace, '.crucible', 'workflows'), 'repo', `  schedule: { cron: '0 9 * * *' },\n`)
 
-    const declared = await reader(builtIn, user)(workspace)
+    const declared = await reader(user)(workspace)
 
     expect(declared.map((schedule) => schedule.workflow)).toEqual(['repo'])
   })
@@ -96,7 +92,7 @@ describe('what the scheduler reads', () => {
       `{ intent: 'the intent document' }`
     )
 
-    const declared = await reader(tempDir(), tempDir())(workspace)
+    const declared = await reader(tempDir())(workspace)
 
     expect(declared[0]?.declaresInputs).toBe(true)
   })
@@ -105,7 +101,7 @@ describe('what the scheduler reads', () => {
     const workspace = tempDir()
     workflowFile(join(workspace, '.crucible', 'workflows'), 'plain', '')
 
-    expect(await reader(tempDir(), tempDir())(workspace)).toEqual([])
+    expect(await reader(tempDir())(workspace)).toEqual([])
   })
 
   // A cron that is not even text is an expression nothing can fire, which the
@@ -118,7 +114,7 @@ describe('what the scheduler reads', () => {
       `  schedule: { cron: 9 as unknown as string },\n`
     )
 
-    const declared = await reader(tempDir(), tempDir())(workspace)
+    const declared = await reader(tempDir())(workspace)
 
     expect(declared[0]?.cron).toBe('')
   })

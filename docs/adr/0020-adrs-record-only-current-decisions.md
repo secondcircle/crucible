@@ -34,9 +34,10 @@ what carries the replaced-shape reasoning that makes deletion safe.
 ## Consequences
 
 The convention we broke is one every agent has been trained on, so left alone
-an agent will eventually "repair" the folder by adding tombstones back. The
-shipped `adr-audit` workflow is what holds the line, and this ADR is what
-tells the audit's own agents why the line is there.
+an agent will eventually "repair" the folder by adding tombstones back. This
+repository's `adr-audit` workflow (`.crucible/workflows/adr-audit.ts`) is
+what holds the line, and this ADR is what tells the audit's own agents why
+the line is there.
 
 ## Considered Options
 

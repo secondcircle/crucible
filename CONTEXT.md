@@ -247,6 +247,13 @@ outputs and verdicts. The template, never the execution: what executes is a
 run.
 _Avoid_: using "workflow" for a running instance, pipeline, automation.
 
+**Example workflow**:
+A complete, runnable workflow file shipped beside the agent docs as reference
+material — copied into a `.crucible/workflows/` folder and adapted, never
+loaded by the engine from where it ships. Crucible ships no workflows that
+run as-is.
+_Avoid_: built-in workflow, prefab, template, sample.
+
 **Run**:
 One execution of a workflow, working in a worktree of its own branched from
 a commit named at kickoff. Observed in the UI, never conversed with: its

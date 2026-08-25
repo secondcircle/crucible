@@ -872,9 +872,9 @@ export function createFakeWorkflowRunService({
   const tools: RunTools = {
     async workflows(): Promise<string> {
       return [
-        '- adhoc (built-in) — one node running a prompt file, in a worktree',
+        '- adhoc (workspace) — one node running a prompt file, in a worktree',
         '  inputs: prompt: A file containing the node\'s task, used verbatim.',
-        '- build (built-in) — take an intent document to built code: a Spec, a builder, and a review loop',
+        '- build (workspace) — take an intent document to built code: a Spec, a builder, and a review loop',
         '  inputs: intent: The intent document for the work.'
       ].join('\n')
     },

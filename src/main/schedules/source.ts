@@ -5,9 +5,9 @@ import type { DeclaredSchedule } from './scheduler'
 // through the loader whose module cache is off, so an edited schedule is live
 // by the next evaluation and a deleted one stops existing.
 //
-// Only repo workflows carry schedules: a `schedule` field on a user or
-// built-in workflow is ignored — not fired, not listed, no error. They would
-// otherwise fire in every workspace at once.
+// Only repo workflows carry schedules: a `schedule` field on a user workflow
+// is ignored — not fired, not listed, no error. It would otherwise fire in
+// every workspace at once.
 
 export function loaderSchedules(
   loader: WorkflowLoader

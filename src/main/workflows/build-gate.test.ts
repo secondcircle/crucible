@@ -14,7 +14,7 @@ import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { shippedWorkflowLibPath, shippedWorkflowsPath } from '../shipped'
+import { shippedExamplesPath, shippedWorkflowLibPath } from '../shipped'
 import type { NodeResult, NodeSpec, RunContext, WorkflowDef } from './authoring'
 import { createWorkflowLoader } from './loader'
 
@@ -201,14 +201,13 @@ function driver(repo: string, script: Script = {}): Driver {
 }
 
 async function buildWorkflow(): Promise<WorkflowDef> {
+  // The example folder stood up as the user root: the loader never reads the
+  // examples in the app, so a test that wants one loads it as its own.
   const loader = createWorkflowLoader({
-    roots: {
-      builtIn: shippedWorkflowsPath(APP),
-      user: join(APP, 'resources', 'workflows', 'no-such-user-folder')
-    },
+    roots: { user: shippedExamplesPath(APP) },
     authoringModule: shippedWorkflowLibPath(APP)
   })
-  return (await loader.resolve(APP, 'build')).def
+  return (await loader.resolve('/no/such/workspace', 'build')).def
 }
 
 interface Outputs {

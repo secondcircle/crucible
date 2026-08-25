@@ -1,12 +1,34 @@
 import { spawnSync } from 'node:child_process'
 import { workflow, type PlannedNode } from 'crucible:workflow'
 
-// Ported from the legacy system: take an intent document to built code — a
-// Spec, a fresh-context builder, a review loop, and the merge gate that was
-// once a workflow of its own. What a run leaves is a branch; pulling it in is
-// the orchestrator's judgment and merging it the human's act. Venue machinery
-// is gone (every run works in its own worktree); check-ins go to
-// the orchestrator, never to a dashboard.
+// Take an intent document to built code — a Spec, a fresh-context builder, a
+// review loop, and the merge gate. What a run leaves is a branch; pulling it
+// in is the orchestrator's judgment and merging it the human's act. Check-ins
+// go to the orchestrator, never to a dashboard.
+//
+// Orchestrator guidance — when a run of this workflow completes:
+//
+// A run ends in the merge gate, so what comes back is a branch already judged
+// against the intent document that authorized it. Its outputs carry the
+// gate's `verdict` and `reason`, a `coverageReport`, one `commentReports`
+// path per gate round, and a `merge` result. Do all four of these:
+//
+// - Give the verdict and its reason in chat. The reason is written to be
+//   acted on without opening anything.
+// - Open the coverage report as a context panel tab with `panel_show`. It is
+//   the coverage-and-scope judgment on the branch and the thing the user
+//   reads before they merge. The run never opens it itself — a run only
+//   speaks to its orchestrator, and the panel is the session's.
+// - Name the comment report's path in chat without opening it. It is an
+//   audit trail of comment edits the gate made, read only when something
+//   looks off.
+// - Relay the merge result. `clean` means the branch still merges with the
+//   local trunk; `conflicts` comes with the conflicting files, so name them —
+//   the user wants to know before they go to merge, not during. `untested`
+//   means the check itself could not run, and says why.
+//
+// The gate never merges, pushes or touches the trunk, and neither does
+// completion: merging stays the human's act.
 
 const DOCUMENT_MODEL = 'anthropic/claude-fable-5:high'
 const CODE_MODEL = 'anthropic/claude-opus-5:high'

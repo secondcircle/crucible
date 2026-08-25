@@ -6,8 +6,12 @@ registry, no build step:
 
 - `<workspace>/.crucible/workflows/` — this repository only.
 - `~/.crucible/workflows/` — every workspace on this machine.
-- Built-ins ship with Crucible. Workspace overrides user overrides built-in,
-  so shadowing a built-in's name replaces it here.
+
+Workspace overrides user, so a workspace file shadowing a user file's name
+replaces it here. Crucible ships no workflows of its own: every workflow is
+authored, usually by an agent reading this page. What Crucible does ship is
+complete examples — see the end of this page — to copy into a workflow
+folder and adapt.
 
 Crucible loads the file with a TypeScript-aware loader; `crucible:workflow`
 resolves to the authoring module without any `node_modules` in the folder.
@@ -170,3 +174,33 @@ same session, so fixes happen with full context.
   workflow then has to parse.
 - `ctx.ask` is expensive attention: reserve it for judgment only the
   session that started the run can supply.
+
+## Complete examples, shipped beside these docs
+
+`examples/`, in the same directory as this file, holds full workflows that
+once shipped as built-ins. They are reference material only — the engine
+never loads them from there. Copy one into a workflow folder, rename it,
+and adapt:
+
+- `examples/adhoc.ts` — the smallest useful workflow: one node running a
+  prompt file in the run's worktree, declaring a report artifact so the run
+  is inspectable from the graph.
+- `examples/adr-audit.ts` — a multi-node pipeline with no inputs at all:
+  audit, sweep and report nodes chained through `reads`, doctrine text
+  shipped inside the file so replacing the workflow replaces the rule and
+  its enforcement in one act, and commits made from `run()` so the branch
+  tells the story. Declaring no inputs is what makes a workflow schedulable.
+- `examples/build.ts` — the big one: an intent document to built code.
+  A Spec node, a fresh-context builder, a bounded review loop with
+  `ctx.openNode`/`revise`, verdict schemas branching the orchestration, a
+  check-in via `ctx.ask` when reviews keep arguing, and a merge gate that
+  loops until it approves. Its header comment carries guidance for the
+  orchestrator that runs it. This is the workflow the align flow feeds —
+  see `align-flow.md` beside this file.
+
+A typical ask — "a workflow that works through issues labeled `ready` on a
+nightly cron" — is a small composition of what is on this page: a
+`schedule` with a `check` that queries the issue host (`gh issue list …`),
+no inputs, and a `run()` that re-queries the label, then loops issues
+through nodes shaped like the examples' — or stages a follow-up run per
+issue with `ctx.stage`.

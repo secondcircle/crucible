@@ -63,7 +63,7 @@ const loader: WorkflowLoader = {
     return [
       {
         name: 'adhoc',
-        origin: 'built-in',
+        origin: 'workspace',
         path: '/x/adhoc.ts',
         def: {
           description: 'one node running a prompt file',
@@ -97,7 +97,7 @@ describe('the live run service', () => {
   it('lists the catalog with origins and inputs for the agent', async () => {
     const { service } = serviceOver([])
     const text = await service.tools.workflows('/repos/thing')
-    expect(text).toContain('adhoc (built-in) — one node running a prompt file')
+    expect(text).toContain('adhoc (workspace) — one node running a prompt file')
     expect(text).toContain('prompt: a task file')
   })
 

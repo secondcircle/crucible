@@ -94,9 +94,10 @@ export function createLiveWorkflowRunService({
       const listed = await loader.list(root)
       if (listed.length === 0) {
         return (
-          'No workflows are available here. A workflow is a TypeScript file in ' +
-          `${join(root, '.crucible', 'workflows')} (workspace), ~/.crucible/workflows (user), ` +
-          'or shipped with Crucible; see the workflow authoring page of the agent docs.'
+          'No workflows are available here — Crucible ships none. A workflow is a ' +
+          `TypeScript file in ${join(root, '.crucible', 'workflows')} (workspace) or ` +
+          '~/.crucible/workflows (user). To write one, read the workflow authoring page ' +
+          'of the agent docs, which names complete shipped examples to copy and adapt.'
         )
       }
       return listed

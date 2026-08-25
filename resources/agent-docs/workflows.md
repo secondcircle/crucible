@@ -23,7 +23,8 @@ To write a new workflow, read `workflow-authoring.md` beside this file.
 ## What starting a run means
 
 Every input is a path to an existing file. Write the file first — a prompt
-for `adhoc`, an intent document for `build` — then pass its path.
+file, an intent document, whatever the input's description asks for — then
+pass its path.
 
 The run gets a fresh worktree, branched from a commit:
 
@@ -60,32 +61,22 @@ The user watches runs in the run strip above the chat and can open a
 full-screen view of any run, but they never talk to a run's agents — every
 conversation about a run happens here, with you.
 
-### When a `build` run completes
+### Workflow-specific guidance
 
-A `build` run ends in the merge gate, so what comes back is a branch already
-judged against the intent document that authorized it. Its `Outputs` carry
-the gate's `verdict` and `reason`, a `coverageReport`, one `commentReports`
-path per gate round, and a `merge` result. Do all four of these:
-
-- Give the verdict and its reason in chat. The reason is written to be acted
-  on without opening anything.
-- Open the coverage report as a context panel tab with `panel_show`. It is
-  the coverage-and-scope judgment on the branch and the thing the user reads
-  before they merge. The run never opens it itself — a run only speaks to
-  you, and the panel is this session's.
-- Name the comment report's path in chat without opening it. It is an audit
-  trail of comment edits the gate made, read only when something looks off.
-- Relay the merge result. `clean` means the branch still merges with the
-  local trunk; `conflicts` comes with the conflicting files, so name them —
-  the user wants to know before they go to merge, not during. `untested`
-  means the check itself could not run, and says why.
-
-The gate never merges, pushes or touches the trunk, and neither does
-completion: merging stays the human's act.
+A workflow's file may open with orchestrator guidance in a header comment —
+what to do with its outputs when a run completes, what its verdicts mean.
+When a completion arrives from a workflow you have not run before, read the
+workflow's file — `<name>.ts` in its origin's folder, which the catalog
+names — before relaying the result.
 
 ## Where workflows come from
 
-Three origins, exactly like commands: built-in (shipped with Crucible),
-user (`~/.crucible/workflows/`), workspace (`<workspace>/.crucible/workflows/`).
-Workspace overrides user overrides built-in, file name is workflow name, and
-a file in a folder is enrollment — there is no registry.
+Two origins: user (`~/.crucible/workflows/`) and workspace
+(`<workspace>/.crucible/workflows/`). Workspace overrides user, file name is
+workflow name, and a file in a folder is enrollment — there is no registry.
+
+Crucible ships no workflows. An empty catalog is not breakage: it means
+nobody has written one for this workspace yet, and writing one is your job
+when asked. Read `workflow-authoring.md` beside this file — it names
+complete shipped examples (`examples/adhoc.ts`, `examples/adr-audit.ts`,
+`examples/build.ts`) to copy and adapt.

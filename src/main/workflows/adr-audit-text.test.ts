@@ -10,7 +10,7 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { createJiti } from 'jiti'
 import { beforeAll, describe, expect, it } from 'vitest'
-import { shippedWorkflowLibPath, shippedWorkflowsPath } from '../shipped'
+import { shippedExamplesPath, shippedWorkflowLibPath } from '../shipped'
 import type { WorkflowDef } from './authoring'
 
 const APP = join(import.meta.dirname, '..', '..', '..')
@@ -34,7 +34,7 @@ beforeAll(async () => {
     interopDefault: true,
     alias: { 'crucible:workflow': shippedWorkflowLibPath(APP) }
   })
-  mod = (await jiti.import(join(shippedWorkflowsPath(APP), 'adr-audit.ts'))) as AdrAuditModule
+  mod = (await jiti.import(join(shippedExamplesPath(APP), 'adr-audit.ts'))) as AdrAuditModule
 })
 
 /**
@@ -226,7 +226,7 @@ describe('the enforcer is clean of what it treats', () => {
   })
 
   it('names none in its own source either, comments included', () => {
-    const source = readFileSync(join(shippedWorkflowsPath(APP), 'adr-audit.ts'), 'utf8')
+    const source = readFileSync(join(shippedExamplesPath(APP), 'adr-audit.ts'), 'utf8')
 
     expect(source).not.toMatch(/\bADR\s*\d/i)
     expect(source).not.toMatch(/docs\/adr\/\d/i)

@@ -10,7 +10,7 @@ import type { MainWorkflowRunService } from '../../shared/workflows/service'
 import type { CacheRecorder } from '../cache/ledger'
 import type { Flavor } from '../agent/select-adapter'
 import type { LogSink } from '../log/sink'
-import { readShippedStandingPrompt, shippedWorkflowLibPath, shippedWorkflowsPath } from '../shipped'
+import { readShippedStandingPrompt, shippedWorkflowLibPath } from '../shipped'
 import { createWorkflowEngine } from './engine'
 import { createWorkflowLoader, type WorkflowLoader } from './loader'
 import { createLiveWorkflowRunService } from './service'
@@ -27,7 +27,7 @@ export function userWorkflowsPath(home = homedir()): string {
 // through it. Its module cache is off, so both see an edited file at once.
 export function shippedWorkflowLoader(appPath: string, log: LogSink): WorkflowLoader {
   return createWorkflowLoader({
-    roots: { builtIn: shippedWorkflowsPath(appPath), user: userWorkflowsPath() },
+    roots: { user: userWorkflowsPath() },
     authoringModule: shippedWorkflowLibPath(appPath),
     onUnloadable: (path, cause) => {
       log.append({
