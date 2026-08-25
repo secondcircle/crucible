@@ -119,10 +119,24 @@ overrides user overrides built-in.
 _Avoid_: prompt template (π's mechanism), slash command.
 
 **Intent brief**:
-The durable artifact an `/align` interview writes on agreement — the settled
-scope and rulings — at `.crucible/align/` in the workspace. The interview
-says nothing about what happens to it next.
+The durable artifact an alignment interview produces on agreement — the
+settled scope and rulings — published as the body of an align issue on the
+workspace's issue host, never as a file in the repository. The interview says
+nothing about what happens to it next.
 _Avoid_: alignment doc, spec, plan.
+
+**Align issue**:
+The issue an alignment interview creates on the confirming yes: labeled
+`align`, its body the intent brief, its prototypes attached. The marker a
+future build chain looks for.
+_Avoid_: alignment ticket, brief file, align document.
+
+**Prototype**:
+A small artifact built during an alignment interview to de-risk something
+non-obvious — an HTML mock for a UI surface, a spike proving a library we
+have never used — finished before the align issue is created and shipped
+with it.
+_Avoid_: spike (alone), proof of concept, demo.
 
 **Context panel**:
 The agent-curated display split to the right of the chat area, where a

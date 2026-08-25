@@ -79,11 +79,11 @@ describe('the built-in commands', () => {
     const text = expansion.kind === 'command' ? expansion.text : ''
 
     expect(text).toContain('Do you agree we are fully aligned?')
-    expect(text).toContain('<workspace>/.crucible/align/<YYMMDD>-<slug>.md')
     for (const heading of [
       "## What we're building",
       '## Rulings — what the user settled',
       '## Constraints and non-negotiables',
+      '## Prototyping',
       '## Still open',
       '## Durable residue from this interview',
       '## Source material'
@@ -95,6 +95,22 @@ describe('the built-in commands', () => {
     expect(text).toContain('frontier')
     expect(text).toContain('CONTEXT.md')
     expect(text).toContain('docs/adr/')
+  })
+
+  it('ends /align in an align issue on the workspace host, never a repo file', async () => {
+    const expansion = await shipped().expand(workspace, '/align')
+    const text = expansion.kind === 'command' ? expansion.text : ''
+
+    // Host detection is the workspace's config, and the label is the marker.
+    expect(text).toContain('.crucible/jira.json')
+    expect(text).toContain('gh label create align')
+    expect(text).toContain('gh issue create')
+    expect(text).toContain('gh gist create')
+    expect(text).toMatch(/Never\s+write the\s+brief into the repository\./)
+    expect(text).not.toContain('.crucible/align/')
+    // Failure preserves the brief outside the repo, named, never dropped.
+    expect(text).toMatch(/outside the repository/)
+    expect(text).toMatch(/never silently dropped/)
   })
 
   it('carries no workflow machinery and no π folder', async () => {
@@ -121,17 +137,21 @@ describe('the built-in commands', () => {
     expect(withSubject).toMatchObject({ kind: 'command', origin: 'built-in' })
     expect(text).toContain('The subject: blank screen after summarize')
     expect(text).toContain('Do you agree we are fully aligned?')
-    expect(text).toContain('<workspace>/.crucible/align/<YYMMDD>-<slug>.md')
     expect(text).toContain('## Decided without asking — veto anything here')
+    expect(text).toContain('## Prototyping')
+    // The same align-issue ending as /align: host by config, label, no repo file.
+    expect(text).toContain('.crucible/jira.json')
+    expect(text).toContain('gh label create align')
+    expect(text).toContain('gh gist create')
+    expect(text).not.toContain('.crucible/align/')
   })
 
   it('keeps /quick-align ignorant of /align, sub-agents and π', async () => {
     const expansion = await shipped().expand(workspace, '/quick-align')
     const text = expansion.kind === 'command' ? expansion.text : ''
 
-    // Its own name and the brief path both contain "align", so match /align
-    // not preceded by "quick-" or ".crucible".
-    expect(text).not.toMatch(/(?<!quick-)(?<!\.crucible)\/align/)
+    // Its own name contains "align", so match /align not preceded by "quick-".
+    expect(text).not.toMatch(/(?<!quick-)\/align/)
     for (const gone of ['sub-agent', '~/.pi', '<repo>']) {
       expect(text).not.toContain(gone)
     }
