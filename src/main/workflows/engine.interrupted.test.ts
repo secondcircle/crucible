@@ -229,6 +229,22 @@ describe('resume', () => {
     expect(ending?.text).toContain(branch)
   })
 
+  it('never drops the burned money from the record, even before new stats arrive', async () => {
+    const { before, runId } = await interruptedRun()
+    const burned = before.engine.runs()[0].nodes[1].cost ?? 0
+    expect(burned).toBeGreaterThan(0)
+
+    // The re-run blocks without a line of activity, so no stats snapshot has
+    // happened yet: the record must still say what the first life spent.
+    const after = relaunch(before, { gated }, () => (_prompt, tools) => {
+      tools.block({ reason: 'which way?' })
+    })
+    await after.engine.resume(runId)
+    await until(() => after.engine.runs()[0].waiting === true)
+
+    expect(after.engine.runs()[0].nodes[1].cost ?? 0).toBeGreaterThanOrEqual(burned)
+  })
+
   it('keeps the money the cut node already burned and adds to it', async () => {
     const { before, runId } = await interruptedRun()
     const burned = before.engine.runs()[0].nodes[1].cost ?? 0
