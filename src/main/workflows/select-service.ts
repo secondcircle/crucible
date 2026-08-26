@@ -46,6 +46,11 @@ export interface WorkflowRunWiring {
   readonly stateDir: string
   /** How a run speaks: a message to its orchestrator session's agent. */
   readonly deliver: (sessionId: SessionId, text: string) => void
+  // Whether a session the shell store holds still exists, asked when a run
+  // resumes. Not optional: the engine's own default presumes every recorded
+  // session is alive, which in a real launch would leave a resumed orphan run
+  // talking to nobody and never parking, so main must answer for real.
+  readonly sessionExists: (sessionId: SessionId) => boolean
   /** The cache ledger every observed miss is appended to, sessions and runs alike. */
   readonly cache?: CacheRecorder
   /** Shows a file in the OS file manager, for the artifact reader's Reveal. */
@@ -131,6 +136,9 @@ export function selectWorkflowRunService(
       agentDir: join(wiring.stateDir, 'workflow-agent')
     }),
     deliver: wiring.deliver,
+    // ADR 0023's machinery only takes over an orphaned resumed run if the
+    // engine is told the session is gone; the shell store is the authority.
+    sessionExists: wiring.sessionExists,
     ...(wiring.cache === undefined ? {} : { cache: wiring.cache }),
     onChanged: () => {
       for (const listener of [...changeListeners]) listener()

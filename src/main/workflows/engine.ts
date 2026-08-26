@@ -680,6 +680,11 @@ export function createWorkflowEngine(options: EngineOptions): WorkflowEngine {
         })),
         artifacts: declaredArtifacts(),
         startedAt: nowIso(),
+        // The carried money is on the record from the re-run's first instant,
+        // not from its first stats capture: a node that blocks before it
+        // reports any activity never gets one, and until then the record
+        // would claim the previous life spent nothing.
+        ...(carried.cost === 0 ? {} : { cost: round4(carried.cost) }),
         ...(carried.cacheMisses === 0 ? {} : { cacheMisses: carried.cacheMisses })
       }
       if (slot >= 0) run.nodes[slot] = node

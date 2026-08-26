@@ -148,6 +148,10 @@ const workflowRuns = selectWorkflowRunService(
     // The renderer gets no path-opening capability of its own; Reveal in the
     // artifact reader asks the service, which asks this.
     reveal: (path: string) => electronShell.showItemInFolder(path),
+    // The store is the authority on which sessions exist, so a run resuming
+    // to a session the user has since deleted goes unattended and parks
+    // instead of reporting into nothing.
+    sessionExists: (sessionId) => store.session(sessionId) !== undefined,
     deliver: (sessionId, text) => {
       if (orchestratorInbox === undefined) {
         throw new Error('no shell is up to carry a run message yet')
