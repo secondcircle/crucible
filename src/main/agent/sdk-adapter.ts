@@ -163,7 +163,6 @@ export function createSdkAdapter({
   const agentDir = crucibleAgentDir(homedir())
   const listeners = new Set<AdapterEventListener>()
   const sessions = new Map<SessionId, Bound>()
-  const resources = new Map<string, Promise<WorkspaceResources>>()
   let sdkModule: Promise<Sdk> | undefined
   let modelRuntime: Promise<ModelRuntime> | undefined
   // The runtime once it has resolved, because pricing a miss happens inside a
@@ -213,45 +212,44 @@ export function createSdkAdapter({
   // Stock π except for the emptied resources below, which keep the user's
   // globally configured extensions out of a Crucible session, and the system
   // prompt, which is Crucible's outright.
-  function workspaceResources(workspacePath: string): Promise<WorkspaceResources> {
-    const existing = resources.get(workspacePath)
-    if (existing !== undefined) return existing
-
-    const built = (async (): Promise<WorkspaceResources> => {
-      const pi = await sdk()
-      const settingsManager = pi.SettingsManager.create(workspacePath, agentDir)
-      // In memory only, never written back to the user's settings files. The
-      // queue modes are fixed here: a kind is delivered as one group.
-      settingsManager.applyOverrides({
-        packages: [],
-        extensions: [],
-        steeringMode: 'all',
-        followUpMode: 'all'
-      })
-      const resourceLoader = new pi.DefaultResourceLoader({
-        cwd: workspacePath,
-        agentDir,
-        settingsManager,
-        noExtensions: true,
-        // π's own prompt folders are not read at all: commands are Crucible's,
-        // and two command systems in one composer would be two grammars.
-        noPromptTemplates: true,
-        // A skill is one of the few things that would still reach a session
-        // past a full prompt override.
-        noSkills: true,
-        // The base is ignored, so π's own prompt never reaches a session and a
-        // system-prompt file discovered in any folder is dead.
-        systemPromptOverride: () => systemPrompt,
-        // A Crucible-owned custom-instructions mechanism is deferred, so a file
-        // dropped into the agent dir must not become one by accident.
-        appendSystemPromptOverride: () => []
-      })
-      await resourceLoader.reload()
-      return { resourceLoader, settingsManager }
-    })()
-
-    resources.set(workspacePath, built)
-    return built
+  //
+  // Built fresh on every call, never cached: the loader reads AGENTS.md only
+  // inside reload(), so a loader cached per workspace would pin every later
+  // session — in an app process that lives for days — to the file as it stood
+  // when the workspace was first opened. Each session open reads the file as
+  // it is now. Resumes go through here too, on purpose: a resumed conversation
+  // pays one prompt-cache miss and gets the current instructions.
+  async function workspaceResources(workspacePath: string): Promise<WorkspaceResources> {
+    const pi = await sdk()
+    const settingsManager = pi.SettingsManager.create(workspacePath, agentDir)
+    // In memory only, never written back to the user's settings files. The
+    // queue modes are fixed here: a kind is delivered as one group.
+    settingsManager.applyOverrides({
+      packages: [],
+      extensions: [],
+      steeringMode: 'all',
+      followUpMode: 'all'
+    })
+    const resourceLoader = new pi.DefaultResourceLoader({
+      cwd: workspacePath,
+      agentDir,
+      settingsManager,
+      noExtensions: true,
+      // π's own prompt folders are not read at all: commands are Crucible's,
+      // and two command systems in one composer would be two grammars.
+      noPromptTemplates: true,
+      // A skill is one of the few things that would still reach a session
+      // past a full prompt override.
+      noSkills: true,
+      // The base is ignored, so π's own prompt never reaches a session and a
+      // system-prompt file discovered in any folder is dead.
+      systemPromptOverride: () => systemPrompt,
+      // A Crucible-owned custom-instructions mechanism is deferred, so a file
+      // dropped into the agent dir must not become one by accident.
+      appendSystemPromptOverride: () => []
+    })
+    await resourceLoader.reload()
+    return { resourceLoader, settingsManager }
   }
 
   /** `provider/id`, which is the whole of what a `ModelId` is here. */
