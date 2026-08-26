@@ -15,6 +15,7 @@ import {
   type DetectedCacheMiss
 } from './cache-miss.ts'
 import { renderToolOutput, summarizeToolArgs } from './sdk-events.ts'
+import { stripTurnContext } from './turn-context.ts'
 
 // Stored messages produce the same item kinds a live turn does, so history
 // renders through the code a stream renders through.
@@ -235,10 +236,13 @@ export function bashRunOf(details: unknown): BashRunShare | undefined {
   return { command, output, ...(typeof exitCode === 'number' ? { exitCode } : {}) }
 }
 
+// Turn-start context rides inside the user message π stored, and no surface
+// may show it: stripping it here covers the transcript, the session tree and
+// the titler, all three of which read a user message through this.
 export function userTextOf(content: unknown): string {
-  if (typeof content === 'string') return content.trim()
+  if (typeof content === 'string') return stripTurnContext(content).trim()
   if (!Array.isArray(content)) return ''
-  return content
+  const joined = content
     .map((block) =>
       typeof block === 'object' &&
       block !== null &&
@@ -248,7 +252,7 @@ export function userTextOf(content: unknown): string {
         : ''
     )
     .join('')
-    .trim()
+  return stripTurnContext(joined).trim()
 }
 
 // Only images that were genuinely sent with the message: base64 bytes and a

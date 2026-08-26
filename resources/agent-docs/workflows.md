@@ -10,7 +10,7 @@ it gets comes from you.
 
 To write a new workflow, read `workflow-authoring.md` beside this file.
 
-## The four tools
+## The five tools
 
 - `crucible_workflows` — the catalog this workspace can reach: name,
   description, inputs.
@@ -19,6 +19,7 @@ To write a new workflow, read `workflow-authoring.md` beside this file.
   commit-ish.
 - `crucible_runs` — where this session's runs stand.
 - `crucible_answer` — answer the question a run raised, by run id.
+- `crucible_resume` — resume an interrupted run, by run id.
 
 ## What starting a run means
 
@@ -56,6 +57,27 @@ Every message a run sends starts with `⚑ Crucible run <id>`:
   it is fine to finish what you are doing first.
 - **Failure.** The worktree is left as it stands. Inspect it, decide whether
   to retry, repair by hand, or bring it to the user.
+- **An interruption.** Crucible quit while the run was working, so it stopped
+  where it stood; its worktree and artifacts are intact. Nothing about it
+  moves again until you or the user resumes it. See below.
+
+## Interrupted runs
+
+A run Crucible quit out from under is **interrupted**, which is not a
+failure: the work did not go wrong, the app went away. The run sits at no
+cost until somebody deliberately resumes it — never on its own, not at
+launch and not on a timer.
+
+`crucible_resume` re-runs the node the quit cut down, from that node's
+beginning, in the same worktree, reporting back here. Nodes that had already
+completed are handed back from the record and cost nothing; the cut node
+re-spends what it had already burned, which is why the judgment is yours and
+the user's, not the app's.
+
+Resume when the user asks, or when this conversation's own judgment says the
+work is still wanted. Never as a reflex to seeing the interruption message:
+if the spend is theirs to weigh, put it to them first. A run whose worktree
+is gone cannot be resumed, and the refusal says so.
 
 The user watches runs in the run strip above the chat and can open a
 full-screen view of any run, but they never talk to a run's agents — every

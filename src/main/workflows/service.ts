@@ -3,7 +3,8 @@ import { basename, join } from 'node:path'
 import type { SessionId, TranscriptItem, Unsubscribe } from '../../shared/agent/port'
 import type { RunTools } from '../../shared/agent/run-tools'
 import { artifactKind, recordNamesPath } from '../../shared/workflows/artifacts'
-import { currentNode, runCost, type RunRecord } from '../../shared/workflows/run'
+import { interruptedNodes } from '../../shared/workflows/run'
+import { createTurnStart, describeRun, resumeAnswer } from '../../shared/workflows/status'
 import type {
   ArtifactView,
   MainWorkflowRunService,
@@ -152,8 +153,30 @@ export function createLiveWorkflowRunService({
     async answer(_sessionId: SessionId, runId: string, message: string): Promise<string> {
       engine.answer(runId, message)
       return `Answer delivered to run ${runId}; it resumes from here.`
+    },
+
+    // No session check, as `answer` has none: the deliberate call is the spend
+    // authorization (ADR 0026), and the run keeps reporting to the
+    // orchestrator its record names.
+    async resume(_sessionId: SessionId, runId: string): Promise<string> {
+      // Read before the act: resuming reverts the cut nodes to ghosts, so
+      // afterwards there is nothing left to name.
+      const before = engine.runs().find((candidate) => candidate.id === runId)
+      const cut = before === undefined ? [] : interruptedNodes(before).map((node) => node.id)
+      await engine.resume(runId)
+      const run = engine.runs().find((candidate) => candidate.id === runId)
+      if (run === undefined) throw new Error(`No run is named "${runId}".`)
+      return resumeAnswer(run, cut)
     }
   }
+
+  // One hook, consulted once per user turn: it wakes whatever interruption
+  // notices this session is owed and answers with the invisible status block.
+  // Every rule about runs stays in the engine; the wording is this module's.
+  const turnStart = createTurnStart({
+    runs: () => engine.runs(),
+    wake: (sessionId) => engine.wake(sessionId)
+  })
 
   return {
     async snapshot(): Promise<RunsSnapshot> {
@@ -172,7 +195,7 @@ export function createLiveWorkflowRunService({
     },
 
     async resume(runId: string): Promise<void> {
-      engine.resume(runId)
+      await engine.resume(runId)
     },
 
     async cancel(runId: string): Promise<void> {
@@ -226,6 +249,8 @@ export function createLiveWorkflowRunService({
 
     tools,
 
+    turnStart,
+
     // The whole of what a scheduled fire is beyond an ordinary run: the trunk
     // for a base, nothing handed in, nobody to report to, and the marker that
     // puts it on the schedule board.
@@ -252,19 +277,4 @@ export function createLiveWorkflowRunService({
       engine.dispose()
     }
   }
-}
-
-function describeRun(run: RunRecord): string {
-  const node = currentNode(run)
-  const cost = runCost(run)
-  const parts = [
-    `run ${run.id} (${run.workflow}) — ${run.status}`,
-    node === undefined ? undefined : `node ${node.id} ${node.status}`,
-    cost === undefined ? undefined : `$${cost.toFixed(2)}`,
-    run.branch,
-    run.waiting === true && run.question !== undefined
-      ? `⚑ waiting on an answer: ${run.question.reason.split('\n')[0]}`
-      : undefined
-  ]
-  return `- ${parts.filter((part): part is string => part !== undefined).join(' · ')}`
 }

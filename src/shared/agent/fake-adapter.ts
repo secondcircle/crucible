@@ -225,6 +225,15 @@ const RUN_ANSWERED_DELTAS: readonly string[] = [
   'The run resumes from here.'
 ]
 
+// What the script says when it read an interruption notice and judged the work
+// still wanted. Nothing resumes on its own — the tool call above is the
+// deliberate act, and this is the sentence that reports it.
+const RUN_RESUMED_DELTAS: readonly string[] = [
+  'That run was cut down by an app quit, and the work is still wanted, so I resumed it: ',
+  'the interrupted node re-runs from its beginning in the same worktree. ',
+  'Its completion arrives here. (Scripted: no cost.)'
+]
+
 // What the script says when it was handed a run to investigate. The parked
 // case spells the words that hand the run an answer, so the unstick walk needs
 // nothing memorized and no paid model to demonstrate.
@@ -582,6 +591,21 @@ export function createFakeAdapter({
 
     if (isRunMessage(text)) {
       const runId = /run (\w+)/.exec(text)?.[1] ?? ''
+      // Checked first, and by the lever the notice names rather than by the
+      // word "interrupted": the notice a resumed run sends says it was
+      // interrupted too, and resuming that one would be refused.
+      if (asked.includes('crucible_resume')) {
+        return {
+          calls: [
+            {
+              name: 'crucible_resume',
+              summary: `run ${runId}`,
+              answer: () => runs.resume(sessionId, runId)
+            }
+          ],
+          closing: RUN_RESUMED_DELTAS
+        }
+      }
       if (asked.includes('checking in') || asked.includes('blocker') || asked.includes('stalled')) {
         return {
           calls: [
@@ -944,6 +968,15 @@ export function createFakeAdapter({
       reportUsage(sessionId, conversation, estimateTokens(counted))
     }
 
+    // One counter for the whole turn, so no two of its calls can share an id:
+    // a message delivered mid-turn makes calls of its own, and a repeated id
+    // would have them land on top of the calls already in the transcript.
+    let calls = 0
+    const nextCallId = (): string => {
+      calls += 1
+      return `${turnId}-call-${calls}`
+    }
+
     /** False once the script has been abandoned, which ends every loop. */
     async function say(deltas: readonly string[]): Promise<boolean> {
       for (const delta of deltas) {
@@ -977,9 +1010,9 @@ export function createFakeAdapter({
 
     // The scripted tools answer at once and stream nothing, so a call is its
     // start and its end, carrying the model's own text as the output.
-    async function scriptedCall(call: PanelCall, number: number): Promise<boolean> {
+    async function scriptedCall(call: PanelCall): Promise<boolean> {
       settleSpoken()
-      const callId = `${turnId}-call-${number}`
+      const callId = nextCallId()
       await beat()
       if (stopped !== undefined) return false
       emit({
@@ -1009,9 +1042,9 @@ export function createFakeAdapter({
       return true
     }
 
-    async function call(scripted: ScriptedCall, number: number): Promise<boolean> {
+    async function call(scripted: ScriptedCall): Promise<boolean> {
       settleSpoken()
-      const callId = `${turnId}-call-${number}`
+      const callId = nextCallId()
       // The model committing to the call, before any of it runs: the element
       // is in the transcript from here, with a growing argument count.
       if (scripted.argBeats !== undefined) {
@@ -1118,8 +1151,23 @@ export function createFakeAdapter({
           continue
         }
         if (bound.followUp.length > 0) {
+          // A run's own message reaches a session as a follow-up whenever a
+          // turn is already live — an interruption notice delivered as the
+          // session wakes arrives exactly that way — so the script answers it
+          // here the way it would answer the same message as a prompt.
+          const queued = [...bound.followUp]
           if (!(await deliver('followUp'))) return false
-          if (!(await say(FOLLOW_UP_ANSWER_DELTAS))) return false
+          const answered = queued
+            .map((message) => runScript(bound, sessionId, message))
+            .find((turn): turn is ScriptedToolTurn => turn !== undefined)
+          if (answered === undefined) {
+            if (!(await say(FOLLOW_UP_ANSWER_DELTAS))) return false
+            continue
+          }
+          for (const scripted of answered.calls) {
+            if (!(await scriptedCall(scripted))) return false
+          }
+          if (!(await say(answered.closing))) return false
           continue
         }
         return true
@@ -1129,10 +1177,8 @@ export function createFakeAdapter({
     // Every beat is a cancellation point here too, and each call is followed
     // by the same boundary a steering message lands at.
     async function toolTurn(turn: ScriptedToolTurn): Promise<void> {
-      let number = 0
       for (const call of turn.calls) {
-        number += 1
-        if (!(await scriptedCall(call, number))) return finish()
+        if (!(await scriptedCall(call))) return finish()
         if (!(await boundary())) return finish()
       }
       if (!(await say(turn.closing))) return finish()
@@ -1155,16 +1201,14 @@ export function createFakeAdapter({
 
       if (!(await think())) return finish()
 
-      let number = 0
       for (const scripted of CHAIN) {
-        number += 1
-        if (!(await call(scripted, number))) return finish()
+        if (!(await call(scripted))) return finish()
         // The boundary between two tool calls is where steering lands.
         if (!(await boundary())) return finish()
       }
 
       if (!(await say(BETWEEN_DELTAS))) return finish()
-      if (!(await call(LONE_CALL, number + 1))) return finish()
+      if (!(await call(LONE_CALL))) return finish()
       if (!(await boundary())) return finish()
       if (!(await say(REPLY_DELTAS))) return finish()
       // One prompt drives the whole loop in this flavor: the seam, the badge,
@@ -1507,6 +1551,10 @@ export function createFakeAdapter({
       return scaleUsage(conversation.usageMessages)
     },
 
+    // `context` is deliberately dropped on the floor here: the fake's
+    // transcript is the conversation itself, so text that must never show up
+    // in it simply never enters it. The scripted turn reads the user's message
+    // and nothing else, exactly as before.
     prompt(
       sessionId: SessionId,
       turnId: TurnId,

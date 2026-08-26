@@ -3,12 +3,21 @@ import type { RunTools } from '../agent/run-tools'
 import { artifactKind, artifactName, recordNamesPath } from './artifacts'
 import {
   dismissRefusal,
+  INTERRUPTED_MESSAGE,
+  interruptedNodes,
+  resumeRefusal,
   runMessageHeader,
   type RunArtifact,
   type RunNode,
   type RunRecord,
   type WorkflowRunId
 } from './run'
+import {
+  createTurnStart,
+  describeRun,
+  interruptionNotice,
+  resumeAnswer
+} from './status'
 import type {
   ArtifactView,
   MainWorkflowRunService,
@@ -21,10 +30,10 @@ import type {
 // tool call starts a run that walks its nodes on a timer, parks once when
 // the workflow is `build` (so the routed-question surfaces are exercisable),
 // and completes with the same message-to-the-orchestrator the engine sends.
-// Three canned records seed the global view — one waiting on a person, one
-// finished, one failed whose orchestrator session is gone — so ⌘R shows its
-// bands, and Dismiss and Investigate both have something to act on, without
-// anything having been started.
+// Four canned records seed the global view — one waiting on a person, one
+// finished, one failed whose orchestrator session is gone, and one the app
+// quit out from under — so ⌘R shows its bands, and Dismiss, Investigate and
+// Resume all have something to act on, without anything having been started.
 //
 // Scripted nodes declare the artifacts they will write and then write them,
 // so the artifact rail, the reader and the exhibit-run route are all
@@ -43,6 +52,14 @@ const FALLBACK_WORKSPACE: CannedWorkspace = { path: '/fake/resume-site', name: '
 
 /** The parked-with-no-one-to-ask run, named because its answer path is wired. */
 const CANNED_UNATTENDED_ID = 'g8x2'
+
+/** The interrupted run, whose Resume walks the rest of the way on the beat. */
+const CANNED_INTERRUPTED_ID = '45c8'
+
+// The orchestrator the interrupted run reports to. No sidebar session can ever
+// carry this id, so its notice waits until a session adopts the run — which is
+// the whole path a test drives: adopt, then take a turn.
+const CANNED_INTERRUPTED_SESSION = 'fake-interrupted-orchestrator'
 
 /** Slow enough to watch under `npm run dev`; tests pass zero. */
 const DEFAULT_BEAT_MS = 700
@@ -125,6 +142,7 @@ interface LiveRun {
   endedAt?: string
   dismissedAt?: string
   dir?: string
+  noticePending?: true
 }
 
 /** One output of a scripted node: what it declares, and what it writes. */
@@ -593,6 +611,7 @@ export function createFakeWorkflowRunService({
 
   const records: LiveRun[] = [
     cannedUnattended(workspace, artifactDir, runDir),
+    cannedInterrupted(workspace, artifactDir, runDir),
     cannedFailed(workspace, artifactDir, runDir),
     cannedFinished(workspace, artifactDir, runDir)
   ]
@@ -627,9 +646,35 @@ export function createFakeWorkflowRunService({
   }
 
   function tell(run: LiveRun, text: string): void {
-    if (run.sessionId === undefined) return
-    deliver?.(run.sessionId, text)
+    if (run.sessionId === undefined || deliver === undefined) return
+    try {
+      deliver(run.sessionId, text)
+    } catch {
+      // A message that did not land leaves whatever it was owed still owed,
+      // exactly as the engine leaves it.
+      return
+    }
+    // Any message that reaches the orchestrator is the wake-up an interruption
+    // notice was owed.
+    if (run.noticePending === true) {
+      delete run.noticePending
+      changed()
+    }
   }
+
+  // Every run of this session that is owed an interruption notice says it now,
+  // composed from the record as it stands — the engine's `wake`, in the fake.
+  function wake(sessionId: SessionId): void {
+    for (const run of records) {
+      if (run.noticePending !== true || run.sessionId !== sessionId) continue
+      tell(run, interruptionNotice(run as RunRecord))
+    }
+  }
+
+  const turnStart = createTurnStart({
+    runs: () => records as readonly RunRecord[],
+    wake
+  })
 
   function requireRun(runId: WorkflowRunId): LiveRun {
     const found = records.find((candidate) => candidate.id === runId)
@@ -821,6 +866,72 @@ export function createFakeWorkflowRunService({
     })
   }
 
+  // The interrupted run's own resume walk: the reverted node runs again on the
+  // beat, writing what it declared, and the rest of the graph follows until
+  // the run completes and says so — the whole resume arc, watchable and free.
+  function walkResumed(run: LiveRun): void {
+    const next = run.nodes.findIndex((node) => node.status === 'pending')
+    if (next < 0) {
+      finish(run)
+      return
+    }
+    const node = run.nodes[next]
+    node.status = 'running'
+    node.startedAt = nowIso()
+    node.lastActivityAt = nowIso()
+    node.now = 'reading the worktree it left behind…'
+    changed()
+    beat(run, () => {
+      node.status = 'complete'
+      node.endedAt = nowIso()
+      node.lastActivityAt = nowIso()
+      delete node.now
+      node.toolCalls = (node.toolCalls ?? 0) + 6
+      // Added to what this node already burned, never replacing it: the money
+      // the first attempt spent was really spent.
+      node.cost = Number(((node.cost ?? 0) + 0.28).toFixed(2))
+      node.summary = `Re-ran ${node.id} from its beginning after the app quit; nothing was sent anywhere.`
+      node.artifacts = node.artifacts.map((artifact) => {
+        files?.write(artifact.path, CANNED_BODIES[artifactName(artifact.path)] ?? CANNED_BODY)
+        return { ...artifact, writtenAt: nowIso() }
+      })
+      changed()
+      walkResumed(run)
+    })
+  }
+
+  // Total over the two stopped states, refusing every other one with the live
+  // service's own sentence.
+  function resumeRun(runId: WorkflowRunId): void {
+    const run = requireRun(runId)
+    if (run.status === 'paused') {
+      paused.delete(runId)
+      run.status = 'running'
+      changed()
+      return
+    }
+    if (run.status !== 'interrupted') throw new Error(resumeRefusal(runId, run.status))
+    // The record goes back to working and every cut node back to the ghost the
+    // plan drew, keeping what it spent — the engine's own reversion.
+    run.status = 'running'
+    delete run.error
+    delete run.endedAt
+    delete run.dismissedAt
+    for (const node of run.nodes) {
+      if (node.status !== 'interrupted') continue
+      node.status = 'pending'
+      node.artifacts = node.artifacts.map(({ name, path, desc }) => ({ name, path, desc }))
+      delete node.error
+      delete node.summary
+      delete node.startedAt
+      delete node.endedAt
+      delete node.lastActivityAt
+      delete node.now
+    }
+    changed()
+    walkResumed(run)
+  }
+
   function finish(run: LiveRun): void {
     run.status = 'complete'
     run.endedAt = nowIso()
@@ -896,13 +1007,9 @@ export function createFakeWorkflowRunService({
     async list(sessionId: SessionId): Promise<string> {
       const mine = records.filter((run) => run.sessionId === sessionId)
       if (mine.length === 0) return 'This session has no workflow runs.'
-      return mine
-        .map(
-          (run) =>
-            `- run ${run.id} (${run.workflow}) — ${run.status}` +
-            (run.waiting === true ? ' · ⚑ waiting on an answer' : '')
-        )
-        .join('\n')
+      // The live service's own line, so what an agent reads of a run is the
+      // same sentence in both flavors.
+      return mine.map((run) => describeRun(run as RunRecord)).join('\n')
     },
 
     async answer(_sessionId: SessionId, runId: string, message: string): Promise<string> {
@@ -910,6 +1017,13 @@ export function createFakeWorkflowRunService({
       if (resume === undefined) throw new Error(`The run "${runId}" is not waiting on an answer.`)
       resume(message)
       return `Answer delivered to run ${runId}; it resumes from here.`
+    },
+
+    async resume(_sessionId: SessionId, runId: string): Promise<string> {
+      // Named before the act: resuming reverts the cut nodes to ghosts.
+      const cut = interruptedNodes(requireRun(runId) as RunRecord).map((node) => node.id)
+      resumeRun(runId)
+      return resumeAnswer(requireRun(runId) as RunRecord, cut)
     }
   }
 
@@ -934,11 +1048,7 @@ export function createFakeWorkflowRunService({
     },
 
     async resume(runId: WorkflowRunId): Promise<void> {
-      const run = requireRun(runId)
-      if (run.status !== 'paused') return
-      paused.delete(runId)
-      run.status = 'running'
-      changed()
+      resumeRun(runId)
     },
 
     async dismiss(runId: WorkflowRunId): Promise<void> {
@@ -992,6 +1102,8 @@ export function createFakeWorkflowRunService({
     },
 
     tools,
+
+    turnStart,
 
     async startScheduled(fire: ScheduledFireRequest): Promise<RunRecord> {
       return beginRun({
@@ -1233,6 +1345,141 @@ function cannedFailed(
     startedAt: hoursAgo(5.6),
     endedAt: hoursAgo(5),
     dir: runDir('b1n7')
+  }
+}
+
+// A build the app quit out from under, shaped like the approved mock's row:
+// four nodes done, the gate cut down mid-flight, an orchestrator that is owed
+// the news, and $3.62 already spent. Resume re-runs the cut node alone.
+function cannedInterrupted(
+  workspace: CannedWorkspace,
+  artifactDir: (runId: WorkflowRunId) => string,
+  runDir: (runId: WorkflowRunId) => string
+): LiveRun {
+  const dir = artifactDir(CANNED_INTERRUPTED_ID)
+  const intent = `${workspace.path}/docs/intent/archexplorer-diff-mode.md`
+  const read = (path: string): RunArtifact => ({ name: artifactName(path), path, desc: 'input' })
+  const spec = `${dir}/spec.md`
+  const changes = `${dir}/changes.md`
+  const tests = `${dir}/review-tests.md`
+  return {
+    id: CANNED_INTERRUPTED_ID,
+    workflow: 'build',
+    status: 'interrupted',
+    workspacePath: workspace.path,
+    workspaceName: workspace.name,
+    sessionId: CANNED_INTERRUPTED_SESSION,
+    worktreePath: `${workspace.path}/.crucible/worktrees/run-${CANNED_INTERRUPTED_ID}`,
+    branch: `crucible/run-${CANNED_INTERRUPTED_ID}`,
+    baseCommit: 'ab3d19fake',
+    inputs: { intent },
+    inputDescs: { intent: 'The intent document for the work.' },
+    nodes: [
+      {
+        id: 'requirements',
+        status: 'complete',
+        parents: [],
+        model: 'anthropic/claude-fable-5:high',
+        reads: [read(intent)],
+        artifacts: [
+          {
+            name: 'spec',
+            path: spec,
+            desc: 'the Spec: what to build, derived from the intent document',
+            writtenAt: hoursAgo(2.7)
+          }
+        ],
+        summary: 'Wrote the spec.',
+        cost: 0.42,
+        toolCalls: 9,
+        startedAt: hoursAgo(3),
+        endedAt: hoursAgo(2.7)
+      },
+      {
+        id: 'architect',
+        status: 'complete',
+        parents: ['requirements'],
+        model: 'anthropic/claude-opus-5:high',
+        reads: [read(spec)],
+        artifacts: [],
+        summary: 'Settled the module boundaries.',
+        cost: 0.68,
+        toolCalls: 14,
+        startedAt: hoursAgo(2.7),
+        endedAt: hoursAgo(2.2)
+      },
+      {
+        id: 'builder',
+        status: 'complete',
+        parents: ['architect'],
+        model: 'anthropic/claude-opus-5:high',
+        reads: [read(intent), read(spec)],
+        artifacts: [
+          {
+            name: 'changes',
+            path: changes,
+            desc: 'every file the builder touched, with reasons',
+            writtenAt: hoursAgo(1.3)
+          }
+        ],
+        summary: 'Built the diff mode.',
+        cost: 1.74,
+        toolCalls: 38,
+        startedAt: hoursAgo(2.2),
+        endedAt: hoursAgo(1.3)
+      },
+      {
+        id: 't2-review',
+        status: 'complete',
+        parents: ['builder'],
+        model: 'anthropic/claude-fable-5:high',
+        reads: [read(changes)],
+        artifacts: [
+          {
+            name: 'review',
+            path: tests,
+            desc: 'the branch judged at its test seams',
+            writtenAt: hoursAgo(0.9)
+          }
+        ],
+        summary: 'Approved at the seams.',
+        verdict: { verdict: 'approved', reason: 'every seam the spec named has a test at it' },
+        cost: 0.39,
+        toolCalls: 11,
+        startedAt: hoursAgo(1.3),
+        endedAt: hoursAgo(0.9)
+      },
+      // The node the quit cut down: what it declared is still unwritten, and
+      // its error is the one sentence the sweep writes.
+      {
+        id: 'gate-alignment',
+        status: 'interrupted',
+        parents: ['t2-review'],
+        model: 'anthropic/claude-opus-5:high',
+        reads: [read(intent), read(changes), read(tests)],
+        artifacts: [
+          {
+            name: 'review',
+            path: `${dir}/review.md`,
+            desc: "the gate's verdict and its evidence"
+          }
+        ],
+        error: INTERRUPTED_MESSAGE,
+        cost: 0.39,
+        toolCalls: 7,
+        startedAt: hoursAgo(0.9),
+        lastActivityAt: hoursAgo(0.67),
+        endedAt: hoursAgo(0.67)
+      }
+    ],
+    error: INTERRUPTED_MESSAGE,
+    // Owed to its orchestrator, and still owed: nothing has woken that session
+    // since the quit.
+    noticePending: true,
+    createdAt: hoursAgo(3),
+    startedAt: hoursAgo(3),
+    endedAt: hoursAgo(0.67),
+    dir: runDir(CANNED_INTERRUPTED_ID)
   }
 }
 

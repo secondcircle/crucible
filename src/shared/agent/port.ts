@@ -33,6 +33,11 @@ export interface WorkspaceState {
 // next boundary between tool calls, a follow-up waits until the agent stops.
 export type QueuedKind = 'steering' | 'followUp'
 
+// Who put a message in: a person, or Crucible itself carrying a run's voice.
+// A fact about turns rather than about runs — the shell learns nothing else
+// about what the text is — and what decides whether a turn is the user's.
+export type MessageOrigin = 'user' | 'system'
+
 export interface QueuedMessage {
   readonly kind: QueuedKind
   readonly text: string
@@ -503,7 +508,10 @@ export interface AgentPort {
   // Never lost and never refused: with no live turn to take it, the message is
   // sent as the next prompt. Nothing enters the transcript at queue time.
   steer(sessionId: SessionId, text: string): Promise<void>
-  followUp(sessionId: SessionId, text: string): Promise<void>
+  // `origin` defaults to `'user'`, so every caller who does not say otherwise
+  // is a person queueing a message. It rides with the message: one that ends
+  // up starting a turn of its own still starts the kind of turn it is.
+  followUp(sessionId: SessionId, text: string, origin?: MessageOrigin): Promise<void>
   /** By content, because delivery may have shifted any index. */
   dequeue(sessionId: SessionId, kind: QueuedKind, text: string): Promise<boolean>
 

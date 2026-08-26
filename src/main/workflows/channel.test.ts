@@ -23,8 +23,11 @@ function serviceRecorder(): MainWorkflowRunService {
       workflows: async () => '',
       start: async () => '',
       list: async () => '',
-      answer: async () => ''
+      answer: async () => '',
+      resume: async () => ''
     },
+    // Never crosses the channel: the hook is main's, consulted at a turn.
+    turnStart: () => undefined,
     toggleOverview: () => {},
     dispose: () => {}
   }

@@ -4,6 +4,8 @@ import { basename, join } from 'node:path'
 import type { SessionId, TranscriptItem } from '../../shared/agent/port'
 import {
   dismissRefusal,
+  INTERRUPTED_MESSAGE,
+  resumeRefusal,
   runMessageHeader,
   type RunArtifact,
   type RunNodeStatus,
@@ -11,6 +13,7 @@ import {
   type RunStatus,
   type WorkflowRunId
 } from '../../shared/workflows/run'
+import { interruptionNotice } from '../../shared/workflows/status'
 import type {
   NodeResult,
   NodeSpec,
@@ -38,10 +41,13 @@ const DEFAULT_TOOLS = ['read', 'bash', 'edit', 'write', 'grep', 'find', 'ls']
 const NUDGE_LIMIT = 2
 const VALIDATION_RETRY_LIMIT = 3
 
-/** What a record that outlived its engine is told it is. */
-const INTERRUPTED =
-  'Crucible quit while this run was working, so it stopped where it stood. ' +
-  'Its worktree is left as it stands.'
+// What a revision of a replayed node opens with. The session that held the
+// node's context died with the process, so feedback cannot re-enter it: a
+// fresh agent is told what it is picking up and where the prior work is.
+const REPLAY_REVISION_NOTICE =
+  'You are picking this node up in a fresh session: Crucible quit while this run was working, ' +
+  'so the earlier conversation is gone, while the worktree and the artifacts hold the work that ' +
+  'was already done. Read what is there before you change it.'
 
 export interface StartRunRequest {
   readonly workspacePath: string
@@ -64,8 +70,17 @@ export interface WorkflowEngine {
   /** Resolves at kickoff; the run continues in the background. */
   start(request: StartRunRequest): Promise<RunRecord>
   pause(runId: WorkflowRunId): void
-  resume(runId: WorkflowRunId): void
+  // Total over the two stopped states: a paused run un-pauses, an interrupted
+  // one re-runs the node the quit cut down, from its beginning, in the same
+  // worktree, replaying what already completed at no cost. Every other status
+  // is refused with a sentence. Resolves once the run is working again; the
+  // run itself continues in the background.
+  resume(runId: WorkflowRunId): Promise<void>
   cancel(runId: WorkflowRunId): void
+  // Every run of this session that is owed an interruption notice says it now,
+  // through the ordinary delivery path. Called by the run service's turn-start
+  // hook when a user turn begins, which is the only thing that wakes a session.
+  wake(sessionId: SessionId): void
   /** Stamps a settled run dismissed; refuses a live one. Stamping twice is a no-op. */
   dismiss(runId: WorkflowRunId): void
   /** Hands the run to another session: every later message goes there. */
@@ -83,6 +98,10 @@ export interface EngineOptions {
   readonly sessions: NodeSessionFactory
   /** How a run speaks: a message to its orchestrator session's agent. */
   readonly deliver: (sessionId: SessionId, text: string) => void
+  // Whether a recorded orchestrator session still exists, asked when a run
+  // resumes: a run whose session is gone goes unattended rather than talking
+  // to nobody. Absent presumes every recorded session exists.
+  readonly sessionExists?: (sessionId: SessionId) => boolean
   // Where a node's cache misses are written down. Absent records nothing; the
   // run's own count lands on the record either way, because that is what the
   // chip's mark is drawn from.
@@ -153,6 +172,7 @@ interface LiveRun {
   endedAt?: string
   dismissedAt?: string
   dir?: string
+  noticePending?: true
 }
 
 interface Waiter {
@@ -182,6 +202,7 @@ export function createWorkflowEngine(options: EngineOptions): WorkflowEngine {
     store,
     sessions,
     deliver,
+    sessionExists,
     cache,
     onChanged,
     log,
@@ -201,27 +222,43 @@ export function createWorkflowEngine(options: EngineOptions): WorkflowEngine {
 
   const nowIso = (): string => new Date().toISOString()
 
-  // Nothing resumes a run across launches: the sessions its nodes were
-  // holding died with the process. A record that still says it is working is
-  // therefore a lie the moment it is read back, and one nothing can act on —
-  // pause and cancel both need a live handle. Say what happened instead, and
-  // write it, so the next launch does not have to work it out again.
+  // Nothing resumes a run across launches on its own (ADR 0026): the sessions
+  // its nodes were holding died with the process. A record that still says it
+  // is working is therefore a lie the moment it is read back, and one nothing
+  // can act on — pause and cancel both need a live handle. Say what happened
+  // instead, and write it, so the next launch does not have to work it out
+  // again. Interrupted, not failed: the app went away, the work did not go
+  // wrong, and only Resume moves it from here.
   for (const stale of records) {
     if (stale.status !== 'running' && stale.status !== 'paused') continue
-    stale.status = 'failed'
-    stale.error = stale.error === undefined ? INTERRUPTED : `${stale.error}; ${INTERRUPTED}`
-    stale.endedAt ??= nowIso()
+    stale.status = 'interrupted'
+    stale.error =
+      stale.error === undefined
+        ? INTERRUPTED_MESSAGE
+        : `${stale.error}; ${INTERRUPTED_MESSAGE}`
+    // The app may have been closed for a week, so sweep time would be a fresh
+    // lie: the honest stop is the last thing any node was seen doing.
+    stale.endedAt = latestNodeStop(stale) ?? stale.endedAt ?? nowIso()
+    // The waiter died with the process; nothing can answer it now.
     stale.waiting = false
     delete stale.question
     for (const node of stale.nodes) {
-      if (node.status === 'pending' || node.status === 'complete' || node.status === 'failed') {
+      if (
+        node.status !== 'running' &&
+        node.status !== 'paused' &&
+        node.status !== 'blocked' &&
+        node.status !== 'stalled'
+      ) {
         continue
       }
-      node.status = 'failed'
-      node.error ??= INTERRUPTED
-      node.endedAt ??= nowIso()
+      node.status = 'interrupted'
+      node.error ??= INTERRUPTED_MESSAGE
+      node.endedAt ??= node.lastActivityAt ?? nowIso()
       delete node.now
     }
+    // No shell exists this early, so delivery is not even attempted: the
+    // record carries the debt until the session next wakes.
+    if (stale.sessionId !== undefined) stale.noticePending = true
     store.save(stale as RunRecord)
   }
 
@@ -254,6 +291,15 @@ export function createWorkflowEngine(options: EngineOptions): WorkflowEngine {
         runId: run.id,
         message: cause instanceof Error ? cause.message : String(cause)
       })
+      return
+    }
+    // Any message that reaches the orchestrator is the wake-up an interruption
+    // notice was owed, so a blocker or a completion settles the debt as surely
+    // as the notice itself. Cleared here and written, in the one module that
+    // both sets the flag and says everything a run says.
+    if (run.noticePending === true) {
+      delete run.noticePending
+      save(run)
     }
   }
 
@@ -381,7 +427,10 @@ export function createWorkflowEngine(options: EngineOptions): WorkflowEngine {
     return run as RunRecord
   }
 
-  async function execute(handle: Handle, def: WorkflowDef): Promise<void> {
+  // `replay` is what a resumed run brings: the record already holds nodes a
+  // previous life completed, and those are handed back rather than run again.
+  // A first run replays nothing, so nothing about it changes.
+  async function execute(handle: Handle, def: WorkflowDef, replay = false): Promise<void> {
     const { run } = handle
     const artifacts = store.artifactDir(run.id)
     const cwd = run.worktreePath ?? run.workspacePath
@@ -401,6 +450,62 @@ export function createWorkflowEngine(options: EngineOptions): WorkflowEngine {
       return promise
     }
 
+    // Every id this execution has already put a record behind, so a workflow
+    // asking for one node twice is still refused. On a resumed run the ids the
+    // previous life recorded are not taken: replaying or re-running them is
+    // the whole point of resuming.
+    const taken = new Set<string>()
+
+    const recordOf = (nodeId: string): LiveNode | undefined =>
+      run.nodes.find((candidate) => candidate.id === nodeId)
+
+    // The furthest completed record of a held-open node's revision chain:
+    // `id`, then `id·rN` by highest N. What a replayed handle's result is.
+    function furthestComplete(id: string): LiveNode | undefined {
+      const revised = run.nodes
+        .filter(
+          (candidate) =>
+            candidate.status === 'complete' && candidate.id.startsWith(`${id}·r`)
+        )
+        .map((candidate) => ({
+          node: candidate,
+          round: Number(candidate.id.slice(id.length + 2))
+        }))
+        .filter((candidate) => Number.isFinite(candidate.round))
+        .sort((left, right) => left.round - right.round)
+      const base = recordOf(id)
+      return revised.at(-1)?.node ?? (base?.status === 'complete' ? base : undefined)
+    }
+
+    /** The next free revision id of a node: `<id>·rN`. */
+    function nextRevisionId(id: string): string {
+      const known = new Set(run.nodes.map((candidate) => candidate.id))
+      let round = 0
+      let revisionId: string
+      do {
+        round += 1
+        revisionId = `${id}·r${round}`
+      } while (known.has(revisionId))
+      return revisionId
+    }
+
+    /** One session of one node: what it is asked, and which record carries it. */
+    interface NodeJob {
+      /** The node's own id, which names its revisions and its role prompt. */
+      readonly id: string
+      /** The record this session's first turn takes: `id`, or a revision of it. */
+      readonly recordId: string
+      readonly spec: NodeSpec
+      readonly outputPaths: Record<string, string>
+      readonly firstMessage: string
+      /** Explicit for a revision; read from the plan and the reads otherwise. */
+      readonly parents?: readonly string[]
+      readonly onHold?: (opened: OpenNode) => void
+    }
+
+    // Where a replayed node and a fresh one part, and the only place they do:
+    // everything about paths, parents, ids and results is settled here for
+    // both, so neither path keeps bookkeeping of its own.
     async function runNode(
       id: string,
       spec: NodeSpec,
@@ -410,9 +515,8 @@ export function createWorkflowEngine(options: EngineOptions): WorkflowEngine {
       while (pauseAsked()) await sleep(pollMs)
       if (cancelAsked()) throw new Error('the run was cancelled')
 
-      if (run.nodes.some((node) => node.id === id && node.status !== 'pending')) {
-        throw new Error(`duplicate node id "${id}"`)
-      }
+      if (taken.has(id)) throw new Error(`duplicate node id "${id}"`)
+      taken.add(id)
       for (const read of spec.reads ?? []) {
         if (!existsSync(read)) throw new Error(`node "${id}": required input missing: ${read}`)
       }
@@ -422,6 +526,107 @@ export function createWorkflowEngine(options: EngineOptions): WorkflowEngine {
         outputPaths[name] = join(artifacts, output.file)
       }
 
+      // A resumed run replays what the previous life completed. Anything else
+      // — a node the quit cut down, one that failed, one this definition never
+      // ran before — runs for real, exactly as a first run would.
+      const recorded = !replay
+        ? undefined
+        : onHold === undefined
+          ? recordOf(id)
+          : furthestComplete(id)
+      if (recorded?.status === 'complete') {
+        return replayed(id, recorded, spec, outputPaths, onHold)
+      }
+
+      return liveNode({
+        id,
+        recordId: id,
+        spec,
+        outputPaths,
+        firstMessage: composeTaskPrompt(spec, outputPaths),
+        ...(onHold === undefined ? {} : { onHold })
+      })
+    }
+
+    /**
+     * A node the previous life completed, handed back from its record: the
+     * outputs where they were written, the recorded verdict and summary. No
+     * session is opened, nothing is spent, and the record is left exactly as
+     * that life wrote it.
+     */
+    function replayed(
+      id: string,
+      record: LiveNode,
+      spec: NodeSpec,
+      outputPaths: Record<string, string>,
+      onHold?: (opened: OpenNode) => void
+    ): NodeResult {
+      // Fed exactly as a fresh node feeds it, so edges inferred from artifact
+      // dataflow come out the same on a resumed run as on a first one.
+      for (const path of Object.values(outputPaths)) producerByArtifact.set(path, record.id)
+      const result: NodeResult = {
+        outputs: outputPaths,
+        verdict: record.verdict,
+        summary: record.summary ?? ''
+      }
+      if (onHold !== undefined) onHold(replayedHandle(id, record, spec, outputPaths, result))
+      return result
+    }
+
+    /**
+     * The handle a replayed `openNode` hands back. `revise()` cannot re-enter
+     * the session that held this node's context — it died with the process —
+     * so the first one opens a fresh revision node told what it is picking up,
+     * and every later one goes into that session through the ordinary
+     * machinery. `close()` has nothing of its own to release.
+     */
+    function replayedHandle(
+      id: string,
+      record: LiveNode,
+      spec: NodeSpec,
+      outputPaths: Record<string, string>,
+      result: NodeResult
+    ): OpenNode {
+      let live: OpenNode | undefined
+      return {
+        result,
+        get id() {
+          return live?.id ?? record.id
+        },
+        async revise(message: string, opts?: ReviseOptions): Promise<NodeResult> {
+          if (live !== undefined) return live.revise(message, opts)
+          const revisionId = nextRevisionId(id)
+          const opened = await new Promise<OpenNode>((resolve, reject) => {
+            track(
+              liveNode({
+                id,
+                recordId: revisionId,
+                spec,
+                outputPaths,
+                parents: [
+                  ...new Set([record.id, ...keptParents(run, revisionId, opts?.from ?? [])])
+                ],
+                firstMessage: [
+                  composeTaskPrompt(spec, outputPaths),
+                  REPLAY_REVISION_NOTICE,
+                  message
+                ].join('\n\n'),
+                onHold: resolve
+              })
+            ).catch(reject)
+          })
+          live = opened
+          return opened.result
+        },
+        close() {
+          live?.close()
+        }
+      }
+    }
+
+    async function liveNode(job: NodeJob): Promise<NodeResult> {
+      const { id, spec, outputPaths } = job
+
       /** What the node says it will write, before it has written any of it. */
       const declaredArtifacts = (): RunArtifact[] =>
         Object.entries(spec.outputs ?? {}).map(([name, output]) => ({
@@ -430,25 +635,41 @@ export function createWorkflowEngine(options: EngineOptions): WorkflowEngine {
           desc: output.desc
         }))
 
-      const ghost = run.nodes.findIndex(
-        (candidate) => candidate.id === id && candidate.status === 'pending'
+      // The record this session's first turn takes over: the plan's ghost, or
+      // — on a resumed run — whatever the previous life left under this id
+      // and never completed. One record per id, whichever life wrote it.
+      const slot = run.nodes.findIndex(
+        (candidate) => candidate.id === job.recordId && candidate.status !== 'complete'
       )
+      const held = slot >= 0 ? run.nodes[slot] : undefined
       // The spec's own declaration wins the moment the node starts; failing
       // that the plan's forecast stands, because a record rebuilt from
       // inference alone would erase edges the workflow already got right.
-      const forecast = ghost >= 0 ? run.nodes[ghost].parents : []
-      const declared = spec.from === undefined ? forecast : keptParents(run, id, spec.from)
+      const forecast = held?.parents ?? []
+      const declared =
+        job.parents !== undefined
+          ? [...job.parents]
+          : spec.from === undefined
+            ? forecast
+            : keptParents(run, job.recordId, spec.from)
       // Reading an artifact may reveal an edge nobody declared; it never
       // takes one away, so this is a union in every case.
       const inferred = (spec.reads ?? [])
         .map((path) => producerByArtifact.get(path))
         .filter((producer): producer is string => producer !== undefined)
-      const parents = [...new Set([...declared, ...inferred])].filter((parent) => parent !== id)
-      for (const path of Object.values(outputPaths)) producerByArtifact.set(path, id)
+      const parents = [...new Set([...declared, ...inferred])].filter(
+        (parent) => parent !== job.recordId
+      )
+      for (const path of Object.values(outputPaths)) producerByArtifact.set(path, job.recordId)
+
+      // What the previous life already burned under this id. Kept, so a
+      // re-run adds to it rather than erasing money that was really spent; a
+      // revision starts its own record and carries nothing.
+      let carried = { cost: held?.cost ?? 0, cacheMisses: held?.cacheMisses ?? 0 }
 
       // The record currently carrying this session; revisions swap it.
       let node: LiveNode = {
-        id,
+        id: job.recordId,
         status: 'running',
         parents,
         model: spec.model ?? defaultModel,
@@ -458,9 +679,10 @@ export function createWorkflowEngine(options: EngineOptions): WorkflowEngine {
           desc: 'input'
         })),
         artifacts: declaredArtifacts(),
-        startedAt: nowIso()
+        startedAt: nowIso(),
+        ...(carried.cacheMisses === 0 ? {} : { cacheMisses: carried.cacheMisses })
       }
-      if (ghost >= 0) run.nodes[ghost] = node
+      if (slot >= 0) run.nodes[slot] = node
       else run.nodes.push(node)
       save(run)
 
@@ -533,7 +755,7 @@ export function createWorkflowEngine(options: EngineOptions): WorkflowEngine {
         sessionStats = { toolCalls: stats.toolCalls, cost: stats.cost ?? 0 }
         node.toolCalls = Math.max(0, sessionStats.toolCalls - statBase.toolCalls)
         if (stats.cost !== undefined) {
-          node.cost = Math.max(0, round4(stats.cost - statBase.cost))
+          node.cost = round4(carried.cost + Math.max(0, stats.cost - statBase.cost))
         }
         if (stats.contextPercent !== undefined) node.contextPercent = stats.contextPercent
         store.writeTranscript(run.id, node.id, session.transcript())
@@ -551,19 +773,16 @@ export function createWorkflowEngine(options: EngineOptions): WorkflowEngine {
         }, 300)
       })
 
-      let revisions = 0
       const openRevision = (from: string[] | undefined): void => {
-        const known = new Set(run.nodes.map((candidate) => candidate.id))
-        let revisionId: string
-        do {
-          revisions += 1
-          revisionId = `${id}·r${revisions}`
-        } while (known.has(revisionId))
+        const revisionId = nextRevisionId(id)
         const revisionParents = [
           ...new Set([node.id, ...keptParents(run, revisionId, from ?? [])])
         ]
         captureStats()
         statBase = { ...sessionStats }
+        // A revision is its own record from zero: what the record it follows
+        // burned stays on that record.
+        carried = { cost: 0, cacheMisses: 0 }
         const previous = node
         node = {
           id: revisionId,
@@ -742,7 +961,7 @@ export function createWorkflowEngine(options: EngineOptions): WorkflowEngine {
         | { resolve: (result: NodeResult) => void; reject: (cause: unknown) => void }
         | undefined
       let handleGiven = false
-      let message = composeTaskPrompt(spec, outputPaths)
+      let message = job.firstMessage
       let validationRetries = 0
 
       try {
@@ -772,7 +991,7 @@ export function createWorkflowEngine(options: EngineOptions): WorkflowEngine {
                 verdict: completion.verdict,
                 summary: completion.summary
               }
-              if (onHold === undefined) {
+              if (job.onHold === undefined) {
                 finishNode('complete')
                 return result
               }
@@ -790,7 +1009,9 @@ export function createWorkflowEngine(options: EngineOptions): WorkflowEngine {
                 parkResolve = resolve
                 if (!handleGiven) {
                   handleGiven = true
-                  onHold({
+                  // Never absent here: a node with no `onHold` returned above
+                  // rather than parking.
+                  job.onHold?.({
                     result,
                     get id() {
                       return node.id
@@ -1082,6 +1303,94 @@ export function createWorkflowEngine(options: EngineOptions): WorkflowEngine {
     )
   }
 
+  // Runs whose resume is in flight: the loader is asked before anything is
+  // written, and a second resume arriving in that window is refused rather
+  // than allowed to start the same run twice.
+  const resuming = new Set<WorkflowRunId>()
+
+  /**
+   * Total over the two stopped states. A paused run un-pauses. An interrupted
+   * one re-runs the node the quit cut down, from that node's beginning, in the
+   * same worktree, reporting to the same orchestrator; everything the previous
+   * life completed is replayed from the record at no cost. Every other status
+   * is refused, and so is a missing worktree or a workflow that no longer
+   * resolves — all before anything can cost money.
+   */
+  async function resumeRun(runId: WorkflowRunId): Promise<void> {
+    const run = requireRecord(runId)
+    if (run.status === 'paused') {
+      const handle = handles.get(runId)
+      if (handle === undefined) throw new Error(`The run "${runId}" is not live.`)
+      if (handle.desired !== 'paused') return
+      handle.desired = 'running'
+      handle.run.status = 'running'
+      save(handle.run)
+      return
+    }
+    if (run.status !== 'interrupted') throw new Error(resumeRefusal(runId, run.status))
+    if (handles.has(runId) || resuming.has(runId)) {
+      throw new Error(resumeRefusal(runId, 'running'))
+    }
+
+    resuming.add(runId)
+    try {
+      // The same worktree is the whole promise of resuming, so a run whose
+      // worktree is gone is refused rather than given a new one.
+      if (run.worktreePath === undefined || !existsSync(run.worktreePath)) {
+        throw new Error(
+          `The run "${runId}" cannot resume: its worktree is gone ` +
+            `(${run.worktreePath ?? 'none was recorded'}). Resume re-runs the interrupted node ` +
+            'in the same worktree and never makes a new one.'
+        )
+      }
+      // The loader's own error stands: which workflow file is missing or
+      // unloadable is what the reader needs.
+      const resolved = await loader.resolve(run.workspacePath, run.workflow)
+
+      // A resumed run keeps its orchestrator; when that session is gone the
+      // run goes unattended instead, so its questions park it and ADR 0023's
+      // adoption machinery takes over. No session is ever created for it.
+      if (run.sessionId !== undefined && sessionExists?.(run.sessionId) === false) {
+        delete run.sessionId
+        // Nothing is owed a notice any more: there is nobody to owe it to.
+        delete run.noticePending
+      }
+
+      run.status = 'running'
+      delete run.error
+      delete run.endedAt
+      // A run that is working again must show, whatever the user cleared.
+      delete run.dismissedAt
+      for (const node of run.nodes) {
+        if (node.status === 'interrupted') revertToGhost(node)
+      }
+
+      const handle: Handle = {
+        run,
+        desired: 'running',
+        cancelRequested: false,
+        pauseInterrupts: new Set(),
+        waiters: [],
+        live: new Set(),
+        pending: new Set(),
+        staged: []
+      }
+      handles.set(runId, handle)
+      save(run)
+      log?.({ event: 'run_resumed', runId, workflow: run.workflow, branch: run.branch })
+
+      void execute(handle, resolved.def, true).catch((cause: unknown) => {
+        run.status = 'failed'
+        run.error = cause instanceof Error ? cause.message : String(cause)
+        run.endedAt = nowIso()
+        save(run)
+        log?.({ event: 'run_crashed', runId, message: run.error })
+      })
+    } finally {
+      resuming.delete(runId)
+    }
+  }
+
   /** Stops a live run where it stands; its record keeps what it reached. */
   function cancelRun(runId: WorkflowRunId): void {
     const handle = handles.get(runId)
@@ -1110,16 +1419,19 @@ export function createWorkflowEngine(options: EngineOptions): WorkflowEngine {
       for (const interrupt of [...handle.pauseInterrupts]) interrupt()
     },
 
-    resume(runId: WorkflowRunId): void {
-      const handle = handles.get(runId)
-      if (handle === undefined) throw new Error(`The run "${runId}" is not live.`)
-      if (handle.desired !== 'paused') return
-      handle.desired = 'running'
-      handle.run.status = 'running'
-      save(handle.run)
-    },
+    resume: resumeRun,
 
     cancel: cancelRun,
+
+    wake(sessionId: SessionId): void {
+      for (const run of records) {
+        if (run.noticePending !== true || run.sessionId !== sessionId) continue
+        // Composed here, from the record as it stands: a run resumed since the
+        // sweep says so instead of repeating a world that has moved on. A
+        // successful tell clears the flag and writes the clear.
+        tell(run, interruptionNotice(run as RunRecord))
+      }
+    },
 
     dismiss(runId: WorkflowRunId): void {
       const run = requireRecord(runId)
@@ -1178,6 +1490,35 @@ export function createWorkflowEngine(options: EngineOptions): WorkflowEngine {
       }
     }
   }
+}
+
+// The last moment any node of this run was seen doing something, which is the
+// most honest stop time a swept record can be given. Absent when no node ever
+// recorded activity at all.
+function latestNodeStop(run: LiveRun): string | undefined {
+  const stamps = run.nodes
+    .flatMap((node) => [node.lastActivityAt, node.endedAt])
+    .filter((at): at is string => at !== undefined)
+  if (stamps.length === 0) return undefined
+  return stamps.reduce((latest, at) => (Date.parse(at) > Date.parse(latest) ? at : latest))
+}
+
+// An interrupted node back to the pending ghost the plan first drew: same id,
+// same parents, its declared artifacts unwritten. What it already spent stays
+// on the record — the money was really spent, and the re-run adds to it — and
+// everything the dead session said about itself goes.
+function revertToGhost(node: LiveNode): void {
+  node.status = 'pending'
+  node.artifacts = node.artifacts.map(({ name, path, desc }) => ({ name, path, desc }))
+  delete node.error
+  delete node.summary
+  delete node.verdict
+  delete node.startedAt
+  delete node.endedAt
+  delete node.lastActivityAt
+  delete node.now
+  delete node.toolCalls
+  delete node.contextPercent
 }
 
 /**

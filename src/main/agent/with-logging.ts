@@ -114,7 +114,9 @@ export function withLogging(shell: Shell, log: LogSink, adapter: string): Shell 
     ),
     shareBashRun: op('shareBashRun', (sessionId, run) => shell.shareBashRun(sessionId, run)),
     steer: op('steer', (sessionId, text) => shell.steer(sessionId, text)),
-    followUp: op('followUp', (sessionId, text) => shell.followUp(sessionId, text)),
+    followUp: op('followUp', (sessionId, text, origin) =>
+      shell.followUp(sessionId, text, origin)
+    ),
     dequeue: op('dequeue', (sessionId, kind, text) => shell.dequeue(sessionId, kind, text)),
 
     activateTab: op('activateTab', (sessionId, tabId) => shell.activateTab(sessionId, tabId)),

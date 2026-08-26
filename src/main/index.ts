@@ -1,4 +1,4 @@
-import { basename, join, sep } from 'node:path'
+import { join } from 'node:path'
 import { app, BrowserWindow, dialog, shell as electronShell } from 'electron'
 import { type AgentChannel, serveAgentChannel } from './agent/channel'
 import type { SessionId } from '../shared/agent/port'
@@ -30,6 +30,7 @@ import { storePanelPersistence } from './panel/store-persistence'
 import { seedWorkspacePath } from './shell/seed-workspace'
 import { createShell } from './shell/shell'
 import { createShellStore } from './shell/store'
+import { devInstance } from './instance'
 import { createMainWindow } from './window'
 import { serveWorkspaceChannel, type WorkspaceChannel } from './workspace/channel'
 import { selectWorkspaceService } from './workspace/select-service'
@@ -55,20 +56,16 @@ if (app.isPackaged) {
   if (!path.includes('/opt/homebrew/bin')) {
     process.env.PATH = `/opt/homebrew/bin:/usr/local/bin:${path}`
   }
-} else {
-  // The data firewall between the installed app and every dev launch: dev
-  // state lives in Crucible-Dev, so no dev build can ever touch the installed
-  // app's sessions. Set before anything reads `userData`.
-  //
-  // A run's worktree gets its own directory under that, because concurrent
-  // builds would otherwise write one another's sessions and config. Only
-  // Crucible-managed worktrees are suffixed, so the human's own checkout keeps
-  // the plain Crucible-Dev state it has always had. The matching per-checkout
-  // debug port lives in scripts/dev-port.sh.
-  const root = app.getAppPath()
-  const inRunWorktree = root.includes(`${sep}.crucible${sep}worktrees${sep}`)
-  const devState = inRunWorktree ? `Crucible-Dev-${basename(root)}` : 'Crucible-Dev'
-  app.setPath('userData', join(app.getPath('appData'), devState))
+}
+
+// The data firewall between the installed app and every dev launch: dev state
+// lives in Crucible-Dev, so no dev build can ever touch the installed app's
+// sessions. Set before anything reads `userData`. The badge names the same
+// directory the window is pointed at, so the two cannot disagree; the
+// installed app has neither a suffix nor a badge.
+const instance = app.isPackaged ? undefined : devInstance(app.getAppPath())
+if (instance !== undefined) {
+  app.setPath('userData', join(app.getPath('appData'), instance.stateDir))
 }
 
 // One sink per launch, built here and passed everywhere: main is the sole
@@ -247,6 +244,11 @@ const shell = withLogging(
     panel,
     pickFolder,
     seedWorkspacePath: seededWorkspace,
+    // Fresh run status at the start of every user turn, and whatever
+    // interruption notice this session is owed, delivered as it wakes. The
+    // shell carries an opaque string; every rule about runs stays behind this
+    // seam.
+    turnContext: (sessionId) => workflowRuns.turnStart(sessionId),
     cache,
     // Nobody asked for a title, so nobody is told it failed: the run log is
     // the whole of the report.
@@ -264,9 +266,11 @@ const shell = withLogging(
 )
 
 // A run's message is a follow-up: queued while the orchestrator works,
-// prompted the moment it is idle — never lost, never refused.
+// prompted the moment it is idle — never lost, never refused. Marked as the
+// system's, so a message that ends up starting a turn of its own does not read
+// as the user taking one.
 orchestratorInbox = (sessionId, text) => {
-  void shell.followUp(sessionId, text).catch((cause: unknown) => {
+  void shell.followUp(sessionId, text, 'system').catch((cause: unknown) => {
     log.append({
       source: 'main',
       event: 'run_message_undeliverable',
@@ -288,7 +292,9 @@ let workflowRunChannel: WorkflowRunChannel | undefined
 let scheduleChannel: ScheduleChannel | undefined
 
 function openWindow(reason?: 'activate'): void {
-  const window = createMainWindow()
+  const window = createMainWindow(
+    instance === undefined ? {} : { instance: instance.badge }
+  )
   // The renderer writes nothing itself: its console output is forwarded here,
   // so one file holds both processes in one order.
   forwardRendererOutput(window.webContents, log)

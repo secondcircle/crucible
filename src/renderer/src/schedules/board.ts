@@ -25,6 +25,7 @@ export function parkedNode(run: RunRecord): string | undefined {
 /** A short note of why it stopped, in the board's own words. */
 export function parkedNote(run: RunRecord): string {
   if (run.status === 'failed') return 'node failed'
+  if (run.status === 'interrupted') return 'app quit'
   const node = run.nodes.find((candidate) => candidate.id === run.question?.nodeId)
   if (node?.status === 'stalled') return 'stalled'
   return 'asked a question'
@@ -38,6 +39,10 @@ export interface RunStateCell {
 
 export function parkedStateCell(run: RunRecord): RunStateCell {
   if (run.status === 'failed') return { text: '✕ failed', tone: 'failed' }
+  // Amber like a wait, because that is what it is: stopped, intact, and
+  // waiting on somebody to decide. The board never resumes it — adoption or
+  // ⌘R is the way to that button.
+  if (run.status === 'interrupted') return { text: '◌ interrupted', tone: 'blocked' }
   return { text: '⚑ waiting on answer', tone: 'blocked' }
 }
 
@@ -112,6 +117,9 @@ export function lastOutcome(
     )
     .sort((left, right) => stamp(newsOf(right)) - stamp(newsOf(left)))[0]
   if (latest === undefined) return undefined
+  if (latest.status === 'interrupted') {
+    return { mark: '◌', text: 'interrupted', at: newsOf(latest), tone: 'blocked' }
+  }
   if (runIsParked(latest) && latest.status !== 'failed') {
     return { mark: '⚑', text: 'blocked', at: parkedAt(latest), tone: 'blocked' }
   }
