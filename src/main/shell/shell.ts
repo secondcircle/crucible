@@ -10,6 +10,7 @@ import type {
   BashRunShare,
   HistoryMatch,
   ImageAttachment,
+  MessageOrigin,
   ModelId,
   ModelInfo,
   PortEvent,
@@ -56,6 +57,12 @@ export interface ShellOptions {
   readonly pickFolder: () => Promise<string | null>
   // Lets an agent-driven check reach a chattable state without an OS dialog.
   readonly seedWorkspacePath?: string
+  // Consulted once per user turn, after the turn is claimed and its
+  // conversation is open, one line before the adapter hears the prompt: what
+  // it answers rides that prompt as context the model sees and no surface
+  // shows. An opaque string — the shell never learns what is in it — and a
+  // launch without it prompts exactly as it always has.
+  readonly turnContext?: (sessionId: SessionId) => string | undefined
   // Where an observed miss is written down. Absent in tests that are not
   // about recording: with no ledger there is no entry to compose, and no
   // retention to state, so nothing about a miss crosses the port either.
@@ -105,6 +112,7 @@ export function createShell({
   panel,
   pickFolder,
   seedWorkspacePath,
+  turnContext,
   cache,
   onTitlingFailure = () => {}
 }: ShellOptions): Shell {
@@ -510,11 +518,13 @@ export function createShell({
   }
 
   // `announce` is what this shell delivered itself, and a plain prompt has
-  // none because its caller echoed it.
+  // none because its caller echoed it. `origin` says whose turn this is: only
+  // a user's is offered the turn-start context.
   function beginTurn(
     sessionId: SessionId,
-    dispatch: (turnId: TurnId) => Promise<void>,
-    announce?: Announcement
+    dispatch: (turnId: TurnId, context?: string) => Promise<void>,
+    announce?: Announcement,
+    origin: MessageOrigin = 'user'
   ): TurnId {
     requireSession(sessionId)
     // Checked and claimed in the same tick, so nothing can slip between the
@@ -546,7 +556,11 @@ export function createShell({
         // and the adapter must never be asked to run work the user stopped.
         if (live.get(sessionId) !== turn) return
         turn.dispatched = true
-        await dispatch(turnId)
+        // Asked for here, with the turn claimed and its conversation open, so
+        // what comes back belongs to the prompt on the very next line and to
+        // no other turn. A turn the system started asks for nothing.
+        const context = origin === 'user' ? turnContext?.(sessionId) : undefined
+        await dispatch(turnId, context)
       })
       .then(() => {
         // A turn the adapter finished without saying so still ends exactly
@@ -611,11 +625,14 @@ export function createShell({
   }
 
   // Never lost and never refused: with no live turn to take it, the message
-  // becomes the next prompt and is announced as a user message itself.
+  // becomes the next prompt and is announced as a user message itself. The
+  // origin rides all the way here, so a system message that becomes a prompt
+  // still starts a system turn.
   async function queueMessage(
     sessionId: SessionId,
     kind: QueuedKind,
-    text: string
+    text: string,
+    origin: MessageOrigin = 'user'
   ): Promise<void> {
     requireSession(sessionId)
 
@@ -628,10 +645,12 @@ export function createShell({
       await turn.over
     }
 
-    beginTurn(sessionId, (turnId) => adapter.prompt(sessionId, turnId, text), {
-      kind: 'text',
-      text
-    })
+    beginTurn(
+      sessionId,
+      (turnId, context) => adapter.prompt(sessionId, turnId, text, undefined, context),
+      { kind: 'text', text },
+      origin
+    )
     // A queued message with no turn left to take it becomes the next prompt,
     // and a prompt is a user instruction whatever key sent it.
     panel.bumpTurn(sessionId)
@@ -1213,8 +1232,8 @@ export function createShell({
       text: string,
       images?: readonly ImageAttachment[]
     ): Promise<TurnId> {
-      const started = beginTurn(sessionId, (turnId) =>
-        adapter.prompt(sessionId, turnId, text, images)
+      const started = beginTurn(sessionId, (turnId, context) =>
+        adapter.prompt(sessionId, turnId, text, images, context)
       )
       // One user instruction, one turn on the panel's counter: it is what
       // "shown N turns ago" counts.
@@ -1233,8 +1252,12 @@ export function createShell({
       await queueMessage(sessionId, 'steering', text)
     },
 
-    async followUp(sessionId: SessionId, text: string): Promise<void> {
-      await queueMessage(sessionId, 'followUp', text)
+    async followUp(
+      sessionId: SessionId,
+      text: string,
+      origin: MessageOrigin = 'user'
+    ): Promise<void> {
+      await queueMessage(sessionId, 'followUp', text, origin)
     },
 
     async dequeue(sessionId: SessionId, kind: QueuedKind, text: string): Promise<boolean> {

@@ -77,6 +77,7 @@ import {
   userTextOf,
   type StoredMessage
 } from './sdk-transcript.ts'
+import { markTurnContext } from './turn-context.ts'
 import { sumUsage, type StoredUsage } from './usage.ts'
 
 // Imported dynamically because the SDK is ESM-only, so the CommonJS main
@@ -353,6 +354,9 @@ export function createSdkAdapter({
             return said(
               await behaviors.answer(sessionId, given.runId ?? '', given.message ?? '')
             )
+          }
+          if (tool.name === 'crucible_resume') {
+            return said(await behaviors.resume(sessionId, given.runId ?? ''))
           }
           return said(await behaviors.list(sessionId))
         }
@@ -1240,7 +1244,8 @@ export function createSdkAdapter({
       sessionId: SessionId,
       turnId: TurnId,
       text: string,
-      images?: readonly ImageAttachment[]
+      images?: readonly ImageAttachment[],
+      context?: string
     ): Promise<void> {
       const bound = requireBound(sessionId)
       const { session } = bound
@@ -1248,11 +1253,16 @@ export function createSdkAdapter({
         images === undefined || images.length === 0
           ? undefined
           : { images: images.map(toImageContent) }
+      // π stores the message it was sent, so context that must reach the model
+      // without entering the conversation anyone reads goes in marked and
+      // comes back out through `userTextOf`.
+      const sent = context === undefined ? text : markTurnContext(context, text)
       // Held from before the turn is announced, because the shell asks for a
       // title the moment it hears the start and π appends the prompt to its
-      // own list some way into the call below.
+      // own list some way into the call below. What was typed, never the
+      // context: the titler names sessions after the conversation.
       bound.asked = text
-      return runTurn(sessionId, turnId, () => session.prompt(text, options)).finally(() => {
+      return runTurn(sessionId, turnId, () => session.prompt(sent, options)).finally(() => {
         bound.asked = undefined
       })
     },

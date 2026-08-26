@@ -77,6 +77,9 @@ export interface CrucibleSchedules {
 declare global {
   interface Window {
     crucible?: {
+      // The state directory this window runs against, as a badge: `dev`, or
+      // `dev · <suffix>` in a worktree launch. Absent in the installed app.
+      instance?: string
       agent?: CrucibleAgent
       workspace?: CrucibleWorkspace
       commands?: CrucibleCommands
@@ -154,6 +157,14 @@ export function workflowRunsBridge(): CrucibleWorkflowRuns {
     throw new Error('renderer: window.crucible.workflowRuns is missing — the preload did not load')
   }
   return workflowRuns
+}
+
+// The one value here that is allowed to be absent without anything being
+// wrong: the installed app carries no instance badge, and that absence is the
+// design.
+export function instanceBadge(): string | undefined {
+  const instance = window.crucible?.instance
+  return instance === undefined || instance === '' ? undefined : instance
 }
 
 export function schedulesBridge(): CrucibleSchedules {

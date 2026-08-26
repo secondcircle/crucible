@@ -412,9 +412,12 @@ function ReadingPane({
     ? { text: '⚑ WAITING', tone: 'blocked' }
     : run.status === 'failed'
       ? { text: '✕ FAILED', tone: 'failed' }
-      : live
-        ? { text: '● RUNNING', tone: 'live' }
-        : { text: `✓ ${run.status.toUpperCase()}`, tone: 'done' }
+      : // A checkmark would be a lie: the run stopped where it stood.
+        run.status === 'interrupted'
+        ? { text: '◌ INTERRUPTED', tone: 'blocked' }
+        : live
+          ? { text: '● RUNNING', tone: 'live' }
+          : { text: `✓ ${run.status.toUpperCase()}`, tone: 'done' }
   const spend = runCost(run)
   const answer = read?.of === of ? read : undefined
 

@@ -11,6 +11,7 @@ import './topbar.css'
 // that guesses is worse than one that admits it does not know yet.
 export function TopBar({
   session,
+  instance,
   menuOpen,
   onToggleMenu,
   onResetSession,
@@ -22,6 +23,10 @@ export function TopBar({
   update
 }: {
   readonly session?: SessionState
+  // Which state directory this window runs against: `dev`, or `dev · <suffix>`
+  // in a worktree launch. Absent in the installed app, and that absence is
+  // the design — the badge marks the exceptional case.
+  readonly instance?: string
   readonly menuOpen: boolean
   readonly onToggleMenu: () => void
   readonly onResetSession: () => void
@@ -63,8 +68,14 @@ export function TopBar({
 
   return (
     <header className="top">
-      {/* Nothing on the left: the tree button and the gear both left the bar,
-          the tree to double-Esc and Settings to the sidebar foot. */}
+      {/* The left slot holds one thing and only in a dev window: which state
+          directory this instance can see. A mark, not a button — it opens
+          nothing. */}
+      {instance === undefined ? null : (
+        <span className="instance" aria-label={`Instance ${instance}`}>
+          {instance}
+        </span>
+      )}
       <span className="spacer" />
 
       {/* Lit exactly while an issue is assigned to you: unclaimed ones are

@@ -361,16 +361,19 @@ describe('the engine end to end', () => {
     })
 
     const [run] = engine.runs()
-    expect(run.status).toBe('failed')
+    // Interrupted, never failed: the app went away, the work did not go wrong.
+    expect(run.status).toBe('interrupted')
     expect(run.error).toMatch(/quit while this run was working/)
     expect(run.endedAt).toBeDefined()
     // Nothing is owed an answer any more, and nothing claims to be thinking.
     expect(run.waiting).toBe(false)
     expect(run.question).toBeUndefined()
-    expect(run.nodes.map((node) => node.status)).toEqual(['complete', 'failed', 'pending'])
+    expect(run.nodes.map((node) => node.status)).toEqual(['complete', 'interrupted', 'pending'])
     expect(run.nodes[1].now).toBeUndefined()
+    // Its orchestrator has not heard, and the record says so until it does.
+    expect(run.noticePending).toBe(true)
     // Written through, so the next launch reads the settled record.
-    expect(store.load()[0].status).toBe('failed')
+    expect(store.load()[0].status).toBe('interrupted')
 
     // And it is a record, not a ghost: the live-only operations say so
     // plainly rather than pretending to work.

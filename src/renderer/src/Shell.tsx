@@ -131,7 +131,8 @@ export function Shell({
   cache: cacheService,
   needsYou: needsYouService,
   workflowRuns,
-  schedules: scheduleService
+  schedules: scheduleService,
+  instance
 }: {
   readonly port: AgentPort
   readonly workspace: WorkspaceService
@@ -160,6 +161,9 @@ export function Shell({
   // repository's workflow files, and a run is a fact about the engine.
   // Without this service no chip and no schedule board render at all.
   readonly schedules?: ScheduleService
+  // Which state directory this window runs against, as main worked it out at
+  // creation. Absent in the installed app, which shows no badge.
+  readonly instance?: string
 }): React.JSX.Element {
   const [state, dispatch] = useReducer(reduce, NOTHING_YET)
   const quotaHold = useQuota(quota)
@@ -2031,6 +2035,23 @@ export function Shell({
     [workflowRuns, report]
   )
 
+  // No confirm, no dialog: the click is the spend authorization. `cleared`
+  // means the run is working again and the snapshot will re-band its row; a
+  // refusal is reported where run refusals are and hands the button back.
+  const resumeRun = useCallback(
+    async (runId: WorkflowRunId): Promise<RunActOutcome> => {
+      if (workflowRuns === undefined) return 'kept'
+      try {
+        await workflowRuns.resume(runId)
+        return 'cleared'
+      } catch (cause) {
+        report(cause)
+        return 'kept'
+      }
+    },
+    [workflowRuns, report]
+  )
+
   // The whole investigation is started for the user — session, adoption,
   // opening prompt — so what they land in is an ordinary conversation that
   // already knows the run.
@@ -2202,6 +2223,7 @@ export function Shell({
         <main className="main">
           <TopBar
             session={session}
+            instance={instance}
             menuOpen={popover === 'sessionMenu'}
             onToggleMenu={() => setPopover(popover === 'sessionMenu' ? 'none' : 'sessionMenu')}
             onResetSession={resetSession}
@@ -2447,6 +2469,7 @@ export function Shell({
                 onGoToSession={goToRunSession}
                 onDismiss={dismissRun}
                 onCancel={cancelRun}
+                onResume={resumeRun}
                 onInvestigate={investigateRun}
                 onClose={closeRegion}
               />
@@ -2477,7 +2500,7 @@ export function Shell({
                   if (openRun.sessionId !== undefined) goToRunSession(openRun.sessionId)
                 }}
                 onPause={() => void workflowRuns.pause(openRun.id).catch(report)}
-                onResume={() => void workflowRuns.resume(openRun.id).catch(report)}
+                onResume={() => resumeRun(openRun.id).then(() => {})}
                 onCancel={() => void cancelRun(openRun.id)}
                 onInvestigate={() => investigateRun(openRun.id)}
                 onClose={() => {

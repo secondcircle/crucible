@@ -210,7 +210,8 @@ export function graphCount(nodes: readonly RunNode[]): string {
     `${nodes.length} ${nodes.length === 1 ? 'node' : 'nodes'}`,
     of('complete') === 0 ? '' : `${of('complete')} done`,
     of('running') === 0 ? '' : `${of('running')} running`,
-    of('failed') === 0 ? '' : `${of('failed')} failed`
+    of('failed') === 0 ? '' : `${of('failed')} failed`,
+    of('interrupted') === 0 ? '' : `${of('interrupted')} interrupted`
   ]
     .filter((part) => part !== '')
     .join(' · ')
@@ -446,7 +447,11 @@ function round(value: number): number {
 }
 
 function statusWord(node: RunNode): string {
-  return node.status === 'complete' ? 'done' : node.status
+  if (node.status === 'complete') return 'done'
+  // The cut node reads as cut at a glance, while its neighbours keep their
+  // checkmarks: the glyph is what carries that, never colour alone.
+  if (node.status === 'interrupted') return '◌ interrupted'
+  return node.status
 }
 
 function toneOf(node: RunNode): CardTone {
@@ -460,7 +465,8 @@ function toneOf(node: RunNode): CardTone {
     case 'failed':
       return 'bad'
     default:
-      // blocked, stalled, paused: parked states share the amber look.
+      // blocked, stalled, paused, interrupted: stopped states share the amber
+      // look, because none of them is a failure and none moves on its own.
       return 'parked'
   }
 }

@@ -152,17 +152,31 @@ export interface Rig {
   readonly sessions: ReturnType<typeof scriptedSessions>
   /** Every ledger line the run wrote, in order. */
   readonly recorded: RecordedCacheMiss[]
+  // Makes delivery fail the way a launch with no shell up fails: the run's
+  // messages throw instead of landing, which is what leaves a notice owed.
+  refuseDelivery(on: boolean): void
+}
+
+export interface RigOptions {
+  // A repository and a state directory an earlier rig already made: what a
+  // relaunch of the same app over the same records looks like.
+  readonly repo?: string
+  readonly stateDir?: string
+  /** Whether a recorded orchestrator session still exists, as resume asks. */
+  readonly sessionExists?: (sessionId: SessionId) => boolean
 }
 
 export function rig(
   defs: Record<string, WorkflowDef>,
-  scriptFor: (nodeId: string) => NodeScript
+  scriptFor: (nodeId: string) => NodeScript,
+  options: RigOptions = {}
 ): Rig {
-  const repo = tempRepo()
-  const stateDir = tempDir('crucible-engine-state-')
+  const repo = options.repo ?? tempRepo()
+  const stateDir = options.stateDir ?? tempDir('crucible-engine-state-')
   const delivered: { sessionId: SessionId; text: string }[] = []
   const recorded: RecordedCacheMiss[] = []
   const sessions = scriptedSessions(scriptFor)
+  let refusing = false
   // A stand-in for the ledger: what a run writes is checkable without a file.
   const cache: CacheRecorder = {
     retention: '5m',
@@ -175,7 +189,11 @@ export function rig(
     loader: loaderOf(defs),
     store: createRunStore(stateDir),
     sessions,
-    deliver: (sessionId, text) => delivered.push({ sessionId, text }),
+    deliver: (sessionId, text) => {
+      if (refusing) throw new Error('no shell is up to carry a run message yet')
+      delivered.push({ sessionId, text })
+    },
+    ...(options.sessionExists === undefined ? {} : { sessionExists: options.sessionExists }),
     cache,
     onChanged: () => {},
     pollMs: 5,
@@ -183,7 +201,29 @@ export function rig(
     quietAbortMs: 600_000,
     releaseWaitMs: 100
   })
-  return { engine, repo, stateDir, delivered, sessions, recorded }
+  return {
+    engine,
+    repo,
+    stateDir,
+    delivered,
+    sessions,
+    recorded,
+    refuseDelivery(on: boolean): void {
+      refusing = on
+    }
+  }
+}
+
+// The same app started again over the same records and the same repository:
+// its engine sweeps what the last one left mid-flight, and its node sessions
+// are a fresh script.
+export function relaunch(
+  before: Rig,
+  defs: Record<string, WorkflowDef>,
+  scriptFor: (nodeId: string) => NodeScript,
+  options: Omit<RigOptions, 'repo' | 'stateDir'> = {}
+): Rig {
+  return rig(defs, scriptFor, { ...options, repo: before.repo, stateDir: before.stateDir })
 }
 
 export async function until(what: () => boolean, ms = 4000): Promise<void> {

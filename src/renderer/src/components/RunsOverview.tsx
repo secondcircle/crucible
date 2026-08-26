@@ -24,6 +24,7 @@ export function RunsOverview({
   onGoToSession,
   onDismiss,
   onCancel,
+  onResume,
   onInvestigate,
   onClose
 }: {
@@ -37,6 +38,10 @@ export function RunsOverview({
   // Raises the app's confirm and then does the cancelling, answering with
   // what became of the run — not with what the user clicked.
   readonly onCancel: (runId: string) => Promise<RunActOutcome>
+  // Puts an interrupted run back to work: no confirm, because the click is
+  // the spend authorization. `cleared` when the run is working again — the
+  // snapshot re-bands the row — and `kept` on a refusal.
+  readonly onResume: (runId: string) => Promise<RunActOutcome>
   readonly onInvestigate: (runId: string) => Promise<void>
   readonly onClose: () => void
 }): React.JSX.Element {
@@ -96,13 +101,17 @@ export function RunsOverview({
                 // until it is dismissed, which is the whole point of
                 // dismissing: the row stops shouting.
                 const failed = run.status === 'failed' && !dismissed
+                // Amber where failed is red, and dismissing it stops the
+                // shouting exactly as it does for a failure. Resume works on
+                // a dismissed run all the same.
+                const interrupted = run.status === 'interrupted' && !dismissed
                 const done =
                   dismissed || run.status === 'complete' || run.status === 'cancelled'
                 return (
                   <div
                     className={`runrow${parked ? ' parked' : ''}${failed ? ' failed' : ''}${
-                      done ? ' done' : ''
-                    }`}
+                      interrupted ? ' interrupted' : ''
+                    }${done ? ' done' : ''}`}
                     key={run.id}
                   >
                     <span className={`dot ${run.status}`} />
@@ -151,9 +160,22 @@ export function RunsOverview({
                     <InvestigateButton
                       run={run}
                       workspaceOpen={workspace !== undefined}
-                      primary={run.sessionId === undefined}
+                      // Resume is the only primary on a row that has one:
+                      // it is the one act that moves the run.
+                      primary={run.sessionId === undefined && run.status !== 'interrupted'}
                       onInvestigate={() => onInvestigate(run.id)}
                     />
+                    {/* Rightmost, and only where the run can be resumed: the
+                        one new thing an interrupted row earns. */}
+                    {run.status === 'interrupted' ? (
+                      <button
+                        className="btn primary"
+                        disabled={clearing(run.id)}
+                        onClick={() => act(run.id, onResume)}
+                      >
+                        Resume
+                      </button>
+                    ) : null}
                   </div>
                 )
               })}
@@ -166,6 +188,12 @@ export function RunsOverview({
 }
 
 function statusText(run: RunRecord): string {
+  // What happened, in the mock's words: the glyph, why it stopped, and how
+  // long ago — which is the record's own stop time, not the age of the app.
+  if (run.status === 'interrupted') {
+    const cleared = run.dismissedAt === undefined ? '' : ' · dismissed'
+    return `◌ interrupted · app quit${cleared} · ${shortAge(run.endedAt)}`
+  }
   if (runIsLive(run)) {
     if (run.waiting === true) {
       const who = run.sessionId === undefined ? 'no one to ask' : 'waiting on its agent'

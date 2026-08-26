@@ -50,6 +50,7 @@ import {
   type WorkspaceRequest,
   type WorkspaceResult
 } from '../shared/workspace/channels'
+import { INSTANCE_ARGUMENT } from '../shared/instance'
 import type { WorkspaceEvent } from '../shared/workspace/service'
 import {
   WORKFLOW_RUN_EVENT_CHANNEL,
@@ -58,6 +59,13 @@ import {
   type WorkflowRunRequest,
   type WorkflowRunResult
 } from '../shared/workflows/channels'
+
+// Which state directory this window runs against, as main worked it out and
+// passed it at creation. A static value: it needs no channel and no event, and
+// its absence is how the installed app shows no badge.
+const instance = process.argv
+  .find((argument) => argument.startsWith(INSTANCE_ARGUMENT))
+  ?.slice(INSTANCE_ARGUMENT.length)
 
 // Never `ipcRenderer.on(channel, listener)`: that hands the caller the Electron
 // event as its first argument.
@@ -74,6 +82,9 @@ function forwarder<T>(channel: string, listener: (event: T) => void): () => void
 // The whole of what the sandboxed renderer may reach of Electron: no general
 // passthrough, and nothing carrying a `sender` crosses.
 contextBridge.exposeInMainWorld('crucible', {
+  // A mark, not a capability: the renderer shows it and asks nothing of it.
+  instance,
+
   agent: {
     request: (request: PortRequest): Promise<PortResult> =>
       ipcRenderer.invoke(REQUEST_CHANNEL, request),

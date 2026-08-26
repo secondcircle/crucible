@@ -10,12 +10,24 @@ export type WorkflowRunId = string
 // No "staged": a chained successor is started directly by the engine when its
 // predecessor completes cleanly, so a run that exists is running
 // or done.
-export type RunStatus = 'running' | 'paused' | 'complete' | 'failed' | 'cancelled'
+//
+// `interrupted` is the app quitting out from under a run, which is a different
+// fact from `failed` — the work going wrong — and the only status Resume acts
+// on. One value, so nothing downstream has to parse an error string to tell
+// the two apart.
+export type RunStatus =
+  | 'running'
+  | 'paused'
+  | 'interrupted'
+  | 'complete'
+  | 'failed'
+  | 'cancelled'
 
 export type RunNodeStatus =
   | 'pending'
   | 'running'
   | 'paused'
+  | 'interrupted'
   | 'complete'
   | 'failed'
   | 'blocked'
@@ -125,7 +137,20 @@ export interface RunRecord {
   // Carried on the record so a prompt can name it without the renderer
   // guessing at storage layout; the store backfills it at load.
   readonly dir?: string
+  // The orchestrator has not yet been told this run was interrupted. Set only
+  // by the startup sweep and only when `sessionId` is present; cleared by the
+  // first message about this run that reaches its orchestrator. Never set on a
+  // run with no orchestrator. What the notice says is composed at delivery
+  // from the record, so nothing stored here can go stale.
+  readonly noticePending?: true
 }
+
+// What a record that outlived its engine is told it is. Spelled once: the
+// sweep writes it onto the run and its cut nodes, the notice to the
+// orchestrator says it again, and the run view's banner is drawn from it.
+export const INTERRUPTED_MESSAGE =
+  'Crucible quit while this run was working, so it stopped where it stood. ' +
+  'Its worktree is left as it stands.'
 
 // Every message a run sends its orchestrator opens with this, and three
 // things downstream read it back: the fake orchestrator recognizes a run
@@ -143,6 +168,13 @@ export function runMessageHeader(run: Pick<RunRecord, 'id' | 'workflow'>): strin
 // run is stopped, never cleared, and the UI offers Cancel there instead.
 export function dismissRefusal(runId: WorkflowRunId): string {
   return `The run "${runId}" is still working, so there is nothing to dismiss — cancel it instead.`
+}
+
+// Resume is total over the two stopped states and refuses every other one,
+// naming the run and where it stands. A second resume racing the first reads
+// the run as `running` and is refused by this same sentence.
+export function resumeRefusal(runId: WorkflowRunId, status: RunStatus): string {
+  return `The run "${runId}" is ${status}; there is nothing to resume.`
 }
 
 /** Whether a message in a session's transcript is a run talking, not a human. */
@@ -171,7 +203,10 @@ export function currentNode(run: RunRecord): RunNode | undefined {
       node.status === 'running' ||
       node.status === 'blocked' ||
       node.status === 'stalled' ||
-      node.status === 'paused'
+      node.status === 'paused' ||
+      // The node the quit cut down is what an interrupted run is about, so it
+      // is the node every surface names for one.
+      node.status === 'interrupted'
   )
   if (active !== undefined) return active
   const settled = run.nodes.filter((node) => node.status !== 'pending')
@@ -183,16 +218,25 @@ export function runIsLive(run: RunRecord): boolean {
   return run.status === 'running' || run.status === 'paused'
 }
 
+// The nodes the quit cut down, in record order: what Resume re-runs. There is
+// no field for them — a status is the whole truth, and a fan-out interrupted
+// mid-flight is several of them.
+export function interruptedNodes(run: RunRecord): readonly RunNode[] {
+  return run.nodes.filter((node) => node.status === 'interrupted')
+}
+
 /**
  * Parked: a run with no orchestrator to hear it, stopped on something. It has
  * no `sessionId`, has not been dismissed, and is either waiting on an answer
- * (a question, a blocker, a stall) or has settled `failed`. A parked run waits
- * indefinitely at no cost until a session adopts it or the user dismisses it.
- * Clean completions and cancellations are never parked.
+ * (a question, a blocker, a stall) or has settled `failed` or `interrupted`.
+ * A parked run waits indefinitely at no cost until a session adopts it or the
+ * user dismisses it. Clean completions and cancellations are never parked.
  */
 export function runIsParked(run: RunRecord): boolean {
   if (run.sessionId !== undefined) return false
   if (run.dismissedAt !== undefined) return false
-  if (run.status === 'failed') return true
+  // Interrupted sits here for the same reason failed does: only a deliberate
+  // act moves it, and with no orchestrator that act has to be found.
+  if (run.status === 'failed' || run.status === 'interrupted') return true
   return runIsLive(run) && run.waiting === true
 }
