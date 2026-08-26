@@ -53,14 +53,14 @@ surface the workspace hasn't already settled (an HTML mock against the
 project's design references, iterated until approved), a library this project
 has never used (a small spike proving it does the job), a risky integration.
 Name each candidate and push the user to decide whether to prototype it —
-the pushing is the job, because hands-off builds only work from align issues
+the pushing is the job, because hands-off builds only work from briefs
 with prototypes. An approved mock is worth more than any number of questions.
 
-An accepted prototype is built during the interview, before the issue
-exists: the issue ships complete, never with prototypes trailing in later. A
+An accepted prototype is built during the interview, before the brief is
+written: the brief ships complete, never with prototypes trailing in later. A
 declined one is recorded in the brief's Prototyping section, so a build knows
-where it flies blind. Prototype files never land in the repository's working
-tree or history — they exist to be shipped with the issue.
+where it flies blind. Prototype files live beside the brief in the same
+gitignored folder, never in the repository's history.
 
 ## Glossary and ADRs
 
@@ -78,37 +78,32 @@ When nothing functional is left open, ask, in these words:
 > Do you agree we are fully aligned?
 
 Anything short of a clear yes is another question. On the yes, and only then,
-create the align issue as described below, relay its URL in one sentence, and
-stop. The issue is the user's. What happens to it next is their call, not
+write the brief file as described below, relay its path in one sentence, and
+stop. The brief is the user's. What happens to it next is their call, not
 yours.
 
-## The align issue
+## The brief file
 
-The interview's product is an issue on the workspace's issue host, labeled
-`align` — the marker a future build chain looks for — whose body is the
-intent brief below and which ships with every prototype. Never write the
-brief into the repository.
+The interview's product is a local file — never an issue on any host, never
+a commit. It lives in a gitignored folder inside the workspace:
 
-Which host is the workspace's existing configuration, never a question:
+- The folder is `.crucible/align/` at the workspace root. Create it if it
+  does not exist.
+- Before writing, prove the folder is ignored: `git check-ignore -q
+  .crucible/align` must succeed. If it does not, add `.crucible/align/` to
+  the workspace's `.gitignore` first, then check again. Only then write.
+- The file is `<YYMMDD>-<slug>.md` — today's date, then a short slug of the
+  subject. Its contents are the intent brief below, nothing else.
+- Every prototype file goes beside it in the same folder, and the brief's
+  source material section points at each one by path.
 
-- `.crucible/jira.json` present → **Jira**. Credentials are the `JIRA_*`
-  keys in `.env.local` at the workspace root. Create the issue in the
-  configured project — type Task, unassigned, label `align`, the intent
-  brief as its description — then attach every prototype file to it through
-  the attachments API.
-- Otherwise → **GitHub** through `gh`. Ensure the label exists first
-  (`gh label create align`; already-exists is fine), then `gh issue create`
-  with the brief as body and the `align` label, unassigned. GitHub issues
-  take no file attachments: put all prototype files in one secret gist
-  (`gh gist create`) and link it from the brief's source material.
-
-If creation fails — missing auth, network — preserve the brief in a file
-outside the repository (a temp path), say exactly what failed and where the
-brief is, and stop. The brief is never silently dropped.
+If writing fails, preserve the brief at a temp path outside the repository,
+say exactly what failed and where the brief is, and stop. The brief is never
+silently dropped.
 
 ## The intent brief
 
-The brief is the align issue's body: the one durable statement of what was
+The brief is the file's contents: the one durable statement of what was
 agreed, precise enough to hand to an implementer who heard none of the
 conversation. Write rulings in the user's sense, never blurred with your
 recommendation. The template, in full:
@@ -156,4 +151,4 @@ Behavior, not mechanism.>
 ## Source material (read these — do not work from paraphrase)
 
 - <Path or URL, one line each on what to take from it. Every prototype
-  belongs here — as an attachment on Jira, in the linked gist on GitHub.>
+  belongs here, by its path beside this file.>

@@ -139,19 +139,32 @@ describe('the built-in commands', () => {
     expect(text).toContain('Do you agree we are fully aligned?')
     expect(text).toContain('## Decided without asking — veto anything here')
     expect(text).toContain('## Prototyping')
-    // The same align-issue ending as /align: host by config, label, no repo file.
-    expect(text).toContain('.crucible/jira.json')
-    expect(text).toContain('gh label create align')
-    expect(text).toContain('gh gist create')
-    expect(text).not.toContain('.crucible/align/')
+  })
+
+  it('ends /quick-align in a local gitignored brief, never an issue on any host', async () => {
+    const expansion = await shipped().expand(workspace, '/quick-align')
+    const text = expansion.kind === 'command' ? expansion.text : ''
+
+    // The folder, and the proof it is ignored before anything is written.
+    expect(text).toContain('.crucible/align/')
+    expect(text).toContain('git check-ignore -q')
+    // No host machinery: no Jira config, no gh, no gist, no label.
+    expect(text).not.toContain('.crucible/jira.json')
+    expect(text).not.toContain('gh issue create')
+    expect(text).not.toContain('gh gist create')
+    expect(text).not.toContain('gh label create')
+    // Failure preserves the brief at a temp path, named, never dropped.
+    expect(text).toMatch(/outside the repository/)
+    expect(text).toMatch(/never\s+silently dropped/)
   })
 
   it('keeps /quick-align ignorant of /align, sub-agents and π', async () => {
     const expansion = await shipped().expand(workspace, '/quick-align')
     const text = expansion.kind === 'command' ? expansion.text : ''
 
-    // Its own name contains "align", so match /align not preceded by "quick-".
-    expect(text).not.toMatch(/(?<!quick-)\/align/)
+    // Its own name contains "align" and its brief folder is .crucible/align,
+    // so match /align as the command: not preceded by "quick-" or ".crucible".
+    expect(text).not.toMatch(/(?<!quick-)(?<!\.crucible)\/align/)
     for (const gone of ['sub-agent', '~/.pi', '<repo>']) {
       expect(text).not.toContain(gone)
     }

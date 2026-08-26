@@ -6,25 +6,27 @@ run that builds from the issue. The alignment part is global — the same two
 commands in every workspace — while the building part is authored per
 repository as a workflow.
 
-## Alignment produces an issue, not a file
+## What alignment produces
 
 An alignment is an interview: the user states an intent, the agent asks only
 the questions with real functional trade-offs, prototypes anything
 non-obvious, and writes the settled scope into an **intent brief**. Two
-built-in commands run it:
+built-in commands run it, and they end differently:
 
 - `/align` — the thorough interview: glossary entries and ADRs as terms and
-  decisions crystallize, prototypes built and approved along the way.
+  decisions crystallize, prototypes built and approved along the way. On the
+  confirming yes it creates an **align issue** on the workspace's issue
+  host: labeled `align`, its body the intent brief, its prototypes attached.
+  The brief is never written into the repository — the issue is the durable
+  artifact, and the `align` label is the marker a build workflow looks for.
 - `/quick-align` — the fast one: end-user experience only, a handful of
-  questions, technical shape left entirely to the implementation.
+  questions, technical shape left entirely to the implementation. On the
+  confirming yes it writes the brief to a local file in `.crucible/align/`
+  at the workspace root, prototypes beside it — a folder it proves is
+  gitignored before writing. No issue is created; the file is the product,
+  and it never enters the repository's history.
 
-On the confirming yes, the interview creates an **align issue** on the
-workspace's issue host: labeled `align`, its body the intent brief, its
-prototypes attached. The brief is never written into the repository — the
-issue is the durable artifact, and the `align` label is the marker a build
-workflow looks for.
-
-## Which issue host
+## Which issue host (`/align` only)
 
 The workspace's existing configuration decides, never a question:
 
@@ -40,7 +42,8 @@ The workspace's existing configuration decides, never a question:
 
 The typical shape, end to end:
 
-1. The user aligns (`/align` or `/quick-align`) → an align issue exists.
+1. The user aligns — `/align` leaves an align issue, `/quick-align` a brief
+   file under `.crucible/align/`.
 2. A build workflow takes the intent brief as its input and runs unattended:
    spec, build, review, merge gate. `examples/build.ts` beside these docs is
    a complete one to copy into `.crucible/workflows/` and adapt; read
