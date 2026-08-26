@@ -39,8 +39,8 @@ export function RunsOverview({
   // what became of the run — not with what the user clicked.
   readonly onCancel: (runId: string) => Promise<RunActOutcome>
   // Puts an interrupted run back to work: no confirm, because the click is
-  // the spend authorization (ADR 0026). `cleared` when the run is working
-  // again — the snapshot re-bands the row — and `kept` on a refusal.
+  // the spend authorization. `cleared` when the run is working again — the
+  // snapshot re-bands the row — and `kept` on a refusal.
   readonly onResume: (runId: string) => Promise<RunActOutcome>
   readonly onInvestigate: (runId: string) => Promise<void>
   readonly onClose: () => void

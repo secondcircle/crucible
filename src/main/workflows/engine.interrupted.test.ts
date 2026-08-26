@@ -358,7 +358,7 @@ describe('resume', () => {
     const run = denied.engine.runs()[0]
 
     // No orchestrator, so no message went anywhere and the question parks the
-    // run until a session adopts it (ADR 0023).
+    // run until a session adopts it.
     expect(run.sessionId).toBeUndefined()
     expect(run.noticePending).toBeUndefined()
     expect(run.waiting).toBe(true)
@@ -558,8 +558,9 @@ describe('the interruption notice', () => {
     })
 
     await after.engine.resume(runId)
-    // Resume itself says nothing (ADR 0017's channel is not multiplied), so
-    // the notice is still owed and now describes a run that is working.
+    // Resume itself says nothing — a run speaks only through messages to its
+    // orchestrator — so the notice is still owed and now describes a run that
+    // is working.
     expect(after.delivered).toEqual([])
     expect(after.engine.runs()[0].noticePending).toBe(true)
 

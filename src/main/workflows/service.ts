@@ -156,8 +156,8 @@ export function createLiveWorkflowRunService({
     },
 
     // No session check, as `answer` has none: the deliberate call is the spend
-    // authorization (ADR 0026), and the run keeps reporting to the
-    // orchestrator its record names.
+    // authorization, and the run keeps reporting to the orchestrator its
+    // record names.
     async resume(_sessionId: SessionId, runId: string): Promise<string> {
       // Read before the act: resuming reverts the cut nodes to ghosts, so
       // afterwards there is nothing left to name.

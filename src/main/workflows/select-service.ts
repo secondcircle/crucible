@@ -136,8 +136,8 @@ export function selectWorkflowRunService(
       agentDir: join(wiring.stateDir, 'workflow-agent')
     }),
     deliver: wiring.deliver,
-    // ADR 0023's machinery only takes over an orphaned resumed run if the
-    // engine is told the session is gone; the shell store is the authority.
+    // An orphaned resumed run only parks for adoption if the engine is told
+    // the session is gone; the shell store is the authority.
     sessionExists: wiring.sessionExists,
     ...(wiring.cache === undefined ? {} : { cache: wiring.cache }),
     onChanged: () => {

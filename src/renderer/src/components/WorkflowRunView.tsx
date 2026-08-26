@@ -139,7 +139,7 @@ export function WorkflowRunView({
 
   const live = runIsLive(run)
   // Set from the click to the act's answer, so the button says it heard in the
-  // same frame (ADR 0010) and cannot be clicked twice.
+  // same frame and cannot be clicked twice.
   const [resuming, setResuming] = useState(false)
   const resume = (): void => {
     setResuming(true)
@@ -492,7 +492,7 @@ function InterruptedBanner({
       {cut.length === 0 ? '' : ' — '}
       from that node’s beginning, in the same worktree, reporting to{' '}
       {/* Never a session that no longer exists: a run with none parks until
-          one adopts it (ADR 0023). */}
+          one adopts it. */}
       {toSession ? 'the same session' : 'whichever session adopts it'}.
     </div>
   )

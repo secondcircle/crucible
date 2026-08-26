@@ -222,13 +222,10 @@ export function createWorkflowEngine(options: EngineOptions): WorkflowEngine {
 
   const nowIso = (): string => new Date().toISOString()
 
-  // Nothing resumes a run across launches on its own (ADR 0026): the sessions
-  // its nodes were holding died with the process. A record that still says it
-  // is working is therefore a lie the moment it is read back, and one nothing
-  // can act on — pause and cancel both need a live handle. Say what happened
-  // instead, and write it, so the next launch does not have to work it out
-  // again. Interrupted, not failed: the app went away, the work did not go
-  // wrong, and only Resume moves it from here.
+  // The sessions a running record's nodes were holding died with the process,
+  // so the record is a lie the moment it is read back. Settle it as
+  // interrupted — the app went away, the work did not go wrong — and only a
+  // deliberate Resume moves it from here.
   for (const stale of records) {
     if (stale.status !== 'running' && stale.status !== 'paused') continue
     stale.status = 'interrupted'
@@ -1353,8 +1350,8 @@ export function createWorkflowEngine(options: EngineOptions): WorkflowEngine {
       const resolved = await loader.resolve(run.workspacePath, run.workflow)
 
       // A resumed run keeps its orchestrator; when that session is gone the
-      // run goes unattended instead, so its questions park it and ADR 0023's
-      // adoption machinery takes over. No session is ever created for it.
+      // run goes unattended instead, so its questions park it until a session
+      // adopts it. No session is ever created for it.
       if (run.sessionId !== undefined && sessionExists?.(run.sessionId) === false) {
         delete run.sessionId
         // Nothing is owed a notice any more: there is nobody to owe it to.

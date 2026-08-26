@@ -2035,10 +2035,9 @@ export function Shell({
     [workflowRuns, report]
   )
 
-  // No confirm, no dialog: the click is the spend authorization (ADR 0026).
-  // `cleared` means the run is working again and the snapshot will re-band its
-  // row; a refusal is reported where run refusals are and hands the button
-  // back.
+  // No confirm, no dialog: the click is the spend authorization. `cleared`
+  // means the run is working again and the snapshot will re-band its row; a
+  // refusal is reported where run refusals are and hands the button back.
   const resumeRun = useCallback(
     async (runId: WorkflowRunId): Promise<RunActOutcome> => {
       if (workflowRuns === undefined) return 'kept'

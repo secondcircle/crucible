@@ -20,8 +20,7 @@ export interface DevInstance {
  * The dev instance a checkout runs as. A run worktree gets its own state
  * directory, because concurrent builds would otherwise write one another's
  * sessions and config; the human's own checkout keeps the plain `Crucible-Dev`
- * it has always had. The matching per-checkout debug port lives in
- * `scripts/dev-port.sh`.
+ * it has always had.
  */
 export function devInstance(appPath: string): DevInstance {
   const inRunWorktree = appPath.includes(`${sep}.crucible${sep}worktrees${sep}`)

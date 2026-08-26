@@ -1,12 +1,12 @@
 // @vitest-environment node
 //
-// The wiring, not the engine: the engine's rules are proven at its own seam
-// in engine.interrupted.test.ts, and what nothing proved before this file is
-// that a real launch hands the engine the seams it only pretends to have a
-// default for. Only `createWorkflowEngine` is stood in for here — the loader,
-// the store and the node-session factory are the real ones (the factory
-// imports π lazily, inside `start`, so constructing it loads no SDK) — so a
-// field dropped anywhere on the way down fails this test.
+// The wiring, not the engine: the engine's rules are proven at its own seam,
+// and what nothing proved before this file is that a real launch hands the
+// engine the seams it only pretends to have a default for. Only
+// `createWorkflowEngine` is stood in for here — the loader, the store and the
+// node-session factory are the real ones (the factory imports π lazily,
+// inside `start`, so constructing it loads no SDK) — so a field dropped
+// anywhere on the way down fails this test.
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -71,7 +71,7 @@ describe('choosing a workflow run service', () => {
 
     // Absent, the engine presumes every recorded session is alive, so a run
     // resuming to a deleted orchestrator would report into nothing forever
-    // and never park (ADR 0023).
+    // and never park for adoption.
     const predicate = engineOptions()?.sessionExists
     expect(predicate).toBeTypeOf('function')
     expect(predicate?.('kept' as SessionId)).toBe(true)
