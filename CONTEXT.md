@@ -397,3 +397,22 @@ The text appended to every agent Crucible starts, whatever its role prompt
 says — things true of every agent regardless of its job. Day one it is the
 communication style block, nothing else.
 _Avoid_: global prompt, append slot, junk drawer.
+
+**Interrupted**:
+The status of a run that Crucible quit out from under: its progress stopped
+where it stood, its worktree and artifacts are intact, and it can be resumed.
+Distinct from failed, which means the work itself went wrong.
+_Avoid_: stale, crashed, orphaned, failed (for this case).
+
+**Resume**:
+Restarting an interrupted run by re-running the node the quit cut down, from
+that node's beginning, in the same worktree, reporting to the same
+orchestrator. Always a deliberate act — the human's click or an agent's tool
+call — never the system's own.
+_Avoid_: auto-resume, restart (that is the whole run), retry.
+
+**Instance badge**:
+The top-bar mark naming which state directory a dev window is running
+against — "dev" for the primary clone, "dev · <suffix>" for a worktree
+launch. The installed app shows none: the badge marks the exceptional case.
+_Avoid_: flavor chip, dev pill, environment indicator.
