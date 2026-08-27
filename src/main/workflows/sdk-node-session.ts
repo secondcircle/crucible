@@ -74,17 +74,7 @@ export function createSdkNodeSessionFactory({
           'Complete Node',
           "Declare this node's work finished. Only call when every required output file is " +
             'written. Include `verdict` when the task declares a verdict schema.',
-          {
-            type: 'object',
-            required: ['summary'],
-            properties: {
-              summary: {
-                type: 'string',
-                description: 'One-paragraph summary of what was done.'
-              },
-              verdict: { description: 'Verdict matching the declared schema.' }
-            }
-          },
+          completeNodeParameters(request.verdictSchema),
           (params) => {
             const given = (params ?? {}) as { summary?: string; verdict?: unknown }
             return request.onComplete({
@@ -357,6 +347,31 @@ function liveness(
     return undefined
   }
   return null
+}
+
+/**
+ * The complete_node parameter schema. A node that declares a verdict schema
+ * gets it spliced in and marked required, so π's own argument validation
+ * enforces it: the model sees a precise error naming the received arguments
+ * on the very next token, instead of a vague engine rejection a turn later.
+ * (Tool-call JSON is parsed by a repairing, never-fail parser upstream, so a
+ * mangled call otherwise arrives as a plausible object with pieces missing.)
+ */
+export function completeNodeParameters(verdictSchema?: Record<string, unknown>): unknown {
+  return {
+    type: 'object',
+    required: verdictSchema === undefined ? ['summary'] : ['summary', 'verdict'],
+    properties: {
+      summary: {
+        type: 'string',
+        description: 'One-paragraph summary of what was done.'
+      },
+      verdict:
+        verdictSchema === undefined
+          ? { description: 'Verdict matching the declared schema.' }
+          : { description: 'Verdict matching the declared schema.', ...verdictSchema }
+    }
+  }
 }
 
 function nodeTool(

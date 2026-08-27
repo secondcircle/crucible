@@ -39,7 +39,58 @@ const oneNode: WorkflowDef = {
   }
 }
 
+// A verdict-bearing node next to a plain one, so the seam shows both sides.
+const judgedSchema = {
+  type: 'object',
+  required: ['verdict'],
+  properties: { verdict: { enum: ['approved', 'changes-required'] } }
+}
+const judged: WorkflowDef = {
+  description: 'a judged node, then a plain one',
+  inputs: { prompt: 'the task file' },
+  plan: () => [{ id: 'judge' }, { id: 'work', parents: ['judge'] }],
+  run: async (ctx) => {
+    await ctx.node('judge', {
+      prompt: 'judge the thing',
+      reads: [ctx.inputs.prompt],
+      outputs: { review: { file: 'review.md', desc: 'the review' } },
+      verdict: judgedSchema
+    })
+    const result = await ctx.node('work', {
+      prompt: 'do the thing',
+      outputs: { report: { file: 'report.md', desc: 'what happened' } }
+    })
+    return { summary: result.summary }
+  }
+}
+
 describe('the engine end to end', () => {
+  it("hands a node's declared verdict schema to its session, and only then", async () => {
+    const { engine, repo, sessions } = rig({ judged }, (nodeId) => {
+      return (prompt, tools) => {
+        if (nodeId === 'judge') {
+          writeFileSync(outputPath(prompt, 'review.md'), 'looks right\n')
+          tools.complete({ summary: 'judged', verdict: { verdict: 'approved' } })
+          return
+        }
+        writeFileSync(outputPath(prompt, 'report.md'), 'the report\n')
+        tools.complete({ summary: 'done' })
+      }
+    })
+
+    const task = join(repo, 'task.md')
+    writeFileSync(task, 'the task\n')
+    await engine.start(startRequest(repo, 'judged', { prompt: task }))
+    await until(() => engine.runs()[0].status === 'complete')
+
+    // The declared schema rode the session request; the plain node got none.
+    expect(sessions.requests.map((request) => request.verdictSchema)).toEqual([
+      judgedSchema,
+      undefined
+    ])
+    expect(engine.runs()[0].nodes[0].verdict).toEqual({ verdict: 'approved' })
+  })
+
   it('runs a workflow in its own worktree and reports completion to the orchestrator', async () => {
     const { engine, repo, stateDir, delivered } = rig({ solo: oneNode }, () => {
       return (prompt, tools) => {

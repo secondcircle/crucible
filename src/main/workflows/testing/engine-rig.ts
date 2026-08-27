@@ -78,11 +78,17 @@ export function outputPath(prompt: string, file: string): string {
 
 export function scriptedSessions(
   scriptFor: (nodeId: string) => NodeScript
-): NodeSessionFactory & { readonly prompts: string[] } {
+): NodeSessionFactory & {
+  readonly prompts: string[]
+  readonly requests: NodeSessionRequest[]
+} {
   const prompts: string[] = []
+  const requests: NodeSessionRequest[] = []
   return {
     prompts,
+    requests,
     async start(request: NodeSessionRequest): Promise<NodeSession> {
+      requests.push(request)
       const nodeId = /^You are "([^"]+)"/.exec(request.rolePrompt)?.[1] ?? 'unknown'
       const script = scriptFor(nodeId)
       let turn = 0

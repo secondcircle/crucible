@@ -28,6 +28,12 @@ export interface NodeSessionRequest {
   readonly rolePrompt: string
   /** Built-in tool names the node gets, complete_node and raise_blocker aside. */
   readonly tools: readonly string[]
+  /**
+   * The node's declared verdict schema. When present, complete_node requires
+   * a `verdict` argument matching it, enforced at the tool boundary so a bad
+   * call fails in the model's face instead of one engine turn later.
+   */
+  readonly verdictSchema?: Record<string, unknown>
   /** The agent called complete_node; the return is the tool's answer text. */
   readonly onComplete: (completion: NodeCompletion) => string
   /** The agent called raise_blocker; same contract. */

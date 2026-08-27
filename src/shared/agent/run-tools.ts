@@ -18,6 +18,8 @@ export interface RunToolParameter {
   readonly description: string
   /** Absent means required. */
   readonly optional?: boolean
+  /** Schema shape; absent means string. `map` is an object of string values. */
+  readonly kind?: 'map'
 }
 
 export interface RunToolDefinition {
@@ -59,9 +61,10 @@ export const RUN_TOOLS: readonly RunToolDefinition[] = [
       {
         name: 'inputs',
         description:
-          'JSON object mapping input name to absolute file path, e.g. {"prompt": "/tmp/task.md"}. ' +
+          'Object mapping input name to absolute file path, e.g. {"prompt": "/tmp/task.md"}. ' +
           'Omit for a workflow with no inputs.',
-        optional: true
+        optional: true,
+        kind: 'map'
       },
       {
         name: 'base',

@@ -318,7 +318,13 @@ export function createSdkAdapter({
         properties: Object.fromEntries(
           tool.parameters.map((parameter) => [
             parameter.name,
-            { type: 'string', description: parameter.description }
+            parameter.kind === 'map'
+              ? {
+                  type: 'object',
+                  additionalProperties: { type: 'string' },
+                  description: parameter.description
+                }
+              : { type: 'string', description: parameter.description }
           ])
         )
       } as unknown as ToolDefinition['parameters']
@@ -331,7 +337,7 @@ export function createSdkAdapter({
         async execute(_callId: string, params: unknown) {
           const given = (params ?? {}) as {
             workflow?: string
-            inputs?: string
+            inputs?: Record<string, string> | string
             base?: string
             runId?: string
             message?: string
@@ -1441,13 +1447,18 @@ function said(text: string): { content: { type: 'text'; text: string }[]; detail
 
 // The tool's `inputs` parameter is a JSON object in a string; a malformed one
 // throws exactly the sentence the model should read.
-function parseInputs(raw: string | undefined): Record<string, string> {
-  if (raw === undefined || raw.trim() === '') return {}
-  let parsed: unknown
-  try {
-    parsed = JSON.parse(raw)
-  } catch {
-    throw new Error('`inputs` must be a JSON object mapping input names to file paths.')
+// The schema says object, but a model that double-encodes is decoded rather
+// than refused: the string case costs nothing to accept.
+function parseInputs(raw: Record<string, string> | string | undefined): Record<string, string> {
+  if (raw === undefined) return {}
+  let parsed: unknown = raw
+  if (typeof raw === 'string') {
+    if (raw.trim() === '') return {}
+    try {
+      parsed = JSON.parse(raw)
+    } catch {
+      throw new Error('`inputs` must be a JSON object mapping input names to file paths.')
+    }
   }
   if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
     throw new Error('`inputs` must be a JSON object mapping input names to file paths.')

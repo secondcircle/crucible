@@ -697,6 +697,7 @@ export function createWorkflowEngine(options: EngineOptions): WorkflowEngine {
         model: node.model ?? defaultModel,
         rolePrompt: nodeRolePrompt(id, run.workflow, cwd),
         tools: spec.tools ?? DEFAULT_TOOLS,
+        ...(spec.verdict === undefined ? {} : { verdictSchema: spec.verdict }),
         onComplete(done) {
           completion = { summary: done.summary, ...(done.verdict === undefined ? {} : { verdict: done.verdict }) }
           return 'Completion recorded. End your turn now.'
