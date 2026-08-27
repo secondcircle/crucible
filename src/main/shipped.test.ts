@@ -604,18 +604,18 @@ describe('the shipped role prompt', () => {
 describe('the shipped standing prompt', () => {
   const standing = (): string => readShippedStandingPrompt(APP)
 
-  it('is the communication style block, wrapped in its tags', () => {
+  it('opens with the communication style block and closes with answering-questions', () => {
     const text = standing().trim()
     expect(text.startsWith('<communication-style>')).toBe(true)
-    expect(text.endsWith('</communication-style>')).toBe(true)
+    expect(text.endsWith('</answering-questions>')).toBe(true)
   })
 
-  it('is the legacy block itself, recognizable sentence by sentence', () => {
+  it('carries the three sections, recognizable sentence by sentence', () => {
     const text = standing()
-    expect(text).toContain('# Unslop')
-    expect(text).toContain('Edit text to remove AI patterns and add human voice.')
-    expect(text).toContain('**Em dash overuse.**')
-    expect(text).toContain('**Prefer the plain word.**')
+    expect(text).toContain('Write like a person, not a language model.')
+    expect(text).toContain('Prefer the plain word.')
+    expect(text).toContain('is anything waiting\non them')
+    expect(text).toContain('A question wants an answer, not a project.')
   })
 })
 
@@ -626,7 +626,7 @@ describe('the system prompt a launch composes', () => {
     expect(composed.startsWith('You are an expert coding assistant')).toBe(true)
     expect(composed).toContain(shippedDocsIndexPath(APP))
     expect(composed).not.toContain(DOCS_INDEX_PLACEHOLDER)
-    expect(composed.endsWith('</communication-style>')).toBe(true)
+    expect(composed.endsWith('</answering-questions>')).toBe(true)
   })
 
   it('never says the name of the layer below it', () => {
