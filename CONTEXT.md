@@ -422,11 +422,19 @@ Distinct from failed, which means the work itself went wrong.
 _Avoid_: stale, crashed, orphaned, failed (for this case).
 
 **Resume**:
-Restarting an interrupted run by re-running the node the quit cut down, from
-that node's beginning, in the same worktree, reporting to the same
-orchestrator. Always a deliberate act — the human's click or an agent's tool
-call — never the system's own.
+Putting a stopped run back to work by continuing its stopped node from that
+node's last turn, in the same worktree, reporting to the same orchestrator.
+Total over every stop short of completion — interrupted, failed, cancelled —
+and over paused, which un-pauses. Always a deliberate act: the human's click
+or an agent's tool call, never the system's own.
 _Avoid_: auto-resume, restart (that is the whole run), retry.
+
+**Clean restart**:
+The second, explicitly labeled way to put a stopped node back to work: run it
+again from its prompt with no memory of the attempt that stopped, recorded as
+a revision so the earlier transcript stays readable. For a node that died in a
+loop, where continuing would resume the loop.
+_Avoid_: retry, rerun, hard resume, reset.
 
 **Instance badge**:
 The top-bar mark naming which state directory a dev window is running
