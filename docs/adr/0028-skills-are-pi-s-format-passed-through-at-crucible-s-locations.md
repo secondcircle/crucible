@@ -1,4 +1,4 @@
-# 0021 — Skills are π's format, passed through, at Crucible's own locations
+# 0028 — Skills are π's format, passed through, at Crucible's own locations
 
 Crucible owns its commands outright (ADR 0007) and hands every agent a full
 system-prompt override so π's stock prompt never reaches a session (ADR 0012),

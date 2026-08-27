@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { describe, expect, it, vi } from 'vitest'
 import type { TranscriptItem } from '../../shared/agent/port'
-import type { RunRecord } from '../../shared/workflows/run'
+import { resumeRefusal, type RunRecord } from '../../shared/workflows/run'
 import type { WorkflowRunEvent } from '../../shared/workflows/service'
 import type { StartRunRequest, WorkflowEngine } from './engine'
 import type { LoadedWorkflow, WorkflowLoader } from './loader'
@@ -43,9 +43,25 @@ function engineOf(runs: RunRecord[]): WorkflowEngine & { started: StartRunReques
       return record({ id: 'new1' })
     },
     pause: vi.fn(),
-    resume: vi.fn(),
+    // The record moves the way the engine moves it, so what the tool answers
+    // and what the next listing says are read off one state.
+    resume: vi.fn(async (runId: string) => {
+      const at = runs.findIndex((run) => run.id === runId)
+      if (at < 0) throw new Error(`No run is named "${runId}".`)
+      if (runs[at].status !== 'interrupted' && runs[at].status !== 'paused') {
+        throw new Error(resumeRefusal(runId, runs[at].status))
+      }
+      runs[at] = {
+        ...runs[at],
+        status: 'running',
+        nodes: runs[at].nodes.map((node) =>
+          node.status === 'interrupted' ? { ...node, status: 'pending' } : node
+        )
+      }
+    }),
     cancel: vi.fn(),
     dismiss: vi.fn(),
+    wake: vi.fn(),
     // The record is what crucible_runs reads, so the stub moves it the way
     // the engine does rather than only counting the call.
     adopt: vi.fn((runId: string, sessionId: string) => {
@@ -63,7 +79,7 @@ const loader: WorkflowLoader = {
     return [
       {
         name: 'adhoc',
-        origin: 'built-in',
+        origin: 'workspace',
         path: '/x/adhoc.ts',
         def: {
           description: 'one node running a prompt file',
@@ -78,12 +94,17 @@ const loader: WorkflowLoader = {
   }
 }
 
-function serviceOver(runs: RunRecord[], subscribers: Array<() => void> = []) {
+function serviceOver(
+  runs: RunRecord[],
+  subscribers: Array<() => void> = [],
+  base?: (workspacePath: string) => Promise<string>
+) {
   const engine = engineOf(runs)
   const service = createLiveWorkflowRunService({
     engine,
     loader,
-    changes: { subscribe: (listener) => subscribers.push(listener) }
+    changes: { subscribe: (listener) => subscribers.push(listener) },
+    ...(base === undefined ? {} : { base })
   })
   return { engine, service }
 }
@@ -92,7 +113,7 @@ describe('the live run service', () => {
   it('lists the catalog with origins and inputs for the agent', async () => {
     const { service } = serviceOver([])
     const text = await service.tools.workflows('/repos/thing')
-    expect(text).toContain('adhoc (built-in) — one node running a prompt file')
+    expect(text).toContain('adhoc (workspace) — one node running a prompt file')
     expect(text).toContain('prompt: a task file')
   })
 
@@ -157,6 +178,136 @@ describe('the live run service', () => {
     } finally {
       vi.useRealTimers()
     }
+  })
+
+  // A scheduled fire is an ordinary run with three things settled for it: the
+  // trunk to branch from, nothing handed in, and nobody to report to.
+  it('fires a scheduled run from the trunk, with no session and no inputs', async () => {
+    const asked: string[] = []
+    const { engine, service } = serviceOver([], [], async (workspacePath) => {
+      asked.push(workspacePath)
+      return 'refs/remotes/origin/main'
+    })
+
+    const run = await service.startScheduled({
+      workspacePath: '/repos/thing',
+      workflow: 'triage'
+    })
+
+    expect(asked).toEqual(['/repos/thing'])
+    expect(engine.started).toEqual([
+      {
+        workspacePath: '/repos/thing',
+        workspaceName: 'thing',
+        workflow: 'triage',
+        inputs: {},
+        base: 'refs/remotes/origin/main',
+        scheduled: true
+      }
+    ])
+    expect(run.id).toBe('new1')
+  })
+
+  it('refuses a scheduled fire whose trunk cannot be resolved', async () => {
+    const { engine, service } = serviceOver([], [], async () => {
+      throw new Error('no origin/HEAD, main or master')
+    })
+
+    await expect(
+      service.startScheduled({ workspacePath: '/repos/thing', workflow: 'triage' })
+    ).rejects.toThrow(/no origin\/HEAD/)
+    // Nothing was started: the failure is the schedule's, before a run exists.
+    expect(engine.started).toEqual([])
+  })
+
+  // An interrupted run reads as what happened and what to do about it: the
+  // status, why it stopped, and the lever.
+  it('says a run is interrupted by an app quit and names the tool that resumes it', async () => {
+    const { service } = serviceOver([
+      record({
+        id: 'cd34',
+        status: 'interrupted',
+        error: 'Crucible quit while this run was working, so it stopped where it stood.',
+        nodes: [
+          { id: 'gate', status: 'interrupted', parents: [], reads: [], artifacts: [], cost: 3.62 }
+        ],
+        endedAt: '2026-08-20T10:40:00.000Z'
+      })
+    ])
+
+    const text = await service.tools.list('s1')
+    expect(text).toContain('interrupted \u00b7 app quit')
+    expect(text).toContain('node gate interrupted')
+    expect(text).toContain('resume with crucible_resume if this work is still wanted')
+  })
+
+  it('resumes through the tool, naming the run, the cut node and the worktree', async () => {
+    const { engine, service } = serviceOver([
+      record({
+        id: 'cd34',
+        status: 'interrupted',
+        worktreePath: '/repos/thing/.crucible/worktrees/run-cd34',
+        nodes: [{ id: 'gate', status: 'interrupted', parents: [], reads: [], artifacts: [] }]
+      })
+    ])
+
+    const said = await service.tools.resume('s1', 'cd34')
+
+    expect(engine.resume).toHaveBeenCalledWith('cd34')
+    expect(said).toContain('cd34')
+    expect(said).toContain('"gate"')
+    expect(said).toContain('/repos/thing/.crucible/worktrees/run-cd34')
+    expect(said).toContain('reports back here')
+  })
+
+  it('throws the refusal a model should read when there is nothing to resume', async () => {
+    const { service } = serviceOver([record({ id: 'cd34', status: 'complete' })])
+    await expect(service.tools.resume('s1', 'cd34')).rejects.toThrow(
+      'The run "cd34" is complete; there is nothing to resume.'
+    )
+    await expect(service.tools.resume('s1', 'nope')).rejects.toThrow('No run is named "nope".')
+  })
+
+  describe('the turn-start hook', () => {
+    it('injects the changed runs of this session, once per change, invisibly', async () => {
+      const runs = [record({ id: 'cd34' }), record({ id: 'zz99', sessionId: 'someone-else' })]
+      const { engine, service } = serviceOver(runs)
+
+      // The first turn after a launch knows nothing, so everything this
+      // session orchestrates is said.
+      const first = service.turnStart('s1')
+      expect(first).toContain('Crucible status update')
+      expect(first).toContain('cd34')
+      expect(first).not.toContain('zz99')
+      expect(engine.wake).toHaveBeenCalledWith('s1')
+
+      // A quiet turn costs nothing at all.
+      expect(service.turnStart('s1')).toBeUndefined()
+
+      // The node moved, so the next turn hears about it, and only about that.
+      runs[0] = {
+        ...runs[0],
+        nodes: [{ ...runs[0].nodes[0], status: 'complete' }]
+      }
+      const second = service.turnStart('s1')
+      expect(second).toContain('cd34')
+      expect(service.turnStart('s1')).toBeUndefined()
+    })
+
+    it('says nothing at all for a session that orchestrates no runs', () => {
+      const { engine, service } = serviceOver([record({ sessionId: 'someone-else' })])
+      expect(service.turnStart('s1')).toBeUndefined()
+      // Woken all the same: a session with no runs is owed nothing, and asking
+      // is how that is found out.
+      expect(engine.wake).toHaveBeenCalledWith('s1')
+    })
+
+    it('keeps one picture per session, so two sessions are told separately', () => {
+      const { service } = serviceOver([record({ id: 'cd34' }), record({ id: 'ef56', sessionId: 's2' })])
+      expect(service.turnStart('s1')).toContain('cd34')
+      expect(service.turnStart('s2')).toContain('ef56')
+      expect(service.turnStart('s1')).toBeUndefined()
+    })
   })
 
   it('announces toggle-overview to whoever listens', () => {

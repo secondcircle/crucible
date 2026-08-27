@@ -6,8 +6,8 @@ argument-hint: "[subject]"
 
 Interview the user relentlessly until you reach a shared understanding. Until
 the interview ends, this is the only work in this session: no implementation,
-no refactors, no commits, and no files written except mocks and the ones
-named below. You are the interviewer. The user decides.
+no refactors, no commits, and no files written except mocks, prototypes and
+the ones named below. You are the interviewer. The user decides.
 
 The subject: ${@:-(none given - make asking for it your first question)}
 
@@ -80,6 +80,20 @@ react to than by any number of rounds: show the mock, take the reaction,
 revise, as part of the round it belongs to. The approved mock is settled
 scope and goes in the brief's source material.
 
+### Push for prototypes
+
+A mock settles a visual surface; anything else non-obvious is a prototyping
+candidate — a library this project has never used (a small spike proving it
+does the job), a risky integration, a format nobody has parsed before. Name
+each candidate and push the user to decide whether to prototype it — the
+pushing is the job, because hands-off builds only work from align issues
+with prototypes. An accepted prototype is built during the interview, before
+the issue exists: the issue ships complete, never with prototypes trailing
+in later. A declined one is recorded in the brief's Prototyping section, so
+a build knows where it flies blind. Prototype files never land in the
+repository's working tree or history — they exist to be shipped with the
+issue.
+
 ### Cross-reference with code
 
 When the user states how something works, check whether the code agrees. If
@@ -140,20 +154,38 @@ question, a hesitation. Do not write the intent brief before the yes:
 authorization is the user's utterance, and you never write it, infer it, or
 advance past it.
 
-On the yes, and only then:
+On the yes, and only then, create the align issue as described below, relay
+its URL in one sentence, and stop. The interview is over. The issue is the
+user's. What happens to it next is their call, not yours.
 
-1. Write the intent brief to `<workspace>/.crucible/align/<YYMMDD>-<slug>.md`
-   (create the directory), in the shape below. If that path already exists,
-   add a numeric suffix instead of overwriting it: an earlier brief is
-   somebody's input and must never change under them.
-2. Relay where the brief is, in one sentence, and stop. The interview is over.
+## The align issue
 
-The brief is the user's. What happens to it next is their call, not yours.
+The interview's product is an issue on the workspace's issue host, labeled
+`align` — the marker a future build chain looks for — whose body is the
+intent brief below and which ships with every mock and prototype. Never
+write the brief into the repository.
+
+Which host is the workspace's existing configuration, never a question:
+
+- `.crucible/jira.json` present → **Jira**. Credentials are the `JIRA_*`
+  keys in `.env.local` at the workspace root. Create the issue in the
+  configured project — type Task, unassigned, label `align`, the intent
+  brief as its description — then attach every mock and prototype file to it
+  through the attachments API.
+- Otherwise → **GitHub** through `gh`. Ensure the label exists first
+  (`gh label create align`; already-exists is fine), then `gh issue create`
+  with the brief as body and the `align` label, unassigned. GitHub issues
+  take no file attachments: put all mock and prototype files in one secret
+  gist (`gh gist create`) and link it from the brief's source material.
+
+If creation fails — missing auth, network — preserve the brief in a file
+outside the repository (a temp path), say exactly what failed and where the
+brief is, and stop. The brief is never silently dropped.
 
 ## The intent brief
 
-The brief is the interview's whole product: the one durable statement of what
-was agreed, precise enough to hand to an implementer who heard none of the
+The brief is the align issue's body: the one durable statement of what was
+agreed, precise enough to hand to an implementer who heard none of the
 conversation. Write the rulings in the user's sense rather than your
 recommendation's, and never blur what they said with what you synthesized. The
 template, in full:
@@ -184,6 +216,12 @@ own words.>
 - <What the design may not violate: behaviour to preserve, budgets, deadlines,
   principles carried forward, things explicitly ruled out and why.>
 
+## Prototyping
+
+- <Each mock or prototype built: one line on what it proves and where it is
+  attached or linked. Each declined candidate, marked declined. Or "Nothing
+  was worth prototyping.">
+
 ## Still open
 
 - <Each question deliberately left open, with one line on why it was left.
@@ -197,4 +235,5 @@ own words.>
 ## Source material (read these — do not work from paraphrase)
 
 - <Path, URL, or prior work, each with one line saying what it is for and what
-  to take from it. An approved mock belongs here.>
+  to take from it. Every mock and prototype belongs here — as an attachment
+  on Jira, in the linked gist on GitHub.>

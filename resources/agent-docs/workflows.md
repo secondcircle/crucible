@@ -10,7 +10,7 @@ it gets comes from you.
 
 To write a new workflow, read `workflow-authoring.md` beside this file.
 
-## The four tools
+## The five tools
 
 - `crucible_workflows` — the catalog this workspace can reach: name,
   description, inputs.
@@ -19,11 +19,13 @@ To write a new workflow, read `workflow-authoring.md` beside this file.
   commit-ish.
 - `crucible_runs` — where this session's runs stand.
 - `crucible_answer` — answer the question a run raised, by run id.
+- `crucible_resume` — resume an interrupted run, by run id.
 
 ## What starting a run means
 
 Every input is a path to an existing file. Write the file first — a prompt
-for `adhoc`, an intent document for `build` — then pass its path.
+file, an intent document, whatever the input's description asks for — then
+pass its path.
 
 The run gets a fresh worktree, branched from a commit:
 
@@ -55,37 +57,48 @@ Every message a run sends starts with `⚑ Crucible run <id>`:
   it is fine to finish what you are doing first.
 - **Failure.** The worktree is left as it stands. Inspect it, decide whether
   to retry, repair by hand, or bring it to the user.
+- **An interruption.** Crucible quit while the run was working, so it stopped
+  where it stood; its worktree and artifacts are intact. Nothing about it
+  moves again until you or the user resumes it. See below.
+
+## Interrupted runs
+
+A run Crucible quit out from under is **interrupted**, which is not a
+failure: the work did not go wrong, the app went away. The run sits at no
+cost until somebody deliberately resumes it — never on its own, not at
+launch and not on a timer.
+
+`crucible_resume` re-runs the node the quit cut down, from that node's
+beginning, in the same worktree, reporting back here. Nodes that had already
+completed are handed back from the record and cost nothing; the cut node
+re-spends what it had already burned, which is why the judgment is yours and
+the user's, not the app's.
+
+Resume when the user asks, or when this conversation's own judgment says the
+work is still wanted. Never as a reflex to seeing the interruption message:
+if the spend is theirs to weigh, put it to them first. A run whose worktree
+is gone cannot be resumed, and the refusal says so.
 
 The user watches runs in the run strip above the chat and can open a
 full-screen view of any run, but they never talk to a run's agents — every
 conversation about a run happens here, with you.
 
-### When a `build` run completes
+### Workflow-specific guidance
 
-A `build` run ends in the merge gate, so what comes back is a branch already
-judged against the intent document that authorized it. Its `Outputs` carry
-the gate's `verdict` and `reason`, a `coverageReport`, one `commentReports`
-path per gate round, and a `merge` result. Do all four of these:
-
-- Give the verdict and its reason in chat. The reason is written to be acted
-  on without opening anything.
-- Open the coverage report as a context panel tab with `panel_show`. It is
-  the coverage-and-scope judgment on the branch and the thing the user reads
-  before they merge. The run never opens it itself — a run only speaks to
-  you, and the panel is this session's.
-- Name the comment report's path in chat without opening it. It is an audit
-  trail of comment edits the gate made, read only when something looks off.
-- Relay the merge result. `clean` means the branch still merges with the
-  local trunk; `conflicts` comes with the conflicting files, so name them —
-  the user wants to know before they go to merge, not during. `untested`
-  means the check itself could not run, and says why.
-
-The gate never merges, pushes or touches the trunk, and neither does
-completion: merging stays the human's act.
+A workflow's file may open with orchestrator guidance in a header comment —
+what to do with its outputs when a run completes, what its verdicts mean.
+When a completion arrives from a workflow you have not run before, read the
+workflow's file — `<name>.ts` in its origin's folder, which the catalog
+names — before relaying the result.
 
 ## Where workflows come from
 
-Three origins, exactly like commands: built-in (shipped with Crucible),
-user (`~/.crucible/workflows/`), workspace (`<workspace>/.crucible/workflows/`).
-Workspace overrides user overrides built-in, file name is workflow name, and
-a file in a folder is enrollment — there is no registry.
+Two origins: user (`~/.crucible/workflows/`) and workspace
+(`<workspace>/.crucible/workflows/`). Workspace overrides user, file name is
+workflow name, and a file in a folder is enrollment — there is no registry.
+
+Crucible ships no workflows. An empty catalog is not breakage: it means
+nobody has written one for this workspace yet, and writing one is your job
+when asked. Read `workflow-authoring.md` beside this file — it names
+complete shipped examples (`examples/adhoc.ts`, `examples/adr-audit.ts`,
+`examples/build.ts`) to copy and adapt.

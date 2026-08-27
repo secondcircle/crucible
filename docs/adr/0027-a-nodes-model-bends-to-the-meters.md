@@ -1,4 +1,4 @@
-# 0021 — A node's model bends to the meters
+# 0027 — A node's model bends to the meters
 
 A workflow names a model per node, and until now that name was final: a run
 started at three in the morning spent whatever the file said, however little

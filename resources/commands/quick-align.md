@@ -8,8 +8,8 @@ Reach shared understanding on **what the user will experience** — and nothing
 deeper. The implementation owns the technical shape; your job is to hand it a
 crisp statement of the intended behavior, fast. Until the interview ends,
 this is the only work in this session: no implementation, no commits, no
-files written except the ones named below. You are the interviewer. The user
-decides.
+files written except prototypes and the ones named below. You are the
+interviewer. The user decides.
 
 The subject: ${@:-(none given - make asking for it your first question)}
 
@@ -46,10 +46,21 @@ continuously so the user can point back at one:
 Zero questions is a legitimate interview: if the subject has no real
 functional trade-offs, restate what you understood, confirm it, and end.
 
-If the subject has a visual surface the workspace hasn't already settled,
-settle it the way this project settles visuals — an HTML mock against the
-project's design references, iterated until approved — not prose. That mock
-is worth more than any number of questions.
+## Push for prototypes
+
+Anything non-obvious in the subject is a prototyping candidate: a visual
+surface the workspace hasn't already settled (an HTML mock against the
+project's design references, iterated until approved), a library this project
+has never used (a small spike proving it does the job), a risky integration.
+Name each candidate and push the user to decide whether to prototype it —
+the pushing is the job, because hands-off builds only work from briefs
+with prototypes. An approved mock is worth more than any number of questions.
+
+An accepted prototype is built during the interview, before the brief is
+written: the brief ships complete, never with prototypes trailing in later. A
+declined one is recorded in the brief's Prototyping section, so a build knows
+where it flies blind. Prototype files live beside the brief in the same
+gitignored folder, never in the repository's history.
 
 ## Glossary and ADRs
 
@@ -67,15 +78,33 @@ When nothing functional is left open, ask, in these words:
 > Do you agree we are fully aligned?
 
 Anything short of a clear yes is another question. On the yes, and only then,
-write the intent brief to `<workspace>/.crucible/align/<YYMMDD>-<slug>.md`
-(create the directory; suffix rather than overwrite an existing path), relay
-where it is in one sentence, and stop. The brief is the user's. What happens
-to it next is their call, not yours.
+write the brief file as described below, relay its path in one sentence, and
+stop. The brief is the user's. What happens to it next is their call, not
+yours.
+
+## The brief file
+
+The interview's product is a local file — never an issue on any host, never
+a commit. It lives in a gitignored folder inside the workspace:
+
+- The folder is `.crucible/align/` at the workspace root. Create it if it
+  does not exist.
+- Before writing, prove the folder is ignored: `git check-ignore -q
+  .crucible/align` must succeed. If it does not, add `.crucible/align/` to
+  the workspace's `.gitignore` first, then check again. Only then write.
+- The file is `<YYMMDD>-<slug>.md` — today's date, then a short slug of the
+  subject. Its contents are the intent brief below, nothing else.
+- Every prototype file goes beside it in the same folder, and the brief's
+  source material section points at each one by path.
+
+If writing fails, preserve the brief at a temp path outside the repository,
+say exactly what failed and where the brief is, and stop. The brief is never
+silently dropped.
 
 ## The intent brief
 
-The brief is the interview's whole product: the one durable statement of what
-was agreed, precise enough to hand to an implementer who heard none of the
+The brief is the file's contents: the one durable statement of what was
+agreed, precise enough to hand to an implementer who heard none of the
 conversation. Write rulings in the user's sense, never blurred with your
 recommendation. The template, in full:
 
@@ -104,6 +133,12 @@ Behavior, not mechanism.>
 - <Only what the design may not violate. Technical shape is the
   implementation's — do not smuggle it in here.>
 
+## Prototyping
+
+- <Each prototype built: one line on what it proves and where it is attached
+  or linked. Each declined candidate, marked declined. Or "Nothing was worth
+  prototyping.">
+
 ## Still open
 
 - <Deliberately open questions, or "Nothing.">
@@ -115,5 +150,5 @@ Behavior, not mechanism.>
 
 ## Source material (read these — do not work from paraphrase)
 
-- <Path or URL, one line each on what to take from it. An approved mock
-  belongs here.>
+- <Path or URL, one line each on what to take from it. Every prototype
+  belongs here, by its path beside this file.>

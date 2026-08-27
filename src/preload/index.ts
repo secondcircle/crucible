@@ -38,11 +38,19 @@ import {
 } from '../shared/quota/channels'
 import type { QuotaSnapshot } from '../shared/quota/types'
 import {
+  SCHEDULE_EVENT_CHANNEL,
+  SCHEDULE_REQUEST_CHANNEL,
+  type ScheduleEvent,
+  type ScheduleRequest,
+  type ScheduleResult
+} from '../shared/schedules/channels'
+import {
   WORKSPACE_EVENT_CHANNEL,
   WORKSPACE_REQUEST_CHANNEL,
   type WorkspaceRequest,
   type WorkspaceResult
 } from '../shared/workspace/channels'
+import { INSTANCE_ARGUMENT } from '../shared/instance'
 import type { WorkspaceEvent } from '../shared/workspace/service'
 import {
   WORKFLOW_RUN_EVENT_CHANNEL,
@@ -51,6 +59,13 @@ import {
   type WorkflowRunRequest,
   type WorkflowRunResult
 } from '../shared/workflows/channels'
+
+// Which state directory this window runs against, as main worked it out and
+// passed it at creation. A static value: it needs no channel and no event, and
+// its absence is how the installed app shows no badge.
+const instance = process.argv
+  .find((argument) => argument.startsWith(INSTANCE_ARGUMENT))
+  ?.slice(INSTANCE_ARGUMENT.length)
 
 // Never `ipcRenderer.on(channel, listener)`: that hands the caller the Electron
 // event as its first argument.
@@ -67,6 +82,9 @@ function forwarder<T>(channel: string, listener: (event: T) => void): () => void
 // The whole of what the sandboxed renderer may reach of Electron: no general
 // passthrough, and nothing carrying a `sender` crosses.
 contextBridge.exposeInMainWorld('crucible', {
+  // A mark, not a capability: the renderer shows it and asks nothing of it.
+  instance,
+
   agent: {
     request: (request: PortRequest): Promise<PortResult> =>
       ipcRenderer.invoke(REQUEST_CHANNEL, request),
@@ -128,6 +146,17 @@ contextBridge.exposeInMainWorld('crucible', {
 
     onEvent: (listener: (event: WorkflowRunEvent) => void): (() => void) =>
       forwarder(WORKFLOW_RUN_EVENT_CHANNEL, listener)
+  },
+
+  // Schedules: what a repo declares, when each fires next, and the three
+  // commands the board issues. Runs never cross here — they have their own
+  // seam, and nothing about a run is restated on this one.
+  schedules: {
+    request: (request: ScheduleRequest): Promise<ScheduleResult> =>
+      ipcRenderer.invoke(SCHEDULE_REQUEST_CHANNEL, request),
+
+    onEvent: (listener: (event: ScheduleEvent) => void): (() => void) =>
+      forwarder(SCHEDULE_EVENT_CHANNEL, listener)
   },
 
   // The installed app's update seam: one question, one event, one restart.

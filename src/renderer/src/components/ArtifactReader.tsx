@@ -114,16 +114,48 @@ function Body({
       </div>
     )
   }
+  return (
+    <ArtifactBody
+      runId={runId}
+      path={row.path}
+      title={row.name}
+      stamp={row.writtenAt}
+      view={view}
+      failure={failure}
+    />
+  )
+}
+
+// One written artifact's content, whichever kind it is: the machinery the run
+// view's reader and the schedule board's reading pane share, so a report
+// renders the same in both.
+export function ArtifactBody({
+  runId,
+  path,
+  title,
+  stamp,
+  view,
+  failure
+}: {
+  readonly runId: string
+  readonly path: string
+  /** What the frame is titled, which is the artifact's name. */
+  readonly title: string
+  /** When it was written; part of the frame's key so a rewrite refetches. */
+  readonly stamp?: string
+  readonly view: ArtifactView | undefined
+  readonly failure: string | undefined
+}): React.JSX.Element {
   // The frame mounts before anything is read, because the document it loads
   // never crosses into this origin: the guest loads the file itself, keyed so
   // a re-open refetches.
-  if (artifactKind(row.path) === 'html') {
+  if (artifactKind(path) === 'html') {
     return (
       <webview
-        key={`${runId}:${row.path}:${row.writtenAt ?? ''}`}
+        key={`${runId}:${path}:${stamp ?? ''}`}
         className="frame"
-        title={row.name}
-        src={fileUrl(row.path)}
+        title={title}
+        src={fileUrl(path)}
       />
     )
   }
@@ -141,7 +173,7 @@ function Body({
       </div>
     )
   }
-  if (artifactKind(row.path) === 'markdown') {
+  if (artifactKind(path) === 'markdown') {
     return (
       <div className="rdbody">
         <Markdown markdown={view.body ?? ''} />

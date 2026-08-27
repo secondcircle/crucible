@@ -127,10 +127,24 @@ _Avoid_: agent doc (that is the Crucible-specific material behind the docs
 index), command (a skill is never invoked by the user), plugin, extension.
 
 **Intent brief**:
-The durable artifact an `/align` interview writes on agreement — the settled
-scope and rulings — at `.crucible/align/` in the workspace. The interview
-says nothing about what happens to it next.
+The durable artifact an alignment interview produces on agreement — the
+settled scope and rulings — published as the body of an align issue on the
+workspace's issue host, never as a file in the repository. The interview says
+nothing about what happens to it next.
 _Avoid_: alignment doc, spec, plan.
+
+**Align issue**:
+The issue an alignment interview creates on the confirming yes: labeled
+`align`, its body the intent brief, its prototypes attached. The marker a
+future build chain looks for.
+_Avoid_: alignment ticket, brief file, align document.
+
+**Prototype**:
+A small artifact built during an alignment interview to de-risk something
+non-obvious — an HTML mock for a UI surface, a spike proving a library we
+have never used — finished before the align issue is created and shipped
+with it.
+_Avoid_: spike (alone), proof of concept, demo.
 
 **Context panel**:
 The agent-curated display split to the right of the chat area, where a
@@ -207,9 +221,24 @@ and cost), limits, meters panel.
 **Quota meter**:
 One window of one plan in the quota strip — a short label, a percent used, and
 the instant it resets. A provider has as many as its plan reports; nothing in
-Crucible fixes the count or the labels.
+Crucible fixes the count or the labels. Most meter a percent; the spend meter
+meters dollars.
 _Avoid_: window (the payload's word, ambiguous beside the context window),
 bar, gauge.
+
+**Spend meter**:
+The quota meter for an account's monthly dollar budget, labelled `MO` and
+printing dollars used over dollars allowed rather than a bare percent. It is
+the only meter that contributes no countdown to its row, because a calendar
+month needs no counting.
+_Avoid_: budget bar, credit meter, overage meter, monthly quota, MO meter.
+
+**Work account**:
+An Anthropic subscription that meters a monthly dollar budget and no usage
+windows at all: `limits: []` and a live `.spend`. It signs in through the same
+OAuth flow as a personal one, so nothing but the payload tells them apart, and
+its row carries the spend meter alone.
+_Avoid_: enterprise account, team plan, business subscription.
 
 **Pace tick**:
 The hairline on a windowed quota meter — weekly or monthly — marking where an
@@ -234,6 +263,13 @@ A TypeScript definition of automated agent work — its nodes, inputs,
 outputs and verdicts. The template, never the execution: what executes is a
 run.
 _Avoid_: using "workflow" for a running instance, pipeline, automation.
+
+**Example workflow**:
+A complete, runnable workflow file shipped beside the agent docs as reference
+material — copied into a `.crucible/workflows/` folder and adapted, never
+loaded by the engine from where it ships. Crucible ships no workflows that
+run as-is.
+_Avoid_: built-in workflow, prefab, template, sample.
 
 **Run**:
 One execution of a workflow, working in a worktree of its own branched from
@@ -264,6 +300,34 @@ directory, outside the repo. The files handed in at kickoff are shown beside
 them but are the repo's, not the run's.
 _Avoid_: output file, deliverable, exhibit (an exhibit is a context panel tab).
 
+**Schedule**:
+The firing rule a repo workflow may declare — a cron expression, optionally
+gated by a schedule check, in the workflow file, versioned with the repo. It
+starts runs on its own while the app is running and never blocks running
+that workflow by hand.
+_Avoid_: cron job, timer, automation.
+
+**Schedule check**:
+The optional predicate a schedule may declare beside its cron expression —
+plain TypeScript the scheduler evaluates in-process at fire time. Falsy
+means no run and no record anywhere; truthy fires the run. A check that
+errors puts its schedule in a warning state on the schedule board and never
+lights the chip.
+_Avoid_: trigger, condition, sensor, poll.
+
+**Schedule board**:
+The workspace-scoped overlay behind the schedule chip in the top bar:
+parked runs first, then every schedule with its cadence and last outcome,
+then recent runs and their reports. It reports, toggles schedules, and
+hands runs to sessions; it never answers a run itself.
+_Avoid_: schedules view, cron panel, automation dashboard.
+
+**Parked**:
+The state of a scheduled run stopped on a question, a stall, or a failure
+with no orchestrator to hear it. It waits — lighting the schedule chip and
+walking with Tab — until a session adopts it or the user dismisses it.
+_Avoid_: blocked (π's word for an interactive run's wait), stuck, orphaned.
+
 **Run graph**:
 The drawn picture of a run's nodes and the edges between them, layered
 top-down in the run view's left pane: what followed what, what fanned out in
@@ -292,6 +356,14 @@ mock fidelity, input acknowledgment, comments — that loops until it approves,
 and leaves the branch ready for the human to merge. A phase, not a workflow of
 its own, and it never merges anything.
 _Avoid_: PR review, final review, the gate workflow.
+
+**Design doctrine**:
+The rules the build workflow holds a plan and its code to: deep modules
+behind small interfaces, testing at the seams, and data representations
+that cannot express invalid states — principles, never one language's
+constructs. Ships inside the build workflow like the comment doctrine; a
+workspace that disagrees replaces the whole workflow.
+_Avoid_: design guide, architecture standards, best practices.
 
 **Comment doctrine**:
 The rules a comment must satisfy to survive the merge gate: it explains why
@@ -342,3 +414,22 @@ The text appended to every agent Crucible starts, whatever its role prompt
 says — things true of every agent regardless of its job. Day one it is the
 communication style block, nothing else.
 _Avoid_: global prompt, append slot, junk drawer.
+
+**Interrupted**:
+The status of a run that Crucible quit out from under: its progress stopped
+where it stood, its worktree and artifacts are intact, and it can be resumed.
+Distinct from failed, which means the work itself went wrong.
+_Avoid_: stale, crashed, orphaned, failed (for this case).
+
+**Resume**:
+Restarting an interrupted run by re-running the node the quit cut down, from
+that node's beginning, in the same worktree, reporting to the same
+orchestrator. Always a deliberate act — the human's click or an agent's tool
+call — never the system's own.
+_Avoid_: auto-resume, restart (that is the whole run), retry.
+
+**Instance badge**:
+The top-bar mark naming which state directory a dev window is running
+against — "dev" for the primary clone, "dev · <suffix>" for a worktree
+launch. The installed app shows none: the badge marks the exceptional case.
+_Avoid_: flavor chip, dev pill, environment indicator.

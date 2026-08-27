@@ -406,6 +406,28 @@ describe('the repository’s own worktree script', () => {
     expect(existsSync(join(folder, '.crucible', 'worktrees'))).toBe(false)
   })
 
+  it('tells it nothing: a session is the invocation with no variables set', async () => {
+    // The same script serves runs, which are told a base and sometimes a
+    // branch. A session is the case where neither exists, and that is how a
+    // script tells them apart.
+    worktreeScript(
+      [
+        '#!/bin/sh',
+        'echo "base=[${CRUCIBLE_WORKTREE_BASE-unset}] branch=[${CRUCIBLE_WORKTREE_BRANCH-unset}]" > "$PWD/told.txt"',
+        'git worktree add -q -b feature/from-script "$PWD/from-script" 1>&2',
+        'echo "$PWD/from-script"',
+        ''
+      ].join('\n')
+    )
+
+    const made = await service.createWorktree(folder)
+
+    if (!made.ok) throw new Error(made.output)
+    expect(readFileSync(join(folder, 'told.txt'), 'utf8').trim()).toBe(
+      'base=[unset] branch=[unset]'
+    )
+  })
+
   it('leaves the branch unknown when the worktree it reports has none', async () => {
     const outside = mkdtempSync(join(tmpdir(), 'crucible-elsewhere-'))
     try {

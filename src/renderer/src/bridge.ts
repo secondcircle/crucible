@@ -8,6 +8,11 @@ import type { CommandRequest, CommandResult } from '../../shared/commands/channe
 import type { NeedsYouRequest, NeedsYouResult } from '../../shared/needs-you/channels'
 import type { QuotaRequest, QuotaResult } from '../../shared/quota/channels'
 import type { QuotaSnapshot } from '../../shared/quota/types'
+import type {
+  ScheduleEvent,
+  ScheduleRequest,
+  ScheduleResult
+} from '../../shared/schedules/channels'
 import type { WorkspaceRequest, WorkspaceResult } from '../../shared/workspace/channels'
 import type { WorkspaceEvent } from '../../shared/workspace/service'
 import type {
@@ -63,9 +68,18 @@ export interface CrucibleWorkflowRuns {
   onEvent(listener: (event: WorkflowRunEvent) => void): () => void
 }
 
+/** The schedule half, shaped like the run half because it is the same pattern. */
+export interface CrucibleSchedules {
+  request(request: ScheduleRequest): Promise<ScheduleResult>
+  onEvent(listener: (event: ScheduleEvent) => void): () => void
+}
+
 declare global {
   interface Window {
     crucible?: {
+      // The state directory this window runs against, as a badge: `dev`, or
+      // `dev · <suffix>` in a worktree launch. Absent in the installed app.
+      instance?: string
       agent?: CrucibleAgent
       workspace?: CrucibleWorkspace
       commands?: CrucibleCommands
@@ -74,6 +88,7 @@ declare global {
       cache?: CrucibleCache
       needsYou?: CrucibleNeedsYou
       workflowRuns?: CrucibleWorkflowRuns
+      schedules?: CrucibleSchedules
     }
   }
 }
@@ -142,4 +157,20 @@ export function workflowRunsBridge(): CrucibleWorkflowRuns {
     throw new Error('renderer: window.crucible.workflowRuns is missing — the preload did not load')
   }
   return workflowRuns
+}
+
+// The one value here that is allowed to be absent without anything being
+// wrong: the installed app carries no instance badge, and that absence is the
+// design.
+export function instanceBadge(): string | undefined {
+  const instance = window.crucible?.instance
+  return instance === undefined || instance === '' ? undefined : instance
+}
+
+export function schedulesBridge(): CrucibleSchedules {
+  const schedules = window.crucible?.schedules
+  if (schedules === undefined) {
+    throw new Error('renderer: window.crucible.schedules is missing — the preload did not load')
+  }
+  return schedules
 }

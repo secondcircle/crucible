@@ -3,16 +3,10 @@ import { existsSync } from 'node:fs'
 import { access, constants } from 'node:fs/promises'
 import { join } from 'node:path'
 
-// `.crucible/worktree` is the whole mechanism for making a worktree, which
-// is why a run cannot use it: a run's worktree is branched from a commit
-// named at kickoff and may have to continue a predecessor's branch, and none
-// of that is a script's to decide.
-//
-// What a repository does know, and Crucible never can, is what turns a fresh
-// checkout into one an agent can work in: the env file, the install, the
-// generated code. That part is separable, so it is separate. This script runs
-// inside a worktree that already exists, and it is the only thing a repo has
-// to write for runs to work.
+// `.crucible/worktree` reports a *ready* worktree, so this script never runs
+// after it — only inside worktrees Crucible itself made with plain git. What
+// turns a fresh checkout into one an agent can work in is the repository's
+// to know, never Crucible's.
 
 /** What a repository claims the mechanism by placing there. */
 const SCRIPT = join('.crucible', 'worktree-setup')

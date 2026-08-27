@@ -87,6 +87,7 @@ import {
   userTextOf,
   type StoredMessage
 } from './sdk-transcript.ts'
+import { markTurnContext } from './turn-context.ts'
 import { sumUsage, type StoredUsage } from './usage.ts'
 
 // Imported dynamically because the SDK is ESM-only, so the CommonJS main
@@ -186,7 +187,6 @@ export function createSdkAdapter({
   const agentDir = crucibleAgentDir(homedir())
   const listeners = new Set<AdapterEventListener>()
   const sessions = new Map<SessionId, Bound>()
-  const resources = new Map<string, Promise<WorkspaceResources>>()
   let sdkModule: Promise<Sdk> | undefined
   let modelRuntime: Promise<ModelRuntime> | undefined
   // The runtime once it has resolved, because pricing a miss happens inside a
@@ -202,10 +202,37 @@ export function createSdkAdapter({
     // resolved rather than the ones π would have discovered.
     readonly resourceLoader: ResourceLoader
     readonly settingsManager: SettingsManager
+  }
+
+  interface HeldSkills {
     /** Replaced whole on every re-read; π's loader is never reloaded for it. */
-    resolved: readonly LoadedSkill[]
+    readonly resolved: readonly LoadedSkill[]
     /** π's own `<available_skills>` text for that set, so a change is one string compare. */
-    block: string
+    readonly block: string
+  }
+
+  // The last set read for each workspace. Held rather than re-read on demand
+  // because a folder that cannot be read must leave the previous set in force,
+  // and because the loader above is rebuilt far more often than skills change.
+  const heldSkills = new Map<string, HeldSkills>()
+
+  const empty: HeldSkills = { resolved: [], block: '' }
+
+  function held(workspacePath: string): HeldSkills {
+    return heldSkills.get(workspacePath) ?? empty
+  }
+
+  // Answers with the set now in force: the one just read, or — when the folder
+  // could not be read — the one this workspace was already holding.
+  async function readSkills(workspacePath: string): Promise<HeldSkills> {
+    const resolved = await skills?.resolve(workspacePath)
+    if (resolved === undefined) return held(workspacePath)
+    const fresh: HeldSkills = {
+      resolved,
+      block: (await sdk()).formatSkillsForPrompt(forPi(resolved))
+    }
+    heldSkills.set(workspacePath, fresh)
+    return fresh
   }
 
   function emit(event: AdapterEvent): void {
@@ -242,54 +269,50 @@ export function createSdkAdapter({
   // Stock π except for the emptied resources below, which keep the user's
   // globally configured extensions out of a Crucible session, and the system
   // prompt, which is Crucible's outright.
-  function workspaceResources(workspacePath: string): Promise<WorkspaceResources> {
-    const existing = resources.get(workspacePath)
-    if (existing !== undefined) return existing
-
-    const built = (async (): Promise<WorkspaceResources> => {
-      const pi = await sdk()
-      const settingsManager = pi.SettingsManager.create(workspacePath, agentDir)
-      // Read before the first session of this workspace is composed, so an
-      // agent is offered its workspace's skills from its very first turn.
-      const resolved = (await skills?.resolve(workspacePath)) ?? []
-      // In memory only, never written back to the user's settings files. The
-      // queue modes are fixed here: a kind is delivered as one group.
-      settingsManager.applyOverrides({
-        packages: [],
-        extensions: [],
-        steeringMode: 'all',
-        followUpMode: 'all'
-      })
-      const resourceLoader = new pi.DefaultResourceLoader({
-        cwd: workspacePath,
-        agentDir,
-        settingsManager,
-        noExtensions: true,
-        // π's own prompt folders are not read at all: commands are Crucible's,
-        // and two command systems in one composer would be two grammars.
-        noPromptTemplates: true,
-        // π's own skill folders are never read; Crucible's three origins are
-        // handed in through `getSkills` below instead.
-        noSkills: true,
-        // The base is ignored, so π's own prompt never reaches a session and a
-        // system-prompt file discovered in any folder is dead.
-        systemPromptOverride: () => systemPrompt,
-        // A Crucible-owned custom-instructions mechanism is deferred, so a file
-        // dropped into the agent dir must not become one by accident.
-        appendSystemPromptOverride: () => []
-      })
-      await resourceLoader.reload()
-      const held: WorkspaceResources = {
-        resourceLoader: withCrucibleSkills(resourceLoader, () => held.resolved),
-        settingsManager,
-        resolved,
-        block: pi.formatSkillsForPrompt(forPi(resolved))
-      }
-      return held
-    })()
-
-    resources.set(workspacePath, built)
-    return built
+  //
+  // Built fresh on every call, never cached: the loader reads AGENTS.md only
+  // inside reload(), so a loader cached per workspace would pin every later
+  // session — in an app process that lives for days — to the file as it stood
+  // when the workspace was first opened. Each session open reads the file as
+  // it is now. Resumes go through here too, on purpose: a resumed conversation
+  // pays one prompt-cache miss and gets the current instructions.
+  async function workspaceResources(workspacePath: string): Promise<WorkspaceResources> {
+    const pi = await sdk()
+    const settingsManager = pi.SettingsManager.create(workspacePath, agentDir)
+    // Read before the session being composed is created, so an agent is
+    // offered its workspace's skills from its very first turn.
+    await readSkills(workspacePath)
+    // In memory only, never written back to the user's settings files. The
+    // queue modes are fixed here: a kind is delivered as one group.
+    settingsManager.applyOverrides({
+      packages: [],
+      extensions: [],
+      steeringMode: 'all',
+      followUpMode: 'all'
+    })
+    const resourceLoader = new pi.DefaultResourceLoader({
+      cwd: workspacePath,
+      agentDir,
+      settingsManager,
+      noExtensions: true,
+      // π's own prompt folders are not read at all: commands are Crucible's,
+      // and two command systems in one composer would be two grammars.
+      noPromptTemplates: true,
+      // π's own skill folders are never read; Crucible's three origins are
+      // handed in through `getSkills` below instead.
+      noSkills: true,
+      // The base is ignored, so π's own prompt never reaches a session and a
+      // system-prompt file discovered in any folder is dead.
+      systemPromptOverride: () => systemPrompt,
+      // A Crucible-owned custom-instructions mechanism is deferred, so a file
+      // dropped into the agent dir must not become one by accident.
+      appendSystemPromptOverride: () => []
+    })
+    await resourceLoader.reload()
+    return {
+      resourceLoader: withCrucibleSkills(resourceLoader, () => held(workspacePath).resolved),
+      settingsManager
+    }
   }
 
   /** `provider/id`, which is the whole of what a `ModelId` is here. */
@@ -357,7 +380,13 @@ export function createSdkAdapter({
         properties: Object.fromEntries(
           tool.parameters.map((parameter) => [
             parameter.name,
-            { type: 'string', description: parameter.description }
+            parameter.kind === 'map'
+              ? {
+                  type: 'object',
+                  additionalProperties: { type: 'string' },
+                  description: parameter.description
+                }
+              : { type: 'string', description: parameter.description }
           ])
         )
       } as unknown as ToolDefinition['parameters']
@@ -370,7 +399,7 @@ export function createSdkAdapter({
         async execute(_callId: string, params: unknown) {
           const given = (params ?? {}) as {
             workflow?: string
-            inputs?: string
+            inputs?: Record<string, string> | string
             base?: string
             runId?: string
             message?: string
@@ -393,6 +422,9 @@ export function createSdkAdapter({
             return said(
               await behaviors.answer(sessionId, given.runId ?? '', given.message ?? '')
             )
+          }
+          if (tool.name === 'crucible_resume') {
+            return said(await behaviors.resume(sessionId, given.runId ?? ''))
           }
           return said(await behaviors.list(sessionId))
         }
@@ -592,31 +624,25 @@ export function createSdkAdapter({
   // very next thing the user types; a folder that cannot be read leaves the
   // previous set in force rather than turning a send into an error.
   async function skillsForTurn(bound: Bound): Promise<SkillsInForce> {
-    const held = await workspaceResources(bound.workspacePath)
-    const resolved = await skills?.resolve(bound.workspacePath)
-    if (resolved !== undefined) {
-      held.resolved = resolved
-      held.block = (await sdk()).formatSkillsForPrompt(forPi(resolved))
-    }
+    const inForce = await readSkills(bound.workspacePath)
 
-    if (bound.carriedBlock !== held.block) {
+    if (bound.carriedBlock !== inForce.block) {
       // Setting the tool set is what makes π recompose the system prompt, and
       // the set handed back is the one the session already had.
       bound.session.setActiveToolsByName(bound.session.getActiveToolNames())
-      bound.carriedBlock = held.block
+      bound.carriedBlock = inForce.block
       // Rewriting the prompt re-bills the cache, so the next miss in this
       // session says the prompt changed rather than claiming nothing did.
       bound.promptChanged = true
     }
 
-    return { skills: held.resolved, cwd: bound.workspacePath }
+    return { skills: inForce.resolved, cwd: bound.workspacePath }
   }
 
   // The skills this workspace is holding, without reading a folder: what a
   // transcript built now is attributed against.
-  async function skillsHeld(workspacePath: string): Promise<SkillsInForce> {
-    const held = await workspaceResources(workspacePath)
-    return { skills: held.resolved, cwd: workspacePath }
+  function skillsHeld(workspacePath: string): SkillsInForce {
+    return { skills: held(workspacePath).resolved, cwd: workspacePath }
   }
 
   // A typed prompt and a shared bash run differ only in what `deliver` sends,
@@ -1043,7 +1069,7 @@ export function createSdkAdapter({
         jumped: false,
         promptChanged: false,
         watchedPrevious: false,
-        carriedBlock: (await workspaceResources(request.workspacePath)).block
+        carriedBlock: held(request.workspacePath).block
       }
       sessions.set(request.sessionId, bound)
       // A conversation that came back is already holding context, and it is
@@ -1088,7 +1114,7 @@ export function createSdkAdapter({
       bound.watchedPrevious = false
       // The fresh conversation was composed from the same loader, so it is
       // carrying whatever skills block the workspace holds now.
-      bound.carriedBlock = (await workspaceResources(bound.workspacePath)).block
+      bound.carriedBlock = held(bound.workspacePath).block
       return describe(bound, false)
     },
 
@@ -1115,7 +1141,7 @@ export function createSdkAdapter({
         jumped: false,
         promptChanged: false,
         watchedPrevious: false,
-        carriedBlock: (await workspaceResources(request.workspacePath)).block
+        carriedBlock: held(request.workspacePath).block
       }
       sessions.set(request.sessionId, bound)
       reportUsage(request.sessionId, bound)
@@ -1131,7 +1157,7 @@ export function createSdkAdapter({
       return toTranscript(
         messages,
         seamsOf(session.sessionManager, messages),
-        await skillsHeld(bound.workspacePath)
+        skillsHeld(bound.workspacePath)
       )
     },
 
@@ -1390,7 +1416,8 @@ export function createSdkAdapter({
       sessionId: SessionId,
       turnId: TurnId,
       text: string,
-      images?: readonly ImageAttachment[]
+      images?: readonly ImageAttachment[],
+      context?: string
     ): Promise<void> {
       const bound = requireBound(sessionId)
       const { session } = bound
@@ -1398,11 +1425,16 @@ export function createSdkAdapter({
         images === undefined || images.length === 0
           ? undefined
           : { images: images.map(toImageContent) }
+      // π stores the message it was sent, so context that must reach the model
+      // without entering the conversation anyone reads goes in marked and
+      // comes back out through `userTextOf`.
+      const sent = context === undefined ? text : markTurnContext(context, text)
       // Held from before the turn is announced, because the shell asks for a
       // title the moment it hears the start and π appends the prompt to its
-      // own list some way into the call below.
+      // own list some way into the call below. What was typed, never the
+      // context: the titler names sessions after the conversation.
       bound.asked = text
-      return runTurn(sessionId, turnId, () => session.prompt(text, options)).finally(() => {
+      return runTurn(sessionId, turnId, () => session.prompt(sent, options)).finally(() => {
         bound.asked = undefined
       })
     },
@@ -1620,13 +1652,18 @@ function said(text: string): { content: { type: 'text'; text: string }[]; detail
 
 // The tool's `inputs` parameter is a JSON object in a string; a malformed one
 // throws exactly the sentence the model should read.
-function parseInputs(raw: string | undefined): Record<string, string> {
-  if (raw === undefined || raw.trim() === '') return {}
-  let parsed: unknown
-  try {
-    parsed = JSON.parse(raw)
-  } catch {
-    throw new Error('`inputs` must be a JSON object mapping input names to file paths.')
+// The schema says object, but a model that double-encodes is decoded rather
+// than refused: the string case costs nothing to accept.
+function parseInputs(raw: Record<string, string> | string | undefined): Record<string, string> {
+  if (raw === undefined) return {}
+  let parsed: unknown = raw
+  if (typeof raw === 'string') {
+    if (raw.trim() === '') return {}
+    try {
+      parsed = JSON.parse(raw)
+    } catch {
+      throw new Error('`inputs` must be a JSON object mapping input names to file paths.')
+    }
   }
   if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
     throw new Error('`inputs` must be a JSON object mapping input names to file paths.')

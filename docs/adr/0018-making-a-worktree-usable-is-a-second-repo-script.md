@@ -1,19 +1,18 @@
 # 0018 — Making a worktree usable is a second repo script
 
 ADR 0014 delegates worktree *creation* to `.crucible/worktree`, which is the
-whole mechanism when it exists — it picks the location, the branch and the
-base. A run cannot use it: a run's worktree is branched from a commit named
-at kickoff and a chained successor continues its predecessor's branch (ADR
-0016), and none of that is a script's to decide. So run worktrees are plain
-git, and plain git leaves a checkout rather than a working environment: no
+whole mechanism when it exists — it picks the location and, told a run's
+base, serves runs too (ADR 0021). A repository with no script gets plain
+git from Crucible, and plain git leaves a checkout rather than a working
+environment: no
 installed dependencies, no env file, nothing generated. A run's nodes are
 told to run the project's checks, so the whole budget goes on discovering
 that the worktree cannot build. We decided the two questions are separate and
 get separate scripts: `.crucible/worktree` still makes a worktree, and
 `.crucible/worktree-setup` makes one usable — run inside a worktree Crucible
 has already created, no arguments, exit 0 means ready. Crucible runs it
-wherever it made the worktree itself, which is every run and every session
-that fell through to plain git; it does not run it after `.crucible/worktree`,
+wherever it made the worktree itself with plain git — any run or session in
+a repository without the script; it does not run it after `.crucible/worktree`,
 because that script reports a *ready* worktree and can call this one itself.
 
 ## Consequences
@@ -27,10 +26,7 @@ are painful to rename once repositories have written them.
 
 ## Considered Options
 
-Extending `.crucible/worktree` to take a base commit and a branch was
-rejected because a run also needs `--force` when a chained successor picks up
-a branch still checked out in its predecessor, and a naive script would
-silently break chains. Having Crucible install dependencies itself was
+Having Crucible install dependencies itself was
 rejected as ADR 0014 rejected the Makefile contract: it puts a guess about
 every ecosystem in Crucible. Leaving it to the node agents was rejected
 because it is the model paying, every node, every run, to rediscover the same

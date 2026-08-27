@@ -216,7 +216,10 @@ export function quotaRows(snapshot: QuotaSnapshot | undefined, now: number): rea
       }
 
       const stale = isStale(quota, now)
+      // A reader knows when the month ends, so the spend meter lends no
+      // countdown; its reset instant still drives the tick, projection and lapse.
       const resets = live
+        .filter((meter) => meter.kind !== 'monthly')
         .map((meter) => meter.resetsAt)
         .filter((resetsAt): resetsAt is number => resetsAt !== null)
       const longest = resets.length === 0 ? undefined : Math.max(...resets)

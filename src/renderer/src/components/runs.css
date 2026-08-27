@@ -111,9 +111,25 @@
   color: var(--error);
 }
 
+/* Interrupted is as loud as failed and a different thing: amber, because the
+   app went away rather than the work going wrong. */
+.runrow.interrupted {
+  border-color: var(--warn-line);
+}
+
+.runrow.interrupted .st {
+  color: var(--warn);
+}
+
 .runchip .dot.failed,
 .runrow .dot.failed {
   background: var(--error);
+  animation: none;
+}
+
+.runchip .dot.interrupted,
+.runrow .dot.interrupted {
+  background: var(--warn);
   animation: none;
 }
 
@@ -205,6 +221,13 @@
 .rvtop .stat.failed,
 .rvtop .stat.cancelled {
   color: var(--error);
+}
+
+.rvtop .stat.interrupted {
+  color: var(--warn);
+  /* The status cell says two things now, and neither is a word to space out. */
+  letter-spacing: 0.02em;
+  text-transform: none;
 }
 
 .rvtop .where {
@@ -504,6 +527,30 @@
   min-width: 0;
 }
 
+/* What the quit did and what Resume will do, above the node transcript and
+   only while the run is interrupted. It states; it has no controls of its own
+   — the button is in the header. */
+.runview .rvwhy {
+  flex: none;
+  margin: 14px 20px 0;
+  border: 1px solid var(--warn-line);
+  background: var(--warn-bg);
+  border-radius: 8px;
+  padding: 10px 14px;
+  color: var(--ink);
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+
+.runview .rvwhy b {
+  color: var(--warn);
+}
+
+.runview .rvwhy code {
+  font: 11.5px var(--mono);
+  color: var(--accent2);
+}
+
 .runview .dhead {
   padding: 14px 20px;
   border-bottom: 1px solid var(--line);
@@ -758,11 +805,14 @@
 
 /* ---------- the artifact reader ---------- */
 
+/* A column-flex item's automatic minimum height is its whole content, so
+   without this the inner scroller never engages and the pane outgrows the window. */
 .reader {
   flex: 1;
   display: flex;
   flex-direction: column;
   min-width: 0;
+  min-height: 0;
   background: var(--bg);
 }
 

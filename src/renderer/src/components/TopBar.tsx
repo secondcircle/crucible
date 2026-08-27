@@ -11,6 +11,7 @@ import './topbar.css'
 // that guesses is worse than one that admits it does not know yet.
 export function TopBar({
   session,
+  instance,
   menuOpen,
   onToggleMenu,
   onResetSession,
@@ -18,9 +19,14 @@ export function TopBar({
   onJumpToCacheMiss,
   issues,
   board,
+  schedules,
   update
 }: {
   readonly session?: SessionState
+  // Which state directory this window runs against: `dev`, or `dev · <suffix>`
+  // in a worktree launch. Absent in the installed app, and that absence is
+  // the design — the badge marks the exceptional case.
+  readonly instance?: string
   readonly menuOpen: boolean
   readonly onToggleMenu: () => void
   readonly onResetSession: () => void
@@ -42,6 +48,14 @@ export function TopBar({
     readonly needYou: number
     readonly onOpen: () => void
   }
+  // The schedule board's whole resting surface, on the same terms: absent
+  // until the scheduler has answered for this workspace, and absent for a
+  // workspace that declares no schedules at all.
+  readonly schedules?: {
+    readonly count: number
+    readonly needYou: number
+    readonly onOpen: () => void
+  }
   /** A newer installed build, waiting. One click restarts into it. */
   readonly update?: { readonly commit: string; readonly onRestart: () => void }
 }): React.JSX.Element {
@@ -54,8 +68,14 @@ export function TopBar({
 
   return (
     <header className="top">
-      {/* Nothing on the left: the tree button and the gear both left the bar,
-          the tree to double-Esc and Settings to the sidebar foot. */}
+      {/* The left slot holds one thing and only in a dev window: which state
+          directory this instance can see. A mark, not a button — it opens
+          nothing. */}
+      {instance === undefined ? null : (
+        <span className="instance" aria-label={`Instance ${instance}`}>
+          {instance}
+        </span>
+      )}
       <span className="spacer" />
 
       {/* Lit exactly while an issue is assigned to you: unclaimed ones are
@@ -88,6 +108,24 @@ export function TopBar({
           </span>{' '}
           <b>{board.landed} landed</b>
           {board.needYou > 0 ? <u> · {board.needYou} need you</u> : null}
+        </button>
+      )}
+
+      {/* Teal-glyphed because it is a run surface, and lit exactly while one
+          of this workspace's scheduled runs is parked. */}
+      {schedules === undefined ? null : (
+        <button
+          className={`tchip runs${schedules.needYou > 0 ? ' lit' : ''}`}
+          aria-label="Schedule board"
+          onClick={schedules.onOpen}
+        >
+          <span className="g" aria-hidden="true">
+            ⟳
+          </span>{' '}
+          <b>
+            {schedules.count} schedule{schedules.count === 1 ? '' : 's'}
+          </b>
+          {schedules.needYou > 0 ? <u> · {schedules.needYou} needs you</u> : null}
         </button>
       )}
 

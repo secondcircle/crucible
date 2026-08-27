@@ -1,4 +1,4 @@
-import type { ImageAttachment, PortEvent, QueuedEntry } from '../../shared/agent/port'
+import type { ImageAttachment, MessageOrigin, PortEvent, QueuedEntry } from '../../shared/agent/port'
 import type { Shell } from '../shell/shell'
 import type { LogSink } from '../log/sink'
 
@@ -120,7 +120,7 @@ export function withLogging(shell: Shell, log: LogSink, adapter: string): Shell 
     ),
     followUp: op(
       'followUp',
-      (sessionId, text, images) => shell.followUp(sessionId, text, images),
+      (sessionId, text, images, origin) => shell.followUp(sessionId, text, images, origin),
       describeQueueCall
     ),
     dequeue: op(
@@ -159,9 +159,11 @@ function describeImage(image: ImageAttachment): { mimeType: string; bytes: numbe
 function describeQueueCall(
   sessionId: string,
   text: string,
-  images?: readonly ImageAttachment[]
+  images?: readonly ImageAttachment[],
+  origin?: MessageOrigin
 ): unknown[] {
-  return images === undefined ? [sessionId, text] : [sessionId, text, images.map(describeImage)]
+  const call = images === undefined ? [sessionId, text] : [sessionId, text, images.map(describeImage)]
+  return origin === undefined ? call : [...call, origin]
 }
 
 /** A record as the log holds it: the port's own fields, bytes excepted. */

@@ -32,6 +32,12 @@ export interface NodeSessionRequest {
   // Already resolved and already narrowed to what the node's spec asked for:
   // a node is offered nothing this does not name.
   readonly skills?: readonly LoadedSkill[]
+  /**
+   * The node's declared verdict schema. When present, complete_node requires
+   * a `verdict` argument matching it, enforced at the tool boundary so a bad
+   * call fails in the model's face instead of one engine turn later.
+   */
+  readonly verdictSchema?: Record<string, unknown>
   /** The agent called complete_node; the return is the tool's answer text. */
   readonly onComplete: (completion: NodeCompletion) => string
   /** The agent called raise_blocker; same contract. */

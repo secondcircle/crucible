@@ -2,6 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import type { TranscriptItem } from '../../../shared/agent/port'
 import {
   currentNode,
+  interruptedNodes,
   runCost,
   runIsLive,
   type RunArtifact,
@@ -47,12 +48,12 @@ const WIDTH_KEY = 'crucible.run-graph-width'
 // it again lands on the same transcript, scrolled where it was.
 const HIDDEN: React.CSSProperties = { display: 'none' }
 
-// The full-screen dig: read-only observability plus the mechanical Pause and
-// Cancel, with Investigate beside them. The graph is layered top-down; a
-// node's transcript renders through the chat pane's own component, tool chains
-// collapsed; the routed banner shows what was asked and where it went —
-// never an input box. Talking happens in the session; Go to session is the
-// door.
+// The full-screen dig: read-only observability plus the mechanical Pause,
+// Cancel and Resume, with Investigate beside them. The graph is layered
+// top-down; a node's transcript renders through the chat pane's own component,
+// tool chains collapsed; the routed banner shows what was asked and where it
+// went — never an input box. Talking happens in the session; Go to session is
+// the door.
 export function WorkflowRunView({
   run,
   canGoToSession,
@@ -88,7 +89,10 @@ export function WorkflowRunView({
   readonly onCopyPath: (path: string) => void
   readonly onGoToSession: () => void
   readonly onPause: () => void
-  readonly onResume: () => void
+  // Un-pauses a paused run, and puts an interrupted one back to work. It
+  // resolves when the act has landed either way, which is what takes the
+  // button out of its waiting state.
+  readonly onResume: () => Promise<void>
   /** Raises the same confirm the run row raises; stopping never goes silent. */
   readonly onCancel: () => void
   /** The same flow the row's Investigate runs, landing in a new session. */
@@ -134,6 +138,18 @@ export function WorkflowRunView({
   }, [shown, transcriptKey, transcript])
 
   const live = runIsLive(run)
+  // Set from the click to the act's answer, so the button says it heard in the
+  // same frame and cannot be clicked twice.
+  const [resuming, setResuming] = useState(false)
+  const resume = (): void => {
+    setResuming(true)
+    void onResume()
+      .catch(() => {
+        // The refusal is reported where every run refusal is; here it only
+        // means the button comes back.
+      })
+      .then(() => setResuming(false))
+  }
   const rail = usePlacedRail(run)
   const body = useRef<HTMLDivElement>(null)
   const { graphWidth, railShown, startDrag } = useSplitter(body)
@@ -153,7 +169,7 @@ export function WorkflowRunView({
         <span className="wf">{run.workflow}</span>
         <span className="id">run {run.id}</span>
         <span className={`stat ${run.status}`}>
-          {run.status}
+          {run.status === 'interrupted' ? '◌ interrupted · app quit' : run.status}
           {/* How long it has been working, while it still is; how long ago it
               stopped, once it has. Age-since-start on a settled run reads as
               the time it took, which it is not. */}
@@ -168,13 +184,18 @@ export function WorkflowRunView({
           {nodeProgress(run)}
         </span>
         {canGoToSession ? (
-          <button className="btn primary" onClick={onGoToSession}>
+          // Quiet while the run is interrupted: Resume is the one primary
+          // there, because it is the one act that moves the run.
+          <button
+            className={`btn${run.status === 'interrupted' ? '' : ' primary'}`}
+            onClick={onGoToSession}
+          >
             Go to session
           </button>
         ) : null}
         {live ? (
           run.status === 'paused' ? (
-            <button className="btn" onClick={onResume}>
+            <button className="btn" disabled={resuming} onClick={resume}>
               Resume
             </button>
           ) : (
@@ -186,6 +207,14 @@ export function WorkflowRunView({
         {live ? (
           <button className="btn" onClick={onCancel}>
             Cancel
+          </button>
+        ) : null}
+        {/* The primary, in the slot Pause and Cancel occupy on a live run:
+            there is no live handle here to pause or to cancel, and this is
+            the one act that moves the run. */}
+        {run.status === 'interrupted' ? (
+          <button className="btn primary" disabled={resuming} onClick={resume}>
+            Resume
           </button>
         ) : null}
         {/* On every status: what happened is a question worth asking of a
@@ -230,6 +259,9 @@ export function WorkflowRunView({
         )}
 
         <div className="detail" style={fullScreen ? HIDDEN : undefined}>
+          {run.status === 'interrupted' ? (
+            <InterruptedBanner run={run} toSession={canGoToSession} />
+          ) : null}
           {openRow !== undefined ? (
             <ArtifactReader
               runId={run.id}
@@ -431,6 +463,39 @@ const NO_ORDER: readonly string[] = []
 
 function sameOrder(held: readonly string[], next: readonly string[]): boolean {
   return held.length === next.length && held.every((path, at) => path === next[at])
+}
+
+// What the quit did and what Resume will do about it, stated before the click
+// rather than discovered after it. Present exactly while the run is
+// interrupted — resuming re-renders the column without it.
+function InterruptedBanner({
+  run,
+  toSession
+}: {
+  readonly run: RunRecord
+  /** Whether the recorded orchestrator session is still there to report to. */
+  readonly toSession: boolean
+}): React.JSX.Element {
+  const cut = interruptedNodes(run).map((node) => node.id)
+  return (
+    <div className="rvwhy" role="status">
+      <b>Crucible quit while this run was working.</b> Its worktree is left as it stands. Resume
+      re-runs the{' '}
+      {cut.length === 1 ? 'interrupted node' : 'interrupted nodes'}
+      {cut.length === 0 ? ' ' : ' — '}
+      {cut.map((id, at) => (
+        <span key={id}>
+          {at === 0 ? null : ', '}
+          <code>{id}</code>
+        </span>
+      ))}
+      {cut.length === 0 ? '' : ' — '}
+      from that node’s beginning, in the same worktree, reporting to{' '}
+      {/* Never a session that no longer exists: a run with none parks until
+          one adopts it. */}
+      {toSession ? 'the same session' : 'whichever session adopts it'}.
+    </div>
+  )
 }
 
 // Took these, made these: the node's own dataflow, one clickable chip per

@@ -1,5 +1,6 @@
 import { join } from 'node:path'
 import { BrowserWindow, shell as osShell } from 'electron'
+import { INSTANCE_ARGUMENT } from '../shared/instance'
 
 // The window is not shown until it can paint, and its background matches the
 // document's, so a launch never flashes white.
@@ -7,7 +8,7 @@ import { BrowserWindow, shell as osShell } from 'electron'
 /** The one place main names a color. */
 const EMBER_BACKGROUND = '#191419'
 
-export function createMainWindow(): BrowserWindow {
+export function createMainWindow(options: { readonly instance?: string } = {}): BrowserWindow {
   const window = new BrowserWindow({
     width: 1180,
     height: 820,
@@ -24,7 +25,11 @@ export function createMainWindow(): BrowserWindow {
       // Exhibits render in <webview> guests: full browser fidelity, in a
       // webContents of its own with no preload and no node, so a page can do
       // everything a browser tab can and reach nothing of the app.
-      webviewTag: true
+      webviewTag: true,
+      // The instance badge, read back by the preload off its own process.
+      // Absent in the installed app, which is what makes it show no badge.
+      additionalArguments:
+        options.instance === undefined ? [] : [`${INSTANCE_ARGUMENT}${options.instance}`]
     }
   })
 

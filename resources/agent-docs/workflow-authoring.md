@@ -6,8 +6,12 @@ registry, no build step:
 
 - `<workspace>/.crucible/workflows/` — this repository only.
 - `~/.crucible/workflows/` — every workspace on this machine.
-- Built-ins ship with Crucible. Workspace overrides user overrides built-in,
-  so shadowing a built-in's name replaces it here.
+
+Workspace overrides user, so a workspace file shadowing a user file's name
+replaces it here. Crucible ships no workflows of its own: every workflow is
+authored, usually by an agent reading this page. What Crucible does ship is
+complete examples — see the end of this page — to copy into a workflow
+folder and adapt.
 
 Crucible loads the file with a TypeScript-aware loader; `crucible:workflow`
 resolves to the authoring module without any `node_modules` in the folder.
@@ -44,6 +48,7 @@ export default workflow({
   pending ghosts in the graph from the first moment. Throwing here fails the
   kickoff, which makes it the place for input validation. List only what is
   certain: the plan is a floor, not a guess.
+- `schedule` — optional, workspace workflows only: the firing rule, below.
 - `commit` — optional, default `true`: when the run ends, Crucible commits
   whatever its worktree holds as `crucible: <workflow> <run-id>`. Set
   `false` when the workflow commits for itself and strays should not be
@@ -51,6 +56,60 @@ export default workflow({
 - `run(ctx)` — the workflow. Plain TypeScript: loops, branches on verdicts,
   whatever the orchestration needs. Its return value lands on the run
   record as `outputs`.
+
+## Firing on a schedule
+
+A workflow in `<workspace>/.crucible/workflows/` may declare a schedule.
+While Crucible is running, the scheduler fires it for that workspace — no
+session, no orchestrator, no inputs:
+
+```ts
+export default workflow({
+  description: 'label and prioritize untriaged issues',
+  inputs: {},
+  schedule: {
+    cron: '*/5 * * * *',
+    check: ({ workspacePath }) =>
+      execFileSync('gh', ['issue', 'list', '--label', 'untriaged', '--json', 'number'], {
+        cwd: workspacePath,
+        encoding: 'utf8'
+      }).trim() !== '[]'
+  },
+  run: async (ctx) => { /* … */ }
+})
+```
+
+- `cron` — a standard 5-field expression: minute, hour, day-of-month, month,
+  day-of-week. `*`, lists (`,`), ranges (`-`), steps (`/`) and numeric values;
+  day-of-week 0–7 with both 0 and 7 meaning Sunday. Evaluated in the machine's
+  local time. No names for days or months, no presets, no plain English.
+- `check` — optional gate, evaluated in the main process at fire time, outside
+  any worktree and with the app's own privileges, exactly as this file was
+  loaded. It receives `{ workspacePath }` and nothing else. Truthy fires the
+  run; falsy leaves no trace anywhere — no run, no worktree, no board entry.
+  Day one it is boolean only: nothing it computed reaches the run, which
+  re-queries whatever it needs. A check that throws, rejects or takes longer
+  than 30 seconds puts the schedule in a warning state on the schedule board;
+  it never fires and never lights the chip.
+
+What a scheduled fire is: `git fetch --prune origin`, then a run branched from
+the trunk tip, in a worktree of its own, with no inputs and no orchestrator. A
+run that finishes clean lands on the schedule board as a one-line summary —
+`outputs.summary` when the workflow returns one — with its `report` artifact
+rendered beside it. A run that stops on a question, a stall or a failure parks
+there until the user takes it to a session or dismisses it.
+
+So a scheduled workflow declares **no inputs**: there is nobody to supply
+them. One that declares both a `schedule` and an `inputs` record sits on the
+board in a permanent warning state saying so, and never fires on the clock;
+running it by hand with its inputs is untouched, as it is for every schedule.
+
+Timing is deliberately loose. The scheduler evaluates at least once a minute,
+and a schedule is due when a slot has passed since it was last considered. If
+Crucible was closed when slots passed, the first evaluation after launch fires
+once — late and unbothered, never once per missed slot. While a previous
+scheduled run of the same workflow is still live, a due slot is skipped
+entirely and the check is not even evaluated.
 
 ## The run context
 
@@ -144,3 +203,33 @@ same session, so fixes happen with full context.
   workflow then has to parse.
 - `ctx.ask` is expensive attention: reserve it for judgment only the
   session that started the run can supply.
+
+## Complete examples, shipped beside these docs
+
+`examples/`, in the same directory as this file, holds full workflows that
+once shipped as built-ins. They are reference material only — the engine
+never loads them from there. Copy one into a workflow folder, rename it,
+and adapt:
+
+- `examples/adhoc.ts` — the smallest useful workflow: one node running a
+  prompt file in the run's worktree, declaring a report artifact so the run
+  is inspectable from the graph.
+- `examples/adr-audit.ts` — a multi-node pipeline with no inputs at all:
+  audit, sweep and report nodes chained through `reads`, doctrine text
+  shipped inside the file so replacing the workflow replaces the rule and
+  its enforcement in one act, and commits made from `run()` so the branch
+  tells the story. Declaring no inputs is what makes a workflow schedulable.
+- `examples/build.ts` — the big one: an intent document to built code.
+  A Spec node, a fresh-context builder, a bounded review loop with
+  `ctx.openNode`/`revise`, verdict schemas branching the orchestration, a
+  check-in via `ctx.ask` when reviews keep arguing, and a merge gate that
+  loops until it approves. Its header comment carries guidance for the
+  orchestrator that runs it. This is the workflow the align flow feeds —
+  see `align-flow.md` beside this file.
+
+A typical ask — "a workflow that works through issues labeled `ready` on a
+nightly cron" — is a small composition of what is on this page: a
+`schedule` with a `check` that queries the issue host (`gh issue list …`),
+no inputs, and a `run()` that re-queries the label, then loops issues
+through nodes shaped like the examples' — or stages a follow-up run per
+issue with `ctx.stage`.

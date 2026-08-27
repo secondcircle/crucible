@@ -23,13 +23,14 @@ export function shippedDocsIndexPath(root: string): string {
   return join(root, SHIPPED_DIRECTORY, 'agent-docs', 'index.md')
 }
 
-export function shippedWorkflowsPath(root: string): string {
-  return join(root, SHIPPED_DIRECTORY, 'workflows')
+/** The example workflows beside the agent docs — reference files, never loaded by the engine. */
+export function shippedExamplesPath(root: string): string {
+  return join(root, SHIPPED_DIRECTORY, 'agent-docs', 'examples')
 }
 
 /** The authoring module workflow files import as `crucible:workflow`. */
 export function shippedWorkflowLibPath(root: string): string {
-  return join(root, SHIPPED_DIRECTORY, 'workflows', 'lib', 'workflow.ts')
+  return join(root, SHIPPED_DIRECTORY, 'workflow-lib', 'workflow.ts')
 }
 
 export function shippedRolePromptPath(root: string): string {

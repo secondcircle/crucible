@@ -41,11 +41,26 @@ export interface CacheEntry {
   readonly writeId?: string
 }
 
-const KINDS = new Set<QuotaMeter['kind']>(['session', 'weekly', 'weekly_scoped'])
+const KINDS = new Set<QuotaMeter['kind']>(['session', 'weekly', 'weekly_scoped', 'monthly'])
 const ERRORS = new Set<string>(['unauthorized', 'unavailable', 'unparsed'])
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+/**
+ * `null` unless both amounts hold: a fabricated zero would read exactly like
+ * an amount somebody actually spent, so half a reading is worse than none.
+ */
+function validDollars(
+  used: unknown,
+  limit: unknown
+): { usedDollars: number; limitDollars: number } | null {
+  if (typeof used !== 'number' || !Number.isFinite(used) || used < 0) return null
+  // A zero budget divides into nothing, so the percent the strip prints from
+  // these two would be a fabrication of its own.
+  if (typeof limit !== 'number' || !Number.isFinite(limit) || limit <= 0) return null
+  return { usedDollars: used, limitDollars: limit }
 }
 
 // A cache file is data from outside this process, so it is validated exactly
@@ -62,11 +77,20 @@ function validMeter(raw: unknown): QuotaMeter | null {
   if (usedPercent < 0 || usedPercent > 100) return null
   if (resetsAt !== null && (typeof resetsAt !== 'number' || !Number.isFinite(resetsAt))) return null
 
+  // Dollars on any other kind are stripped rather than fatal: the percent
+  // there is still a reading worth keeping.
+  let dollars: { usedDollars: number; limitDollars: number } | null = null
+  if (kind === 'monthly') {
+    dollars = validDollars(raw['usedDollars'], raw['limitDollars'])
+    if (dollars === null) return null
+  }
+
   return {
     kind: kind as QuotaMeter['kind'],
     label,
     usedPercent,
     resetsAt: resetsAt as number | null,
+    ...(dollars ?? {}),
     ...(typeof raw['scopeName'] === 'string' ? { scopeName: raw['scopeName'] } : {}),
     ...(typeof raw['isActive'] === 'boolean' ? { isActive: raw['isActive'] } : {})
   }

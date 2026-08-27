@@ -1,6 +1,6 @@
 import type { SessionId } from './port'
 
-// Both adapters build their run tools from these definitions, so the four
+// Both adapters build their run tools from these definitions, so the five
 // tools cannot drift into meaning different things in the two flavors. The
 // descriptions carry the orchestration teaching too: a description rides the
 // request's tools parameter, the one channel Crucible's system prompt does
@@ -11,12 +11,15 @@ export type RunToolName =
   | 'crucible_run'
   | 'crucible_runs'
   | 'crucible_answer'
+  | 'crucible_resume'
 
 export interface RunToolParameter {
   readonly name: string
   readonly description: string
   /** Absent means required. */
   readonly optional?: boolean
+  /** Schema shape; absent means string. `map` is an object of string values. */
+  readonly kind?: 'map'
 }
 
 export interface RunToolDefinition {
@@ -58,9 +61,10 @@ export const RUN_TOOLS: readonly RunToolDefinition[] = [
       {
         name: 'inputs',
         description:
-          'JSON object mapping input name to absolute file path, e.g. {"prompt": "/tmp/task.md"}. ' +
+          'Object mapping input name to absolute file path, e.g. {"prompt": "/tmp/task.md"}. ' +
           'Omit for a workflow with no inputs.',
-        optional: true
+        optional: true,
+        kind: 'map'
       },
       {
         name: 'base',
@@ -90,6 +94,22 @@ export const RUN_TOOLS: readonly RunToolDefinition[] = [
       { name: 'runId', description: 'The run whose question is being answered' },
       { name: 'message', description: 'The answer, delivered verbatim to the waiting agent' }
     ]
+  },
+  {
+    name: 'crucible_resume',
+    label: 'Resume Run',
+    description:
+      'Resume an interrupted run. A run is interrupted when Crucible quit while it was working: ' +
+      'its progress stopped where it stood, its worktree and artifacts are intact, and nothing ' +
+      'about it moves again until somebody deliberately resumes it.\n\n' +
+      'Resuming re-runs the node the quit cut down, from that node’s beginning, in the same ' +
+      'worktree, reporting to this session as before — which re-spends whatever that node had ' +
+      'already burned. Completed nodes are not re-run and cost nothing.\n\n' +
+      'Resume when the user asks, or when this conversation’s own judgment says the work is ' +
+      'still wanted. Never as a reflex to seeing an interruption message: the run sits at no ' +
+      'cost, so bring it to the user whenever the spend is theirs to weigh. A paused run ' +
+      'un-pauses through here too.',
+    parameters: [{ name: 'runId', description: 'The interrupted run to resume' }]
   }
 ]
 
@@ -115,4 +135,7 @@ export interface RunTools {
   ): Promise<string>
   list(sessionId: SessionId): Promise<string>
   answer(sessionId: SessionId, runId: string, message: string): Promise<string>
+  // No session check, exactly as `answer` has none: the deliberate call is the
+  // authorization, and the run goes on reporting to its recorded orchestrator.
+  resume(sessionId: SessionId, runId: string): Promise<string>
 }

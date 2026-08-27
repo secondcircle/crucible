@@ -17,4 +17,8 @@ matches what you were asked about.
   the crucible_* tools do, what a run's messages mean, and how finished work
   comes back.
 - `workflow-authoring.md` — read this when the user asks you to write or
-  change a workflow.
+  change a workflow. Crucible ships no workflows, only the complete examples
+  in `examples/` that this page names — authoring one is how a workspace
+  gets one.
+- `align-flow.md` — read this when the user asks how alignment works, what
+  an align issue is, or how aligned work becomes a workflow run.

@@ -305,6 +305,27 @@ describe('the scripted cached prefix', () => {
   })
 })
 
+// Turn-start context is model-visible and surface-invisible. In this flavor
+// there is no model, so the whole of the contract is that nothing of it can be
+// found afterwards.
+describe('turn-start context', () => {
+  it('reaches nothing the transcript returns', async () => {
+    const { adapter } = await withSession()
+
+    await adapter.prompt(
+      's1',
+      't1',
+      'how is the build going?',
+      undefined,
+      'Crucible status update \u2014 run 45c8 (build) \u2014 interrupted \u00b7 app quit'
+    )
+
+    const items = await adapter.transcript('s1')
+    expect(items).toContainEqual({ kind: 'user', text: 'how is the build going?' })
+    expect(JSON.stringify(items)).not.toContain('interrupted')
+  })
+})
+
 // The unstick walk of `npm run dev`, in one place: Investigate hands this
 // session a run that parked with nobody to ask, and the user's own words are
 // what unblocks it. Nothing here is paid for, which is the point.
@@ -365,6 +386,44 @@ describe('the scripted orchestrator on an investigated run', () => {
     expect(run?.question?.answer).toBe('put the merge helper in the merge module')
     expect(run?.status).toBe('complete')
     expect(delivered.every((message) => message.sessionId === 's1')).toBe(true)
+    runs.dispose()
+  })
+
+  // The other half of the free walk: a run the app quit out from under sends
+  // its notice, and the script judges the work still wanted and resumes it.
+  it('resumes an interrupted run when its notice arrives, and never as a reflex', async () => {
+    const delivered: { sessionId: string; text: string }[] = []
+    const runs = createFakeWorkflowRunService({
+      beatMs: 0,
+      deliver: (sessionId, text) => delivered.push({ sessionId, text })
+    })
+    const adapter = createFakeAdapter({ pauseMs: 0, runs: runs.tools })
+    await adapter.bind({ sessionId: 's1', workspacePath: WORKSPACE })
+    const events: AdapterEvent[] = []
+    adapter.onEvent((event) => events.push(event))
+
+    // The session adopts the run, and its next turn is what wakes it: the
+    // notice is delivered and becomes this session's next message.
+    await runs.adopt('45c8', 's1')
+    runs.turnStart('s1')
+    const notice = delivered.at(-1)
+    expect(notice?.sessionId).toBe('s1')
+    expect(notice?.text).toContain('was interrupted')
+
+    await adapter.prompt('s1', 't1', notice?.text ?? '')
+
+    expect(
+      events.filter((event) => event.type === 'tool_started').map((event) => event.name)
+    ).toEqual(['crucible_resume'])
+    // From there the script walks the rest of the run on its beat timer.
+    const deadline = Date.now() + 4000
+    while (!delivered.some((message) => message.text.includes('completed'))) {
+      if (Date.now() > deadline) throw new Error('the resumed run never completed')
+      await new Promise((resolve) => setTimeout(resolve, 5))
+    }
+    const run = (await runs.snapshot()).runs.find((candidate) => candidate.id === '45c8')
+    expect(run?.status).toBe('complete')
+    expect(run?.nodes.every((node) => node.status === 'complete')).toBe(true)
     runs.dispose()
   })
 

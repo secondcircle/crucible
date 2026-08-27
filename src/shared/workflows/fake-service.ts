@@ -3,16 +3,26 @@ import type { RunTools } from '../agent/run-tools'
 import { artifactKind, artifactName, recordNamesPath } from './artifacts'
 import {
   dismissRefusal,
+  INTERRUPTED_MESSAGE,
+  interruptedNodes,
+  resumeRefusal,
   runMessageHeader,
   type RunArtifact,
   type RunNode,
   type RunRecord,
   type WorkflowRunId
 } from './run'
+import {
+  createTurnStart,
+  describeRun,
+  interruptionNotice,
+  resumeAnswer
+} from './status'
 import type {
   ArtifactView,
   MainWorkflowRunService,
   RunsSnapshot,
+  ScheduledFireRequest,
   WorkflowRunListener
 } from './service'
 
@@ -20,10 +30,10 @@ import type {
 // tool call starts a run that walks its nodes on a timer, parks once when
 // the workflow is `build` (so the routed-question surfaces are exercisable),
 // and completes with the same message-to-the-orchestrator the engine sends.
-// Three canned records seed the global view — one waiting on a person, one
-// finished, one failed whose orchestrator session is gone — so ⌘R shows its
-// bands, and Dismiss and Investigate both have something to act on, without
-// anything having been started.
+// Four canned records seed the global view — one waiting on a person, one
+// finished, one failed whose orchestrator session is gone, and one the app
+// quit out from under — so ⌘R shows its bands, and Dismiss, Investigate and
+// Resume all have something to act on, without anything having been started.
 //
 // Scripted nodes declare the artifacts they will write and then write them,
 // so the artifact rail, the reader and the exhibit-run route are all
@@ -42,6 +52,14 @@ const FALLBACK_WORKSPACE: CannedWorkspace = { path: '/fake/resume-site', name: '
 
 /** The parked-with-no-one-to-ask run, named because its answer path is wired. */
 const CANNED_UNATTENDED_ID = 'g8x2'
+
+/** The interrupted run, whose Resume walks the rest of the way on the beat. */
+const CANNED_INTERRUPTED_ID = '45c8'
+
+// The orchestrator the interrupted run reports to. No sidebar session can ever
+// carry this id, so its notice waits until a session adopts the run — which is
+// the whole path a test drives: adopt, then take a turn.
+const CANNED_INTERRUPTED_SESSION = 'fake-interrupted-orchestrator'
 
 /** Slow enough to watch under `npm run dev`; tests pass zero. */
 const DEFAULT_BEAT_MS = 700
@@ -107,6 +125,7 @@ interface LiveRun {
   workspacePath: string
   workspaceName: string
   sessionId?: SessionId
+  scheduled?: true
   worktreePath?: string
   branch?: string
   baseCommit?: string
@@ -123,6 +142,7 @@ interface LiveRun {
   endedAt?: string
   dismissedAt?: string
   dir?: string
+  noticePending?: true
 }
 
 /** One output of a scripted node: what it declares, and what it writes. */
@@ -148,6 +168,8 @@ interface ScriptedNode {
   readonly verdict?: { readonly verdict: string; readonly reason: string }
 }
 
+// Deliberately long so the reader's scrolling is checkable in the fake flavor;
+// every other canned body stays short, keeping the no-scrollbar case checkable.
 const SPEC_BODY = `# Spec — the scripted build
 
 The planner's product: what the builder implements and the reviewer judges.
@@ -157,6 +179,196 @@ The planner's product: what the builder implements and the reviewer judges.
 - The rail lists every artifact this run touched, inputs first.
 - Clicking one opens it here, in place of the node transcript.
 - Nothing in the view writes, deletes or re-runs anything.
+
+## The defect this run was started for
+
+A run's artifacts were reachable only through the node that produced them.
+Open a run, pick the node, read the strip at its foot, click the file. Three
+steps to answer "what did this run actually write", and the answer was
+scattered across as many nodes as the graph had. Nothing showed the run's
+product as one list.
+
+The rail is that list. It stands to the right of the detail pane for as long
+as the window has room for it, and it names every file the record knows
+about, in the order the run first mentioned each one.
+
+## The rail
+
+### What it holds
+
+1. The run's inputs, in the order the kickoff named them.
+2. Every artifact any node declared, whether or not it was written.
+3. Nothing else. A file a node touched without declaring is not the run's product and does not appear.
+
+### Ordering
+
+First appearance, and first appearance only. A node that starts late and
+declares a path the record has not seen puts that path at the end of the
+list. A path that was already there stays where it was, even if a later node
+rewrites it. The order is remembered for as long as the run view is open;
+reopening the run derives it from record order again.
+
+The alternative, sorting by write time, was rejected: rows would jump under
+the pointer while a run walks, and a rail that reorders itself mid-read is
+worse than one that occasionally looks stale.
+
+### Row states
+
+- **Written.** The file exists and has a stamp. The row is fully lit and clicking it opens the reader.
+- **Pending.** A node declared it and has not written it yet. The row is dimmed with a dashed marker.
+- **Never.** The node that owed it failed. The row stays, dimmed, marked never written. It does not disappear: a file that was promised and never arrived is a fact about the run, and dropping the row hides it.
+
+A pruned ghost is the one row that leaves. When the record stops naming a
+path the plan had only guessed at, its row goes and, if the reader was
+showing it, the node's transcript comes back by itself.
+
+### The count
+
+The rail's header counts artifacts, not nodes. Six files across three nodes
+reads "6 artifacts". The count gives way before the controls do: at the
+pane's narrowest the number is what gets ellipsized.
+
+## The reader
+
+### Opening
+
+A rail row opens the reader. So does a chip in the node strip, and so does
+the artifact name anywhere else in the view. The reader takes the detail
+pane, in place of the node transcript. The graph does not move. The rail does
+not move. The run view's header does not move.
+
+### Its header
+
+One row: the file's name, then where it came from and when, then the two
+actions, then the way out.
+
+- The name, in the mono face, accented.
+- The provenance line: written by which node, how long ago, how large. An input reads "handed in at kickoff" instead. A never-written file reads "never written" and names the node that failed.
+- **Reveal in Finder**, on written files only. There is nothing to reveal for a file that does not exist.
+- **Copy path**, on every state. It says "Copied" for a moment and then says what it does again.
+- **esc back to the node**, right-aligned, which is also what the Escape key does.
+
+Below the header, the full path on its own row, ellipsized from the right
+when the pane is narrow.
+
+### The body
+
+Three kinds, one container.
+
+| Kind | Rendered as | Notes |
+| --- | --- | --- |
+| Markdown | The app's own renderer | No HTML is parsed from the string |
+| Plain text | Preformatted, wrapped | Long tokens break rather than overflow |
+| HTML | A sandboxed frame | Served under its own origin, never inlined |
+
+The body scrolls. The header and the path row do not. This holds for a file
+of any length, which is the whole point of a reader: a spec of two hundred
+lines is read by scrolling, not by resizing the window and hoping.
+
+HTML is the exception to the container, not to the rule. It fills the space
+below the path row and scrolls inside its own frame, because a document from
+another origin scrolls itself.
+
+### Placeholders
+
+- Not written yet: "This file has not been written yet."
+- Never written: "This file was never written."
+- In flight: "Reading…".
+- Refused or unreadable: whatever the read said went wrong, in the body, with the rail row left alone.
+
+None of these is an error dialog. A file that is not there yet is an ordinary
+state of a running run.
+
+### Read-only, without exception
+
+The reader shows. It does not edit, it does not delete, it does not re-run
+the node that wrote the file. The two header actions are about the file on
+disk and never about the run. This is not a matter of what is convenient to
+build; it is what the view is for.
+
+## The gate
+
+Every read is checked against the run's own record, by exact string equality
+against the paths the record names. Not by resolving against the filesystem,
+not by prefix matching a directory. A path the record does not name is
+refused with "That file is not one this run touched", and the refusal reads
+the same in both flavors of the service because both ask the same function.
+
+What this buys: a relative path climbing out of the artifact directory
+matches no entry, so it is refused for the same reason any other unknown path
+is. There is no separate traversal check to keep correct.
+
+## Refresh
+
+A written artifact is read when the reader opens it and again when a slot the
+reader is watching fills. Nothing tails the file. The key carries the run,
+the path and the write stamp, so a rewrite refetches and a quiet file does
+not.
+
+While a read is in flight, nothing of another artifact is ever shown under
+this one's name. The answer that arrives is matched against the key that was
+asked for and dropped if they disagree.
+
+## Keyboard
+
+Escape unwinds one layer at a time, outermost last: full screen, then the
+reader, then the run view. Nothing else in the reader binds a key. There is
+no scroll shortcut, no jump-to-top, no find. The platform's own scrolling is
+what the mocks draw and it is what ships.
+
+## Geometry
+
+The graph pane starts at 640px and is dragged wider by the splitter. The
+splitter's width is remembered for the whole app, in the profile's own
+storage, so a dev launch and the installed app cannot move each other's
+divider.
+
+Room is given up in a fixed order as the window narrows: the rail goes first,
+then the graph is clamped, and the detail pane keeps a floor of 400px because
+below that it stops being a reading surface. Full screen puts the detail
+column away without taking it apart, so leaving full screen lands on the same
+transcript, scrolled where it was.
+
+## What this does not do
+
+These bind as strongly as the list above.
+
+- No editing, no deleting, no re-running from the rail or the reader.
+- No search across a run's artifacts. One file at a time.
+- No diff between two versions of the same file. The reader shows what is on disk now.
+- No download, no export, no share. Reveal in Finder is the door out.
+- No scroll-position memory. Closing and reopening a file starts at the top.
+- No new IPC. Every read rides the channel the run service already has.
+
+## Testing intent
+
+The rail's ordering, the row states, the gate's refusals and the reader's
+placeholders are all unit-testable and are tested at the shell seam against
+the fake service. Layout is not: the test environment computes none, so what
+a pane does with a tall child is checked in the running app under the fake
+flavor and nowhere else.
+
+This file is itself a fixture for that check. It is long on purpose.
+
+## Rejected alternatives
+
+**A modal over the graph.** Reading an artifact and looking at the node that
+wrote it are the same thought; a modal makes them alternatives.
+
+**A fourth column.** The window does not have the room, and the reader would
+be a column of forty characters on any laptop.
+
+**Rendering HTML inline after sanitizing it.** A sanitizer is a thing you can
+misconfigure. A frame under its own origin is a thing you cannot.
+
+**Tailing written files.** Interesting for a log, wrong for an artifact:
+artifacts are written once, at the end of a node, and a tail would spend its
+life idle.
+
+## Open questions
+
+None. The intent document ruled on every one of them, and the ones it did not
+reach were decided here and marked for veto.
 `
 
 const CHANGES_BODY = `# Changes
@@ -399,6 +611,7 @@ export function createFakeWorkflowRunService({
 
   const records: LiveRun[] = [
     cannedUnattended(workspace, artifactDir, runDir),
+    cannedInterrupted(workspace, artifactDir, runDir),
     cannedFailed(workspace, artifactDir, runDir),
     cannedFinished(workspace, artifactDir, runDir)
   ]
@@ -433,14 +646,96 @@ export function createFakeWorkflowRunService({
   }
 
   function tell(run: LiveRun, text: string): void {
-    if (run.sessionId === undefined) return
-    deliver?.(run.sessionId, text)
+    if (run.sessionId === undefined || deliver === undefined) return
+    try {
+      deliver(run.sessionId, text)
+    } catch {
+      // A message that did not land leaves whatever it was owed still owed,
+      // exactly as the engine leaves it.
+      return
+    }
+    // Any message that reaches the orchestrator is the wake-up an interruption
+    // notice was owed.
+    if (run.noticePending === true) {
+      delete run.noticePending
+      changed()
+    }
   }
+
+  // Every run of this session that is owed an interruption notice says it now,
+  // composed from the record as it stands — the engine's `wake`, in the fake.
+  function wake(sessionId: SessionId): void {
+    for (const run of records) {
+      if (run.noticePending !== true || run.sessionId !== sessionId) continue
+      tell(run, interruptionNotice(run as RunRecord))
+    }
+  }
+
+  const turnStart = createTurnStart({
+    runs: () => records as readonly RunRecord[],
+    wake
+  })
 
   function requireRun(runId: WorkflowRunId): LiveRun {
     const found = records.find((candidate) => candidate.id === runId)
     if (found === undefined) throw new Error(`No run is named "${runId}".`)
     return found
+  }
+
+  // One scripted run, however it was asked for: an agent's crucible_run, or a
+  // schedule firing with no session and nothing handed in.
+  function beginRun({
+    workingDir,
+    workflow,
+    inputs,
+    sessionId,
+    scheduled
+  }: {
+    readonly workingDir: string
+    readonly workflow: string
+    readonly inputs: Readonly<Record<string, string>>
+    readonly sessionId?: SessionId
+    readonly scheduled?: true
+  }): LiveRun {
+    minted += 1
+    const id = `fk${minted}${Math.floor(Math.random() * 90 + 10)}`
+    const dir = artifactDir(id)
+    const nodes: LiveNode[] = scriptOf(workflow).map((script) => ({
+      id: script.id,
+      status: 'pending',
+      parents: [...script.parents],
+      model: script.model,
+      reads: [],
+      artifacts: script.planned
+        ? script.outputs.map((output) => ({
+            name: output.name,
+            path: `${dir}/${output.file}`,
+            desc: output.desc
+          }))
+        : []
+    }))
+    const run: LiveRun = {
+      id,
+      workflow,
+      status: 'running',
+      workspacePath: workingDir,
+      workspaceName: lastSegment(workingDir),
+      ...(sessionId === undefined ? {} : { sessionId }),
+      ...(scheduled === undefined ? {} : { scheduled }),
+      worktreePath: `${workingDir}/.crucible/worktrees/run-${id}`,
+      branch: `crucible/run-${id}`,
+      baseCommit: '6c90bb0fake',
+      inputs: { ...inputs },
+      inputDescs: describeInputs(workflow, inputs),
+      nodes,
+      createdAt: nowIso(),
+      startedAt: nowIso(),
+      dir: runDir(id)
+    }
+    records.unshift(run)
+    changed()
+    startNode(run, 0, 0.61)
+    return run
   }
 
   /** One beat later — unless the run is paused, in which case wait it out. */
@@ -571,6 +866,72 @@ export function createFakeWorkflowRunService({
     })
   }
 
+  // The interrupted run's own resume walk: the reverted node runs again on the
+  // beat, writing what it declared, and the rest of the graph follows until
+  // the run completes and says so — the whole resume arc, watchable and free.
+  function walkResumed(run: LiveRun): void {
+    const next = run.nodes.findIndex((node) => node.status === 'pending')
+    if (next < 0) {
+      finish(run)
+      return
+    }
+    const node = run.nodes[next]
+    node.status = 'running'
+    node.startedAt = nowIso()
+    node.lastActivityAt = nowIso()
+    node.now = 'reading the worktree it left behind…'
+    changed()
+    beat(run, () => {
+      node.status = 'complete'
+      node.endedAt = nowIso()
+      node.lastActivityAt = nowIso()
+      delete node.now
+      node.toolCalls = (node.toolCalls ?? 0) + 6
+      // Added to what this node already burned, never replacing it: the money
+      // the first attempt spent was really spent.
+      node.cost = Number(((node.cost ?? 0) + 0.28).toFixed(2))
+      node.summary = `Re-ran ${node.id} from its beginning after the app quit; nothing was sent anywhere.`
+      node.artifacts = node.artifacts.map((artifact) => {
+        files?.write(artifact.path, CANNED_BODIES[artifactName(artifact.path)] ?? CANNED_BODY)
+        return { ...artifact, writtenAt: nowIso() }
+      })
+      changed()
+      walkResumed(run)
+    })
+  }
+
+  // Total over the two stopped states, refusing every other one with the live
+  // service's own sentence.
+  function resumeRun(runId: WorkflowRunId): void {
+    const run = requireRun(runId)
+    if (run.status === 'paused') {
+      paused.delete(runId)
+      run.status = 'running'
+      changed()
+      return
+    }
+    if (run.status !== 'interrupted') throw new Error(resumeRefusal(runId, run.status))
+    // The record goes back to working and every cut node back to the ghost the
+    // plan drew, keeping what it spent — the engine's own reversion.
+    run.status = 'running'
+    delete run.error
+    delete run.endedAt
+    delete run.dismissedAt
+    for (const node of run.nodes) {
+      if (node.status !== 'interrupted') continue
+      node.status = 'pending'
+      node.artifacts = node.artifacts.map(({ name, path, desc }) => ({ name, path, desc }))
+      delete node.error
+      delete node.summary
+      delete node.startedAt
+      delete node.endedAt
+      delete node.lastActivityAt
+      delete node.now
+    }
+    changed()
+    walkResumed(run)
+  }
+
   function finish(run: LiveRun): void {
     run.status = 'complete'
     run.endedAt = nowIso()
@@ -599,12 +960,32 @@ export function createFakeWorkflowRunService({
     }
   }
 
+  /** Stops a live scripted run where it stands. */
+  function cancelRun(runId: WorkflowRunId): void {
+    const run = requireRun(runId)
+    if (run.status !== 'running' && run.status !== 'paused') return
+    run.status = 'cancelled'
+    run.endedAt = nowIso()
+    paused.delete(runId)
+    waiting.delete(runId)
+    const timer = timers.get(runId)
+    if (timer !== undefined) clearTimeout(timer)
+    for (const node of run.nodes) {
+      if (node.status === 'running' || node.status === 'blocked') {
+        node.status = 'failed'
+        node.endedAt = nowIso()
+        delete node.now
+      }
+    }
+    changed()
+  }
+
   const tools: RunTools = {
     async workflows(): Promise<string> {
       return [
-        '- adhoc (built-in) — one node running a prompt file, in a worktree',
+        '- adhoc (workspace) — one node running a prompt file, in a worktree',
         '  inputs: prompt: A file containing the node\'s task, used verbatim.',
-        '- build (built-in) — take an intent document to built code: a Spec, a builder, and a review loop',
+        '- build (workspace) — take an intent document to built code: a Spec, a builder, and a review loop',
         '  inputs: intent: The intent document for the work.'
       ].join('\n')
     },
@@ -615,45 +996,9 @@ export function createFakeWorkflowRunService({
       workflow: string,
       inputs: Readonly<Record<string, string>>
     ): Promise<string> {
-      minted += 1
-      const id = `fk${minted}${Math.floor(Math.random() * 90 + 10)}`
-      const dir = artifactDir(id)
-      const nodes: LiveNode[] = scriptOf(workflow).map((script) => ({
-        id: script.id,
-        status: 'pending',
-        parents: [...script.parents],
-        model: script.model,
-        reads: [],
-        artifacts: script.planned
-          ? script.outputs.map((output) => ({
-              name: output.name,
-              path: `${dir}/${output.file}`,
-              desc: output.desc
-            }))
-          : []
-      }))
-      const run: LiveRun = {
-        id,
-        workflow,
-        status: 'running',
-        workspacePath: workingDir,
-        workspaceName: lastSegment(workingDir),
-        sessionId,
-        worktreePath: `${workingDir}/.crucible/worktrees/run-${id}`,
-        branch: `crucible/run-${id}`,
-        baseCommit: '6c90bb0fake',
-        inputs: { ...inputs },
-        inputDescs: describeInputs(workflow, inputs),
-        nodes,
-        createdAt: nowIso(),
-        startedAt: nowIso(),
-        dir: runDir(id)
-      }
-      records.unshift(run)
-      changed()
-      startNode(run, 0, 0.61)
+      const run = beginRun({ workingDir, workflow, inputs, sessionId })
       return (
-        `Run ${id} of "${workflow}" started · branch ${run.branch} · worktree ` +
+        `Run ${run.id} of "${workflow}" started · branch ${run.branch} · worktree ` +
         `${run.worktreePath} · base 6c90bb0.\nIt works unattended and reports back to this ` +
         'session. Ending your turn now is the normal thing to do. (Scripted: no cost.)'
       )
@@ -662,13 +1007,9 @@ export function createFakeWorkflowRunService({
     async list(sessionId: SessionId): Promise<string> {
       const mine = records.filter((run) => run.sessionId === sessionId)
       if (mine.length === 0) return 'This session has no workflow runs.'
-      return mine
-        .map(
-          (run) =>
-            `- run ${run.id} (${run.workflow}) — ${run.status}` +
-            (run.waiting === true ? ' · ⚑ waiting on an answer' : '')
-        )
-        .join('\n')
+      // The live service's own line, so what an agent reads of a run is the
+      // same sentence in both flavors.
+      return mine.map((run) => describeRun(run as RunRecord)).join('\n')
     },
 
     async answer(_sessionId: SessionId, runId: string, message: string): Promise<string> {
@@ -676,6 +1017,13 @@ export function createFakeWorkflowRunService({
       if (resume === undefined) throw new Error(`The run "${runId}" is not waiting on an answer.`)
       resume(message)
       return `Answer delivered to run ${runId}; it resumes from here.`
+    },
+
+    async resume(_sessionId: SessionId, runId: string): Promise<string> {
+      // Named before the act: resuming reverts the cut nodes to ghosts.
+      const cut = interruptedNodes(requireRun(runId) as RunRecord).map((node) => node.id)
+      resumeRun(runId)
+      return resumeAnswer(requireRun(runId) as RunRecord, cut)
     }
   }
 
@@ -700,16 +1048,20 @@ export function createFakeWorkflowRunService({
     },
 
     async resume(runId: WorkflowRunId): Promise<void> {
-      const run = requireRun(runId)
-      if (run.status !== 'paused') return
-      paused.delete(runId)
-      run.status = 'running'
-      changed()
+      resumeRun(runId)
     },
 
     async dismiss(runId: WorkflowRunId): Promise<void> {
       const run = requireRun(runId)
-      if (run.status === 'running' || run.status === 'paused') throw new Error(dismissRefusal(runId))
+      if (run.status === 'running' || run.status === 'paused') {
+        // With an orchestrator listening, a live run is stopped from the run
+        // view rather than cleared. With none, dismissing is the whole act:
+        // the run stops and is cleared in one go.
+        if (run.sessionId !== undefined) throw new Error(dismissRefusal(runId))
+        if (run.dismissedAt === undefined) run.dismissedAt = nowIso()
+        cancelRun(runId)
+        return
+      }
       if (run.dismissedAt !== undefined) return
       run.dismissedAt = nowIso()
       changed()
@@ -725,22 +1077,7 @@ export function createFakeWorkflowRunService({
     },
 
     async cancel(runId: WorkflowRunId): Promise<void> {
-      const run = requireRun(runId)
-      if (run.status !== 'running' && run.status !== 'paused') return
-      run.status = 'cancelled'
-      run.endedAt = nowIso()
-      paused.delete(runId)
-      waiting.delete(runId)
-      const timer = timers.get(runId)
-      if (timer !== undefined) clearTimeout(timer)
-      for (const node of run.nodes) {
-        if (node.status === 'running' || node.status === 'blocked') {
-          node.status = 'failed'
-          node.endedAt = nowIso()
-          delete node.now
-        }
-      }
-      changed()
+      cancelRun(runId)
     },
 
     async nodeTranscript(): Promise<readonly TranscriptItem[]> {
@@ -765,6 +1102,17 @@ export function createFakeWorkflowRunService({
     },
 
     tools,
+
+    turnStart,
+
+    async startScheduled(fire: ScheduledFireRequest): Promise<RunRecord> {
+      return beginRun({
+        workingDir: fire.workspacePath,
+        workflow: fire.workflow,
+        inputs: {},
+        scheduled: true
+      }) as RunRecord
+    },
 
     toggleOverview(): void {
       for (const listener of [...listeners]) listener({ type: 'toggle-overview' })
@@ -818,6 +1166,9 @@ function cannedFinished(
     status: 'complete',
     workspacePath: workspace.path,
     workspaceName: workspace.name,
+    // Fired by the workspace's `build` schedule, so the fake flavor's board
+    // has a clean run to read a report from.
+    scheduled: true,
     worktreePath: `${workspace.path}/.crucible/worktrees/run-d3p8`,
     branch: 'crucible/run-d3p8',
     baseCommit: 'a11ce0fake',
@@ -932,7 +1283,9 @@ function cannedFailed(
     status: 'failed',
     workspacePath: workspace.path,
     workspaceName: workspace.name,
-    // A session that is not in the sidebar and never will be again.
+    scheduled: true,
+    // A session that is not in the sidebar and never will be again. Adopted
+    // and then failed, which is why the board files it under Recent runs.
     sessionId: 'fake-removed-session',
     worktreePath: `${workspace.path}/.crucible/worktrees/run-b1n7`,
     branch: 'crucible/run-b1n7',
@@ -993,6 +1346,141 @@ function cannedFailed(
   }
 }
 
+// A build the app quit out from under, shaped like the approved mock's row:
+// four nodes done, the gate cut down mid-flight, an orchestrator that is owed
+// the news, and $3.62 already spent. Resume re-runs the cut node alone.
+function cannedInterrupted(
+  workspace: CannedWorkspace,
+  artifactDir: (runId: WorkflowRunId) => string,
+  runDir: (runId: WorkflowRunId) => string
+): LiveRun {
+  const dir = artifactDir(CANNED_INTERRUPTED_ID)
+  const intent = `${workspace.path}/docs/intent/archexplorer-diff-mode.md`
+  const read = (path: string): RunArtifact => ({ name: artifactName(path), path, desc: 'input' })
+  const spec = `${dir}/spec.md`
+  const changes = `${dir}/changes.md`
+  const tests = `${dir}/review-tests.md`
+  return {
+    id: CANNED_INTERRUPTED_ID,
+    workflow: 'build',
+    status: 'interrupted',
+    workspacePath: workspace.path,
+    workspaceName: workspace.name,
+    sessionId: CANNED_INTERRUPTED_SESSION,
+    worktreePath: `${workspace.path}/.crucible/worktrees/run-${CANNED_INTERRUPTED_ID}`,
+    branch: `crucible/run-${CANNED_INTERRUPTED_ID}`,
+    baseCommit: 'ab3d19fake',
+    inputs: { intent },
+    inputDescs: { intent: 'The intent document for the work.' },
+    nodes: [
+      {
+        id: 'requirements',
+        status: 'complete',
+        parents: [],
+        model: 'anthropic/claude-fable-5:high',
+        reads: [read(intent)],
+        artifacts: [
+          {
+            name: 'spec',
+            path: spec,
+            desc: 'the Spec: what to build, derived from the intent document',
+            writtenAt: hoursAgo(2.7)
+          }
+        ],
+        summary: 'Wrote the spec.',
+        cost: 0.42,
+        toolCalls: 9,
+        startedAt: hoursAgo(3),
+        endedAt: hoursAgo(2.7)
+      },
+      {
+        id: 'architect',
+        status: 'complete',
+        parents: ['requirements'],
+        model: 'anthropic/claude-opus-5:high',
+        reads: [read(spec)],
+        artifacts: [],
+        summary: 'Settled the module boundaries.',
+        cost: 0.68,
+        toolCalls: 14,
+        startedAt: hoursAgo(2.7),
+        endedAt: hoursAgo(2.2)
+      },
+      {
+        id: 'builder',
+        status: 'complete',
+        parents: ['architect'],
+        model: 'anthropic/claude-opus-5:high',
+        reads: [read(intent), read(spec)],
+        artifacts: [
+          {
+            name: 'changes',
+            path: changes,
+            desc: 'every file the builder touched, with reasons',
+            writtenAt: hoursAgo(1.3)
+          }
+        ],
+        summary: 'Built the diff mode.',
+        cost: 1.74,
+        toolCalls: 38,
+        startedAt: hoursAgo(2.2),
+        endedAt: hoursAgo(1.3)
+      },
+      {
+        id: 't2-review',
+        status: 'complete',
+        parents: ['builder'],
+        model: 'anthropic/claude-fable-5:high',
+        reads: [read(changes)],
+        artifacts: [
+          {
+            name: 'review',
+            path: tests,
+            desc: 'the branch judged at its test seams',
+            writtenAt: hoursAgo(0.9)
+          }
+        ],
+        summary: 'Approved at the seams.',
+        verdict: { verdict: 'approved', reason: 'every seam the spec named has a test at it' },
+        cost: 0.39,
+        toolCalls: 11,
+        startedAt: hoursAgo(1.3),
+        endedAt: hoursAgo(0.9)
+      },
+      // The node the quit cut down: what it declared is still unwritten, and
+      // its error is the one sentence the sweep writes.
+      {
+        id: 'gate-alignment',
+        status: 'interrupted',
+        parents: ['t2-review'],
+        model: 'anthropic/claude-opus-5:high',
+        reads: [read(intent), read(changes), read(tests)],
+        artifacts: [
+          {
+            name: 'review',
+            path: `${dir}/review.md`,
+            desc: "the gate's verdict and its evidence"
+          }
+        ],
+        error: INTERRUPTED_MESSAGE,
+        cost: 0.39,
+        toolCalls: 7,
+        startedAt: hoursAgo(0.9),
+        lastActivityAt: hoursAgo(0.67),
+        endedAt: hoursAgo(0.67)
+      }
+    ],
+    error: INTERRUPTED_MESSAGE,
+    // Owed to its orchestrator, and still owed: nothing has woken that session
+    // since the quit.
+    noticePending: true,
+    createdAt: hoursAgo(3),
+    startedAt: hoursAgo(3),
+    endedAt: hoursAgo(0.67),
+    dir: runDir(CANNED_INTERRUPTED_ID)
+  }
+}
+
 /** A session-less parked run: the unattended kind, parked with no one to ask
  *  until a session investigates it and adopts it. */
 function cannedUnattended(
@@ -1009,6 +1497,8 @@ function cannedUnattended(
     status: 'running',
     workspacePath: workspace.path,
     workspaceName: workspace.name,
+    // Parked: fired by a schedule, waiting with no orchestrator to hear it.
+    scheduled: true,
     worktreePath: `${workspace.path}/.crucible/worktrees/run-g8x2`,
     branch: 'crucible/run-g8x2',
     baseCommit: 'c4rl0fake',

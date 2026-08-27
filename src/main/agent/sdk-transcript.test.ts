@@ -10,6 +10,8 @@ import {
   toTranscript,
   type StoredMessage
 } from './sdk-transcript'
+import { titleInput } from './sdk-titler'
+import { markTurnContext } from './turn-context'
 
 function messages(...stored: unknown[]): StoredMessage[] {
   return stored as StoredMessage[]
@@ -55,6 +57,29 @@ describe('a restored conversation', () => {
       { kind: 'tool', name: 'read', summary: 'mock-a.html', ok: true, output: '--accent:#e07a4f' },
       { kind: 'assistant', markdown: 'Done: `--accent` is the one accent.' }
     ])
+  })
+
+  // Turn-start context reaches the model inside the user message π stored, and
+  // no surface may show it. This is the whole of that guarantee at the pure
+  // translation layer: no SDK, no session.
+  it('shows the user’s message without the turn-start context that rode it', () => {
+    const asked = markTurnContext(
+      'Crucible status update — run 45c8 (build) — interrupted · app quit',
+      'how is the build going?'
+    )
+    const items = toTranscript(
+      messages(
+        { role: 'user', content: asked },
+        { role: 'user', content: [{ type: 'text', text: asked }] }
+      )
+    )
+
+    expect(items).toEqual([
+      { kind: 'user', text: 'how is the build going?' },
+      { kind: 'user', text: 'how is the build going?' }
+    ])
+    // And the titler, which reads user text through the same translation.
+    expect(titleInput(items) ?? '').not.toContain('interrupted')
   })
 
   it('closes an aborted message with the same quiet stopped marker', () => {

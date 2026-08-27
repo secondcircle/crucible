@@ -15,12 +15,18 @@ function serviceRecorder(): MainWorkflowRunService {
     nodeTranscript: vi.fn(async () => []),
     artifact: vi.fn(async () => ({ kind: 'markdown' as const, body: '# spec', bytes: 6 })),
     revealArtifact: vi.fn(async () => {}),
+    startScheduled: vi.fn(async () => {
+      throw new Error('the channel never carries a scheduled fire')
+    }),
     tools: {
       workflows: async () => '',
       start: async () => '',
       list: async () => '',
-      answer: async () => ''
+      answer: async () => '',
+      resume: async () => ''
     },
+    // Never crosses the channel: the hook is main's, consulted at a turn.
+    turnStart: () => undefined,
     toggleOverview: () => {},
     dispose: () => {}
   }

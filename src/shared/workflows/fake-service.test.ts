@@ -85,12 +85,27 @@ describe('the fake workflow run service', () => {
     expect(cleared?.branch).toBe(failed?.branch)
     expect(cleared?.nodes).toHaveLength(failed?.nodes.length ?? 0)
 
-    // Dismissing twice says nothing new, and a live run is refused outright.
+    // Dismissing twice says nothing new.
     await service.dismiss('b1n7')
     expect(
       (await service.snapshot()).runs.find((run) => run.id === 'b1n7')?.dismissedAt
     ).toBe(cleared?.dismissedAt)
-    await expect(service.dismiss('g8x2')).rejects.toThrow(/still working/)
+
+    // A live run with an orchestrator listening is still refused outright:
+    // the session it reports to can stop it, and Cancel is where that lives.
+    await service.tools.start('s1', '/repos/resume-site', 'adhoc', {})
+    const attended = (await service.snapshot()).runs.find(
+      (run) => run.sessionId === 's1' && run.status === 'running'
+    )
+    expect(attended).toBeDefined()
+    await expect(service.dismiss(attended?.id ?? '')).rejects.toThrow(/still working/)
+
+    // A live run with none is parked, and dismissing it is the whole act: it
+    // stops where it stands and is cleared in one go.
+    await service.dismiss('g8x2')
+    const parked = (await service.snapshot()).runs.find((run) => run.id === 'g8x2')
+    expect(parked?.status).toBe('cancelled')
+    expect(parked?.dismissedAt).toBeDefined()
     service.dispose()
   })
 
@@ -205,6 +220,97 @@ describe('the fake workflow run service', () => {
     expect(after?.status).toBe('complete')
     expect(after?.question?.answer).toBe('proceed')
     service.dispose()
+  })
+
+  // Everything about interrupted runs has to be exercisable in the flavor
+  // agents drive, or the whole arc is only checkable against a paid model.
+  describe('the canned interrupted run', () => {
+    it('seeds the Needs-you band with an interrupted build, notice owed', async () => {
+      const service = createFakeWorkflowRunService({ beatMs: 0 })
+      const run = (await service.snapshot()).runs.find(
+        (candidate) => candidate.status === 'interrupted'
+      )
+
+      expect(run?.id).toBe('45c8')
+      expect(run?.sessionId).toBeDefined()
+      expect(run?.error).toContain('quit while this run was working')
+      expect(run?.endedAt).toBeDefined()
+      expect(run?.noticePending).toBe(true)
+      // Four done, one cut down: the shape the approved mock draws.
+      expect(run?.nodes.map((node) => node.status)).toEqual([
+        'complete',
+        'complete',
+        'complete',
+        'complete',
+        'interrupted'
+      ])
+      const cut = run?.nodes.at(-1)
+      expect(cut?.id).toBe('gate-alignment')
+      expect(cut?.error).toContain('quit while this run was working')
+      // What it owed is still unwritten, which is what the rail shows.
+      expect(cut?.artifacts[0].writtenAt).toBeUndefined()
+      service.dispose()
+    })
+
+    it('resumes on the beat: the cut node re-runs, the run completes and says so', async () => {
+      const delivered: string[] = []
+      const service = createFakeWorkflowRunService({
+        beatMs: 0,
+        deliver: (_sessionId, text) => delivered.push(text)
+      })
+
+      const said = await service.tools.resume('s1', '45c8')
+      expect(said).toContain('"gate-alignment"')
+
+      await until(() => delivered.some((text) => text.includes('completed')))
+      const run = (await service.snapshot()).runs.find((candidate) => candidate.id === '45c8')
+      expect(run?.status).toBe('complete')
+      expect(run?.error).toBeUndefined()
+      expect(run?.nodes.every((node) => node.status === 'complete')).toBe(true)
+      // The node it re-ran wrote what it owed, and kept the money it had
+      // already burned.
+      const cut = run?.nodes.find((node) => node.id === 'gate-alignment')
+      expect(cut?.artifacts[0].writtenAt).toBeDefined()
+      expect(cut?.cost).toBeGreaterThan(0.39)
+      service.dispose()
+    })
+
+    it('refuses a resume with the live service\u2019s own sentence', async () => {
+      const service = createFakeWorkflowRunService({ beatMs: 0 })
+      await expect(service.tools.resume('s1', 'd3p8')).rejects.toThrow(
+        'The run "d3p8" is complete; there is nothing to resume.'
+      )
+      await expect(service.resume('b1n7')).rejects.toThrow(
+        'The run "b1n7" is failed; there is nothing to resume.'
+      )
+      service.dispose()
+    })
+
+    it('delivers the notice when the session wakes, once, and injects the change', async () => {
+      const delivered: { sessionId: string; text: string }[] = []
+      const service = createFakeWorkflowRunService({
+        beatMs: 0,
+        deliver: (sessionId, text) => delivered.push({ sessionId, text })
+      })
+
+      // A session adopts it, and its next user turn is the wake.
+      await service.adopt('45c8', 's1')
+      const injected = service.turnStart('s1')
+
+      expect(delivered).toHaveLength(1)
+      expect(delivered[0].sessionId).toBe('s1')
+      expect(delivered[0].text).toContain('was interrupted')
+      expect(delivered[0].text).toContain('crucible_resume')
+      // The same turn's invisible block names the run and the lever.
+      expect(injected).toContain('45c8')
+      expect(injected).toContain('interrupted \u00b7 app quit')
+      expect(injected).toContain('crucible_resume')
+
+      // Nothing changed and nothing is owed, so a quiet turn costs nothing.
+      expect(service.turnStart('s1')).toBeUndefined()
+      expect(delivered).toHaveLength(1)
+      service.dispose()
+    })
   })
 
   it('cancel ends a scripted run where it stands', async () => {

@@ -7,6 +7,8 @@ import { createCommandClient } from './commands/ipc-client'
 import { createNeedsYouClient } from './needs-you/ipc-client'
 import { createQuotaClient } from './quota/ipc-client'
 import { createWorkflowRunClient } from './runs/ipc-client'
+import { createScheduleClient } from './schedules/ipc-client'
+import { instanceBadge } from './bridge'
 import { Shell } from './Shell'
 import { createWorkspaceClient } from './workspace/ipc-client'
 import './styles/base.css'
@@ -28,6 +30,8 @@ function mountApp(): void {
         cache={createCacheClient()}
         needsYou={createNeedsYouClient()}
         workflowRuns={createWorkflowRunClient()}
+        schedules={createScheduleClient()}
+        instance={instanceBadge()}
       />
     </StrictMode>
   )

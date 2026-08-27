@@ -655,6 +655,230 @@ describe('clearing a run that needs you', () => {
   })
 })
 
+// A run the app quit out from under: as loud as a failure, amber instead of
+// red, and carrying the one act that moves it.
+describe('an interrupted run', () => {
+  /** The mock's row: four nodes done, the gate cut down, $3.62 spent. */
+  function interrupted(overrides: Partial<RunRecord> = {}): RunRecord {
+    return runOf({
+      id: '45c8',
+      status: 'interrupted',
+      error: 'Crucible quit while this run was working, so it stopped where it stood.',
+      endedAt: '2026-08-20T10:40:00.000Z',
+      nodes: [
+        {
+          id: 'requirements',
+          status: 'complete',
+          parents: [],
+          reads: [],
+          artifacts: [],
+          summary: 'wrote the spec',
+          cost: 0.42,
+          endedAt: '2026-08-20T10:10:00.000Z'
+        },
+        {
+          id: 'gate-alignment',
+          status: 'interrupted',
+          parents: ['requirements'],
+          reads: [],
+          artifacts: [],
+          error: 'Crucible quit while this run was working.',
+          cost: 3.2,
+          startedAt: '2026-08-20T10:10:00.000Z',
+          endedAt: '2026-08-20T10:40:00.000Z'
+        }
+      ],
+      ...overrides
+    })
+  }
+
+  it('bands under Needs you beside a failure, amber, with the mock’s status text', async () => {
+    await open([
+      interrupted(),
+      runOf({ id: 'b1n7', status: 'failed', endedAt: '2026-08-20T10:40:00.000Z' })
+    ])
+
+    expect(bands()).toEqual(['Needs you'])
+    expect(rowsOf('Needs you')).toEqual(['45c8', 'b1n7'])
+    const cut = row('45c8')
+    expect(cut?.className).toContain('interrupted')
+    expect(cut?.className).not.toContain('failed')
+    expect(cut?.className).not.toContain('done')
+    // Amber, and the age is time since it stopped, in the row's bare form.
+    expect(cut?.querySelector('.st')?.textContent).toMatch(
+      /^\u25cc interrupted \u00b7 app quit \u00b7 \S+$/
+    )
+    expect(cut?.querySelector('.dot')?.className).toContain('interrupted')
+    // The failed row keeps its own red treatment, untouched.
+    expect(row('b1n7')?.className).toContain('failed')
+
+    // The failed row's whole kit, plus exactly one new thing, rightmost.
+    expect(buttonsOf('45c8')).toEqual([
+      'Open run',
+      'Go to session',
+      'Dismiss',
+      'Investigate',
+      'Resume'
+    ])
+    const resume = [...(cut?.querySelectorAll('button') ?? [])].at(-1)
+    expect(resume?.className).toContain('primary')
+    // The only primary on the row: Investigate stays quiet beside it.
+    expect(
+      [...(cut?.querySelectorAll('button.primary') ?? [])].map((button) => button.textContent)
+    ).toEqual(['Resume'])
+  })
+
+  it('resumes without a confirm, disables the button in-frame, and re-bands', async () => {
+    const { workflowRuns } = mount([interrupted()])
+    await act(settled)
+    await act(async () => {
+      fireEvent.keyDown(document, { key: 'r', metaKey: true })
+      await settled()
+    })
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Resume' }))
+      await settled()
+    })
+
+    // No dialog: the click is the spend authorization.
+    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(workflowRuns.calls).toContainEqual({ op: 'resume', args: ['45c8'] })
+    expect((screen.getByRole('button', { name: 'Resume' }) as HTMLButtonElement).disabled).toBe(
+      true
+    )
+    // Still where it was until the record says otherwise.
+    expect(rowsOf('Needs you')).toEqual(['45c8'])
+
+    await act(async () => {
+      workflowRuns.setRuns([runOf({ id: '45c8', status: 'running' })])
+      await settled()
+    })
+    expect(rowsOf('Running')).toEqual(['45c8'])
+    expect(buttonsOf('45c8')).toEqual(['Open run', 'Go to session', 'Investigate'])
+  })
+
+  it('reports a refused resume and gives the button back', async () => {
+    const { workflowRuns } = mount([interrupted()])
+    workflowRuns.resume = async () => {
+      throw new Error('The run "45c8" cannot resume: its worktree is gone.')
+    }
+    await act(settled)
+    await act(async () => {
+      fireEvent.keyDown(document, { key: 'r', metaKey: true })
+      await settled()
+    })
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Resume' }))
+      await settled()
+    })
+
+    expect(screen.getByRole('alert')).toHaveTextContent('its worktree is gone')
+    expect((screen.getByRole('button', { name: 'Resume' }) as HTMLButtonElement).disabled).toBe(
+      false
+    )
+    expect(rowsOf('Needs you')).toEqual(['45c8'])
+  })
+
+  it('stays resumable after a dismissal, which only stops the shouting', async () => {
+    await open([interrupted({ dismissedAt: '2026-08-20T11:00:00.000Z' })])
+
+    expect(bands()).toEqual(['Done'])
+    const cleared = row('45c8')
+    expect(cleared?.className).toContain('done')
+    expect(cleared?.querySelector('.st')?.textContent).toContain('dismissed')
+    // Resume is still there: dismissal is a display clearing, not a lock.
+    expect(buttonsOf('45c8')).toContain('Resume')
+  })
+
+  it('says what Resume will do, in the run view, before the click', async () => {
+    const { workflowRuns } = mount([interrupted()])
+    await act(settled)
+    await act(async () => {
+      fireEvent.keyDown(document, { key: 'r', metaKey: true })
+      await settled()
+    })
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Open run' }))
+      await settled()
+    })
+
+    const view = screen.getByLabelText('Run 45c8')
+    // Amber status, in the words the mock draws.
+    const status = view.querySelector('.rvtop .stat')
+    expect(status?.className).toContain('interrupted')
+    expect(status?.textContent).toMatch(/^\u25cc interrupted \u00b7 app quit \u00b7 .+ ago$/)
+
+    // The banner names the cut node and what stays put.
+    const banner = view.querySelector('.rvwhy')
+    expect(banner?.textContent).toContain('Crucible quit while this run was working.')
+    expect(banner?.textContent).toContain('Its worktree is left as it stands.')
+    expect(banner?.textContent).toContain('gate-alignment')
+    expect(banner?.textContent).toContain('reporting to the same session')
+
+    // Resume is the primary, and there is no live handle to pause or cancel.
+    const header = view.querySelector('.rvtop')
+    expect(
+      [...(header?.querySelectorAll('button') ?? [])].map((button) => button.textContent)
+    ).toEqual(['Go to session', 'Resume', 'Investigate', 'esc'])
+    // The only primary in the header: Go to session goes quiet beside it.
+    expect(
+      [...(header?.querySelectorAll('button.primary') ?? [])].map((one) => one.textContent)
+    ).toEqual(['Resume'])
+
+    // The graph reads the cut node as cut, in amber, while its neighbour keeps
+    // its own face.
+    const cards = [...view.querySelectorAll('.gpane .nd')].map((card) => ({
+      className: card.className,
+      text: card.textContent ?? ''
+    }))
+    const cutCard = cards.find((card) => card.text.includes('gate-alignment'))
+    expect(cutCard?.className).toContain('parked')
+    expect(cutCard?.text).toContain('\u25cc interrupted')
+
+    await act(async () => {
+      fireEvent.click(within(view.querySelector('.rvtop') as HTMLElement).getByText('Resume'))
+      await settled()
+    })
+    expect(workflowRuns.calls).toContainEqual({ op: 'resume', args: ['45c8'] })
+
+    // The record moving to running re-renders the header into the live shape.
+    await act(async () => {
+      workflowRuns.setRuns([runOf({ id: '45c8', status: 'running' })])
+      await settled()
+    })
+    const live = screen.getByLabelText('Run 45c8')
+    expect(live.querySelector('.rvwhy')).toBeNull()
+    expect(
+      [...(live.querySelectorAll('.rvtop button') ?? [])].map((button) => button.textContent)
+    ).toEqual(['Go to session', 'Pause', 'Cancel', 'Investigate', 'esc'])
+  })
+
+  it('names every cut node, and says who it will report to when the session is gone', async () => {
+    await open([
+      interrupted({
+        sessionId: undefined,
+        nodes: [
+          { id: 'left', status: 'interrupted', parents: [], reads: [], artifacts: [] },
+          { id: 'right', status: 'interrupted', parents: [], reads: [], artifacts: [] }
+        ]
+      })
+    ])
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Open run' }))
+      await settled()
+    })
+
+    const banner = screen.getByLabelText('Run 45c8').querySelector('.rvwhy')
+    expect(banner?.textContent).toContain('interrupted nodes')
+    expect(banner?.textContent).toContain('left')
+    expect(banner?.textContent).toContain('right')
+    // Never a session that no longer exists.
+    expect(banner?.textContent).toContain('reporting to whichever session adopts it')
+  })
+})
+
 describe('investigating a run', () => {
   it('makes a session in the run workspace, adopts the run, then prompts it', async () => {
     const { port, workflowRuns } = mount([

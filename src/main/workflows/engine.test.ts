@@ -3,230 +3,29 @@
 // The engine against scripted node sessions and a real git repository: the
 // node loop, the orchestrator routing and the worktree life all run exactly
 // as shipped, with no SDK session anywhere (the seam is the point).
-import { execFileSync } from 'node:child_process'
-import {
-  chmodSync,
-  existsSync,
-  mkdirSync,
-  mkdtempSync,
-  readFileSync,
-  rmSync,
-  writeFileSync
-} from 'node:fs'
-import { tmpdir } from 'node:os'
+import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import type { ObservedCacheMiss } from '../../shared/agent/adapter'
-import type { SessionId, TranscriptItem } from '../../shared/agent/port'
-import type { CacheRecorder, RecordedCacheMiss } from '../cache/ledger'
 import type { LoadedSkill, SkillService } from '../skills/service'
 import type { PlannedNode, WorkflowDef } from './authoring'
-import { createWorkflowEngine, type EngineOptions, type WorkflowEngine } from './engine'
-import type {
-  NodeBlocker,
-  NodeCompletion,
-  NodeSession,
-  NodeSessionFactory,
-  NodeSessionRequest
-} from './node-session'
-import type { LoadedWorkflow, WorkflowLoader } from './loader'
+import { createWorkflowEngine, type WorkflowEngine } from './engine'
+import type { NodeSessionFactory } from './node-session'
 import { createRunStore } from './store'
+import {
+  cleanupScratch,
+  git,
+  loaderOf,
+  outputPath,
+  rig,
+  scriptedSessions,
+  startRequest,
+  tempDir,
+  until,
+  type NodeScript,
+  type Rig
+} from './testing/engine-rig'
 
-const scratch: string[] = []
-
-afterEach(() => {
-  for (const dir of scratch.splice(0)) rmSync(dir, { recursive: true, force: true })
-})
-
-function tempDir(prefix: string): string {
-  const dir = mkdtempSync(join(tmpdir(), prefix))
-  scratch.push(dir)
-  return dir
-}
-
-function git(cwd: string, ...args: string[]): string {
-  return execFileSync('git', args, { cwd, encoding: 'utf8' }).trim()
-}
-
-/** A real repository with one commit, which is all a run needs to branch. */
-function tempRepo(): string {
-  const repo = tempDir('crucible-engine-repo-')
-  git(repo, 'init', '-q', '-b', 'main')
-  git(repo, 'config', 'user.email', 'test@example.invalid')
-  git(repo, 'config', 'user.name', 'Crucible Test')
-  writeFileSync(join(repo, 'README.md'), 'hello\n')
-  git(repo, 'add', '-A')
-  git(repo, 'commit', '-q', '-m', 'first')
-  return repo
-}
-
-/** What a scripted node may do on one prompt. */
-interface NodeTools {
-  readonly complete: (completion: NodeCompletion) => void
-  readonly block: (blocker: NodeBlocker) => void
-  /** A cache miss on this node's turn, as the SDK factory reports one. */
-  readonly cacheMiss: (miss: ObservedCacheMiss) => void
-  /** A line of liveness, which is what the engine snapshots the node on. */
-  readonly activity: (doing: string) => void
-  readonly cwd: string
-  // The first prompt of the session, which is the one naming the output
-  // paths; later prompts (rejections, blocker answers, shoves) do not.
-  readonly taskPrompt: string
-}
-
-// A script that returns a promise is a turn still under way, which is how a
-// node's record is read while its agent is working.
-type NodeScript = (prompt: string, tools: NodeTools, turn: number) => void | Promise<void>
-
-/** The prompt names every output path; a script writes one by its file name. */
-function outputPath(prompt: string, file: string): string {
-  const line = prompt.split('\n').find((candidate) => candidate.includes(file))
-  const match = line === undefined ? null : /- (\S+) —/.exec(line)
-  if (match === null) throw new Error(`no output path for ${file} in the prompt`)
-  return match[1]
-}
-
-function scriptedSessions(
-  scriptFor: (nodeId: string) => NodeScript
-): NodeSessionFactory & {
-  readonly prompts: string[]
-  readonly models: string[]
-  /** What each node was started with, which is the seam this test drives. */
-  readonly requests: NodeSessionRequest[]
-} {
-  const prompts: string[] = []
-  const models: string[] = []
-  const requests: NodeSessionRequest[] = []
-  return {
-    prompts,
-    models,
-    requests,
-    async start(request: NodeSessionRequest): Promise<NodeSession> {
-      requests.push(request)
-      const nodeId = /^You are "([^"]+)"/.exec(request.rolePrompt)?.[1] ?? 'unknown'
-      models.push(`${nodeId}: ${request.model}`)
-      const script = scriptFor(nodeId)
-      let turn = 0
-      let disposed = false
-      let taskPrompt = ''
-      const activityListeners = new Set<(now: string | undefined) => void>()
-      return {
-        async prompt(text: string): Promise<void> {
-          if (disposed) return
-          prompts.push(`${nodeId}: ${text.split('\n')[0]}`)
-          turn += 1
-          if (turn === 1) taskPrompt = text
-          await script(
-            text,
-            {
-              complete: (completion) => request.onComplete(completion),
-              block: (blocker) => request.onBlocker(blocker),
-              cacheMiss: (miss) => request.onCacheMiss?.(miss),
-              activity: (doing) => {
-                for (const listener of [...activityListeners]) listener(doing)
-              },
-              cwd: request.cwd,
-              taskPrompt
-            },
-            turn
-          )
-        },
-        async abort(): Promise<void> {},
-        isStreaming: () => false,
-        stats: () => ({ toolCalls: turn * 3, cost: turn * 0.25, contextPercent: 10 * turn }),
-        transcript: (): readonly TranscriptItem[] => [
-          { kind: 'assistant', markdown: `scripted node ${nodeId}, turn ${turn}` }
-        ],
-        onActivity: (listener) => {
-          activityListeners.add(listener)
-          return () => activityListeners.delete(listener)
-        },
-        dispose: () => {
-          disposed = true
-        }
-      }
-    }
-  }
-}
-
-function loaderOf(defs: Record<string, WorkflowDef>): WorkflowLoader {
-  function loaded(name: string): LoadedWorkflow {
-    const def = defs[name]
-    if (def === undefined) throw new Error(`No workflow is named "${name}".`)
-    return { name, origin: 'built-in', path: `/shipped/${name}.ts`, def }
-  }
-  return {
-    async list() {
-      return Object.keys(defs).map(loaded)
-    },
-    async resolve(_workspace: string, name: string) {
-      return loaded(name)
-    }
-  }
-}
-
-interface Rig {
-  readonly engine: WorkflowEngine
-  readonly repo: string
-  readonly stateDir: string
-  readonly delivered: { sessionId: SessionId; text: string }[]
-  readonly sessions: ReturnType<typeof scriptedSessions>
-  /** Every ledger line the run wrote, in order. */
-  readonly recorded: RecordedCacheMiss[]
-}
-
-function rig(
-  defs: Record<string, WorkflowDef>,
-  scriptFor: (nodeId: string) => NodeScript,
-  extra: Partial<EngineOptions> = {}
-): Rig {
-  const repo = tempRepo()
-  const stateDir = tempDir('crucible-engine-state-')
-  const delivered: { sessionId: SessionId; text: string }[] = []
-  const recorded: RecordedCacheMiss[] = []
-  const sessions = scriptedSessions(scriptFor)
-  // A stand-in for the ledger: what a run writes is checkable without a file.
-  const cache: CacheRecorder = {
-    retention: '5m',
-    ledgerPath: join(stateDir, 'cache-misses.jsonl'),
-    append: async (miss) => {
-      recorded.push(miss)
-    }
-  }
-  const engine = createWorkflowEngine({
-    loader: loaderOf(defs),
-    store: createRunStore(stateDir),
-    sessions,
-    deliver: (sessionId, text) => delivered.push({ sessionId, text }),
-    cache,
-    onChanged: () => {},
-    pollMs: 5,
-    watchdogMs: 60_000,
-    quietAbortMs: 600_000,
-    releaseWaitMs: 100,
-    ...extra
-  })
-  return { engine, repo, stateDir, delivered, sessions, recorded }
-}
-
-async function until(what: () => boolean, ms = 4000): Promise<void> {
-  const deadline = Date.now() + ms
-  while (!what()) {
-    if (Date.now() > deadline) throw new Error('timed out waiting')
-    await new Promise((resolve) => setTimeout(resolve, 10))
-  }
-}
-
-function startRequest(repo: string, workflow: string, inputs: Record<string, string>) {
-  return {
-    workspacePath: repo,
-    workspaceName: 'engine-test',
-    sessionId: 'orchestrator-1',
-    workflow,
-    inputs,
-    base: 'HEAD'
-  }
-}
+afterEach(cleanupScratch)
 
 const oneNode: WorkflowDef = {
   description: 'one node writing a file into the worktree',
@@ -242,7 +41,58 @@ const oneNode: WorkflowDef = {
   }
 }
 
+// A verdict-bearing node next to a plain one, so the seam shows both sides.
+const judgedSchema = {
+  type: 'object',
+  required: ['verdict'],
+  properties: { verdict: { enum: ['approved', 'changes-required'] } }
+}
+const judged: WorkflowDef = {
+  description: 'a judged node, then a plain one',
+  inputs: { prompt: 'the task file' },
+  plan: () => [{ id: 'judge' }, { id: 'work', parents: ['judge'] }],
+  run: async (ctx) => {
+    await ctx.node('judge', {
+      prompt: 'judge the thing',
+      reads: [ctx.inputs.prompt],
+      outputs: { review: { file: 'review.md', desc: 'the review' } },
+      verdict: judgedSchema
+    })
+    const result = await ctx.node('work', {
+      prompt: 'do the thing',
+      outputs: { report: { file: 'report.md', desc: 'what happened' } }
+    })
+    return { summary: result.summary }
+  }
+}
+
 describe('the engine end to end', () => {
+  it("hands a node's declared verdict schema to its session, and only then", async () => {
+    const { engine, repo, sessions } = rig({ judged }, (nodeId) => {
+      return (prompt, tools) => {
+        if (nodeId === 'judge') {
+          writeFileSync(outputPath(prompt, 'review.md'), 'looks right\n')
+          tools.complete({ summary: 'judged', verdict: { verdict: 'approved' } })
+          return
+        }
+        writeFileSync(outputPath(prompt, 'report.md'), 'the report\n')
+        tools.complete({ summary: 'done' })
+      }
+    })
+
+    const task = join(repo, 'task.md')
+    writeFileSync(task, 'the task\n')
+    await engine.start(startRequest(repo, 'judged', { prompt: task }))
+    await until(() => engine.runs()[0].status === 'complete')
+
+    // The declared schema rode the session request; the plain node got none.
+    expect(sessions.requests.map((request) => request.verdictSchema)).toEqual([
+      judgedSchema,
+      undefined
+    ])
+    expect(engine.runs()[0].nodes[0].verdict).toEqual({ verdict: 'approved' })
+  })
+
   it('runs a workflow in its own worktree and reports completion to the orchestrator', async () => {
     const { engine, repo, stateDir, delivered } = rig({ solo: oneNode }, () => {
       return (prompt, tools) => {
@@ -590,16 +440,19 @@ describe('the engine end to end', () => {
     })
 
     const [run] = engine.runs()
-    expect(run.status).toBe('failed')
+    // Interrupted, never failed: the app went away, the work did not go wrong.
+    expect(run.status).toBe('interrupted')
     expect(run.error).toMatch(/quit while this run was working/)
     expect(run.endedAt).toBeDefined()
     // Nothing is owed an answer any more, and nothing claims to be thinking.
     expect(run.waiting).toBe(false)
     expect(run.question).toBeUndefined()
-    expect(run.nodes.map((node) => node.status)).toEqual(['complete', 'failed', 'pending'])
+    expect(run.nodes.map((node) => node.status)).toEqual(['complete', 'interrupted', 'pending'])
     expect(run.nodes[1].now).toBeUndefined()
+    // Its orchestrator has not heard, and the record says so until it does.
+    expect(run.noticePending).toBe(true)
     // Written through, so the next launch reads the settled record.
-    expect(store.load()[0].status).toBe('failed')
+    expect(store.load()[0].status).toBe('interrupted')
 
     // And it is a record, not a ghost: the live-only operations say so
     // plainly rather than pretending to work.
@@ -1089,6 +942,121 @@ describe('dismissing and adopting a run', () => {
     const loaded = createRunStore(stateDir).load()
     expect(loaded.find((run) => run.id === 'old1')?.dir).toBe(older)
     expect(loaded.find((run) => run.id === runId)?.dir).toBe(join(stateDir, runId))
+  })
+})
+
+// A run a schedule fired has no orchestrator until a session adopts it.
+// What that means to the engine is here: it delivers nothing, it parks
+// rather than speaking, and dismissing it is the whole act.
+describe('a run with no orchestrator', () => {
+  /** A scheduled fire: no session, no inputs, the scheduled marker. */
+  function scheduledRequest(repo: string, workflow: string): {
+    workspacePath: string
+    workspaceName: string
+    workflow: string
+    inputs: Record<string, string>
+    base: string
+    scheduled: true
+  } {
+    return {
+      workspacePath: repo,
+      workspaceName: 'engine-test',
+      workflow,
+      inputs: {},
+      base: 'HEAD',
+      scheduled: true
+    }
+  }
+
+  const noInputs: WorkflowDef = {
+    description: 'one node, nothing handed in',
+    inputs: {},
+    plan: () => [{ id: 'work' }],
+    run: async (ctx) => {
+      const result = await ctx.node('work', {
+        prompt: 'do the thing',
+        outputs: { report: { file: 'report.md', desc: 'what happened' } }
+      })
+      return { summary: result.summary }
+    }
+  }
+
+  it('parks on a blocker with nothing delivered anywhere', async () => {
+    const { engine, repo, delivered } = rig({ solo: noInputs }, () => (_prompt, tools, turn) => {
+      if (turn === 1) {
+        tools.block({ reason: 'the labels force one or the other' })
+        return
+      }
+      writeFileSync(outputPath(tools.taskPrompt, 'report.md'), 'after the answer\n')
+      tools.complete({ summary: 'done once somebody answered' })
+    })
+
+    const started = await engine.start(scheduledRequest(repo, 'solo'))
+    await until(() => engine.runs()[0].waiting === true)
+
+    const parked = engine.runs()[0]
+    expect(parked.scheduled).toBe(true)
+    expect(parked.sessionId).toBeUndefined()
+    expect(parked.question?.reason).toContain('the labels force one or the other')
+    expect(parked.nodes[0].status).toBe('blocked')
+    // Nobody was told: a run with no orchestrator has no voice at all.
+    expect(delivered).toEqual([])
+
+    // It waits indefinitely at no cost until a session takes it on.
+    engine.adopt(started.id, 'investigator-9')
+    expect(engine.runs()[0].sessionId).toBe('investigator-9')
+    engine.answer(started.id, 'default to bug')
+    await until(() => engine.runs()[0].status === 'complete')
+    expect(delivered.every((message) => message.sessionId === 'investigator-9')).toBe(true)
+  })
+
+  it('parks on a failure, and keeps the marker across the store', async () => {
+    const { engine, repo, stateDir, delivered } = rig({ solo: noInputs }, () => () => {
+      throw new Error('the node blew up')
+    })
+
+    await engine.start(scheduledRequest(repo, 'solo'))
+    await until(() => engine.runs()[0].status === 'failed')
+
+    expect(delivered).toEqual([])
+    const reloaded = createRunStore(stateDir).load()[0]
+    expect(reloaded.scheduled).toBe(true)
+    expect(reloaded.sessionId).toBeUndefined()
+    expect(reloaded.status).toBe('failed')
+  })
+
+  it('never carries the marker on a run an agent started', async () => {
+    const { engine, repo } = rig({ solo: oneNode }, () => (prompt, tools) => {
+      writeFileSync(outputPath(prompt, 'report.md'), 'the report\n')
+      tools.complete({ summary: 'did the thing' })
+    })
+    const task = join(repo, 'task.md')
+    writeFileSync(task, 'the task\n')
+
+    await engine.start(startRequest(repo, 'solo', { prompt: task }))
+    await until(() => engine.runs()[0].status === 'complete')
+
+    expect(engine.runs()[0].scheduled).toBeUndefined()
+  })
+
+  it('is cancelled and stamped in one act when it is dismissed', async () => {
+    const { engine, repo } = rig({ solo: noInputs }, () => (_prompt, tools) => {
+      tools.block({ reason: 'nobody is listening' })
+    })
+    const started = await engine.start(scheduledRequest(repo, 'solo'))
+    await until(() => engine.runs()[0].waiting === true)
+
+    engine.dismiss(started.id)
+
+    expect(engine.runs()[0].dismissedAt).toBeDefined()
+    await until(() => engine.runs()[0].status === 'cancelled')
+    // The worktree is left exactly where it stands, as every ending leaves it.
+    expect(existsSync(engine.runs()[0].worktreePath ?? '')).toBe(true)
+
+    // Dismissing twice still says nothing new.
+    const stamped = engine.runs()[0].dismissedAt
+    engine.dismiss(started.id)
+    expect(engine.runs()[0].dismissedAt).toBe(stamped)
   })
 })
 

@@ -3,17 +3,17 @@ import { join } from 'node:path'
 import { createJiti, type Jiti } from 'jiti'
 import type { WorkflowDef } from './authoring'
 
-// Workflows resolve exactly as Commands do: three origins, workspace over
-// user over built-in, and a file in a folder is enrollment. The files are
+// Workflows resolve like Commands, minus the built-in rung: two origins,
+// workspace over user, and a file in a folder is enrollment. Crucible ships
+// no workflows of its own — only example files beside the agent docs, which
+// this loader never reads. The files are
 // TypeScript, loaded through jiti so a workflow works from any folder with
 // no build step and no node_modules of its own; the `crucible:workflow`
 // import every file uses is aliased to the shipped authoring module.
 
-export type WorkflowOrigin = 'built-in' | 'user' | 'workspace'
+export type WorkflowOrigin = 'user' | 'workspace'
 
 export interface WorkflowRoots {
-  /** The built-ins shipped with the app. */
-  readonly builtIn: string
   /** `~/.crucible/workflows`. */
   readonly user: string
 }
@@ -65,10 +65,9 @@ export function createWorkflowLoader({
     return loader
   }
 
-  /** Workspace beats user beats built-in: the winner is the last one found. */
+  /** Workspace beats user: the winner is the last one found. */
   function discover(workspacePath: string): Map<string, Found> {
     const folders: readonly { origin: WorkflowOrigin; path: string }[] = [
-      { origin: 'built-in', path: roots.builtIn },
       { origin: 'user', path: roots.user },
       { origin: 'workspace', path: join(workspacePath, '.crucible', 'workflows') }
     ]

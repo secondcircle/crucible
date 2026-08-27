@@ -38,9 +38,12 @@ export interface WorkflowRunService {
   /** Live-only: no replay, no backlog. */
   onEvent(listener: WorkflowRunListener): Unsubscribe
 
-  // The run view's two mechanical buttons. Everything
-  // conversational goes through the orchestrator instead.
+  // The run view's mechanical buttons. Everything conversational goes through
+  // the orchestrator instead.
   pause(runId: WorkflowRunId): Promise<void>
+  // Total over the two stopped states: a paused run un-pauses, an interrupted
+  // one re-runs the node the app quit cut down, from that node's beginning, in
+  // the same worktree. Every other status is refused with a sentence.
   resume(runId: WorkflowRunId): Promise<void>
   cancel(runId: WorkflowRunId): Promise<void>
 
@@ -66,10 +69,25 @@ export interface WorkflowRunService {
   revealArtifact(runId: WorkflowRunId, path: string): Promise<void>
 }
 
+/** A fire from the schedule surface: a workflow, in a workspace, and nothing else. */
+export interface ScheduledFireRequest {
+  readonly workspacePath: string
+  readonly workflow: string
+}
+
 // What main holds beyond the channel: the tool behaviors the adapters mount
 // on composed agents, and the ⌘R toggle main's key interception fires.
 export interface MainWorkflowRunService extends WorkflowRunService {
   readonly tools: RunTools
+  // Consulted once at the start of every user turn of a session, after the
+  // turn is claimed and before its prompt is dispatched: it delivers whatever
+  // that session is owed about its runs, and answers with the status block the
+  // model must see and no surface may show — or nothing, when nothing changed.
+  turnStart(sessionId: SessionId): string | undefined
+  // Starts a run from the schedule surface: no session, no inputs, branched
+  // from the trunk tip fetched fresh, and marked scheduled. It never crosses
+  // to the renderer — the schedule seam is what the board asks.
+  startScheduled(fire: ScheduledFireRequest): Promise<RunRecord>
   /** Emits `toggle-overview` to every listener; main calls it on ⌘R. */
   toggleOverview(): void
   dispose(): void

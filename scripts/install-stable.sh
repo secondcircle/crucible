@@ -34,7 +34,12 @@ node -e "
 npx electron-builder --mac --dir --config electron-builder.yml
 
 app="$(ls -d dist/mac*/Crucible.app | head -1)"
-rm -rf /Applications/Crucible.app
+# Replace the bundle's contents, never the bundle directory itself. Removing
+# the top-level .app needs write permission on /Applications (root:admin under
+# MDM), and when that rm failed it had already emptied the bundle — a running
+# app with nothing left on disk to relaunch. The user owns the .app directory,
+# so clearing inside it and copying into it needs no admin at all.
+rm -rf /Applications/Crucible.app/Contents
 ditto "$app" /Applications/Crucible.app
 
 echo

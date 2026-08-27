@@ -34,6 +34,11 @@
   /* a border for something that failed, dark enough not to shout */
   --error-line: #5a3540;
   --warn: #d9a441;
+  /* a border for something stopped but not broken — an interrupted run, the
+     instance badge — amber's answer to --error-line */
+  --warn-line: #5a4a2e;
+  /* the ground under it, amber-tinted just enough to read as one surface */
+  --warn-bg: #241f16;
   --thinking: #b08cc9;
   --absent-ink: #4a3f47;
   /* merged is its own color: neither running, nor failing, nor open */

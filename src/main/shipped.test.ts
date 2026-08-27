@@ -81,11 +81,11 @@ describe('the built-in commands', () => {
     const text = expansion.kind === 'command' ? expansion.text : ''
 
     expect(text).toContain('Do you agree we are fully aligned?')
-    expect(text).toContain('<workspace>/.crucible/align/<YYMMDD>-<slug>.md')
     for (const heading of [
       "## What we're building",
       '## Rulings — what the user settled',
       '## Constraints and non-negotiables',
+      '## Prototyping',
       '## Still open',
       '## Durable residue from this interview',
       '## Source material'
@@ -97,6 +97,22 @@ describe('the built-in commands', () => {
     expect(text).toContain('frontier')
     expect(text).toContain('CONTEXT.md')
     expect(text).toContain('docs/adr/')
+  })
+
+  it('ends /align in an align issue on the workspace host, never a repo file', async () => {
+    const expansion = await shipped().expand(workspace, '/align')
+    const text = expansion.kind === 'command' ? expansion.text : ''
+
+    // Host detection is the workspace's config, and the label is the marker.
+    expect(text).toContain('.crucible/jira.json')
+    expect(text).toContain('gh label create align')
+    expect(text).toContain('gh issue create')
+    expect(text).toContain('gh gist create')
+    expect(text).toMatch(/Never\s+write the\s+brief into the repository\./)
+    expect(text).not.toContain('.crucible/align/')
+    // Failure preserves the brief outside the repo, named, never dropped.
+    expect(text).toMatch(/outside the repository/)
+    expect(text).toMatch(/never silently dropped/)
   })
 
   it('carries no workflow machinery and no π folder', async () => {
@@ -123,16 +139,33 @@ describe('the built-in commands', () => {
     expect(withSubject).toMatchObject({ kind: 'command', origin: 'built-in' })
     expect(text).toContain('The subject: blank screen after summarize')
     expect(text).toContain('Do you agree we are fully aligned?')
-    expect(text).toContain('<workspace>/.crucible/align/<YYMMDD>-<slug>.md')
     expect(text).toContain('## Decided without asking — veto anything here')
+    expect(text).toContain('## Prototyping')
+  })
+
+  it('ends /quick-align in a local gitignored brief, never an issue on any host', async () => {
+    const expansion = await shipped().expand(workspace, '/quick-align')
+    const text = expansion.kind === 'command' ? expansion.text : ''
+
+    // The folder, and the proof it is ignored before anything is written.
+    expect(text).toContain('.crucible/align/')
+    expect(text).toContain('git check-ignore -q')
+    // No host machinery: no Jira config, no gh, no gist, no label.
+    expect(text).not.toContain('.crucible/jira.json')
+    expect(text).not.toContain('gh issue create')
+    expect(text).not.toContain('gh gist create')
+    expect(text).not.toContain('gh label create')
+    // Failure preserves the brief at a temp path, named, never dropped.
+    expect(text).toMatch(/outside the repository/)
+    expect(text).toMatch(/never\s+silently dropped/)
   })
 
   it('keeps /quick-align ignorant of /align, sub-agents and π', async () => {
     const expansion = await shipped().expand(workspace, '/quick-align')
     const text = expansion.kind === 'command' ? expansion.text : ''
 
-    // Its own name and the brief path both contain "align", so match /align
-    // not preceded by "quick-" or ".crucible".
+    // Its own name contains "align" and its brief folder is .crucible/align,
+    // so match /align as the command: not preceded by "quick-" or ".crucible".
     expect(text).not.toMatch(/(?<!quick-)(?<!\.crucible)\/align/)
     for (const gone of ['sub-agent', '~/.pi', '<repo>']) {
       expect(text).not.toContain(gone)
@@ -376,6 +409,39 @@ describe('the shipped worktrees doc', () => {
     expect(text).toContain('git worktree add')
     expect(text).toContain('.crucible/worktrees/')
     expect(text).toMatch(/crucible\/</)
+  })
+
+  it('gives the run invocation exactly: both variables, all three cases', () => {
+    const text = doc()
+    expect(text).toContain('CRUCIBLE_WORKTREE_BASE')
+    expect(text).toContain('CRUCIBLE_WORKTREE_BRANCH')
+    // A session is told neither, and the base needs no resolving.
+    expect(text).toMatch(/unset/)
+    expect(text).toMatch(/full sha/)
+    // The example is the whole answer: a branch of it per case.
+    expect(text).toContain('if [ -n "${CRUCIBLE_WORKTREE_BRANCH:-}" ]; then')
+    expect(text).toContain('elif [ -n "${CRUCIBLE_WORKTREE_BASE:-}" ]; then')
+  })
+
+  it('says a continued branch needs a forced checkout, and why', () => {
+    const text = doc()
+    expect(text).toContain('git worktree add --force "$path" "$CRUCIBLE_WORKTREE_BRANCH"')
+    expect(text).toMatch(/still checked out in the predecessor's worktree/)
+  })
+
+  it('says exit 0 is not enough for a run, and what a mismatch costs', () => {
+    const text = doc()
+    expect(text).toMatch(/HEAD` is exactly `CRUCIBLE_WORKTREE_BASE/)
+    expect(text).toMatch(/detached HEAD is a failure/)
+    expect(text).toMatch(/refused at kickoff/)
+    expect(text).toMatch(/Nothing is cleaned up/)
+  })
+
+  it('no longer scopes the creation script to sessions, or setup to runs', () => {
+    const text = doc()
+    expect(text).not.toContain('Sessions only.')
+    expect(text).not.toContain('It is what runs need')
+    expect(text).not.toContain('Workflow runs always create their')
   })
 
   it('says branch names are throwaway and renaming later is the agent’s job', () => {

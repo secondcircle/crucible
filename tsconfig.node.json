@@ -3,7 +3,9 @@
     "electron.vite.config.ts",
     "vitest.config.ts",
     "scripts/**/*.ts",
-    "resources/workflows/**/*.ts",
+    "resources/workflow-lib/**/*.ts",
+    "resources/agent-docs/examples/**/*.ts",
+    ".crucible/workflows/**/*.ts",
     "src/shared/**/*.ts",
     "src/main/**/*.ts",
     "src/preload/**/*.ts"
@@ -11,9 +13,10 @@
   "compilerOptions": {
     "composite": true,
     // What the workflow loader aliases at runtime, resolved for the checker
-    // too, so the shipped workflows are typechecked like everything else.
+    // too, so the shipped examples and this repo's own workflows are
+    // typechecked like everything else.
     "paths": {
-      "crucible:workflow": ["./resources/workflows/lib/workflow.ts"]
+      "crucible:workflow": ["./resources/workflow-lib/workflow.ts"]
     },
     "target": "ES2022",
     "lib": ["ES2023"],

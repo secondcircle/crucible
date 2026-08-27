@@ -9,6 +9,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { REQUEST_CHANNEL } from '../shared/agent/channels'
 import { COMMAND_REQUEST_CHANNEL } from '../shared/commands/channels'
 import { NEEDS_YOU_REQUEST_CHANNEL } from '../shared/needs-you/channels'
+import { SCHEDULE_REQUEST_CHANNEL } from '../shared/schedules/channels'
 import { QUOTA_REQUEST_CHANNEL } from '../shared/quota/channels'
 import { WORKSPACE_REQUEST_CHANNEL } from '../shared/workspace/channels'
 import type { LogRecord } from './log/sink'
@@ -129,7 +130,9 @@ beforeEach(async () => {
   vi.stubEnv('CRUCIBLE_AGENT', undefined)
   vi.stubEnv('CRUCIBLE_WORKSPACE', undefined)
   // A launch that carries no override of its own, which is what every launch
-  // but a deliberate one looks like.
+  // but a deliberate one looks like. Cleared per launch: main writes this one
+  // itself, so a previous test's launch would otherwise be the environment the
+  // next one inherits.
   vi.stubEnv('PI_CACHE_RETENTION', undefined)
   await import('./index')
 })
@@ -149,14 +152,17 @@ describe('what a launch does', () => {
       'cache_retention',
       'quota_service_selected',
       'workflow_run_service_selected',
+      'schedule_service_selected',
       'adapter_selected',
       'workspace_service_selected',
       'command_service_selected'
     ])
-    expect(records()[4]).toMatchObject({ adapter: 'fake' })
+    expect(records()[5]).toMatchObject({ adapter: 'fake' })
     // One flavor decision governs every seam: the fake launch runs scripted
-    // runs, reads no credential and never touches the machine's quota cache.
+    // runs, evaluates no schedule on a clock, reads no credential and never
+    // touches the machine's quota cache.
     expect(records()[3]).toMatchObject({ service: 'fake' })
+    expect(records()[4]).toMatchObject({ service: 'fake' })
     expect(records()[2]).toMatchObject({ event: 'quota_service_selected', service: 'canned' })
     expect(harness.windowsCreated).toBe(0)
   })
@@ -164,7 +170,9 @@ describe('what a launch does', () => {
   it('asks for the hour before the first agent of the launch exists', () => {
     // Second record of the launch, ahead of the ledger, the adapter and the
     // workflow engine: π reads the variable per request, so it has to be in
-    // the environment before anything can make one.
+    // the environment before anything can make one. The launch record itself
+    // already carries the answer.
+    expect(records()[0]).toMatchObject({ event: 'app_starting', retention: '1h' })
     expect(records()[1]).toMatchObject({
       event: 'cache_retention',
       retention: '1h',
@@ -176,7 +184,7 @@ describe('what a launch does', () => {
   it('starts though it can read no shipped prompt file, because the fake needs none', () => {
     // Nothing is shipped under this launch's app directory, prompts included.
     expect(existsSync(join(harness.appPath, 'resources'))).toBe(false)
-    expect(records()[4]).toMatchObject({ event: 'adapter_selected', adapter: 'fake' })
+    expect(records()[5]).toMatchObject({ event: 'adapter_selected', adapter: 'fake' })
   })
 
   it('opens one window when Electron is ready and serves the port over it', async () => {
@@ -191,11 +199,13 @@ describe('what a launch does', () => {
     expect(harness.ipcHandlers.has(COMMAND_REQUEST_CHANNEL)).toBe(true)
     expect(harness.ipcHandlers.has(QUOTA_REQUEST_CHANNEL)).toBe(true)
     expect(harness.ipcHandlers.has(NEEDS_YOU_REQUEST_CHANNEL)).toBe(true)
+    expect(harness.ipcHandlers.has(SCHEDULE_REQUEST_CHANNEL)).toBe(true)
     expect(events()).toEqual([
       'app_starting',
       'cache_retention',
       'quota_service_selected',
       'workflow_run_service_selected',
+      'schedule_service_selected',
       'adapter_selected',
       'workspace_service_selected',
       'command_service_selected',

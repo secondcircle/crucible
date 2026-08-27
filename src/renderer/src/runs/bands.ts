@@ -13,8 +13,11 @@ export function bandOf(run: RunRecord): Band {
   if (run.dismissedAt !== undefined) return 'done'
   if (run.status === 'complete' || run.status === 'cancelled') return 'done'
   // A failed run is the one most likely to need a human, and a paused one is
-  // stopped until somebody moves it.
-  if (run.status === 'failed' || run.status === 'paused') return 'needsYou'
+  // stopped until somebody moves it. An interrupted run is exactly as loud as
+  // a failed one: a deliberate act is the only thing that moves it either.
+  if (run.status === 'failed' || run.status === 'paused' || run.status === 'interrupted') {
+    return 'needsYou'
+  }
   return run.waiting === true ? 'needsYou' : 'running'
 }
 

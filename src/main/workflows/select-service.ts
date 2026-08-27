@@ -12,15 +12,10 @@ import type { MainWorkflowRunService } from '../../shared/workflows/service'
 import type { CacheRecorder } from '../cache/ledger'
 import type { Flavor } from '../agent/select-adapter'
 import type { LogSink } from '../log/sink'
-import {
-  readShippedStandingPrompt,
-  shippedSkillsPath,
-  shippedWorkflowLibPath,
-  shippedWorkflowsPath
-} from '../shipped'
+import { readShippedStandingPrompt, shippedSkillsPath, shippedWorkflowLibPath } from '../shipped'
 import { createSkillService, userSkillsPath } from '../skills/service'
 import { createWorkflowEngine } from './engine'
-import { createWorkflowLoader } from './loader'
+import { createWorkflowLoader, type WorkflowLoader } from './loader'
 import { createLiveWorkflowRunService } from './service'
 import { createSdkNodeSessionFactory } from './sdk-node-session'
 import { createRunStore } from './store'
@@ -30,12 +25,35 @@ export function userWorkflowsPath(home = homedir()): string {
   return join(home, '.crucible', 'workflows')
 }
 
+// One loader shape for the launch: the engine resolves the workflow a run
+// executes through it, and the scheduler reads the schedules a repo declares
+// through it. Its module cache is off, so both see an edited file at once.
+export function shippedWorkflowLoader(appPath: string, log: LogSink): WorkflowLoader {
+  return createWorkflowLoader({
+    roots: { user: userWorkflowsPath() },
+    authoringModule: shippedWorkflowLibPath(appPath),
+    onUnloadable: (path, cause) => {
+      log.append({
+        source: 'main',
+        event: 'workflow_file_unloadable',
+        path,
+        message: cause instanceof Error ? cause.message : String(cause)
+      })
+    }
+  })
+}
+
 export interface WorkflowRunWiring {
   readonly appPath: string
   /** Crucible's own state directory; run records live under it. */
   readonly stateDir: string
   /** How a run speaks: a message to its orchestrator session's agent. */
   readonly deliver: (sessionId: SessionId, text: string) => void
+  // Whether a session the shell store holds still exists, asked when a run
+  // resumes. Not optional: the engine's own default presumes every recorded
+  // session is alive, which in a real launch would leave a resumed orphan run
+  // talking to nobody and never parking, so main must answer for real.
+  readonly sessionExists: (sessionId: SessionId) => boolean
   /** The cache ledger every observed miss is appended to, sessions and runs alike. */
   readonly cache?: CacheRecorder
   /**
@@ -116,21 +134,7 @@ export function selectWorkflowRunService(
     })
   }
 
-  const loader = createWorkflowLoader({
-    roots: {
-      builtIn: shippedWorkflowsPath(wiring.appPath),
-      user: userWorkflowsPath()
-    },
-    authoringModule: shippedWorkflowLibPath(wiring.appPath),
-    onUnloadable: (path, cause) => {
-      log.append({
-        source: 'main',
-        event: 'workflow_file_unloadable',
-        path,
-        message: cause instanceof Error ? cause.message : String(cause)
-      })
-    }
-  })
+  const loader = shippedWorkflowLoader(wiring.appPath, log)
 
   const store = createRunStore(join(wiring.stateDir, 'workflow-runs'), (path, cause) => {
     log.append({
@@ -150,6 +154,9 @@ export function selectWorkflowRunService(
       agentDir: join(wiring.stateDir, 'workflow-agent')
     }),
     deliver: wiring.deliver,
+    // An orphaned resumed run only parks for adoption if the engine is told
+    // the session is gone; the shell store is the authority.
+    sessionExists: wiring.sessionExists,
     ...(wiring.cache === undefined ? {} : { cache: wiring.cache }),
     ...(wiring.quota === undefined ? {} : { chooseModel: chooserFrom(wiring.quota) }),
     // Built only here, in the sdk branch, so a fake-flavor launch reads no

@@ -15,6 +15,21 @@
   flex: 1;
 }
 
+/* The instance badge: which state directory this dev window runs against.
+   Amber and monospace because it is a fact about the launch, not a control —
+   nothing here is clickable. Absent entirely in the installed app. */
+.top .instance {
+  font: 10.5px var(--mono);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--warn);
+  background: var(--warn-bg);
+  border: 1px solid var(--warn-line);
+  border-radius: 5px;
+  padding: 1px 8px;
+  white-space: nowrap;
+}
+
 /* The pill is quiet accent, not alarm: an update waits, nothing is wrong. */
 .top .update {
   background: none;
@@ -50,6 +65,11 @@
 
 .top .tchip .g {
   color: var(--accent);
+}
+
+/* Teal: the run color everywhere, and the schedule chip is a run surface. */
+.top .tchip.runs .g {
+  color: var(--run);
 }
 
 .top .tchip b {

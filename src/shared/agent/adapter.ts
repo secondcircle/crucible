@@ -306,11 +306,18 @@ export interface ConversationAdapter {
 
   // A rejection means the turn never ran, and the caller then owes it a
   // terminal event.
+  //
+  // `context` is text the model must see with this message and no surface may
+  // ever show: it is kept out of the transcript this adapter reads back and
+  // out of everything derived from it, the titler included. How that is done
+  // is the adapter's business; the contract is model-visible,
+  // surface-invisible.
   prompt(
     sessionId: SessionId,
     turnId: TurnId,
     text: string,
-    images?: readonly ImageAttachment[]
+    images?: readonly ImageAttachment[],
+    context?: string
   ): Promise<void>
 
   // `'idle'` closes the same race `steer` does, and the caller then begins a
