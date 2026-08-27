@@ -53,7 +53,7 @@ export interface QueueState {
 
 export type TabId = string
 
-export type ExhibitKind = 'html' | 'markdown'
+export type ExhibitKind = 'html' | 'markdown' | 'url'
 
 export interface PanelTab {
   readonly id: TabId
@@ -61,6 +61,11 @@ export interface PanelTab {
   readonly kind: ExhibitKind
   /** ISO of the latest show; a change means the body should be re-fetched. */
   readonly shownAt: string
+  /**
+   * What the exhibit view loads: a `file:` URL for an html tab, the address
+   * itself for a url tab. Absent for markdown, whose body rides `exhibit`.
+   */
+  readonly src?: string
 }
 
 export interface PanelState {

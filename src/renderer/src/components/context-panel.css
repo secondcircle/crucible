@@ -135,8 +135,10 @@
   background: var(--bg);
 }
 
-/* Full-bleed: an HTML exhibit gets the whole area and draws its own page. */
+/* Full-bleed: an HTML exhibit gets the whole area and draws its own page.
+   display, because a <webview> is inline-flex until told otherwise. */
 .exhibit .frame {
+  display: flex;
   width: 100%;
   height: 100%;
   border: none;

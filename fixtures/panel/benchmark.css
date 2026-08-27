@@ -1,0 +1,15 @@
+/* Loaded from beside benchmark.html. If this file is reached, the badge is
+   green; unreached, the page's own style leaves it dim. That difference is
+   the whole point of the file. */
+.badge {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: #7dc98f;
+  border: 1px solid #7dc98f;
+  border-radius: 999px;
+  padding: 3px 10px;
+}
+.badge::after {
+  content: ' · loaded';
+}

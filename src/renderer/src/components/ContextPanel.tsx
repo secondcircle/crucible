@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState } from 'react'
-import { exhibitUrl } from '../../../shared/agent/exhibit-url'
 import type { AgentPort, PanelState, SessionId, TabId } from '../../../shared/agent/port'
 import { Markdown } from './Markdown'
 import './context-panel.css'
@@ -15,6 +14,11 @@ const MIN_CHAT = 320
 
 /** What a session with tabs shows before the user has resized anything. */
 const DEFAULT_PANEL_WIDTH = '44%'
+
+/** As much of Electron's WebviewTag as the panel calls. */
+interface ExhibitWebview extends HTMLElement {
+  reload(): void
+}
 
 export function ContextPanel({
   panel,
@@ -37,6 +41,8 @@ export function ContextPanel({
   // mid-drag takes its listeners with it.
   const endDrag = useRef<(() => void) | undefined>(undefined)
   const divider = useRef<HTMLDivElement>(null)
+  // The mounted exhibit guest, for the reload button alone.
+  const viewRef = useRef<ExhibitWebview | null>(null)
 
   useEffect(() => () => endDrag.current?.(), [])
 
@@ -112,7 +118,9 @@ export function ContextPanel({
                 void port.activateTab(sessionId, tab.id)
               }}
             >
-              <span className="kind">{tab.kind === 'html' ? 'html' : 'md'}</span>
+              <span className="kind">
+                {tab.kind === 'html' ? 'html' : tab.kind === 'url' ? 'web' : 'md'}
+              </span>
               <span className="ttitle">{tab.title}</span>
               <button
                 className="x"
@@ -128,13 +136,28 @@ export function ContextPanel({
             </div>
           ))}
           <div className="strip-tools">
+            {active !== undefined && active.kind !== 'markdown' ? (
+              // For pages that do not reload themselves; a hot-reloading dev
+              // server never needs it.
+              <button
+                className="stool"
+                aria-label="Reload exhibit"
+                onClick={() => {
+                  const shown = viewRef.current
+                  // Absent under jsdom, where <webview> is an unknown element.
+                  if (shown !== null && typeof shown.reload === 'function') shown.reload()
+                }}
+              >
+                ⟳
+              </button>
+            ) : null}
             <button className="stool" aria-label="Collapse context panel" onClick={onCollapse}>
               ⇥
             </button>
           </div>
         </div>
 
-        <Exhibit sessionId={sessionId} tab={active} port={port} />
+        <Exhibit sessionId={sessionId} tab={active} port={port} viewRef={viewRef} />
       </aside>
     </>
   )
@@ -155,33 +178,36 @@ export function PanelEdge({
   )
 }
 
-// The renderer knows a tab by its id and by nothing else: no exhibit's path
-// reaches this side, whichever way its body arrives.
 function Exhibit({
   sessionId,
   tab,
-  port
+  port,
+  viewRef
 }: {
   readonly sessionId: SessionId
   readonly tab: PanelState['tabs'][number] | undefined
   readonly port: AgentPort
+  readonly viewRef: React.RefObject<ExhibitWebview | null>
 }): React.JSX.Element {
   return (
     <div className="exhibit">
-      {tab === undefined ? null : tab.kind === 'html' ? (
-        // `allow-scripts` alone: the exhibit's own response header is its
-        // policy, and no same-origin means no reach into the app.
+      {tab === undefined ? null : tab.kind === 'markdown' ? (
+        <MarkdownExhibit sessionId={sessionId} tab={tab} port={port} />
+      ) : tab.src === undefined ? null : (
+        // A guest webContents of its own: full browser fidelity — scripts run,
+        // the network loads, links navigate in place — and no preload, no
+        // node, no reach into the app.
 
-        // `shownAt` is in the key so a re-show remounts and refetches.
-        <iframe
+        // `shownAt` is in the key so a re-show remounts and reloads.
+        <webview
           key={`${sessionId}:${tab.id}:${tab.shownAt}`}
           className="frame"
-          sandbox="allow-scripts"
           title={tab.title}
-          src={exhibitUrl(sessionId, tab.id)}
+          src={tab.src}
+          ref={(mounted) => {
+            viewRef.current = mounted as ExhibitWebview | null
+          }}
         />
-      ) : (
-        <MarkdownExhibit sessionId={sessionId} tab={tab} port={port} />
       )}
     </div>
   )

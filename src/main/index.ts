@@ -19,7 +19,6 @@ import { createFileSink } from './log/sink'
 import { type NeedsYouChannel, serveNeedsYouChannel } from './needs-you/channel'
 import { selectNeedsYouService } from './needs-you/select-service'
 import type { LiveNeedsYouService } from './needs-you/service'
-import { registerExhibitScheme, serveExhibitScheme } from './panel/exhibit-scheme'
 import { type QuotaChannel, serveQuotaChannel } from './quota/channel'
 import { useQuotaCacheDir } from './quota/paths'
 import { selectQuotaService } from './quota/select-service'
@@ -34,10 +33,6 @@ import { serveWorkspaceChannel, type WorkspaceChannel } from './workspace/channe
 import { selectWorkspaceService } from './workspace/select-service'
 import { serveWorkflowRunChannel, type WorkflowRunChannel } from './workflows/channel'
 import { selectWorkflowRunService } from './workflows/select-service'
-
-// Before anything else, because a scheme's privileges are only settable while
-// the app is still starting.
-registerExhibitScheme()
 
 if (app.isPackaged) {
   // Dock-launched apps inherit the bare GUI PATH, and the agent's tools need
@@ -324,11 +319,6 @@ function openWindow(reason?: 'activate'): void {
 
 void app.whenReady().then(() => {
   log.append({ source: 'main', event: 'app_ready' })
-
-  // The handler answers out of the same panel model the tools write to and the
-  // same run service the view reads, so a file is servable exactly while a tab
-  // shows it or a run's record names it.
-  serveExhibitScheme(panel, workflowRuns)
 
   openWindow()
 

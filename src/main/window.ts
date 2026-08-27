@@ -20,8 +20,22 @@ export function createMainWindow(): BrowserWindow {
       preload: join(__dirname, '../preload/index.js'),
       sandbox: true,
       contextIsolation: true,
-      nodeIntegration: false
+      nodeIntegration: false,
+      // Exhibits render in <webview> guests: full browser fidelity, in a
+      // webContents of its own with no preload and no node, so a page can do
+      // everything a browser tab can and reach nothing of the app.
+      webviewTag: true
     }
+  })
+
+  // An exhibit guest browses freely — links navigate in place, like a browser
+  // — but a window it tries to open (target=_blank, window.open) goes to the
+  // OS browser: the app spawns no windows it does not own.
+  window.webContents.on('did-attach-webview', (_event, guest) => {
+    guest.setWindowOpenHandler(({ url }) => {
+      openExternally(url)
+      return { action: 'deny' }
+    })
   })
 
   window.on('ready-to-show', () => window.show())

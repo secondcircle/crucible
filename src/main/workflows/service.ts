@@ -223,8 +223,6 @@ export function createLiveWorkflowRunService({
       for (const listener of [...listeners]) listener({ type: 'toggle-overview' })
     },
 
-    artifactFile: fileOf,
-
     dispose(): void {
       if (broadcastTimer !== undefined) clearTimeout(broadcastTimer)
       listeners.clear()

@@ -3,6 +3,9 @@
   <head>
     <meta charset="utf-8" />
     <title>Benchmark</title>
+    <!-- A sibling file, on purpose: the badge below turns green only when the
+         exhibit view loads assets beside the page, the way a browser would. -->
+    <link rel="stylesheet" href="benchmark.css" />
     <style>
       body {
         margin: 0;
@@ -56,11 +59,12 @@
     </div>
     <div class="bars" id="bars"></div>
     <div class="lbl" id="proof">…</div>
+    <div class="badge" id="sibling">sibling stylesheet</div>
 
     <script>
-      // Computed here, in the sandboxed frame: if these numbers appear, the
-      // exhibit's own script ran. It has no Node, no IPC and no way to reach
-      // the app around it.
+      // Computed here, in the exhibit's own guest: if these numbers appear,
+      // the page's script ran. It has no Node, no IPC and no way to reach the
+      // app around it.
       const samples = [3.1, 4.4, 3.9, 6.7, 9.2, 7.4]
       const sorted = [...samples].sort((left, right) => left - right)
       const p95 = sorted[Math.ceil(sorted.length * 0.95) - 1]

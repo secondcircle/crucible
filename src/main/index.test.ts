@@ -7,7 +7,6 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { REQUEST_CHANNEL } from '../shared/agent/channels'
-import { EXHIBIT_SCHEME } from '../shared/agent/exhibit-url'
 import { COMMAND_REQUEST_CHANNEL } from '../shared/commands/channels'
 import { NEEDS_YOU_REQUEST_CHANNEL } from '../shared/needs-you/channels'
 import { QUOTA_REQUEST_CHANNEL } from '../shared/quota/channels'
@@ -208,18 +207,12 @@ describe('what a launch does', () => {
     ])
   })
 
-  it('claims the exhibit scheme before ready, and serves it on the window\u2019s session', async () => {
-    // Privileges are only settable while the app is still starting, and a
-    // sandboxed frame will not load the scheme without them.
-    expect(harness.privileged).toEqual([
-      { scheme: EXHIBIT_SCHEME, privileges: { standard: true, secure: true } }
-    ])
-    expect(harness.schemeHandlers.size).toBe(0)
-
+  it('registers no scheme of its own: exhibits load in webview guests', async () => {
     harness.releaseReady()
     await Promise.resolve()
 
-    expect([...harness.schemeHandlers]).toEqual([EXHIBIT_SCHEME])
+    expect(harness.privileged).toEqual([])
+    expect(harness.schemeHandlers.size).toBe(0)
   })
 
   it('forwards what the renderer says into the same log', async () => {

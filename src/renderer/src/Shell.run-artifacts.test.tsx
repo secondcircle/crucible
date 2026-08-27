@@ -434,12 +434,13 @@ describe('the artifact reader', () => {
     })
 
     const frame = screen.getByTitle('report.html')
-    expect(frame.tagName).toBe('IFRAME')
+    expect(frame.tagName).toBe('WEBVIEW')
     expect(frame).toHaveAttribute(
       'src',
-      `exhibit://run/en42/${encodeURIComponent(REPORT)}`
+      `file://${REPORT.split('/').map(encodeURIComponent).join('/')}`
     )
-    expect(frame.getAttribute('sandbox')).toBe('allow-scripts')
+    // Full fidelity is the guest's own: no sandbox attribute narrows it.
+    expect(frame.getAttribute('sandbox')).toBeNull()
   })
 
   it('shows a read failure in the body and leaves the rail row alone', async () => {

@@ -27,13 +27,13 @@ export const PANEL_TOOLS: readonly PanelToolDefinition[] = [
     name: 'panel_show',
     label: 'Show in Context Panel',
     description:
-      "Show an HTML or markdown file as a tab in the user's context panel. Re-showing the same file replaces its tab and refreshes the view.\n\n" +
+      "Show an HTML or markdown file, or a web address (http or https, localhost included), as a tab in the user's context panel. Pages render at full browser fidelity: scripts run, network loads, links navigate. Re-showing the same file or address replaces its tab and refreshes the view.\n\n" +
       'Reach for this tool whenever a document is pertinent to what the user is doing. Naming a path and waiting to be asked to open it leaves them with nothing to read. Show the file, then say plainly that it is in the panel.\n\n' +
       "The context panel is the user's primary display; they may not notice messages in the chat. Content shown there is what the user relies on to follow the work.\n\n" +
       "The panel's value comes from curation, not accumulation: it should reflect only what is relevant to the current conversation. Stale tabs actively obscure what matters now — close them once they have served their purpose (e.g. a plan that has been accepted).\n\n" +
       'Ephemeral artifacts (plans, diagrams, reports) belong in a temp directory, not the project tree.',
     parameters: [
-      { name: 'path', description: 'Path to an .html or .md file to display' },
+      { name: 'path', description: 'Path to an .html or .md file, or an http(s) URL, to display' },
       { name: 'title', description: 'Short human-readable tab title' }
     ]
   },

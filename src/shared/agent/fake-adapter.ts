@@ -760,6 +760,13 @@ export function createFakeAdapter({
     // Fails with the model's unknown-id text when that tab is not open, which
     // is the scripted failure path.
     if (asked.includes('tidy the panel')) return [close('benchmark')]
+    // `show the web page http://…` exercises a url tab at zero cost; the
+    // address itself is whatever the driver typed, a dev server included.
+    // Keyed on the phrase, so a URL in an unrelated message triggers nothing.
+    if (asked.includes('web page') || asked.includes('website')) {
+      const address = /https?:\/\/\S+/i.exec(text)?.[0]
+      if (address !== undefined) return [show(address, 'Web page')]
+    }
     if (asked.includes('panel')) {
       return [
         show(exhibits.buildPlan, 'Build plan'),

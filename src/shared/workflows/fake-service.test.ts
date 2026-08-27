@@ -291,10 +291,9 @@ describe('the fake flavor\u2019s artifacts', () => {
     for (const artifact of written) {
       expect(files.written.has(artifact.path), artifact.path).toBe(true)
     }
-    // One of them is HTML, so the exhibit-run route is exercisable in dev.
+    // One of them is HTML, so the reader's webview route is exercisable in dev.
     const report = written.find((artifact) => artifact.path.endsWith('.html'))
     expect(report).toBeDefined()
-    expect(service.artifactFile('d3p8', report?.path ?? '')).toEqual({ path: report?.path })
 
     const view = await service.artifact('d3p8', `${files.dir('d3p8')}/spec.md`)
     expect(view.kind).toBe('markdown')
@@ -308,7 +307,6 @@ describe('the fake flavor\u2019s artifacts', () => {
     await expect(
       service.artifact('d3p8', `${files.dir('d3p8')}/../../secrets.md`)
     ).rejects.toThrow(/not one this run/)
-    expect(service.artifactFile('d3p8', '/etc/passwd')).toBeUndefined()
     service.dispose()
   })
 

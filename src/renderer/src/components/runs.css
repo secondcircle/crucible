@@ -828,7 +828,9 @@
   color: var(--faint);
 }
 
+/* display, because a <webview> is inline-flex until told otherwise. */
 .reader .frame {
+  display: flex;
   flex: 1;
   border: 0;
   width: 100%;

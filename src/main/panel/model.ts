@@ -1,5 +1,6 @@
 import { existsSync, readFileSync, statSync } from 'node:fs'
 import { basename, extname, isAbsolute, resolve } from 'node:path'
+import { pathToFileURL } from 'node:url'
 import type { PanelTools } from '../../shared/agent/panel-tools'
 import type {
   ExhibitKind,
@@ -52,13 +53,6 @@ export function memoryPanelPersistence(): PanelPersistence {
   }
 }
 
-/** A tab's file, as the exhibit scheme's handler needs it. */
-export interface ExhibitFile {
-  /** Absolute, as the tab holds it. */
-  readonly path: string
-  readonly kind: ExhibitKind
-}
-
 export interface PanelChange {
   readonly sessionId: SessionId
   /** Present when the change was a show: the tab shown or refreshed. */
@@ -76,9 +70,6 @@ export interface PanelModel extends PanelTools {
   closeTab(sessionId: SessionId, tabId: TabId): void
   /** The exhibit's body, read at call time. Throws when it cannot be read. */
   exhibit(sessionId: SessionId, tabId: TabId): string
-  // A file is servable because some session's tab shows it, and for no other
-  // reason.
-  exhibitFile(sessionId: SessionId, tabId: TabId): ExhibitFile | undefined
   /** Once per user instruction; drives "shown N turns ago" ages. */
   bumpTurn(sessionId: SessionId): void
   /** A session reset: a fresh conversation never inherits a ghost panel. */
@@ -103,7 +94,7 @@ interface Panel {
   turn: number
 }
 
-const SUPPORTED = '.html, .htm, .md, .markdown, .txt'
+const SUPPORTED = '.html, .htm, .md, .markdown, .txt, or an http(s) URL'
 
 export function createPanelModel({
   persistence,
@@ -154,7 +145,8 @@ export function createPanelModel({
       turn: loaded?.turn ?? 0
     }
     const held = panel.tabs.length
-    panel.tabs = panel.tabs.filter((tab) => onDisk(tab.path))
+    // A url tab has no file to be gone; it is kept and loads live.
+    panel.tabs = panel.tabs.filter((tab) => tab.kind === 'url' || onDisk(tab.path))
     reseat(panel)
     panels.set(sessionId, panel)
     // Written back at once when something was dropped, so the store stops
@@ -198,9 +190,11 @@ export function createPanelModel({
 
   return {
     show(sessionId: SessionId, workspacePath: string, path: string, title: string): string {
-      const resolved = isAbsolute(path) ? path : resolve(workspacePath, path)
-      if (!onDisk(resolved)) throw new Error(`File not found: ${resolved}`)
-      const kind = detectKind(resolved)
+      // A web address is a tab too: it loads live, straight off its server.
+      const web = isWebAddress(path)
+      const resolved = web ? path : isAbsolute(path) ? path : resolve(workspacePath, path)
+      if (!web && !onDisk(resolved)) throw new Error(`File not found: ${resolved}`)
+      const kind = web ? 'url' : detectKind(resolved)
 
       const panel = panelOf(sessionId)
       // Keyed by path: re-showing a file refreshes its tab in place and mints
@@ -263,7 +257,14 @@ export function createPanelModel({
           id: tab.id,
           title: tab.title,
           kind: tab.kind,
-          shownAt: tab.shownAt
+          shownAt: tab.shownAt,
+          // What the view loads. A markdown body rides `exhibit` instead, so
+          // no path leaves for the renderer where none is needed.
+          ...(tab.kind === 'html'
+            ? { src: pathToFileURL(tab.path).href }
+            : tab.kind === 'url'
+              ? { src: tab.path }
+              : {})
         })),
         activeTabId
       }
@@ -295,17 +296,15 @@ export function createPanelModel({
     exhibit(sessionId: SessionId, tabId: TabId): string {
       const tab = findTab(sessionId, tabId)
       if (tab === undefined) throw new Error('That tab is no longer in the context panel.')
+      if (tab.kind === 'url') {
+        throw new Error('That tab shows a web address; it has no file to read.')
+      }
       try {
         return readFileSync(tab.path, 'utf8')
       } catch {
         // The tab stays open whatever this says: curation is the agent's.
         throw new Error(`That exhibit could not be read: ${basename(tab.path)}`)
       }
-    },
-
-    exhibitFile(sessionId: SessionId, tabId: TabId): ExhibitFile | undefined {
-      const tab = findTab(sessionId, tabId)
-      return tab === undefined ? undefined : { path: tab.path, kind: tab.kind }
     },
 
     bumpTurn(sessionId: SessionId): void {
@@ -355,12 +354,28 @@ function detectKind(path: string): ExhibitKind {
   throw new Error(`Unsupported file type "${extension}". Supported: ${SUPPORTED}`)
 }
 
+function isWebAddress(path: string): boolean {
+  return /^https?:\/\//i.test(path)
+}
+
+// For a URL, its host; the last path piece when one exists. So
+// `http://localhost:5173/` mints `localhost` and stays readable in a result.
+function nameOf(path: string): string {
+  if (!isWebAddress(path)) return basename(path).replace(/\.[^.]+$/, '')
+  try {
+    const url = new URL(path)
+    const piece = url.pathname.split('/').filter((part) => part !== '').at(-1)
+    return piece ?? url.hostname
+  } catch {
+    return 'page'
+  }
+}
+
 // The basename without its extension, slugged. Collisions take -2, -3, … so a
 // tab id stays a name a person can read back in a tool result.
 function mintId(panel: Panel, path: string): TabId {
   const base =
-    basename(path)
-      .replace(/\.[^.]+$/, '')
+    nameOf(path)
       .toLowerCase()
       .replace(/[^a-z0-9]+/g, '-')
       .replace(/^-+|-+$/g, '') || 'tab'

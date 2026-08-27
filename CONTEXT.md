@@ -134,14 +134,15 @@ _Avoid_: alignment doc, spec, plan.
 
 **Context panel**:
 The agent-curated display split to the right of the chat area, where a
-session's agent shows rendered exhibits — HTML or markdown files — in tabs.
+session's agent shows rendered exhibits — HTML or markdown files, or web
+addresses — in tabs. HTML and web exhibits render at full browser fidelity.
 Adopted verbatim from the legacy system, tools and all.
 _Avoid_: preview pane, artifact viewer, right sidebar.
 
 **Tab**:
-One entry in the context panel: a title over one exhibit file, keyed by path
-so re-showing the same file refreshes it in place. Per-session, like the
-panel itself.
+One entry in the context panel: a title over one exhibit — a file or a web
+address — keyed by path or URL so re-showing the same one refreshes it in
+place. Per-session, like the panel itself.
 _Avoid_: pane, exhibit slot, window.
 
 **Branch board**:

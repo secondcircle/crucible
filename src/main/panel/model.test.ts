@@ -136,8 +136,15 @@ describe('panel_show', () => {
 
   it('refuses an extension it cannot render, and lists what it can', () => {
     expect(() => panel.show(SESSION, workspace, file('notes.pdf'), 'notes')).toThrow(
-      'Unsupported file type ".pdf". Supported: .html, .htm, .md, .markdown, .txt'
+      'Unsupported file type ".pdf". Supported: .html, .htm, .md, .markdown, .txt, or an http(s) URL'
     )
+  })
+
+  it('hands an html tab the file URL its view loads', () => {
+    const path = file('benchmark.html')
+    panel.show(SESSION, workspace, path, 'benchmark')
+
+    expect(panel.state(SESSION)?.tabs[0].src).toBe(`file://${path}`)
   })
 
   it('carries the whole tab list and the curation nudge once a second tab is open', () => {
@@ -248,6 +255,60 @@ describe('the user\u2019s own actions', () => {
 
     expect(changes).toEqual([])
     expect(panel.state(SESSION)?.tabs).toHaveLength(1)
+  })
+})
+
+describe('a web address', () => {
+  it('is a tab too: kind url, the address as its src, its id off the host', () => {
+    const result = panel.show(SESSION, workspace, 'http://localhost:5173/', 'dev server')
+
+    expect(result).toBe('Shown in context panel: "dev server"')
+    expect(panel.state(SESSION)).toEqual({
+      tabs: [
+        {
+          id: 'localhost',
+          title: 'dev server',
+          kind: 'url',
+          shownAt: expect.any(String),
+          src: 'http://localhost:5173/'
+        }
+      ],
+      activeTabId: 'localhost'
+    })
+  })
+
+  it('mints a readable id off the last path piece when one exists', () => {
+    panel.show(SESSION, workspace, 'https://example.com/docs/guide', 'the guide')
+
+    expect(panel.state(SESSION)?.tabs[0].id).toBe('guide')
+  })
+
+  it('refreshes in place when the same address is shown again', () => {
+    panel.show(SESSION, workspace, 'http://localhost:5173/', 'dev server')
+    panel.show(SESSION, workspace, 'http://localhost:5173/', 'the dev server')
+
+    expect(panel.state(SESSION)?.tabs).toHaveLength(1)
+    expect(panel.state(SESSION)?.tabs[0].title).toBe('the dev server')
+  })
+
+  it('has no file to read, and the exhibit body says so', () => {
+    panel.show(SESSION, workspace, 'http://localhost:5173/', 'dev server')
+
+    expect(() => panel.exhibit(SESSION, 'localhost')).toThrow(
+      'That tab shows a web address; it has no file to read.'
+    )
+  })
+
+  it('survives a restore, which checks no disk for it', () => {
+    panel.show(SESSION, workspace, 'http://localhost:5173/', 'dev server')
+
+    build()
+
+    expect(panel.state(SESSION)?.tabs[0]).toMatchObject({
+      id: 'localhost',
+      kind: 'url',
+      src: 'http://localhost:5173/'
+    })
   })
 })
 

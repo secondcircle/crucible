@@ -26,11 +26,11 @@ describe('the three context panel tools', () => {
       name: 'panel_show',
       label: 'Show in Context Panel',
       description: [
-        "Show an HTML or markdown file as a tab in the user's context panel. Re-showing the same file replaces its tab and refreshes the view.",
+        "Show an HTML or markdown file, or a web address (http or https, localhost included), as a tab in the user's context panel. Pages render at full browser fidelity: scripts run, network loads, links navigate. Re-showing the same file or address replaces its tab and refreshes the view.",
         ...CURATION
       ].join('\n\n'),
       parameters: [
-        { name: 'path', description: 'Path to an .html or .md file to display' },
+        { name: 'path', description: 'Path to an .html or .md file, or an http(s) URL, to display' },
         { name: 'title', description: 'Short human-readable tab title' }
       ]
     })

@@ -4,7 +4,6 @@
 // here reads a file or knows a path.
 import { act, fireEvent, render, screen } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
-import { exhibitUrl } from '../../shared/agent/exhibit-url'
 import type { PanelTab, ShellSnapshot } from '../../shared/agent/port'
 import { Shell } from './Shell'
 import { createScriptedPort, oneSession, type ScriptedPort } from './testing/scripted-port'
@@ -20,7 +19,15 @@ const BENCHMARK: PanelTab = {
   id: 'benchmark',
   title: 'benchmark',
   kind: 'html',
-  shownAt: SHOWN
+  shownAt: SHOWN,
+  src: 'file:///repos/crucible/fixtures/panel/benchmark.html'
+}
+const DEV_SERVER: PanelTab = {
+  id: 'localhost',
+  title: 'dev server',
+  kind: 'url',
+  shownAt: SHOWN,
+  src: 'http://localhost:5173/'
 }
 
 function withTabs(tabs: readonly PanelTab[], activeTabId: string): Partial<ShellSnapshot> {
@@ -47,7 +54,7 @@ const region = (): HTMLElement | null => screen.queryByLabelText('Context panel'
 const divider = (): HTMLElement | null => screen.queryByLabelText('Resize context panel')
 const edge = (): HTMLElement | null => screen.queryByRole('button', { name: 'Open context panel' })
 const tabs = (): HTMLElement[] => screen.queryAllByRole('tab')
-const frame = (): HTMLIFrameElement | null => document.querySelector('.exhibit iframe')
+const frame = (): HTMLElement | null => document.querySelector('.exhibit webview')
 
 const ops = (port: ScriptedPort): string[] => port.calls.map((call) => call.op)
 
@@ -262,16 +269,32 @@ describe('the exhibit', () => {
     expect(frame()).toBeNull()
   })
 
-  it('loads an HTML exhibit from its own origin, in a frame that may run scripts and nothing else', async () => {
+  it('loads an HTML exhibit in a webview guest, from the file itself', async () => {
     const port = await shellWith(withTabs([BENCHMARK], 'benchmark'))
 
     const shown = frame()
     expect(shown).not.toBeNull()
-    expect(shown?.getAttribute('sandbox')).toBe('allow-scripts')
-    expect(shown?.getAttribute('src')).toBe(exhibitUrl('s1', 'benchmark'))
-    expect(shown?.getAttribute('srcdoc')).toBeNull()
-    // Nothing of an HTML exhibit crosses the port: the frame fetches it.
+    expect(shown?.getAttribute('src')).toBe(BENCHMARK.src)
+    // Full fidelity is the guest's own: no sandbox attribute narrows it.
+    expect(shown?.getAttribute('sandbox')).toBeNull()
+    // Nothing of an HTML exhibit crosses the port: the guest loads it.
     expect(ops(port)).not.toContain('exhibit')
+  })
+
+  it('loads a web address live, straight off its server', async () => {
+    const port = await shellWith(withTabs([DEV_SERVER], 'localhost'))
+
+    const shown = frame()
+    expect(shown).not.toBeNull()
+    expect(shown?.getAttribute('src')).toBe('http://localhost:5173/')
+    expect(screen.getByLabelText('Reload exhibit')).toBeInTheDocument()
+    expect(ops(port)).not.toContain('exhibit')
+  })
+
+  it('offers no reload for a markdown exhibit, which has nothing to reload', async () => {
+    await shellWith(withTabs([PLAN], 'plan'))
+
+    expect(screen.queryByLabelText('Reload exhibit')).toBeNull()
   })
 
   it('replaces the frame when a re-show refreshes an HTML tab', async () => {
@@ -284,10 +307,10 @@ describe('the exhibit', () => {
     await settled()
 
     // A new element, which is what "the frame reloads" looks like from here:
-    // the load itself is the browser's, and `no-store` makes it fetch again.
+    // the load itself is the guest's, reading what is on disk now.
     expect(frame()).not.toBeNull()
     expect(frame()).not.toBe(first)
-    expect(frame()?.getAttribute('src')).toBe(exhibitUrl('s1', 'benchmark'))
+    expect(frame()?.getAttribute('src')).toBe(BENCHMARK.src)
     expect(ops(port)).not.toContain('exhibit')
   })
 

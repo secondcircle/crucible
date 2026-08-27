@@ -770,8 +770,6 @@ export function createFakeWorkflowRunService({
       for (const listener of [...listeners]) listener({ type: 'toggle-overview' })
     },
 
-    artifactFile: fileOf,
-
     dispose(): void {
       for (const timer of timers.values()) clearTimeout(timer)
       timers.clear()

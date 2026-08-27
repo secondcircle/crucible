@@ -4,13 +4,13 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <!--
-      `frame-src exhibit:` is what admits the context panel's frame: an HTML
-      exhibit loads from its own origin under its own policy, served by main,
-      so this document's script-src is 'self' and nothing else.
+      Exhibits render in <webview> guests, which are webContents of their own:
+      this document's CSP does not reach them, and theirs does not loosen it,
+      so script-src here stays 'self' and nothing else.
     -->
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; frame-src exhibit:"
+      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:"
     />
     <title>Crucible</title>
     <!--

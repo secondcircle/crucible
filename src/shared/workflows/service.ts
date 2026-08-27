@@ -72,8 +72,5 @@ export interface MainWorkflowRunService extends WorkflowRunService {
   readonly tools: RunTools
   /** Emits `toggle-overview` to every listener; main calls it on ⌘R. */
   toggleOverview(): void
-  // The gate's question, as the exhibit scheme's handler needs it: the on-disk
-  // file behind (runId, path), or nothing when the record does not name it.
-  artifactFile(runId: WorkflowRunId, path: string): { readonly path: string } | undefined
   dispose(): void
 }

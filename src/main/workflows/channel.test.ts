@@ -15,7 +15,6 @@ function serviceRecorder(): MainWorkflowRunService {
     nodeTranscript: vi.fn(async () => []),
     artifact: vi.fn(async () => ({ kind: 'markdown' as const, body: '# spec', bytes: 6 })),
     revealArtifact: vi.fn(async () => {}),
-    artifactFile: vi.fn(() => undefined),
     tools: {
       workflows: async () => '',
       start: async () => '',

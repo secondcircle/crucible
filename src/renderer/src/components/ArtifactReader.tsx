@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState } from 'react'
-import { runExhibitUrl } from '../../../shared/agent/exhibit-url'
 import { artifactKind } from '../../../shared/workflows/artifacts'
 import type { ArtifactView } from '../../../shared/workflows/service'
 import { relativeTime } from '../labels'
@@ -12,8 +11,8 @@ import './runs.css'
 const COPIED_MS = 1400
 
 // Read-only, like the rest of the run view: the two header actions are about
-// the file, never about the run. HTML renders under an origin of its own and
-// never enters this document as a string.
+// the file, never about the run. HTML renders in a webview guest at full
+// browser fidelity and never enters this document as a string.
 export function ArtifactReader({
   runId,
   row,
@@ -116,16 +115,15 @@ function Body({
     )
   }
   // The frame mounts before anything is read, because the document it loads
-  // never crosses into this origin: main serves it, keyed so a re-open
-  // refetches.
+  // never crosses into this origin: the guest loads the file itself, keyed so
+  // a re-open refetches.
   if (artifactKind(row.path) === 'html') {
     return (
-      <iframe
+      <webview
         key={`${runId}:${row.path}:${row.writtenAt ?? ''}`}
         className="frame"
-        sandbox="allow-scripts"
         title={row.name}
-        src={runExhibitUrl(runId, row.path)}
+        src={fileUrl(row.path)}
       />
     )
   }
@@ -181,4 +179,10 @@ function headline(row: RailRow, view: ArtifactView | undefined): React.JSX.Eleme
 
 function notWritten(row: RailRow): string {
   return `not written yet · ${row.producer} ${row.producerStatus}`
+}
+
+// A `file:` URL for the row's absolute path, built by hand because the
+// renderer has no node url module. Segments are encoded so spaces survive.
+function fileUrl(path: string): string {
+  return `file://${path.split('/').map(encodeURIComponent).join('/')}`
 }
