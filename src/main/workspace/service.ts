@@ -10,9 +10,16 @@ import type {
   WorkspaceService,
   WorktreeCreation
 } from '../../shared/workspace/service'
+import type {
+  ConnectOutcome,
+  ResearchOutcome,
+  ResearchStatus
+} from '../../shared/workspace/research'
 import { collectBoard, type CommandOutcome, type CommandRunner } from './collect-board'
 import { collectIssues } from './collect-issues'
 import { listFiles } from './files'
+import { createResearchOperations } from './research'
+import { createResearchProcesses, type ResearchProcesses } from './research-processes'
 import { createWorktree, isGitWorkspace } from './worktree'
 
 // The workspace service's real flavor: the one module that reads the user's
@@ -60,11 +67,15 @@ export function spawnRunner(): CommandRunner {
 
 export function createWorkspaceService({
   openExternal,
-  runner = spawnRunner()
+  runner = spawnRunner(),
+  research = createResearchProcesses()
 }: {
   /** The OS browser, which only main may reach. */
   readonly openExternal: (url: string) => void
   readonly runner?: CommandRunner
+  // Its own process seam, not the collector's runner: the research calls turn
+  // on a distinction that runner throws away, and one of them waits on a person.
+  readonly research?: ResearchProcesses
 }): RealWorkspaceService {
   const listeners = new Set<WorkspaceEventListener>()
   const runs = new Map<RunId, Run>()
@@ -79,6 +90,11 @@ export function createWorkspaceService({
   function emit(event: WorkspaceEvent): void {
     for (const listener of [...listeners]) listener(event)
   }
+
+  const operations = createResearchOperations({
+    processes: research,
+    onOutput: (chunk) => emit({ type: 'research_output', chunk })
+  })
 
   return {
     async searchFiles(directory: string, query: string): Promise<readonly string[]> {
@@ -178,6 +194,22 @@ export function createWorkspaceService({
       openExternal(wanted.toString())
     },
 
+    researchStatus(): Promise<ResearchStatus> {
+      return operations.status()
+    },
+
+    researchConnect(apiKey?: string): Promise<ConnectOutcome> {
+      return operations.connect(apiKey)
+    },
+
+    researchCancelConnect(): Promise<void> {
+      return operations.cancelConnect()
+    },
+
+    researchDisconnect(): Promise<ResearchOutcome> {
+      return operations.disconnect()
+    },
+
     onEvent(listener: WorkspaceEventListener): Unsubscribe {
       listeners.add(listener)
       return () => {
@@ -188,6 +220,7 @@ export function createWorkspaceService({
     dispose(): void {
       for (const run of runs.values()) run.kill()
       runs.clear()
+      operations.dispose()
     }
   }
 }

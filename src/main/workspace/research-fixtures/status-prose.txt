@@ -1,0 +1,9 @@
+
+  [38;5;208m🔥 [1mfirecrawl[0m [2mcli[0m [2mv1.23.3[0m
+
+  [32m●[0m Authenticated [2mvia stored credentials[0m
+  [2mCould not fetch account info: Unauthorized: Invalid token[0m
+
+  [2m.firecrawl:[0m not found [2m- no local cache[0m
+  [2m.gitignore:[0m missing [2m- add .firecrawl/ to ignore cache[0m
+

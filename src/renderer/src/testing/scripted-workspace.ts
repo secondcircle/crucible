@@ -8,6 +8,12 @@ import type {
   WorkspaceService,
   WorktreeCreation
 } from '../../../shared/workspace/service'
+import {
+  redactKeys,
+  type ConnectOutcome,
+  type ResearchOutcome,
+  type ResearchStatus
+} from '../../../shared/workspace/research'
 import { rankFiles } from '../../../shared/workspace/match'
 
 // Answers the way main does but streams nothing by itself, so a component
@@ -53,6 +59,25 @@ export interface ScriptedWorkspace extends WorkspaceService {
   settleIssues(): void
   /** Every link this service was asked to open, and opened nothing for. */
   readonly openedUrls: readonly string[]
+
+  /** What `researchStatus` answers. */
+  research: ResearchStatus
+  /** Held where a test drives the checking state, as the boards are. */
+  holdStatus?: boolean
+  /** Settles a held status read with whatever `research` holds now. */
+  settleStatus(): void
+  // A connect always waits on a person, so it is always held: the test settles
+  // it with the ending it wants, `abandoned` among them.
+  settleConnect(outcome: ConnectOutcome): void
+  /** How many connect attempts are still waiting to be settled. */
+  connecting(): number
+  /** Held the same way a status read is, for the log-out's waiting state. */
+  holdDisconnect?: boolean
+  /** What `researchDisconnect` answers; the status it holds now, by default. */
+  disconnectOutcome?: ResearchOutcome
+  settleDisconnect(): void
+  /** What the CLI printed while a connect waits. */
+  researchOutput(chunk: string): void
 }
 
 export function createScriptedWorkspace(files: readonly string[] = []): ScriptedWorkspace {
@@ -63,6 +88,9 @@ export function createScriptedWorkspace(files: readonly string[] = []): Scripted
   let held: (() => void) | undefined
   let heldIssues: (() => void) | undefined
   const worktrees: Array<(created: WorktreeCreation) => void> = []
+  const heldStatus: Array<() => void> = []
+  const heldDisconnects: Array<() => void> = []
+  const connects: Array<(outcome: ConnectOutcome) => void> = []
   let minted = 0
 
   function emit(event: WorkspaceEvent): void {
@@ -152,6 +180,62 @@ export function createScriptedWorkspace(files: readonly string[] = []): Scripted
     stopRun(runId: RunId): Promise<void> {
       calls.push({ op: 'stopRun', args: [runId] })
       return Promise.resolve()
+    },
+
+    research: { kind: 'signedOut', version: redactKeys('1.23.3') },
+
+    researchStatus(): Promise<ResearchStatus> {
+      calls.push({ op: 'researchStatus', args: [] })
+      if (service.holdStatus !== true) return Promise.resolve(service.research)
+      return new Promise<ResearchStatus>((resolve) => {
+        heldStatus.push(() => resolve(service.research))
+      })
+    },
+
+    settleStatus(): void {
+      const settle = heldStatus.shift()
+      if (settle === undefined) throw new Error('no status read is waiting')
+      settle()
+    },
+
+    researchConnect(apiKey?: string): Promise<ConnectOutcome> {
+      calls.push({ op: 'researchConnect', args: apiKey === undefined ? [] : [apiKey] })
+      return new Promise<ConnectOutcome>((resolve) => {
+        connects.push(resolve)
+      })
+    },
+
+    settleConnect(outcome: ConnectOutcome): void {
+      const settle = connects.shift()
+      if (settle === undefined) throw new Error('no connect attempt is waiting')
+      settle(outcome)
+    },
+
+    connecting: () => connects.length,
+
+    researchCancelConnect(): Promise<void> {
+      calls.push({ op: 'researchCancelConnect', args: [] })
+      return Promise.resolve()
+    },
+
+    researchDisconnect(): Promise<ResearchOutcome> {
+      calls.push({ op: 'researchDisconnect', args: [] })
+      const answer = (): ResearchOutcome =>
+        service.disconnectOutcome ?? { kind: 'settled', status: service.research }
+      if (service.holdDisconnect !== true) return Promise.resolve(answer())
+      return new Promise<ResearchOutcome>((resolve) => {
+        heldDisconnects.push(() => resolve(answer()))
+      })
+    },
+
+    settleDisconnect(): void {
+      const settle = heldDisconnects.shift()
+      if (settle === undefined) throw new Error('no log-out is waiting')
+      settle()
+    },
+
+    researchOutput(chunk: string): void {
+      emit({ type: 'research_output', chunk: redactKeys(chunk) })
     },
 
     onEvent(listener: WorkspaceEventListener): Unsubscribe {

@@ -73,7 +73,7 @@ names the milestone from `m1-parity-core.md`. **never** means ruled out.
 
 | π feature | π behavior | Crucible status |
 |---|---|---|
-| Skills | /skill:name | **built, diverged from π** — π's format and π's loader at Crucible's own three origins (`<workspace>/.crucible/skills/`, `~/.crucible/skills/`, built-ins shipped with the app), workspace shadowing user shadowing built-in, re-read on every turn (ADR 0021). π's own `.pi/skills` folders ignored entirely and π's resolution order rejected. No `/skill:name`: skills are model-triggered only, and no skills UI exists. A read inside a skill's directory renders in the tool chain as `skill`. One built-in ships, `writing-agent-prompts` |
+| Skills | /skill:name | **built, diverged from π** — π's format and π's loader at Crucible's own three origins (`<workspace>/.crucible/skills/`, `~/.crucible/skills/`, built-ins shipped with the app), workspace shadowing user shadowing built-in, re-read on every turn (ADR 0021). π's own `.pi/skills` folders ignored entirely and π's resolution order rejected. No `/skill:name`: skills are model-triggered only, and no skills UI exists. A read inside a skill's directory renders in the tool chain as `skill`. Two built-ins ship, `writing-agent-prompts` and `firecrawl` |
 | Extensions | TUI extension API | never — not portable; legacy-system extensions are explicitly not loaded (A17); Crucible features replace them natively |
 | Themes | /settings themes | later — Ember is the theme |
 | Settings | /settings UI + settings.json | **built** — gear in the top bar opens a modal sheet with two tabs, Providers and Usage; delivery pacing stays deferred. No settings file: the sheet's own state is per window and nothing about it is persisted |

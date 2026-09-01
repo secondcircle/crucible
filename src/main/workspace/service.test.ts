@@ -84,7 +84,7 @@ function worktreeScript(body: string, { executable = true } = {}): void {
 
 /** Everything that happened to a run, once it is over. */
 function outcome(runId: string): { output: string; ended: boolean; exitCode?: number } {
-  const mine = events.filter((event) => event.runId === runId)
+  const mine = events.filter((event) => event.type !== 'research_output' && event.runId === runId)
   const ended = mine.find((event) => event.type === 'run_ended')
   return {
     output: mine

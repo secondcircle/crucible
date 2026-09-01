@@ -1,0 +1,60 @@
+{
+  "checks": [
+    {
+      "name": "CLI Version",
+      "status": "pass",
+      "message": "v1.23.3 (latest)"
+    },
+    {
+      "name": "Node Runtime",
+      "status": "pass",
+      "message": "v25.7.0"
+    },
+    {
+      "name": "API Key",
+      "status": "fail",
+      "message": "not found",
+      "fix": "firecrawl login"
+    },
+    {
+      "name": "API Reachability",
+      "status": "fail",
+      "message": "not checked (no API key)"
+    },
+    {
+      "name": "API Key Validity",
+      "status": "fail",
+      "message": "not checked"
+    },
+    {
+      "name": "Credits",
+      "status": "warn",
+      "message": "unavailable"
+    },
+    {
+      "name": "Concurrency",
+      "status": "fail",
+      "message": "not checked"
+    },
+    {
+      "name": "Local .env",
+      "status": "pass",
+      "message": "not present"
+    },
+    {
+      "name": ".gitignore",
+      "status": "pass",
+      "message": "no .firecrawl/ to ignore"
+    },
+    {
+      "name": "AI Agents",
+      "status": "warn",
+      "message": "none detected"
+    },
+    {
+      "name": "MCP Server",
+      "status": "warn",
+      "message": "no agents detected"
+    }
+  ]
+}

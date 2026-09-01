@@ -253,7 +253,7 @@ describe('the rail', () => {
       within(screen.getByRole('navigation', { name: 'Settings sections' }))
         .getAllByRole('button')
         .map((row) => row.textContent)
-    ).toEqual(['◉Providers', '$Usage'])
+    ).toEqual(['◉Providers', '$Usage', '⌕Research'])
   })
 
   it('swaps the body and the header, and moves the marker, on a section click', async () => {
