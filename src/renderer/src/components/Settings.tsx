@@ -5,18 +5,19 @@ import type {
   ProviderState,
   SessionId,
   SessionState,
-  SessionUsage,
-  WorkspaceState
+  SessionUsage
 } from '../../../shared/agent/port'
+import type { WorkspaceService } from '../../../shared/workspace/service'
 import { tokens } from '../labels'
 import type { AskedPrompt, Auth } from '../settings/use-auth'
+import { ResearchPane } from './ResearchPane'
 import './settings.css'
 
 // Neither π nor Crucible keeps a usage ledger, so everything here is
 // recomputed on demand from π's per-message numbers.
 
 /** A row in the rail. Only sections that exist are listed. */
-export type SettingsSection = 'providers' | 'usage'
+export type SettingsSection = 'providers' | 'usage' | 'research'
 
 // The rail's whole content. Adding a section here costs no layout anywhere,
 // which is the point of the fixed card.
@@ -27,7 +28,10 @@ const SECTIONS: readonly {
   readonly subtitle: string
 }[] = [
   { id: 'providers', label: 'Providers', glyph: '◉', subtitle: 'Signed in on this machine' },
-  { id: 'usage', label: 'Usage', glyph: '$', subtitle: 'Tokens and cost, recomputed on open' }
+  { id: 'usage', label: 'Usage', glyph: '$', subtitle: 'Tokens and cost, recomputed on open' },
+  // Never the vendor's name: a second research provider later must not rename
+  // the section. Machine-global, so it renders the same with no workspace open.
+  { id: 'research', label: 'Research', glyph: '⌕', subtitle: 'Reading the web, on this machine' }
 ]
 
 /** Two decimals, or a dash while nothing has been reported (the meter's rule). */
@@ -46,6 +50,7 @@ export function Settings({
   port,
   auth,
   workspace,
+  workspaceOpen,
   sessions,
   activeSessionId,
   contextPercent
@@ -56,7 +61,10 @@ export function Settings({
   readonly port: AgentPort
   /** The login flow's whole state, held above so Escape can order the closes. */
   readonly auth: Auth
-  readonly workspace?: WorkspaceState
+  /** The OS-facts seam: what the Research section reads the CLI through. */
+  readonly workspace: WorkspaceService
+  /** Whether a workspace is open at all, which is all Usage needs to know. */
+  readonly workspaceOpen: boolean
   /** Curated sessions of the active workspace, in sidebar order. */
   readonly sessions: readonly SessionState[]
   readonly activeSessionId?: SessionId
@@ -102,10 +110,15 @@ export function Settings({
             <div className="setinner">
               {section === 'providers' ? (
                 <ProvidersPane auth={auth} />
+              ) : section === 'research' ? (
+                // Mounted when it becomes the shown section and unmounted when
+                // it stops being one, which is what makes the status read
+                // happen on every open and never while another section shows.
+                <ResearchPane workspace={workspace} />
               ) : (
                 <UsagePane
                   port={port}
-                  workspace={workspace}
+                  workspaceOpen={workspaceOpen}
                   sessions={sessions}
                   activeSessionId={activeSessionId}
                   contextPercent={contextPercent}
@@ -417,13 +430,13 @@ function PromptField({
 // workspace, because nothing about usage is persisted anywhere.
 function UsagePane({
   port,
-  workspace,
+  workspaceOpen,
   sessions,
   activeSessionId,
   contextPercent
 }: {
   readonly port: AgentPort
-  readonly workspace?: WorkspaceState
+  readonly workspaceOpen: boolean
   readonly sessions: readonly SessionState[]
   readonly activeSessionId?: SessionId
   readonly contextPercent?: number
@@ -476,7 +489,7 @@ function UsagePane({
     }
   }, [port, ids])
 
-  if (workspace === undefined) {
+  if (!workspaceOpen) {
     return (
       <div className="pane">
         <p className="pempty">No workspace is open, so there is nothing to add up yet.</p>

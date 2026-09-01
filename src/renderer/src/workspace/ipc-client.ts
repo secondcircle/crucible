@@ -1,4 +1,9 @@
 import type {
+  ConnectOutcome,
+  ResearchOutcome,
+  ResearchStatus
+} from '../../../shared/workspace/research'
+import type {
   BranchBoardAnswer,
   IssueBoardAnswer,
   RunId,
@@ -39,6 +44,16 @@ export function createWorkspaceClient(): WorkspaceService {
       call<BranchBoardAnswer>('branchBoard', workspacePath),
     issueBoard: (workspacePath: string) => call<IssueBoardAnswer>('issueBoard', workspacePath),
     openUrl: (url: string) => call<void>('openUrl', url),
+
+    researchStatus: () => call<ResearchStatus>('researchStatus'),
+    // Absent rather than a placeholder: no key is the browser flow, and the
+    // channel refuses anything here that is not text.
+    researchConnect: (apiKey?: string) =>
+      apiKey === undefined
+        ? call<ConnectOutcome>('researchConnect')
+        : call<ConnectOutcome>('researchConnect', apiKey),
+    researchCancelConnect: () => call<void>('researchCancelConnect'),
+    researchDisconnect: () => call<ResearchOutcome>('researchDisconnect'),
 
     onEvent(listener: WorkspaceEventListener): Unsubscribe {
       listeners.add(listener)

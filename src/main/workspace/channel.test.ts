@@ -14,7 +14,10 @@ import type {
   WorkspaceEventListener,
   WorkspaceService
 } from '../../shared/workspace/service'
+import { redactKeys, type ResearchStatus } from '../../shared/workspace/research'
 import { serveWorkspaceChannel } from './channel'
+
+const SIGNED_OUT: ResearchStatus = { kind: 'signedOut', version: redactKeys('1.23.3') }
 
 const electron = vi.hoisted(() => ({
   handlers: new Map<string, (invocation: unknown, ...args: unknown[]) => unknown>()
@@ -113,6 +116,21 @@ function stubService(): StubService {
     async openUrl(url: string) {
       asked.push({ op: 'openUrl', args: [url] })
     },
+    async researchStatus() {
+      asked.push({ op: 'researchStatus', args: [] })
+      return SIGNED_OUT
+    },
+    async researchConnect(apiKey?: string) {
+      asked.push({ op: 'researchConnect', args: apiKey === undefined ? [] : [apiKey] })
+      return { kind: 'abandoned' as const }
+    },
+    async researchCancelConnect() {
+      asked.push({ op: 'researchCancelConnect', args: [] })
+    },
+    async researchDisconnect() {
+      asked.push({ op: 'researchDisconnect', args: [] })
+      return { kind: 'settled' as const, status: SIGNED_OUT }
+    },
     onEvent(listener: WorkspaceEventListener) {
       listeners.add(listener)
       return () => listeners.delete(listener)
@@ -195,6 +213,39 @@ describe('what crosses the workspace channel', () => {
         branch: 'crucible/9f3a2c'
       }
     })
+  })
+
+  it('carries each research operation across under its own name', async () => {
+    expect(await request({ op: 'researchStatus', args: [] })).toEqual({
+      ok: true,
+      value: SIGNED_OUT
+    })
+    expect(await request({ op: 'researchDisconnect', args: [] })).toEqual({
+      ok: true,
+      value: { kind: 'settled', status: SIGNED_OUT }
+    })
+    await request({ op: 'researchCancelConnect', args: [] })
+
+    expect(stub.asked).toEqual([
+      { op: 'researchStatus', args: [] },
+      { op: 'researchDisconnect', args: [] },
+      { op: 'researchCancelConnect', args: [] }
+    ])
+  })
+
+  it('takes a connect with a key and without one, and refuses a key that is not text', async () => {
+    await request({ op: 'researchConnect', args: [] })
+    await request({ op: 'researchConnect', args: ['fc-pasted-by-a-person'] })
+
+    expect(stub.asked).toEqual([
+      { op: 'researchConnect', args: [] },
+      { op: 'researchConnect', args: ['fc-pasted-by-a-person'] }
+    ])
+
+    expect(await request({ op: 'researchConnect', args: [7] })).toMatchObject({ ok: false })
+    expect(await request({ op: 'researchConnect', args: [null] })).toMatchObject({ ok: false })
+    // Nothing reached the service for either of those.
+    expect(stub.asked).toHaveLength(2)
   })
 
   it('answers a refusal as a value, with the sentence written for a person', async () => {

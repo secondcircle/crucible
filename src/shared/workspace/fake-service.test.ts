@@ -170,6 +170,53 @@ describe('the fake workspace service', () => {
     ])
   })
 
+  it('answers the research CLI as an installed, connected one with credits', async () => {
+    const { service } = watched()
+
+    expect(await service.researchStatus()).toEqual({
+      kind: 'signedIn',
+      version: '1.23.3',
+      credits: 4820
+    })
+  })
+
+  it('walks the flow the real one walks: logged out, then connected again', async () => {
+    const { service, events } = watched()
+
+    expect(await service.researchDisconnect()).toEqual({
+      kind: 'settled',
+      status: { kind: 'signedOut', version: '1.23.3' }
+    })
+    expect(await service.researchStatus()).toEqual({
+      kind: 'signedOut',
+      version: '1.23.3'
+    })
+
+    // The browser flow waits on a person nobody can be here, so it holds; the
+    // pasted-key fallback is the one that finishes, exactly as it does for the
+    // real CLI.
+    const waiting = service.researchConnect()
+    await new Promise((resolve) => setTimeout(resolve, 5))
+    expect(events.some((event) => event.type === 'research_output')).toBe(true)
+
+    await service.researchCancelConnect()
+    expect(await waiting).toEqual({ kind: 'abandoned' })
+
+    expect(await service.researchConnect('fc-anything-at-all')).toEqual({
+      kind: 'settled',
+      status: { kind: 'signedIn', version: '1.23.3', credits: 4820 }
+    })
+  })
+
+  it('starts no process and stores no key for any of it', async () => {
+    const { service } = watched()
+
+    // Nothing to assert but the absence: the fake imports neither Node nor
+    // Electron, so there is nothing here that could spawn or write.
+    await service.researchConnect('fc-a-key-the-fake-forgets')
+    expect(JSON.stringify(await service.researchStatus())).not.toContain('fc-')
+  })
+
   it('streams the endless one until it is stopped, and then says nothing more', async () => {
     const { service, events } = watched()
     const runId = await service.startRun('/anywhere', 'tail -f log')

@@ -1,5 +1,7 @@
-// This module imports nothing on purpose: it is a seam the renderer shares
-// with main, and any import here could smuggle Electron or Node across.
+// This module imports nothing that could smuggle Electron or Node across: it
+// is a seam the renderer shares with main. Its one import is a sibling under
+// the same rule.
+import type { ConnectOutcome, Redacted, ResearchOutcome, ResearchStatus } from './research'
 
 export type RunId = string
 
@@ -8,6 +10,11 @@ export type WorkspaceEvent =
   // An absent exit code means the run was stopped rather than exiting on its
   // own; nothing is invented for it.
   | { readonly type: 'run_ended'; readonly runId: RunId; readonly exitCode?: number }
+  // What the research CLI printed while a connect attempt waits on a person.
+  | { readonly type: 'research_output'; readonly chunk: Redacted }
+
+/** The events one bash run produces: the ones a run view is built from. */
+export type RunEvent = Extract<WorkspaceEvent, { readonly runId: RunId }>
 
 export type WorkspaceEventListener = (event: WorkspaceEvent) => void
 
@@ -200,6 +207,19 @@ export interface WorkspaceService {
   issueBoard(workspacePath: string): Promise<IssueBoardAnswer>
   /** Opens an https URL in the OS browser. Main validates the scheme. */
   openUrl(url: string): Promise<void>
+
+  /** Reads the research CLI's status. Never rejects: trouble is a status kind. */
+  researchStatus(): Promise<ResearchStatus>
+  // Connects the CLI: the browser flow with no key, the CLI's non-interactive
+  // key login with one. At most one attempt runs at a time; a second call ends
+  // the first, which then resolves `abandoned`. No timeout — a person is in the
+  // loop, and cancelling is how the wait ends.
+  researchConnect(apiKey?: string): Promise<ConnectOutcome>
+  // Ends an attempt still waiting; it resolves `abandoned`. Harmless when none
+  // is waiting.
+  researchCancelConnect(): Promise<void>
+  /** Clears the CLI's stored credential. Resolves with the status after it. */
+  researchDisconnect(): Promise<ResearchOutcome>
 
   onEvent(listener: WorkspaceEventListener): Unsubscribe
 }

@@ -170,6 +170,22 @@
   background: var(--ok);
 }
 
+/* Not connected, unknown, and still being read: one faint mark, never a third
+   colour invented for a state nobody has established yet. */
+.dot.out {
+  background: var(--faint);
+}
+
+/* A command the human runs themselves, so it reads as one and selects as one. */
+.prov .cmd {
+  font: 11.5px var(--mono);
+  color: var(--ink);
+  background: var(--code);
+  border-radius: 5px;
+  padding: 1px 5px;
+  user-select: text;
+}
+
 .pbtn {
   background: none;
   border: 1px solid var(--line);
@@ -291,6 +307,14 @@
   color: var(--dim);
   font-size: 13px;
   margin: 10px 0;
+}
+
+/* What the CLI is saying while it waits: its own words, under the notice. */
+.login .notice.out {
+  font: 11.5px var(--mono);
+  color: var(--faint);
+  margin: 4px 0;
+  word-break: break-all;
 }
 
 .login .url {

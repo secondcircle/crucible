@@ -27,8 +27,8 @@ import type {
   BoardRow,
   IssueBoardAnswer,
   IssueRow,
+  RunEvent,
   RunId,
-  WorkspaceEvent,
   WorkspaceService
 } from '../../shared/workspace/service'
 import { runIsLive, type RunRecord, type WorkflowRunId } from '../../shared/workflows/run'
@@ -357,7 +357,7 @@ export function Shell({
   const owners = useRef<Record<RunId, SessionId>>({})
   /** Where the caret goes once seeded composer text has rendered. */
   const seedCaret = useRef<number | undefined>(undefined)
-  const orphans = useRef<Map<RunId, WorkspaceEvent[]>>(new Map())
+  const orphans = useRef<Map<RunId, RunEvent[]>>(new Map())
   const escapes = useRef<number>(0)
 
   // One host, one occupant: opening any overlay replaces whatever was up.
@@ -950,6 +950,9 @@ export function Shell({
   // only thing that ties a chunk to the session it came from.
   useEffect(() => {
     return service.onEvent((event) => {
+      // The research CLI's own output belongs to the Research section, which
+      // listens for itself; nothing here is a run.
+      if (event.type === 'research_output') return
       const sessionId = owners.current[event.runId]
       if (sessionId === undefined) {
         // The id has not come back from `startRun` yet; nothing is thrown away.
@@ -2789,7 +2792,8 @@ export function Shell({
                 onClose={closeRegion}
                 port={port}
                 auth={auth}
-                workspace={active}
+                workspace={service}
+                workspaceOpen={active !== undefined}
                 sessions={snapshot.sessions.filter(
                   (candidate) => candidate.workspaceId === activeWorkspaceId
                 )}
@@ -2880,7 +2884,7 @@ function messageOf(cause: unknown): string {
 function applyRunEvent(
   runs: Readonly<Record<SessionId, RunView>>,
   sessionId: SessionId,
-  event: WorkspaceEvent
+  event: RunEvent
 ): Readonly<Record<SessionId, RunView>> {
   const found = runs[sessionId]
   if (found === undefined || found.runId !== event.runId) return runs

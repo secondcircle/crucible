@@ -1,6 +1,12 @@
 import { cannedBoard } from './fake-board'
 import { cannedIssues } from './fake-issues'
 import { rankFiles } from './match'
+import {
+  redactKeys,
+  type ConnectOutcome,
+  type ResearchOutcome,
+  type ResearchStatus
+} from './research'
 import type {
   BranchBoardAnswer,
   IssueBoardAnswer,
@@ -64,6 +70,20 @@ const ENDLESS_CHUNKS: readonly string[] = [
   'still watching — press Stop\n'
 ]
 
+// The research CLI, canned: a version and a credit figure that look like a
+// machine that has one installed and connected, so the ordinary state of the
+// Research section is there to drive with no CLI anywhere.
+const CANNED_VERSION = '1.23.3'
+const CANNED_CREDITS = 4_820
+
+// What the canned browser login "prints" while it waits. The real one waits on
+// a person too; here nothing can ever finish it, so Cancel and the pasted-key
+// fallback are the two ways out, exactly as they are for the real one.
+const CANNED_CONNECT_CHUNKS: readonly string[] = [
+  '\nOpening browser for authorization…\n',
+  "If the browser doesn't open, visit: https://example.invalid/cli-auth\n"
+]
+
 // Slow enough that Stop is reachable by hand, and zero in tests, which then
 // drive the stream themselves.
 const DEFAULT_PAUSE_MS = 220
@@ -124,6 +144,20 @@ export function createFakeWorkspaceService({
   }
 
   let worktrees = 0
+  // The one piece of state the fake research calls move, so a driven check can
+  // walk connected → logged out → connected again.
+  let research: ResearchStatus = {
+    kind: 'signedIn',
+    version: redactKeys(CANNED_VERSION),
+    credits: CANNED_CREDITS
+  }
+  let waiting: { settle(outcome: ConnectOutcome): void } | undefined
+
+  function endConnect(): void {
+    const ending = waiting
+    waiting = undefined
+    ending?.settle({ kind: 'abandoned' })
+  }
 
   return {
     openedUrls,
@@ -181,6 +215,58 @@ export function createFakeWorkspaceService({
 
     async stopRun(runId: RunId): Promise<void> {
       running.get(runId)?.stop()
+    },
+
+    async researchStatus(): Promise<ResearchStatus> {
+      await new Promise((resolve) => setTimeout(resolve, pauseMs))
+      return research
+    },
+
+    async researchConnect(apiKey?: string): Promise<ConnectOutcome> {
+      endConnect()
+
+      // A pasted key is the flow that can finish here: no browser is involved,
+      // and the canned status moves the way the real one would.
+      if (apiKey !== undefined) {
+        await new Promise((resolve) => setTimeout(resolve, pauseMs))
+        research = {
+          kind: 'signedIn',
+          version: redactKeys(CANNED_VERSION),
+          credits: CANNED_CREDITS
+        }
+        return { kind: 'settled', status: research }
+      }
+
+      return new Promise<ConnectOutcome>((resolve) => {
+        const timers: ReturnType<typeof setTimeout>[] = []
+        const mine = {
+          settle(outcome: ConnectOutcome): void {
+            for (const timer of timers) clearTimeout(timer)
+            resolve(outcome)
+          }
+        }
+        waiting = mine
+        CANNED_CONNECT_CHUNKS.forEach((chunk, index) => {
+          timers.push(
+            setTimeout(
+              () => {
+                if (waiting === mine) emit({ type: 'research_output', chunk: redactKeys(chunk) })
+              },
+              pauseMs * (index + 1)
+            )
+          )
+        })
+      })
+    },
+
+    async researchCancelConnect(): Promise<void> {
+      endConnect()
+    },
+
+    async researchDisconnect(): Promise<ResearchOutcome> {
+      await new Promise((resolve) => setTimeout(resolve, pauseMs))
+      research = { kind: 'signedOut', version: redactKeys(CANNED_VERSION) }
+      return { kind: 'settled', status: research }
     },
 
     onEvent(listener: WorkspaceEventListener): Unsubscribe {
