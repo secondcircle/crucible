@@ -122,6 +122,10 @@ export function createWorkspaceService({
       })
 
       let ended = false
+      // Set by stopRun. Killing a process group is not atomic: bash can see its
+      // child die and exit 137 on its own before its own SIGKILL lands, which
+      // would report a status for a run nobody let finish.
+      let stopped = false
       function end(exitCode?: number): void {
         if (ended) return
         ended = true
@@ -142,13 +146,15 @@ export function createWorkspaceService({
       })
 
       child.on('close', (code, signal) => {
-        // A signalled process never exited, so it has no exit status to report.
-        end(signal === null && code !== null ? code : undefined)
+        // A signalled or stopped process never finished, so it has no exit
+        // status to report.
+        end(!stopped && signal === null && code !== null ? code : undefined)
       })
 
       runs.set(runId, {
         kill(): void {
           if (child.pid === undefined) return
+          stopped = true
           try {
             process.kill(-child.pid, 'SIGKILL')
           } catch {
