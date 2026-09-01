@@ -128,6 +128,124 @@
   color: var(--ink);
 }
 
+/* The address row: one line at a fixed height, so the exhibit keeps every
+   other pixel and the row's height never moves with what it shows. */
+.ctx .where {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 26px;
+  box-sizing: border-box;
+  padding: 0 6px 0 12px;
+  border-bottom: 1px solid var(--line);
+  background: var(--bg);
+  flex: none;
+  overflow: hidden;
+}
+
+.ctx .where .loc {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  height: 100%;
+  padding: 0 4px;
+  border: none;
+  border-radius: 4px;
+  background: none;
+  font: 11.5px var(--mono);
+  color: var(--dim);
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  cursor: pointer;
+  position: relative;
+}
+
+.ctx .where .loc:hover {
+  color: var(--ink);
+  background: var(--panel);
+}
+
+/* The directory gives way first and all the way: a shrink factor heavy enough
+   that the filename beside it keeps its width until nothing of the lead is
+   left. Both ellipsize, so a location that gave way never reads as a shorter
+   real path. */
+.ctx .where .loc .head {
+  flex: 0 1000 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ctx .where .loc .tail {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.ctx .where .loc:hover .tail {
+  color: var(--accent2);
+}
+
+/* Out of the flow, so the confirmation costs the location no width and the
+   row no height. */
+.ctx .where .loc .copied {
+  position: absolute;
+  right: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+  font: 10.5px var(--font);
+  color: var(--ok);
+  background: var(--bg);
+  padding: 0 6px;
+  border-radius: 4px;
+}
+
+/* Never shrinks and is never overlapped: the location clips itself instead. */
+.ctx .where .refresh {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 22px;
+  padding: 0;
+  border: none;
+  border-radius: 5px;
+  background: none;
+  color: var(--faint);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.ctx .where .refresh:hover {
+  color: var(--ink);
+  background: var(--panel);
+}
+
+/* The animation is declared on the glyph alone: the control's box, its
+   background, its border and its hover shape do not rotate. */
+.ctx .where .refresh .glyph {
+  display: inline-block;
+  line-height: 1;
+}
+
+.ctx .where .refresh .glyph.spin {
+  animation: ctx-refresh-spin 0.5s linear;
+}
+
+@keyframes ctx-refresh-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 .exhibit {
   flex: 1;
   min-height: 0;

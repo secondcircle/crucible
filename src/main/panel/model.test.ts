@@ -56,7 +56,8 @@ afterEach(() => {
 
 describe('panel_show', () => {
   it('mints a tab from the basename, makes it active, and says what it showed', () => {
-    const result = panel.show(SESSION, workspace, file('storage-options.md'), 'storage options')
+    const path = file('storage-options.md')
+    const result = panel.show(SESSION, workspace, path, 'storage options')
 
     expect(result).toBe('Shown in context panel: "storage options"')
     expect(panel.state(SESSION)).toEqual({
@@ -65,7 +66,8 @@ describe('panel_show', () => {
           id: 'storage-options',
           title: 'storage options',
           kind: 'markdown',
-          shownAt: expect.any(String)
+          shownAt: expect.any(String),
+          path
         }
       ],
       activeTabId: 'storage-options'
@@ -140,11 +142,32 @@ describe('panel_show', () => {
     )
   })
 
-  it('hands an html tab the file URL its view loads', () => {
-    const path = file('benchmark.html')
-    panel.show(SESSION, workspace, path, 'benchmark')
+  // The renderer displays this string and copies it; nothing about the
+  // location may differ between the two exhibit kinds, and no `file:` URL
+  // crosses.
+  it('names the file the same absolute way for both exhibit kinds', () => {
+    const page = file('benchmark.html')
+    const notes = file('deep/nested/notes.md')
+    panel.show(SESSION, workspace, page, 'benchmark')
+    panel.show(SESSION, workspace, notes, 'notes')
 
-    expect(panel.state(SESSION)?.tabs[0].src).toBe(`file://${path}`)
+    const tabs = panel.state(SESSION)?.tabs ?? []
+    expect(tabs.map((tab) => (tab.kind === 'url' ? tab.address : tab.path))).toEqual([page, notes])
+    expect(JSON.stringify(tabs)).not.toContain('file:')
+  })
+
+  it('resolves a relative show against the directory the session works in', () => {
+    const worktree = join(workspace, 'worktrees', 'run-47c8')
+    file(join('worktrees', 'run-47c8', 'plan.md'))
+    file('plan.md')
+
+    panel.show(SESSION, worktree, 'plan.md', 'plan')
+    panel.show('s2', workspace, 'plan.md', 'plan')
+
+    const here = panel.state(SESSION)?.tabs[0]
+    const there = panel.state('s2')?.tabs[0]
+    expect(here?.kind === 'markdown' && here.path).toBe(join(worktree, 'plan.md'))
+    expect(there?.kind === 'markdown' && there.path).toBe(join(workspace, 'plan.md'))
   })
 
   it('carries the whole tab list and the curation nudge once a second tab is open', () => {
@@ -259,7 +282,7 @@ describe('the user\u2019s own actions', () => {
 })
 
 describe('a web address', () => {
-  it('is a tab too: kind url, the address as its src, its id off the host', () => {
+  it('is a tab too: kind url, the address it carries, its id off the host', () => {
     const result = panel.show(SESSION, workspace, 'http://localhost:5173/', 'dev server')
 
     expect(result).toBe('Shown in context panel: "dev server"')
@@ -270,7 +293,7 @@ describe('a web address', () => {
           title: 'dev server',
           kind: 'url',
           shownAt: expect.any(String),
-          src: 'http://localhost:5173/'
+          address: 'http://localhost:5173/'
         }
       ],
       activeTabId: 'localhost'
@@ -307,7 +330,7 @@ describe('a web address', () => {
     expect(panel.state(SESSION)?.tabs[0]).toMatchObject({
       id: 'localhost',
       kind: 'url',
-      src: 'http://localhost:5173/'
+      address: 'http://localhost:5173/'
     })
   })
 })
@@ -394,14 +417,17 @@ describe('persistence and restore', () => {
 
   it('silently drops a tab whose file vanished, and reseats the active one', () => {
     const gone = file('gone.md')
-    panel.show(SESSION, workspace, file('kept.md'), 'kept')
+    const kept = file('kept.md')
+    panel.show(SESSION, workspace, kept, 'kept')
     panel.show(SESSION, workspace, gone, 'gone')
     rmSync(gone)
 
     build()
 
     expect(panel.state(SESSION)).toEqual({
-      tabs: [{ id: 'kept', title: 'kept', kind: 'markdown', shownAt: expect.any(String) }],
+      tabs: [
+        { id: 'kept', title: 'kept', kind: 'markdown', shownAt: expect.any(String), path: kept }
+      ],
       activeTabId: 'kept'
     })
     // What was restored is what is written from then on: the store stops

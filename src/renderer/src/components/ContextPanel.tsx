@@ -1,5 +1,7 @@
-import { useEffect, useRef, useState } from 'react'
-import type { AgentPort, PanelState, SessionId, TabId } from '../../../shared/agent/port'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import type { AgentPort, PanelState, PanelTab, SessionId, TabId } from '../../../shared/agent/port'
+import { AddressRow } from './AddressRow'
+import { guestSrc, shownLocation } from './exhibit-location'
 import { Markdown } from './Markdown'
 import './context-panel.css'
 
@@ -20,11 +22,36 @@ interface ExhibitWebview extends HTMLElement {
   reload(): void
 }
 
+/** Electron's in-place navigation events, as much of one as the row reads. */
+interface GuestNavigation extends Event {
+  readonly url: string
+}
+
+/** A link click, a redirect and a history push, in that order of likelihood. */
+const GUEST_NAVIGATION = ['did-navigate', 'did-navigate-in-page'] as const
+
+/** The one mounted exhibit: the guest's React key, and the owner of the state below. */
+type ExhibitMount = string
+
+function mountOf(sessionId: SessionId, tab: PanelTab): ExhibitMount {
+  return `${sessionId}:${tab.id}:${tab.shownAt}`
+}
+
+/** What the user has done to the mounted exhibit since it mounted. */
+interface LiveExhibit {
+  readonly of: ExhibitMount
+  /** Refresh clicks against this mount. A markdown tab re-reads on every bump. */
+  readonly refreshes: number
+  /** Where a url guest navigated in place; absent until it does. */
+  readonly navigated?: string
+}
+
 export function ContextPanel({
   panel,
   sessionId,
   width,
   port,
+  onCopyLocation,
   onResize,
   onCollapse
 }: {
@@ -33,6 +60,8 @@ export function ContextPanel({
   /** Pixels once the divider has been dragged; the default until then. */
   readonly width?: number
   readonly port: AgentPort
+  /** Writes the whole location to the system clipboard. The row says so itself. */
+  readonly onCopyLocation: (location: string) => void
   readonly onResize: (width: number) => void
   readonly onCollapse: () => void
 }): React.JSX.Element {
@@ -41,10 +70,37 @@ export function ContextPanel({
   // mid-drag takes its listeners with it.
   const endDrag = useRef<(() => void) | undefined>(undefined)
   const divider = useRef<HTMLDivElement>(null)
-  // The mounted exhibit guest, for the reload button alone.
+  // The mounted exhibit guest, for the refresh control alone.
   const viewRef = useRef<ExhibitWebview | null>(null)
+  const [held, setHeld] = useState<LiveExhibit>({ of: '', refreshes: 0 })
 
   useEffect(() => () => endDrag.current?.(), [])
+
+  // Whatever the user did to another mount died with it: a fresh mount reads as
+  // untouched in the same frame it appears, with no effect and no stale frame.
+  const mount = active === undefined ? undefined : mountOf(sessionId, active)
+  const live: LiveExhibit =
+    mount !== undefined && held.of === mount ? held : { of: mount ?? '', refreshes: 0 }
+
+  function refresh(): void {
+    if (active === undefined || mount === undefined) return
+    if (active.kind === 'markdown') {
+      // Main reads the file at call time, so a bumped generation is the whole
+      // of a re-read.
+      setHeld({ ...live, of: mount, refreshes: live.refreshes + 1 })
+      return
+    }
+    const shown = viewRef.current
+    // The guest is reloaded and never remounted: a remount would load the
+    // address the agent showed rather than the page the guest is showing.
+    // Absent under jsdom, where <webview> is an unknown element.
+    if (shown !== null && typeof shown.reload === 'function') shown.reload()
+  }
+
+  function navigate(url: string): void {
+    if (mount === undefined) return
+    setHeld({ of: mount, refreshes: live.refreshes, navigated: url })
+  }
 
   function startDrag(pressed: React.MouseEvent): void {
     if (endDrag.current !== undefined) return
@@ -136,28 +192,30 @@ export function ContextPanel({
             </div>
           ))}
           <div className="strip-tools">
-            {active !== undefined && active.kind !== 'markdown' ? (
-              // For pages that do not reload themselves; a hot-reloading dev
-              // server never needs it.
-              <button
-                className="stool"
-                aria-label="Reload exhibit"
-                onClick={() => {
-                  const shown = viewRef.current
-                  // Absent under jsdom, where <webview> is an unknown element.
-                  if (shown !== null && typeof shown.reload === 'function') shown.reload()
-                }}
-              >
-                ⟳
-              </button>
-            ) : null}
             <button className="stool" aria-label="Collapse context panel" onClick={onCollapse}>
               ⇥
             </button>
           </div>
         </div>
 
-        <Exhibit sessionId={sessionId} tab={active} port={port} viewRef={viewRef} />
+        {/* Where the active tab's exhibit is, and the panel's one refresh
+            control. Between the strip and the exhibit, at every width. */}
+        {active === undefined ? null : (
+          <AddressRow
+            location={shownLocation(active, live.navigated)}
+            onCopy={onCopyLocation}
+            onRefresh={refresh}
+          />
+        )}
+
+        <Exhibit
+          sessionId={sessionId}
+          tab={active}
+          port={port}
+          refreshes={live.refreshes}
+          viewRef={viewRef}
+          onNavigate={navigate}
+        />
       </aside>
     </>
   )
@@ -182,81 +240,139 @@ function Exhibit({
   sessionId,
   tab,
   port,
-  viewRef
+  refreshes,
+  viewRef,
+  onNavigate
 }: {
   readonly sessionId: SessionId
-  readonly tab: PanelState['tabs'][number] | undefined
+  readonly tab: PanelTab | undefined
   readonly port: AgentPort
+  /** Bumped by a refresh click; a markdown exhibit re-reads on every bump. */
+  readonly refreshes: number
   readonly viewRef: React.RefObject<ExhibitWebview | null>
+  /** Where a url guest went in place. Never called for a file tab. */
+  readonly onNavigate: (url: string) => void
 }): React.JSX.Element {
+  // Held in a ref so the ref callback below keeps one identity across renders:
+  // React tears a ref's subscription down whenever that identity changes.
+  const notify = useRef(onNavigate)
+  useEffect(() => {
+    notify.current = onNavigate
+  })
+
+  // A file tab's row names the file that was read, whatever its guest does, so
+  // only a url guest is listened to at all.
+  const follows = tab?.kind === 'url'
+  const mounted = useCallback(
+    (guest: HTMLElement | null) => {
+      viewRef.current = guest as ExhibitWebview | null
+      if (guest === null || !follows) return
+      const went = (event: Event): void => {
+        const { url } = event as GuestNavigation
+        if (typeof url === 'string' && url !== '') notify.current(url)
+      }
+      for (const type of GUEST_NAVIGATION) guest.addEventListener(type, went)
+      return () => {
+        for (const type of GUEST_NAVIGATION) guest.removeEventListener(type, went)
+        viewRef.current = null
+      }
+    },
+    [viewRef, follows]
+  )
+
   return (
     <div className="exhibit">
       {tab === undefined ? null : tab.kind === 'markdown' ? (
-        <MarkdownExhibit sessionId={sessionId} tab={tab} port={port} />
-      ) : tab.src === undefined ? null : (
+        <MarkdownExhibit sessionId={sessionId} tab={tab} port={port} refreshes={refreshes} />
+      ) : (
         // A guest webContents of its own: full browser fidelity — scripts run,
         // the network loads, links navigate in place — and no preload, no
         // node, no reach into the app.
 
-        // `shownAt` is in the key so a re-show remounts and reloads.
+        // `shownAt` is in the key so a re-show remounts and reloads; a refresh
+        // is not in it, because reloading the guest is not remounting it.
         <webview
-          key={`${sessionId}:${tab.id}:${tab.shownAt}`}
+          key={mountOf(sessionId, tab)}
           className="frame"
           title={tab.title}
-          src={tab.src}
-          ref={(mounted) => {
-            viewRef.current = mounted as ExhibitWebview | null
-          }}
+          src={guestSrc(tab)}
+          ref={mounted}
         />
       )}
     </div>
   )
 }
 
+/** One answer to one read of one mount. */
+interface ExhibitRead {
+  readonly of: ExhibitMount
+  /** The refresh generation this read was asked at. */
+  readonly at: number
+  readonly answer:
+    | { readonly kind: 'body'; readonly markdown: string }
+    | { readonly kind: 'failure'; readonly message: string }
+}
+
 // A markdown exhibit's body is fetched through the port and never off the disk.
 function MarkdownExhibit({
   sessionId,
   tab,
-  port
+  port,
+  refreshes
 }: {
   readonly sessionId: SessionId
-  readonly tab: PanelState['tabs'][number]
+  readonly tab: Extract<PanelTab, { readonly kind: 'markdown' }>
   readonly port: AgentPort
+  readonly refreshes: number
 }): React.JSX.Element | null {
-  const [shown, setShown] = useState<
-    { readonly of: string; readonly body?: string; readonly failure?: string } | undefined
-  >(undefined)
+  const [read, setRead] = useState<ExhibitRead | undefined>(undefined)
 
   const tabId: TabId = tab.id
   // A re-show refreshes the tab in place, and that is what a changed `shownAt`
   // means for the view: the same tab, fetched again.
-  const of = `${sessionId}:${tabId}:${tab.shownAt}`
+  const of = mountOf(sessionId, tab)
+
+  // Which mount a landing answer is allowed to speak for. Written before the
+  // read below is asked for, so a read of the mount just left is discarded
+  // rather than painted under the tab that replaced it.
+  const showing = useRef(of)
+  useEffect(() => {
+    showing.current = of
+  }, [of])
 
   useEffect(() => {
-    let current = true
     void port
       .exhibit(sessionId, tabId)
       .then(({ body }) => {
-        if (current) setShown({ of, body })
-      })
-      .catch((cause: unknown) => {
-        if (current) {
-          setShown({ of, failure: cause instanceof Error ? cause.message : String(cause) })
+        if (showing.current === of) {
+          setRead(newest({ of, at: refreshes, answer: { kind: 'body', markdown: body } }))
         }
       })
-    return () => {
-      current = false
-    }
-  }, [port, sessionId, tabId, of])
+      .catch((cause: unknown) => {
+        const message = cause instanceof Error ? cause.message : String(cause)
+        if (showing.current === of) {
+          setRead(newest({ of, at: refreshes, answer: { kind: 'failure', message } }))
+        }
+      })
+  }, [port, sessionId, tabId, of, refreshes])
 
-  // Nothing of another tab is ever shown under this one's title.
-  const answer = shown?.of === of ? shown : undefined
-  if (answer === undefined) return null
+  // Nothing of another tab is ever shown under this one's title, and the body
+  // already on screen stays until a newer answer lands: a refresh replaces
+  // content, it never blanks the exhibit first.
+  const shown = read?.of === of ? read.answer : undefined
+  if (shown === undefined) return null
   // The tab stays open whatever a failure says: curation is the agent's.
-  if (answer.failure !== undefined) return <p className="exhibit-failure">{answer.failure}</p>
+  if (shown.kind === 'failure') return <p className="exhibit-failure">{shown.message}</p>
   return (
     <div className="mdview">
-      <Markdown markdown={answer.body ?? ''} />
+      <Markdown markdown={shown.markdown} />
     </div>
   )
+}
+
+// Two ⟳ clicks put two reads of one file in flight, and the older one may land
+// last. The newest read that has come back wins, never the last to arrive.
+function newest(landed: ExhibitRead): (held: ExhibitRead | undefined) => ExhibitRead {
+  return (held) =>
+    held !== undefined && held.of === landed.of && held.at > landed.at ? held : landed
 }
