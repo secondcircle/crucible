@@ -1,10 +1,7 @@
 import { spawn } from 'node:child_process'
 
-// The process seam the research operations run on. It is not the board
-// collector's runner and cannot be: that one collapses a missing binary, a
-// non-zero exit and a timeout into one failure, applies git and gh
-// environment, insists on a working directory, and only ever captures a
-// process that finishes. Every one of those is wrong here.
+// Not the board collector's runner: that one collapses every way a process can
+// fail into one failure, and only ever captures a process that finished.
 
 /** The command every research call runs. Resolved on PATH, never a path. */
 export const RESEARCH_COMMAND = 'firecrawl'
@@ -48,12 +45,8 @@ export function researchEnv(
 ): Record<string, string | undefined> {
   const child: Record<string, string | undefined> = {}
   for (const [name, value] of Object.entries(parent)) {
-    // The whole prefix rather than a list of names: the CLI honors a key and an
-    // endpoint from the environment today and may honor more tomorrow, and
-    // Crucible sets none of them, so a prefix rule cannot go stale. Every
-    // variable the published package reads a key or an endpoint from is under
-    // this prefix; the two it reads outside it are a git host's token, used
-    // only to clone a template, and neither is a Firecrawl credential.
+    // The whole prefix rather than a list of names: Crucible sets none of these,
+    // and what the CLI reads a credential from can grow without warning.
     if (name.startsWith('FIRECRAWL_')) continue
     child[name] = value
   }

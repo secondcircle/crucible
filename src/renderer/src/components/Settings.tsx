@@ -111,9 +111,8 @@ export function Settings({
               {section === 'providers' ? (
                 <ProvidersPane auth={auth} />
               ) : section === 'research' ? (
-                // Mounted when it becomes the shown section and unmounted when
-                // it stops being one, which is what makes the status read
-                // happen on every open and never while another section shows.
+                // Mounted only while it is the shown section, which is what
+                // reads the status on every open and never on any other.
                 <ResearchPane workspace={workspace} />
               ) : (
                 <UsagePane

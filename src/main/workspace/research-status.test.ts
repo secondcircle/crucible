@@ -1,33 +1,12 @@
 // @vitest-environment node
 //
 // The one part of this feature whose correctness depends on a format nobody
-// here controls, tested against what the CLI actually printed. Nothing spawns
-// anything: the reader is a pure function of what a process did.
+// here controls, driven from captured output. Nothing is spawned: the reader is
+// a pure function of what a process did.
 //
-// Where the fixtures come from, so a later reader knows what is evidence and
-// what is inference:
-//
-//   doctor-not-connected.json        CAPTURED — firecrawl-cli 1.23.3,
-//                                    `firecrawl doctor --json`, no credential
-//                                    stored, exit code 1.
-//   doctor-connected-key-refused.json CAPTURED — the same command with a
-//                                    well-formed but invalid key stored, so
-//                                    the CLI reports a credential and the API
-//                                    refuses it. Exit code 1.
-//   status-prose.txt                 CAPTURED — `firecrawl --status`, the
-//                                    human-formatted output this reader does
-//                                    not parse, kept as proof that
-//                                    unrecognized text is not guessed at.
-//                                    Exit code 0.
-//   doctor-connected.json            DERIVED from the published package's own
-//                                    doctor formatting, with invented numbers:
-//                                    a working credential needs a paid key,
-//                                    which nobody supplied.
-//   doctor-connected-no-credits-left.json  DERIVED the same way, for the
-//                                    "0 remaining" branch of the same code.
-//
-// A derived fixture that later proves wrong shows up as `unreadable`, which
-// the Research section renders honestly.
+// The two connected fixtures were written by hand rather than captured, because
+// a working credential needs a paid key; one that turns out wrong reads as
+// `unreadable`, never as a figure nobody reported.
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import { REDACTION } from '../../shared/workspace/research'

@@ -70,15 +70,13 @@ const ENDLESS_CHUNKS: readonly string[] = [
   'still watching — press Stop\n'
 ]
 
-// The research CLI, canned: a version and a credit figure that look like a
-// machine that has one installed and connected, so the ordinary state of the
-// Research section is there to drive with no CLI anywhere.
+// A version and a credit figure that read as a machine with the CLI installed
+// and connected, so the ordinary state is drivable with no CLI anywhere.
 const CANNED_VERSION = '1.23.3'
 const CANNED_CREDITS = 4_820
 
-// What the canned browser login "prints" while it waits. The real one waits on
-// a person too; here nothing can ever finish it, so Cancel and the pasted-key
-// fallback are the two ways out, exactly as they are for the real one.
+// Nothing here can ever finish the browser login, so Cancel and the pasted key
+// are the two ways out, exactly as they are for the real one.
 const CANNED_CONNECT_CHUNKS: readonly string[] = [
   '\nOpening browser for authorization…\n',
   "If the browser doesn't open, visit: https://example.invalid/cli-auth\n"

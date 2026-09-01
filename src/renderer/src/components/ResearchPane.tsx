@@ -16,8 +16,7 @@ const INSTALL_COMMAND = 'npm i -g firecrawl-cli'
 // than a set of flags that can contradict each other.
 type ResearchActivity =
   | { readonly kind: 'idle' }
-  /** The connect dialog is open and waiting; `note` is what the CLI printed
-      so far, appended in arrival order. */
+  /** `note` is everything the CLI has printed, in arrival order. */
   | { readonly kind: 'connecting'; readonly note: Redacted }
   /** The dialog is open on a refusal; Cancel reads Close. */
   | { readonly kind: 'connectFailed'; readonly message: Redacted }
@@ -36,9 +35,8 @@ type ResearchView =
     }
 
 /**
- * What the CLI printed, as a terminal would have shown it: a carriage return
- * rewrites the line it lands on, which is how the login draws the dots it
- * counts while it waits.
+ * A carriage return rewrites the line it lands on, which is how the login draws
+ * the dots it counts while it waits.
  */
 function noticeLines(note: string): readonly string[] {
   return note
@@ -75,10 +73,8 @@ export function ResearchPane({
 
     return () => {
       current = false
-      // A flow that outlived its dialog would wait invisibly for as long as the
-      // CLI does, so leaving the section ends whatever is waiting. Asked
-      // unconditionally, because ending nothing is defined to be harmless and
-      // that costs less than a second copy here of what main already knows.
+      // A flow that outlived its dialog would wait as long as the CLI does, so
+      // leaving ends whatever is waiting; ending nothing is harmless.
       void workspace.researchCancelConnect().catch(() => {})
     }
   }, [workspace])
@@ -159,9 +155,8 @@ export function ResearchPane({
       <div className="prov">
         <span className="pname">Firecrawl CLI</span>
         <span className="pmeta">
-          {/* Each row's own fact: established is the green mark, and
-              everything else — not yet, not connected, not established — is the
-              one faint mark the mocks define. */}
+          {/* Established is the green mark; not yet, not connected and not
+              established are all the same faint one. */}
           <span
             className={`dot ${status !== undefined && installed(status) ? 'in' : 'out'}`}
             aria-hidden="true"

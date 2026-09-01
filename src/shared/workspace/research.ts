@@ -5,8 +5,8 @@
 declare const redacted: unique symbol
 
 /**
- * Text that has been through `redactKeys`. Every field below that carries CLI
- * output is one of these, so a path that forgets to redact does not compile.
+ * Every field below that carries CLI output is one of these, so a path that
+ * forgets to redact does not compile.
  */
 export type Redacted = string & { readonly [redacted]: true }
 
@@ -18,9 +18,8 @@ export const REDACTION = '[key redacted]'
 const KEY_SHAPED = /fc-[A-Za-z0-9._-]{6,}/g
 
 /**
- * Replaces anything shaped like a Firecrawl key with a marker. The only way to
- * make a `Redacted`. Pure, and shared: main mints these, and the renderer may
- * mint one for a message of its own (a rejected IPC call, say).
+ * The only way to make a `Redacted`. Shared rather than main's alone, because
+ * the renderer mints one too, for a message of its own.
  */
 export function redactKeys(text: string): Redacted {
   return text.replace(KEY_SHAPED, REDACTION) as Redacted
@@ -30,9 +29,8 @@ export function redactKeys(text: string): Redacted {
 export type ResearchStatus =
   /** The binary did not start because nothing by that name is on PATH. */
   | { readonly kind: 'notInstalled' }
-  /** It started, or failed some other way, and no status came back: a
-      non-zero exit, a timeout, output nobody can parse, a spawn error that
-      is not a missing binary. */
+  /** Started, but nothing readable came back: a non-zero exit, a timeout,
+      output nobody can parse, a spawn error that is not a missing binary. */
   | { readonly kind: 'unreadable'; readonly reason: Redacted }
   | { readonly kind: 'signedOut'; readonly version: Redacted }
   | {

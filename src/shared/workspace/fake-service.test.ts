@@ -192,9 +192,8 @@ describe('the fake workspace service', () => {
       version: '1.23.3'
     })
 
-    // The browser flow waits on a person nobody can be here, so it holds; the
-    // pasted-key fallback is the one that finishes, exactly as it does for the
-    // real CLI.
+    // Nobody can be the person the browser flow waits on, so it holds and the
+    // pasted key is the one that finishes, as it is for the real CLI.
     const waiting = service.researchConnect()
     await new Promise((resolve) => setTimeout(resolve, 5))
     expect(events.some((event) => event.type === 'research_output')).toBe(true)

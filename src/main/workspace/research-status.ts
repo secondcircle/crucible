@@ -5,10 +5,8 @@ import type { ProcessOutcome } from './research-processes'
 // the whole risk of an external output format sits behind captured fixtures.
 
 /**
- * The arguments that read the CLI's status. `doctor --json` is the CLI's own
- * machine-readable output — its help says so — and `--status` is prose with
- * terminal colours in it. The checks it reports carry the three facts this
- * section shows: the version, whether a credential is stored, and the credits.
+ * `doctor --json` is the CLI's machine-readable output; `--status` is the same
+ * facts as prose, with terminal colours in it.
  */
 export const STATUS_ARGS: readonly string[] = ['doctor', '--json']
 
@@ -85,9 +83,8 @@ function unreadable(reason: string): ResearchStatus {
 }
 
 /**
- * What one process outcome means. `noBinary` is the only thing that ever reads
- * as not installed; everything that failed some other way is unreadable, which
- * claims neither presence nor absence.
+ * `noBinary` is the only outcome that ever reads as not installed; everything
+ * else that failed is unreadable, which claims neither presence nor absence.
  */
 export function readResearchStatus(outcome: ProcessOutcome): ResearchStatus {
   switch (outcome.kind) {

@@ -216,14 +216,12 @@ describe('the shipped commands doc', () => {
   })
 })
 
-// What ships, and what every one of them has to hold. A third skill is added
-// to this list and inherits the whole shape of its checks; it cannot arrive
-// unnoticed, because the set itself is asserted.
+// A skill added here inherits the whole shape of the checks below, and one
+// that is never added fails the set, so neither can arrive unnoticed.
 const SHIPPED_SKILLS: readonly {
   readonly name: string
-  /** Every file in the folder, sorted. Markdown and nothing else. */
+  /** Sorted, like the folder listing it is compared with. */
   readonly files: readonly string[]
-  /** Two things a description must do: name the capability, and say when. */
   readonly covers: RegExp
   readonly when: RegExp
 }[] = [
@@ -321,7 +319,6 @@ describe('the firecrawl skill', () => {
     expect(text).toMatch(/Results belong in files, not in context/)
     expect(text).toContain('.firecrawl/')
     expect(text).toContain('git check-ignore -q .firecrawl/')
-    // The reason it binds harder here than in a terminal.
     expect(text).toMatch(/commits whatever its working tree\s+holds/)
     expect(text.indexOf('git check-ignore')).toBeLessThan(text.indexOf('When the tool is missing'))
   })
@@ -331,11 +328,8 @@ describe('the firecrawl skill', () => {
     expect(text).toMatch(/Report it, and never fix it/)
     expect(text).toMatch(/\*\*Not installed\*\*/)
     expect(text).toMatch(/\*\*Installed but not connected\*\*/)
-    // The install command is quoted as the human's act, and the screen that
-    // connects it is named once.
     expect(text).toMatch(/installed once, by\s+hand, with `npm i -g firecrawl-cli`/)
     expect(text).toContain('Settings → Research')
-    // With nobody to ask, the same facts go into a blocker.
     expect(text).toMatch(/put the same facts into a\s+blocker/)
   })
 
@@ -345,7 +339,6 @@ describe('the firecrawl skill', () => {
     expect(text).toMatch(/Do not install the tool, and do not\s+upgrade it/)
     expect(text).toMatch(/Do not go looking for an API\s+key/)
     expect(text).toMatch(/never fall back to a keyless or free\s+tier/)
-    // The legacy skill's two superseded lines, gone.
     expect(text).not.toMatch(/install or upgrade it if not/)
     expect(text).not.toMatch(/[Aa]uthentication is the user's to decide/)
     // No way to supply a key is named, because the agent never supplies one.

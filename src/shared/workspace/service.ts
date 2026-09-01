@@ -210,10 +210,8 @@ export interface WorkspaceService {
 
   /** Reads the research CLI's status. Never rejects: trouble is a status kind. */
   researchStatus(): Promise<ResearchStatus>
-  // Connects the CLI: the browser flow with no key, the CLI's non-interactive
-  // key login with one. At most one attempt runs at a time; a second call ends
-  // the first, which then resolves `abandoned`. No timeout — a person is in the
-  // loop, and cancelling is how the wait ends.
+  // A second call ends the attempt in flight, which then resolves `abandoned`.
+  // No timeout: a person is in the loop, and cancelling is how the wait ends.
   researchConnect(apiKey?: string): Promise<ConnectOutcome>
   // Ends an attempt still waiting; it resolves `abandoned`. Harmless when none
   // is waiting.
