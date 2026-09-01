@@ -69,6 +69,26 @@ describe('the workspace client', () => {
     ])
   })
 
+  it('carries each research operation across, the key only where there is one', async () => {
+    const surface = install(() => ({ ok: true, value: { kind: 'notInstalled' } }))
+    const service = createWorkspaceClient()
+
+    await expect(service.researchStatus()).resolves.toEqual({ kind: 'notInstalled' })
+    await service.researchConnect()
+    await service.researchConnect('fc-pasted-by-a-person')
+    await service.researchCancelConnect()
+    await service.researchDisconnect()
+
+    expect(surface.requests).toEqual([
+      { op: 'researchStatus', args: [] },
+      // Absent, not a placeholder: no key is what starts the browser flow.
+      { op: 'researchConnect', args: [] },
+      { op: 'researchConnect', args: ['fc-pasted-by-a-person'] },
+      { op: 'researchCancelConnect', args: [] },
+      { op: 'researchDisconnect', args: [] }
+    ])
+  })
+
   it('turns a refused result back into a rejection a person can read', async () => {
     install(() => ({ ok: false, message: 'That folder could not be read.' }))
     const service = createWorkspaceClient()

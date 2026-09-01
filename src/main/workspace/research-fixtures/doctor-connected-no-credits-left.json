@@ -1,0 +1,61 @@
+{
+  "checks": [
+    {
+      "name": "CLI Version",
+      "status": "pass",
+      "message": "v1.23.3 (latest)"
+    },
+    {
+      "name": "Node Runtime",
+      "status": "pass",
+      "message": "v22.11.0"
+    },
+    {
+      "name": "API Key",
+      "status": "pass",
+      "message": "fc-...9f2a (stored)"
+    },
+    {
+      "name": "API Reachability",
+      "status": "pass",
+      "message": "141ms"
+    },
+    {
+      "name": "API Key Validity",
+      "status": "pass",
+      "message": "accepted"
+    },
+    {
+      "name": "Credits",
+      "status": "fail",
+      "message": "0 remaining",
+      "fix": "Upgrade plan or buy credits at firecrawl.dev/pricing"
+    },
+    {
+      "name": "Concurrency",
+      "status": "pass",
+      "message": "0/5 jobs"
+    },
+    {
+      "name": "Local .env",
+      "status": "pass",
+      "message": "not present"
+    },
+    {
+      "name": ".gitignore",
+      "status": "pass",
+      "message": "no .firecrawl/ to ignore"
+    },
+    {
+      "name": "AI Agents",
+      "status": "pass",
+      "message": "Claude Code"
+    },
+    {
+      "name": "MCP Server",
+      "status": "warn",
+      "message": "not registered in Claude Code",
+      "fix": "firecrawl setup mcp"
+    }
+  ]
+}

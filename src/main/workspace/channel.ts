@@ -66,6 +66,12 @@ export async function invoke(service: WorkspaceService, request: unknown): Promi
     return value
   }
 
+  // The one optional argument on this surface: absent is legal, anything that
+  // is not text is refused like any other malformed argument.
+  function maybeText(position: number): string | undefined {
+    return given[position] === undefined ? undefined : text(position)
+  }
+
   switch (op) {
     case 'searchFiles':
       return service.searchFiles(text(0), text(1))
@@ -83,6 +89,14 @@ export async function invoke(service: WorkspaceService, request: unknown): Promi
       return service.issueBoard(text(0))
     case 'openUrl':
       return service.openUrl(text(0))
+    case 'researchStatus':
+      return service.researchStatus()
+    case 'researchConnect':
+      return service.researchConnect(maybeText(0))
+    case 'researchCancelConnect':
+      return service.researchCancelConnect()
+    case 'researchDisconnect':
+      return service.researchDisconnect()
     default:
       throw new Error('Crucible was asked for something its workspace service does not do.')
   }

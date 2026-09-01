@@ -249,6 +249,17 @@ export function createSdkAdapter({
       .then((pi) => pi.ModelRuntime.create())
       .then((created) => {
         models = created
+        // π's own startup pattern: the built-in catalog answers immediately,
+        // and a background refresh overlays pi.dev's current model list — so
+        // models newer than the installed SDK appear without a package bump.
+        // Fire-and-forget with π's 15s timeout; a failure leaves the static
+        // catalog in force, which is exactly what showed before this ran.
+        const controller = new AbortController()
+        const timeout = setTimeout(() => controller.abort(), 15_000)
+        void created
+          .refresh({ signal: controller.signal })
+          .catch(() => {})
+          .finally(() => clearTimeout(timeout))
         return created
       })
     return modelRuntime
