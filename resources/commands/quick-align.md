@@ -96,6 +96,11 @@ a commit. It lives in a gitignored folder inside the workspace:
   subject. Its contents are the intent brief below, nothing else.
 - Every prototype file goes beside it in the same folder, and the brief's
   source material section points at each one by path.
+- Anything under `.crucible/align/` is named by its absolute path wherever
+  the brief mentions it. The brief is read by runs working in worktrees of
+  their own, where the gitignored folder does not exist, so a relative path
+  to a prototype leads nowhere. Repository files are the opposite case:
+  every worktree has them, so those stay relative to the workspace root.
 
 If writing fails, preserve the brief at a temp path outside the repository,
 say exactly what failed and where the brief is, and stop. The brief is never
@@ -135,8 +140,8 @@ Behavior, not mechanism.>
 
 ## Prototyping
 
-- <Each prototype built: one line on what it proves and where it is attached
-  or linked. Each declined candidate, marked declined. Or "Nothing was worth
+- <Each prototype built: one line on what it proves and its absolute path.
+  Each declined candidate, marked declined. Or "Nothing was worth
   prototyping.">
 
 ## Still open
@@ -151,4 +156,4 @@ Behavior, not mechanism.>
 ## Source material (read these — do not work from paraphrase)
 
 - <Path or URL, one line each on what to take from it. Every prototype
-  belongs here, by its path beside this file.>
+  belongs here, by its absolute path.>
