@@ -6,12 +6,15 @@ import type { ModelId } from './port'
 /** An id with no entry here shows whatever the port called it. */
 export const MODEL_ALIASES: Readonly<Record<ModelId, string>> = {
   'anthropic/claude-opus-5': 'Opus',
-  'anthropic/claude-fable-5': 'Fable'
+  // Both Fables wear the same alias: the chip name doubles as the match for
+  // the provider's scoped weekly meter, which is labelled per family.
+  'anthropic/claude-fable-5': 'Fable',
+  'anthropic/claude-fable-5-1': 'Fable'
 }
 
 export const MODEL_RING: readonly ModelId[] = [
   'anthropic/claude-opus-5',
-  'anthropic/claude-fable-5'
+  'anthropic/claude-fable-5-1'
 ]
 
 export const TITLE_MODEL: ModelId = 'anthropic/claude-haiku-4-5'

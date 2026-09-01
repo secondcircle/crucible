@@ -9,7 +9,7 @@ const NOW = Date.UTC(2026, 7, 15, 12, 0, 0)
 const HOUR = 60 * 60 * 1000
 const DAY = 24 * HOUR
 
-const FABLE = 'anthropic/claude-fable-5'
+const FABLE = 'anthropic/claude-fable-5-1'
 const OPUS = 'anthropic/claude-opus-5'
 
 function meters(week: number, fable: number): QuotaMeter[] {
@@ -52,6 +52,12 @@ describe('swapping a model whose week is running ahead', () => {
 
   it('leaves the node on fable when the two meters are level, so equality never flips it', () => {
     expect(swapModel(FABLE, snapshot({ meters: meters(67, 67) }), NOW)).toBe(FABLE)
+  })
+
+  it('sends the previous fable to opus under the same pressure, both wear the meter\u2019s label', () => {
+    expect(swapModel('anthropic/claude-fable-5', snapshot({ meters: meters(67, 92) }), NOW)).toBe(
+      OPUS
+    )
   })
 
   it('swaps nothing else, however far ahead fable runs', () => {

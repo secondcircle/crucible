@@ -9,7 +9,8 @@ import type { QuotaSnapshot } from './types'
 
 /** Model id to the model that stands in for it while its own meter runs ahead. */
 export const RELIEF: Readonly<Record<ModelId, ModelId>> = {
-  'anthropic/claude-fable-5': 'anthropic/claude-opus-5'
+  'anthropic/claude-fable-5': 'anthropic/claude-opus-5',
+  'anthropic/claude-fable-5-1': 'anthropic/claude-opus-5'
 }
 
 /** π writes a model as "provider/model-id" with an optional ":thinkingLevel". */
