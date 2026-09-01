@@ -2,7 +2,7 @@ import { readdirSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import type { Skill } from '@earendil-works/pi-coding-agent'
-import { crucibleAgentDir } from '../agent/paths'
+import { crucibleAgentDir } from '../agent/paths.ts'
 
 // The file format and the discovery rules stay π's; Crucible decides only
 // which folders are read and in what order.

@@ -1,5 +1,5 @@
 import type { TranscriptItem } from './port'
-import { SKILL_TOOL, splitSkillSummary } from './skill-tool'
+import { SKILL_TOOL, splitSkillSummary } from './skill-tool.ts'
 
 // The dim line a session tree shows between two user messages. Both adapters
 // build it from real entries here, so one conversation never reads two ways.
