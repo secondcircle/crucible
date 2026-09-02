@@ -14,11 +14,8 @@ import {
 // ever committed back to the repo.
 
 /**
- * The whole rule, as a pure function:
- *
- *   none             → the repo's version   (first publish)
- *   repo > published → the repo's version   (the author bumped by hand)
- *   otherwise        → published, patch + 1 (CI's own bump)
+ * The repo's version is a floor: a first publish and a hand-bump take it,
+ * and otherwise CI bumps the patch over what actually shipped.
  */
 export function choose(repo: SemVer, published: SemVer | undefined): SemVer {
   if (published === undefined) return repo

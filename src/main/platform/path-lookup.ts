@@ -11,14 +11,11 @@ export interface PathView {
 }
 
 /**
- * PATH's own semantics on Windows and nothing more: entries split on `;`,
- * surrounding quotes dropped, the first directory that holds the name wins.
- * Windows' rules whatever machine is asking, which is what makes the callers
- * testable off Windows.
- *
- * The name is always given with its extension. Windows' own `PATHEXT` search
- * is what makes a bare name ambiguous — `bash` finds WSL, `npm` finds nothing
- * Node can spawn — and both callers here exist precisely to avoid it.
+ * PATH's own semantics on Windows, by Windows' rules whatever machine is
+ * asking — which is what makes the callers testable off Windows. The name is
+ * always given with its extension: `PATHEXT` search is what makes a bare name
+ * ambiguous — `bash` finds WSL, `npm` finds nothing Node can spawn — and both
+ * callers exist precisely to avoid it.
  */
 export function findOnWindowsPath(name: string, view: PathView): string | undefined {
   for (const directory of view.path.split(win32.delimiter)) {

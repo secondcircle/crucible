@@ -1,10 +1,9 @@
 import { posix, win32, type PlatformPath } from 'node:path'
 
 // Every decision the assembler makes that is a decision rather than a file
-// copy. They are here, as pure functions over a platform string and a few
-// facts, because none of them can be exercised on the machine that builds
-// them: a Mac cannot run a Windows install, and a test that needs
-// `%LOCALAPPDATA%` to exist proves nothing about the rule.
+// copy, as pure functions over a platform string and a few facts: none of
+// them can be exercised on the machine that builds them — a Mac cannot run a
+// Windows install.
 
 export type Platform = NodeJS.Platform
 

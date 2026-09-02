@@ -1,7 +1,6 @@
 // Packs PNGs into a Windows .ico, because macOS ships no tool that writes one
-// and the icon is needed on a Windows Start Menu shortcut. The container is a
-// header, one 16-byte directory entry per size, and the PNG bytes themselves —
-// Windows has read PNG-compressed entries since Vista.
+// and the icon is needed on a Windows Start Menu shortcut. Entries are stored
+// as raw PNG bytes, which Windows has read since Vista.
 //
 //   node scripts/make-ico.js out.ico 16.png 32.png …
 

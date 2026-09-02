@@ -13,11 +13,9 @@ export interface UpdateStager {
 }
 
 /**
- * Set while a staging install runs. The staged package's own postinstall is
- * the desktop assembler, and it must not install an app of its own here: the
- * updater assembles deliberately, into the bundle it is running from. Install
- * scripts stay on regardless, because electron's is what downloads the
- * platform binary the new bundle is built from.
+ * Set while a staging install runs, so the staged package's own postinstall —
+ * the desktop assembler — does not install a second app from under here.
+ * Install scripts stay on: electron's is what downloads the platform binary.
  */
 export const STAGING_VARIABLE = 'CRUCIBLE_UPDATE_STAGING'
 

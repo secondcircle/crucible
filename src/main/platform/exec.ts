@@ -33,13 +33,9 @@ export type ScriptSpawn =
   | { readonly ok: false; readonly message: string }
 
 /**
- * How to run a repository-owned script — `.crucible/worktree`,
- * `.crucible/worktree-setup`. A shebang is a POSIX fact, so on Windows the
- * script cannot be spawned directly and goes through the same bash.
- *
- * Without that bash the answer is a refusal, never a bare `bash`: on Windows
- * a bare lookup finds WSL, and a repository script that ran there would run
- * against another filesystem and say nothing about it.
+ * How to run a repository-owned script. A shebang is a POSIX fact, so on
+ * Windows the script cannot be spawned directly and goes through the same
+ * bash — or is refused with the reason, never handed to a bare `bash`.
  */
 export function scriptSpawn(script: string): ScriptSpawn {
   if (process.platform !== 'win32') return { ok: true, command: script, args: [] }

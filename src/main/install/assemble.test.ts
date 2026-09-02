@@ -244,13 +244,12 @@ describe('what a global install must not drag along', () => {
 })
 
 describe('a refresh that cannot remove everything first', () => {
-  // Windows holds files the running app has loaded against delete; the spec's
-  // ruling (§3.3) is that the assembler still leaves the bundle holding the
-  // new version, renaming aside what it cannot replace. A dependency that
-  // survived the failed removal must therefore still be refreshed — skipping
-  // it because it "already exists" reads last version's leftovers as this
-  // run's own work. Reproduced here with a directory the removal cannot
-  // delete, which is what a locked file does to `rmSync` on Windows.
+  // Windows holds files the running app has loaded against delete, yet the
+  // assembler must still leave the bundle holding the new version. A
+  // dependency that survived the failed removal must therefore still be
+  // refreshed — skipping it because it "already exists" reads last version's
+  // leftovers as this run's own work. Reproduced here with a directory the
+  // removal cannot delete, which is what a locked file does to `rmSync`.
   it('still refreshes a dependency the removal left behind', async () => {
     const tree = staging('1.5.0', 'linux')
     const modules = join(root, 'staging', 'node_modules')
@@ -276,13 +275,11 @@ describe('a refresh that cannot remove everything first', () => {
 })
 
 describe('a leftover the sweep cannot delete yet', () => {
-  // A `.crucible-old` name still held by the old process (its own executable,
-  // above all) unlocks only when that process exits. Until then the sweep
-  // must step past it — the comment in the sweep says the next run will get
-  // it — not fail the whole assembly: a second update published before the
-  // user restarts would otherwise never land, retried and refailed every
-  // fifteen minutes. `rmSync`'s `force` ignores only a missing path, not a
-  // delete the OS refuses.
+  // A `.crucible-old` name still held by the old process unlocks only when
+  // that process exits. Until then the sweep must step past it, not fail the
+  // assembly: a second update published before the user restarts would
+  // otherwise never land. `rmSync`'s `force` ignores only a missing path,
+  // not a delete the OS refuses.
   it('does not fail the assembly', async () => {
     const tree = staging('1.5.0', 'linux')
     const target = join(root, 'opt', 'crucible')
@@ -306,20 +303,12 @@ describe('a leftover the sweep cannot delete yet', () => {
 })
 
 describe('a refresh under a running app', () => {
-  // §4.1: the update is assembled in the background, into the bundle of a
-  // *running* app, and nothing may disturb that app until the human restarts
-  // it. On Mac and Linux the running process has the shell's libraries mmap'd
-  // (Electron Framework, libffmpeg.so): POSIX makes *replacing* such a file
-  // safe — unlink or rename leaves the old inode to the process that holds it
-  // — but writing through it does not. `copyFileSync` onto an existing path
-  // truncates and rewrites the same inode, so a background refresh mutates
-  // the very bytes the running app is executing: a page it faults in after
-  // the truncation is gone (SIGBUS) or from the new generation (two versions
-  // interleaved in one process). The retired install-stable.sh removed the
-  // old contents before copying for exactly this reason, and copyTree's own
-  // symlink branch already removes before it writes; the file branch must
-  // too. The inode is the observable fact: a safe refresh gives the path a
-  // new one and leaves the old one to whoever holds it open.
+  // The refresh happens under a running app, which has the shell's libraries
+  // mmap'd. Replacing such a file is safe — an unlink leaves the old inode to
+  // the process that holds it — but writing through it rewrites the very
+  // bytes the app is executing: SIGBUS, or two versions interleaved in one
+  // process. A new inode at the same path is the observable fact of a safe
+  // refresh.
   it('replaces the shell’s files rather than writing through them', async () => {
     const tree = staging('1.5.0', 'linux')
     const target = join(root, 'opt', 'crucible')

@@ -1,25 +1,13 @@
 import { win32 } from 'node:path'
 import { findOnWindowsPath, type PathView } from '../platform/path-lookup'
 
-// How to run npm on this machine, as a pure function over a view of it — the
-// same shape §7.4's bash discovery has, and for the same reason: the answer is
-// a per-platform fact that cannot be exercised on the machine that writes it.
+// How to run npm on this machine, as a pure function over a view of it: a
+// per-platform fact that cannot be exercised on the machine that writes it.
 //
-// The updater stages a version by driving `npm install` (§4.1), and a bare
-// `npm` spawn cannot work on Windows at all. npm ships there as `npm.cmd`, a
-// batch shim, beside an extensionless sh script; Node resolves a bare command
-// name against PATH trying only `.com` and `.exe`, so `npm` is `ENOENT`. Nor
-// does naming `npm.cmd` help: Node refuses to spawn a `.bat`/`.cmd` without a
-// shell (`EINVAL`, since the CVE-2024-27980 patch). Left alone, every update
-// check on a Windows install fails into §4.3's quiet retry and keeps failing
-// there every fifteen minutes for the life of the process — exactly the
-// "self-update that silently never lands" §3.3 rules out.
-//
-// The way out needs no shell, and so no quoting of a staging path that lives
-// under `%LOCALAPPDATA%\First Last\…`: npm is a JavaScript program, and this
-// process already carries a Node that can run it. Electron's own binary is
-// plain Node when `ELECTRON_RUN_AS_NODE` is set, so the shim on PATH is read
-// only for where it says npm's code is, and never spawned.
+// On Windows npm is a batch shim Node will neither resolve on PATH nor spawn
+// without a shell, so the shim is read only for where it says npm's code is,
+// and that code runs under this process's own binary as Node — no shell, and
+// so no quoting of the staging path.
 
 export interface MachineNpmView extends PathView {
   readonly platform: NodeJS.Platform
@@ -38,7 +26,7 @@ export type NpmSpawn =
       /** Merged into the child's environment. Empty off Windows. */
       readonly env: Readonly<Record<string, string>>
     }
-  /** Said by whoever wanted npm run; the next check retries (§4.3). */
+  /** Said by whoever wanted npm run; the next check retries. */
   | { readonly ok: false; readonly message: string }
 
 const NOT_FOUND =

@@ -8,8 +8,7 @@ export default defineConfig({
       rollupOptions: {
         // Two entries out of one build: the app's main process, and the
         // desktop installer npm runs after an install. They share the
-        // assembler, which is the point — one module decides where an app
-        // goes on each OS, and both callers get the same answer.
+        // assembler, so both get the same answer to where an app goes.
         input: {
           index: 'src/main/index.ts',
           postinstall: 'src/main/install/postinstall.ts'

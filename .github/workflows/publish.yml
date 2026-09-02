@@ -6,7 +6,7 @@
 #
 # The version is decided here and never committed back: the repo's version is a
 # floor the author raises by hand, and the registry is the record of what
-# actually shipped (scripts/publish-version.ts).
+# actually shipped.
 name: publish
 
 on:
@@ -29,8 +29,8 @@ jobs:
           node-version: 24
           registry-url: https://registry.npmjs.org
 
-      # electron is a dependency now, and its postinstall downloads a binary
-      # this job never runs. Nothing here needs it.
+      # electron's postinstall downloads a binary this job never runs. Nothing
+      # here needs it.
       - run: npm ci
         env:
           ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
@@ -42,8 +42,6 @@ jobs:
       - run: npm test
       - run: npm run build
 
-      # Writes the chosen version into the package.json about to be published,
-      # and prints it. Nothing is committed back to the repo.
       - name: Choose the version to publish
         run: node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/publish-version.ts
 

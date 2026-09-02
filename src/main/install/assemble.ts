@@ -36,13 +36,10 @@ import {
   type Platform
 } from './layout'
 
-// One module with one job: given a directory tree that holds the package and
-// its resolved dependencies, produce or refresh the desktop app at a bundle
-// location. Two callers — postinstall at install time and the in-app updater —
-// and nothing else in Crucible knows where an app lives on any OS.
-//
-// Plain Node, no dependencies, no electron import: postinstall runs it before
-// there is an app at all.
+// Given a tree that holds the package and its resolved dependencies, produce
+// or refresh the desktop app at a bundle location: nothing else in Crucible
+// knows where an app lives on any OS. Plain Node, no electron import —
+// postinstall runs it before there is an app at all.
 
 export interface AssembleRequest {
   /** The tree holding the package and its dependencies. Two shapes, see layout. */
@@ -121,8 +118,6 @@ export async function assembleDesktopApp(
   // them exits. Swept first so a bundle never grows a second generation.
   sweepRenamedAside(bundleRoot)
 
-  // The shell first, the app second: everything electron ships, then our own
-  // files inside it.
   copyTree(distRoot(platform, dist), bundleRoot, platform)
   place(join(bundleRoot, distExecutable(platform)), layout.executable, platform)
   rmSync(join(layout.resourcesDir, 'default_app.asar'), { force: true })
@@ -189,11 +184,9 @@ function copyDependencies(
   platform: Platform
 ): void {
   const into = join(appDir, 'node_modules')
-  // What this run has already placed. "A nearer root already provided it" is a
-  // fact about this run, so it is remembered here rather than read back off
-  // the bundle: the bundle also holds whatever the previous version left when
-  // a locked file made its removal fail, and an existing directory there is no
-  // evidence that *we* wrote it.
+  // "A nearer root already provided it" is a fact about this run, remembered
+  // here rather than read off the bundle: an existing directory there may be
+  // the previous version's leftover from a removal a locked file refused.
   const placed = new Set<string>()
 
   for (const root of shape.dependencyRoots) {
@@ -338,10 +331,6 @@ function copyTree(from: string, to: string, platform: Platform): void {
   chmodSync(to, stats.mode & 0o777)
 }
 
-/**
- * Puts one file where another one is. See `replacing` for what "where another
- * one is" costs on each OS.
- */
 function place(from: string, to: string, platform: Platform, how: 'move' | 'copy' = 'move'): void {
   if (from === to) return
   replacing(to, platform, () => {
@@ -351,24 +340,12 @@ function place(from: string, to: string, platform: Platform, how: 'move' | 'copy
 }
 
 /**
- * The one rule for writing anything at a path that may already hold
- * something: *replace* what is there, never write through it — which on POSIX
- * means unlinking first.
- *
- * The bundle being refreshed belongs to a running app (§4.1: the install
- * happens in the background, and only the human's click restarts it), and
- * that app has the shell's libraries mapped off these very inodes.
- * `copyFileSync` onto an existing path truncates and rewrites that same
- * inode, so writing through one is a SIGBUS at the running process's next
- * page fault into it, or two generations of Chromium interleaved in one
- * process. Unlinking leaves the old inode to whoever holds it open, and that
- * is the POSIX property §3.3 leans on when it calls the Mac and Linux swap a
- * straight copy-over.
- *
- * Windows locks the running executable and every DLL it has loaded against
- * write *and* delete but allows renaming them: there the unlink is refused
- * (silently, like every other removal here), the write is refused too, and
- * the file is renamed beside itself so the new one can take its name.
+ * Replace what a path holds, never write through it: the bundle belongs to a
+ * running app with these very inodes mapped, and writing through one rewrites
+ * bytes that app is executing, while an unlink leaves the old inode to
+ * whoever holds it open. Windows refuses the unlink for a loaded file but
+ * allows a rename, so there the file is renamed aside and the new one takes
+ * its name.
  */
 function replacing(to: string, platform: Platform, write: () => void): void {
   removeBestEffort(to)

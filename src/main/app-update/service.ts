@@ -7,14 +7,10 @@ import type {
   Unsubscribe
 } from '../../shared/app-update/service'
 
-// The installed app's updater. Poll the registry, compare against the version
-// this process is running, and when something newer is published stage it and
-// assemble it into this bundle — so that "ready" means the new version is on
-// disk and a restart away, never an instruction to go run npm by hand.
-//
-// Every collaborator is injected: the registry, the stager, the assembler, the
-// relaunch and the clock. The renderer learns none of them; it sees one
-// snapshot and one button.
+// The installed app's updater. "Ready" means the new version is staged and
+// assembled into this very bundle — on disk and a restart away, never an
+// instruction to go run npm by hand. Every collaborator is injected; the
+// renderer learns none of them, seeing one snapshot and one button.
 
 export interface MainAppUpdateService extends AppUpdateService {
   dispose(): void

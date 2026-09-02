@@ -10,7 +10,7 @@ describe('which modifier is this platform’s chord', () => {
     runningOn('darwin')
 
     expect(chordPressed({ metaKey: true, ctrlKey: false })).toBe(true)
-    // The Mac behavior this change owns: Ctrl+R stops being a chord there.
+    // Ctrl alone is no Mac chord: no Mac app answers to Ctrl+R.
     expect(chordPressed({ metaKey: false, ctrlKey: true })).toBe(false)
     expect(chordPressed({ metaKey: true, ctrlKey: true })).toBe(false)
     expect(chordPressed({ metaKey: false, ctrlKey: false })).toBe(false)

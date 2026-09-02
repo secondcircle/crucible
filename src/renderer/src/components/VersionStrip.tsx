@@ -2,15 +2,11 @@ import type { AppVersionState } from '../../../shared/app-update/service'
 import { agoLabel } from '../labels'
 import './version-strip.css'
 
-// One block for the whole app at the foot of the rail, below the quota strip
-// and above Add workspace, in the cache strip's grammar: the rail's gutter, an
-// 11.5px label line, a mono second line. What is running, whether it is
-// current, and — when a newer version is already on disk — the second door to
-// the restart the top bar pill offers. Two doors, one act.
-//
-// It says nothing it cannot support: before the first check has answered the
-// right slot is empty rather than claiming "up to date", and a dev launch
-// says plainly that nothing is being checked.
+// The rail-foot block: what is running, whether it is current, and — when a
+// newer version is already on disk — the second door to the restart the top
+// bar pill offers. It says nothing it cannot support: before the first check
+// has answered the right slot stays empty rather than claiming "up to date",
+// and a dev launch says plainly that nothing is being checked.
 
 export function VersionStrip({
   state,

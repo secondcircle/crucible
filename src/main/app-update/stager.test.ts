@@ -78,9 +78,8 @@ describe('staging a version', () => {
 
 describe('staging on a Windows install', () => {
   // Where a bare `npm` spawn cannot work at all: npm is a batch shim there.
-  // The stager runs npm's own code under electron's binary as Node, which is
-  // what keeps §4.1's background install from failing forever into §4.3's
-  // quiet retry.
+  // The stager runs npm's own code under electron's binary as Node, so the
+  // background install cannot fail silently forever.
   const NODEJS = 'C:\\Program Files\\nodejs'
   const CLI = `${NODEJS}\\node_modules\\npm\\bin\\npm-cli.js`
   const machine = (over: Partial<MachineNpmView> = {}): MachineNpmView => ({

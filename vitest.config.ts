@@ -7,11 +7,9 @@ export default defineConfig({
     // D10: component tests in jsdom. A main-process unit test opts out per file
     // with `// @vitest-environment node`.
     environment: 'jsdom',
-    // Vitest's default is five seconds, which on a saturated machine measures
-    // how many other files are running rather than whether this one is right:
-    // the suite spawns real processes and loads π's own skill reader, and
-    // those tests were failing on wall clock alone. A test that genuinely
-    // hangs still fails, twenty seconds later.
+    // The five-second default measures how saturated the machine is, not
+    // whether a file is right: the suite spawns real processes. A test that
+    // genuinely hangs still fails, twenty seconds later.
     testTimeout: 20_000,
     setupFiles: ['./vitest.setup.ts'],
     // scripts/ is in because the publish workflow's version choice decides

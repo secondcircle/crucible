@@ -4,12 +4,9 @@ import { readPackageIdentity } from './package-json'
 
 // What `npm install -g @scope/crucible` leaves behind: a real desktop app.
 // npm runs this from the installed package's own directory, which is exactly
-// the tree the assembler wants — the package plus its resolved dependencies,
-// electron's platform binary among them.
-//
-// In a repo checkout it does nothing at all: `npm ci` here must never install
-// anything to the machine, and the published tarball's missing `src/` is how
-// the two are told apart.
+// the tree the assembler wants. In a repo checkout — told apart by the `src/`
+// the published tarball lacks — it does nothing at all: `npm ci` here must
+// never install anything to the machine.
 
 async function main(): Promise<void> {
   const tree = process.cwd()

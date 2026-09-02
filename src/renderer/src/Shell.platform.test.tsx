@@ -128,8 +128,7 @@ describe('a Mac launch', () => {
 
     expect(document.querySelector('.rshint')).toHaveTextContent('⌘R all runs')
 
-    // Ctrl+B was incidentally accepted before the key module existed. It is
-    // not a Mac chord, and no Mac app treats it as one.
+    // Not a Mac chord: no Mac app treats Ctrl+B as one.
     await press('b', { ctrlKey: true })
     expect(screen.queryByRole('dialog', { name: 'Branch board' })).toBeNull()
 

@@ -1,14 +1,11 @@
 import { win32, type PlatformPath } from 'node:path'
 import { findOnWindowsPath, type PathView } from './path-lookup'
 
-// Where bash is, per OS, as a pure function over a view of the machine. A bash
-// run is bash on every OS — that is the ruling — and on Windows the bash that
-// counts is Git Bash, the one that comes with the git the app already needs.
-//
-// Never a bare `bash` lookup on Windows: `System32\bash.exe` is WSL, and a
-// command that ran there would run against another filesystem, another user
-// and another set of tools, and say nothing about it. That is a worse failure
-// than not running at all.
+// Where bash is, per OS, as a pure function over a view of the machine. On
+// Windows the bash that counts is Git Bash, never a bare `bash` lookup:
+// `System32\bash.exe` is WSL, and a command that ran there would run against
+// another filesystem, another user and another set of tools, and say nothing
+// about it — a worse failure than not running at all.
 
 /** What the discovery reads. Injected whole, so a Mac can test a Windows box. */
 export interface MachineBashView extends PathView {

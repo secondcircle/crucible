@@ -106,7 +106,7 @@ describe('npm on Windows', () => {
 
     const nothing = npmSpawn(ARGS, windows())
     expect(nothing.ok).toBe(false)
-    // The staging failure carries this into the run log, where §4.3 leaves it.
+    // The staging failure carries this into the run log.
     expect(nothing.ok === false && nothing.message).toContain('Node.js')
   })
 })

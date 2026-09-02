@@ -1,8 +1,7 @@
-/* Lifted from .crucible/align/260902-version-strip.html as approved. The same
-   grammar as the cache strip above it — rail gutter, 11.5px label line, mono
-   10.5px second line — because it is the same kind of block. Every color is a
-   token: quiet accent when an update waits, amber for a dev launch, and never
-   red, since nothing here has failed. */
+/* The same grammar as the cache strip above it — rail gutter, 11.5px label
+   line, mono 10.5px second line — because it is the same kind of block. Every
+   color is a token: quiet accent when an update waits, amber for a dev launch,
+   and never red, since nothing here has failed. */
 
 /* Uninteractive by default, so it renders as a div with no hover: there is
    nothing to click while the app is current. */
