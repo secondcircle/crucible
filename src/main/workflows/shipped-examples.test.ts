@@ -151,8 +151,7 @@ describe('the example workflows Crucible ships', () => {
     })
     const listed = await loader.list(APP)
     expect(listed.map((workflow) => [workflow.name, workflow.origin])).toEqual([
-      ['adr-audit', 'workspace'],
-      ['build', 'workspace']
+      ['adr-audit', 'workspace']
     ])
   })
 

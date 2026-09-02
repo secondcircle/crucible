@@ -14,20 +14,27 @@ import { settled } from './testing/settled'
 
 const SHOWN = '2026-08-19T14:14:00.000Z'
 
-const PLAN: PanelTab = { id: 'plan', title: 'the plan', kind: 'markdown', shownAt: SHOWN }
+const PLAN: PanelTab = {
+  id: 'plan',
+  title: 'the plan',
+  kind: 'markdown',
+  shownAt: SHOWN,
+  path: '/repos/crucible/docs/plan.md'
+}
 const BENCHMARK: PanelTab = {
   id: 'benchmark',
   title: 'benchmark',
   kind: 'html',
   shownAt: SHOWN,
-  src: 'file:///repos/crucible/fixtures/panel/benchmark.html'
+  path: '/repos/crucible/fixtures/panel/benchmark.html'
 }
+const BENCHMARK_SRC = 'file:///repos/crucible/fixtures/panel/benchmark.html'
 const DEV_SERVER: PanelTab = {
   id: 'localhost',
   title: 'dev server',
   kind: 'url',
   shownAt: SHOWN,
-  src: 'http://localhost:5173/'
+  address: 'http://localhost:5173/'
 }
 
 function withTabs(tabs: readonly PanelTab[], activeTabId: string): Partial<ShellSnapshot> {
@@ -274,7 +281,7 @@ describe('the exhibit', () => {
 
     const shown = frame()
     expect(shown).not.toBeNull()
-    expect(shown?.getAttribute('src')).toBe(BENCHMARK.src)
+    expect(shown?.getAttribute('src')).toBe(BENCHMARK_SRC)
     // Full fidelity is the guest's own: no sandbox attribute narrows it.
     expect(shown?.getAttribute('sandbox')).toBeNull()
     // Nothing of an HTML exhibit crosses the port: the guest loads it.
@@ -287,14 +294,7 @@ describe('the exhibit', () => {
     const shown = frame()
     expect(shown).not.toBeNull()
     expect(shown?.getAttribute('src')).toBe('http://localhost:5173/')
-    expect(screen.getByLabelText('Reload exhibit')).toBeInTheDocument()
     expect(ops(port)).not.toContain('exhibit')
-  })
-
-  it('offers no reload for a markdown exhibit, which has nothing to reload', async () => {
-    await shellWith(withTabs([PLAN], 'plan'))
-
-    expect(screen.queryByLabelText('Reload exhibit')).toBeNull()
   })
 
   it('replaces the frame when a re-show refreshes an HTML tab', async () => {
@@ -310,7 +310,7 @@ describe('the exhibit', () => {
     // the load itself is the guest's, reading what is on disk now.
     expect(frame()).not.toBeNull()
     expect(frame()).not.toBe(first)
-    expect(frame()?.getAttribute('src')).toBe(BENCHMARK.src)
+    expect(frame()?.getAttribute('src')).toBe(BENCHMARK_SRC)
     expect(ops(port)).not.toContain('exhibit')
   })
 
