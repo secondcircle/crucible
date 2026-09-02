@@ -343,6 +343,7 @@ function useCanvasGestures(
     element.addEventListener('click', onClick, true)
     element.addEventListener('dblclick', onDoubleClick)
     return () => {
+      press.current = undefined
       element.removeEventListener('wheel', onWheel)
       element.removeEventListener('pointerdown', onDown)
       element.removeEventListener('click', onClick, true)

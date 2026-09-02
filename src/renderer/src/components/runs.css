@@ -333,11 +333,16 @@
 /* The drawing area: one canvas the user pans and zooms, never a scroller.
    No padding — the room fit keeps is FIT_MARGIN in canvas.ts, so the number
    lives in one place. */
+/* `clip`, not `hidden`: an `overflow: hidden` box is still a scroll container,
+   and Chromium scrolls one programmatically when a descendant takes focus. A
+   scrolled canvas draws the stage somewhere the transform does not say, so the
+   fit pill, the percent snap and the zoom pivot all read off by that offset. A
+   clipped box has no scroll offset to move. */
 .gcanvas {
   flex: 1;
   min-height: 0;
   position: relative;
-  overflow: hidden;
+  overflow: clip;
   cursor: grab;
   touch-action: none;
   user-select: none;
