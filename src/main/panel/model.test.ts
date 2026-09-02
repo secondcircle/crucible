@@ -142,9 +142,6 @@ describe('panel_show', () => {
     )
   })
 
-  // The renderer displays this string and copies it; nothing about the
-  // location may differ between the two exhibit kinds, and no `file:` URL
-  // crosses.
   it('names the file the same absolute way for both exhibit kinds', () => {
     const page = file('benchmark.html')
     const notes = file('deep/nested/notes.md')

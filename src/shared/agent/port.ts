@@ -75,12 +75,10 @@ interface PanelTabBase {
 export type PanelTab =
   | (PanelTabBase & {
       readonly kind: 'html'
-      /** Absolute, as the operating system names it. */
       readonly path: string
     })
   | (PanelTabBase & {
       readonly kind: 'markdown'
-      /** Absolute, as the operating system names it. */
       readonly path: string
     })
   | (PanelTabBase & {

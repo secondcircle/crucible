@@ -128,8 +128,6 @@
   color: var(--ink);
 }
 
-/* The address row: one line at a fixed height, so the exhibit keeps every
-   other pixel and the row's height never moves with what it shows. */
 .ctx .where {
   display: flex;
   align-items: center;
@@ -197,8 +195,6 @@
   color: var(--accent2);
 }
 
-/* Out of the flow, so the confirmation costs the location no width and the
-   row no height. */
 .ctx .where .loc .copied {
   position: absolute;
   right: 6px;
@@ -211,7 +207,6 @@
   border-radius: 4px;
 }
 
-/* Never shrinks and is never overlapped: the location clips itself instead. */
 .ctx .where .refresh {
   flex: none;
   display: flex;

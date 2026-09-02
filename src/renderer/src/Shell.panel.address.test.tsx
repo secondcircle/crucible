@@ -16,7 +16,6 @@ import { settled } from './testing/settled'
 
 const SHOWN = '2026-09-01T09:00:00.000Z'
 
-/** A worktree session's own file: the case the whole row exists for. */
 const BRIEF_PATH = '/repos/crucible/.crucible/worktrees/run-47c8/.crucible/align/260828-addons.md'
 
 const BRIEF: PanelTab = {
@@ -87,7 +86,6 @@ const guest = (): HTMLElement | null => document.querySelector('.exhibit webview
 const ops = (port: ScriptedPort): string[] => port.calls.map((call) => call.op)
 const reads = (port: ScriptedPort): number => ops(port).filter((op) => op === 'exhibit').length
 
-/** The whole location, as the row draws it in its two parts. */
 const shown = (): string => location().textContent?.replace('copied', '') ?? ''
 
 /** jsdom knows nothing of a <webview>, so the guest is given the one method the panel calls. */
@@ -99,7 +97,6 @@ function reloadable(): string[] {
   return calls
 }
 
-/** Electron's in-place navigation, as much of one as the row reads. */
 async function navigate(url: string): Promise<void> {
   const mounted = guest()
   if (mounted === null) throw new Error('there is no guest to navigate')
@@ -170,8 +167,6 @@ describe('what the row shows', () => {
     expect(tail?.tagName).toBe('B')
   })
 
-  // Nothing but the snapshot tells the renderer where an exhibit is: a path
-  // that exists nowhere on this machine reads exactly the same.
   it('shows what the port said, having resolved and checked nothing itself', async () => {
     const nowhere: PanelTab = { ...BRIEF, path: '/nowhere/at/all/invented.md' }
     const port = await shellWith(withTabs([nowhere], 'addons'))
@@ -282,8 +277,6 @@ describe('clicking the location', () => {
     }
   })
 
-  // Whatever the row could fit, the clipboard gets the location itself: what
-  // is drawn is a split of one string, never a second string of its own.
   it('copies the whole location, not the two parts the row drew', async () => {
     await shellWith(withTabs([BRIEF], 'addons'))
 
@@ -389,8 +382,6 @@ describe('the refresh control', () => {
     expect(shown()).toBe(BRIEF_PATH)
   })
 
-  // Two clicks put two reads of one file in flight. The newest read that has
-  // come back wins, never the last one to arrive.
   it('never paints an older read over a newer one', async () => {
     const port = await shellWith(withTabs([BRIEF], 'addons'))
     const waiting: ((body: string) => void)[] = []
@@ -431,7 +422,6 @@ describe('the refresh control', () => {
     expect(guest()).toBe(mounted)
     expect(guest()?.getAttribute('src')).toBe(src)
     expect(guest()?.getAttribute('sandbox')).toBeNull()
-    // Nothing of an html exhibit crosses the port: the guest fetches it.
     expect(ops(port)).not.toContain('exhibit')
   })
 
@@ -465,7 +455,6 @@ describe('the refresh control', () => {
     expect(glyph()).toHaveClass('turning')
   })
 
-  // The one fix the mock's approval was conditioned on: the box never turns.
   it('spins the glyph inside the control, never the control', async () => {
     await shellWith(withTabs([BRIEF], 'addons'))
 
@@ -598,8 +587,6 @@ describe('a web tab\u2019s row follows its guest', () => {
       fireEvent.click(refresh())
     })
 
-    // Reloading a guest that has navigated is what keeps it where it is; a
-    // remount would take it back to the address in `src`.
     expect(reloads).toEqual(['reload'])
     expect(guest()).toBe(mounted)
     expect(guest()?.getAttribute('src')).toBe('http://localhost:5241/extras')
@@ -617,8 +604,6 @@ describe('a web tab\u2019s row follows its guest', () => {
     const port = await shellWith(withTabs([BRIEF, DEV_SERVER], 'extras'))
     await navigate('http://localhost:5241/extras/confirm')
 
-    // A re-show remounts the guest, which comes back at the address the agent
-    // showed.
     await act(async () => {
       port.showTab('s1', { ...DEV_SERVER, shownAt: '2026-09-01T10:00:00.000Z' })
     })
@@ -695,8 +680,6 @@ describe('a web tab\u2019s row follows its guest', () => {
     expect(shown()).toBe('http://localhost:5241/extras')
   })
 
-  // The fourth way a guest is unmounted and comes back, after a re-show, a tab
-  // switch and a session switch: the panel itself goes to the edge strip.
   it('forgets where a guest went across a collapse and back', async () => {
     await shellWith(withTabs([DEV_SERVER], 'extras'))
     await navigate('http://localhost:5241/extras/confirm')

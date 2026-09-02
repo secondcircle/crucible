@@ -109,8 +109,6 @@ describe('what a show puts on the port', () => {
   })
 })
 
-// The same relative path names a different file in a worktree session than in
-// a checkout one, which is the whole reason the row shows an absolute path.
 describe('where the session works', () => {
   it('names the worktree\u2019s own file, not the checkout\u2019s', async () => {
     const worktree = mkdtempSync(join(tmpdir(), 'crucible-shell-worktree-'))
@@ -120,8 +118,6 @@ describe('where the session works', () => {
     writeFileSync(join(worktree, 'plan.md'), '# the worktree plan', 'utf8')
     exhibit('plan.md', '# the checkout plan')
 
-    // What the shell binds a session's agent to, read back from the snapshot
-    // the port hands out.
     const snapshot = await shell.snapshot()
     const worksIn = (id: SessionId): string =>
       sessionOf(snapshot, id)?.worktree?.path ?? workspace

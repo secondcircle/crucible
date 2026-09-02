@@ -1,17 +1,14 @@
 import { useEffect, useRef, useState } from 'react'
 import type { ShownLocation } from './exhibit-location'
 
-/** How long "copied" stands in the row. The mock's 900ms. */
 const COPIED_MS = 900
 
-/** The address row: where the active tab's exhibit is, and the one refresh control. */
 export function AddressRow({
   location,
   onCopy,
   onRefresh
 }: {
   readonly location: ShownLocation
-  /** Handed the whole location, so what is copied cannot be what was displayed. */
   readonly onCopy: (whole: string) => void
   readonly onRefresh: () => void
 }): React.JSX.Element {

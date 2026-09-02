@@ -22,7 +22,6 @@ interface ExhibitWebview extends HTMLElement {
   reload(): void
 }
 
-/** Electron's in-place navigation events, as much of one as the row reads. */
 interface GuestNavigation extends Event {
   readonly url: string
 }
@@ -30,19 +29,15 @@ interface GuestNavigation extends Event {
 /** A link click, a redirect and a history push, in that order of likelihood. */
 const GUEST_NAVIGATION = ['did-navigate', 'did-navigate-in-page'] as const
 
-/** The one mounted exhibit: the guest's React key, and the owner of the state below. */
 type ExhibitMount = string
 
 function mountOf(sessionId: SessionId, tab: PanelTab): ExhibitMount {
   return `${sessionId}:${tab.id}:${tab.shownAt}`
 }
 
-/** What the user has done to the mounted exhibit since it mounted. */
 interface LiveExhibit {
   readonly of: ExhibitMount
-  /** Refresh clicks against this mount. A markdown tab re-reads on every bump. */
   readonly refreshes: number
-  /** Where a url guest navigated in place; absent until it does. */
   readonly navigated?: string
 }
 
@@ -60,7 +55,6 @@ export function ContextPanel({
   /** Pixels once the divider has been dragged; the default until then. */
   readonly width?: number
   readonly port: AgentPort
-  /** Writes the whole location to the system clipboard. The row says so itself. */
   readonly onCopyLocation: (location: string) => void
   readonly onResize: (width: number) => void
   readonly onCollapse: () => void
@@ -91,8 +85,6 @@ export function ContextPanel({
   function refresh(): void {
     if (active === undefined || mount === undefined) return
     if (active.kind === 'markdown') {
-      // Main reads the file at call time, so a bumped generation is the whole
-      // of a re-read.
       setHeld({ ...live, of: mount, refreshes: live.refreshes + 1 })
       return
     }
@@ -204,8 +196,6 @@ export function ContextPanel({
           </div>
         </div>
 
-        {/* Where the active tab's exhibit is, and the panel's one refresh
-            control. Between the strip and the exhibit, at every width. */}
         {active === undefined ? null : (
           <AddressRow
             location={shownLocation(active, live.navigated)}
@@ -253,21 +243,15 @@ function Exhibit({
   readonly sessionId: SessionId
   readonly tab: PanelTab | undefined
   readonly port: AgentPort
-  /** Bumped by a refresh click; a markdown exhibit re-reads on every bump. */
   readonly refreshes: number
   readonly viewRef: React.RefObject<ExhibitWebview | null>
-  /** Where a url guest went in place. Never called for a file tab. */
   readonly onNavigate: (url: string) => void
 }): React.JSX.Element {
-  // Held in a ref so the ref callback below keeps one identity across renders:
-  // React tears a ref's subscription down whenever that identity changes.
   const notify = useRef(onNavigate)
   useEffect(() => {
     notify.current = onNavigate
   })
 
-  // A file tab's row names the file that was read, whatever its guest does, so
-  // only a url guest is listened to at all.
   const follows = tab?.kind === 'url'
   const mounted = useCallback(
     (guest: HTMLElement | null) => {
@@ -309,10 +293,8 @@ function Exhibit({
   )
 }
 
-/** One answer to one read of one mount. */
 interface ExhibitRead {
   readonly of: ExhibitMount
-  /** The refresh generation this read was asked at. */
   readonly at: number
   readonly answer:
     | { readonly kind: 'body'; readonly markdown: string }
@@ -338,9 +320,6 @@ function MarkdownExhibit({
   // means for the view: the same tab, fetched again.
   const of = mountOf(sessionId, tab)
 
-  // Which mount a landing answer is allowed to speak for. Written before the
-  // read below is asked for, so a read of the mount just left is discarded
-  // rather than painted under the tab that replaced it.
   const showing = useRef(of)
   useEffect(() => {
     showing.current = of

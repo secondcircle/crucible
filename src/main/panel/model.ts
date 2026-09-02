@@ -324,10 +324,6 @@ export function createPanelModel({
   }
 }
 
-// The one place a stored tab becomes a tab on the port. Every kind carries
-// where its exhibit is, and a file carries it in the form the OS names it: the
-// renderer displays that string, copies it, and builds a guest's `file:` URL
-// from it, resolving nothing of its own.
 function crossing(tab: Tab): PanelTab {
   const carried = { id: tab.id, title: tab.title, shownAt: tab.shownAt }
   if (tab.kind === 'url') return { ...carried, kind: 'url', address: tab.path }
