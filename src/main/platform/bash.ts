@@ -1,4 +1,5 @@
 import { win32, type PlatformPath } from 'node:path'
+import { findOnWindowsPath, type PathView } from './path-lookup'
 
 // Where bash is, per OS, as a pure function over a view of the machine. A bash
 // run is bash on every OS — that is the ruling — and on Windows the bash that
@@ -10,11 +11,8 @@ import { win32, type PlatformPath } from 'node:path'
 // than not running at all.
 
 /** What the discovery reads. Injected whole, so a Mac can test a Windows box. */
-export interface MachineBashView {
+export interface MachineBashView extends PathView {
   readonly platform: NodeJS.Platform
-  /** `PATH`, as the process has it. */
-  readonly path: string
-  readonly exists: (path: string) => boolean
 }
 
 export type BashLocation =
@@ -31,7 +29,7 @@ export function discoverBash(view: MachineBashView): BashLocation {
 
   // Windows paths, composed by Windows rules, whatever machine is asking.
   const { dirname, join } = paths
-  const git = findOnPath('git.exe', view)
+  const git = findOnWindowsPath('git.exe', view)
   if (git !== undefined) {
     // Git for Windows lays out `<root>\cmd\git.exe`, `<root>\bin\git.exe` and
     // `<root>\bin\bash.exe`, so bash is one directory up and one across from
@@ -52,18 +50,6 @@ export function discoverBash(view: MachineBashView): BashLocation {
   return { ok: false, message: NOT_FOUND }
 }
 
-// PATH's own semantics, and nothing more: the first directory that holds the
-// name wins. `System32` can hold `bash.exe`, which is why nothing here ever
-// looks for one.
-function findOnPath(name: string, view: MachineBashView): string | undefined {
-  for (const directory of view.path.split(paths.delimiter)) {
-    if (directory === '') continue
-    const candidate = paths.join(directory.replace(/^"|"$/g, ''), name)
-    if (view.exists(candidate)) return candidate
-  }
-  return undefined
-}
-
 // Everything below the platform check is Windows-only, so the rules are
-// Windows' own: `;` between PATH entries, backslashes between segments.
+// Windows' own: backslashes between segments, whatever machine is asking.
 const paths: PlatformPath = win32

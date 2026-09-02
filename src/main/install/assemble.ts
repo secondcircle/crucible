@@ -322,8 +322,8 @@ function copyTree(from: string, to: string, platform: Platform): void {
   // `Versions/Current` and the links beside it — and following them instead
   // would triple the bundle and leave a shape no framework has.
   if (stats.isSymbolicLink()) {
-    rmSync(to, { recursive: true, force: true })
-    symlinkSync(readlinkSync(from), to)
+    const target = readlinkSync(from)
+    replacing(to, platform, () => symlinkSync(target, to))
     return
   }
   if (stats.isDirectory()) {
@@ -339,25 +339,49 @@ function copyTree(from: string, to: string, platform: Platform): void {
 }
 
 /**
- * Puts one file where another one is, replacing whatever was there. Windows
- * locks the running executable and every DLL it has loaded against write and
- * delete but allows renaming them, so a file that cannot be replaced is
- * renamed beside itself first. Everywhere else POSIX simply allows the write.
+ * Puts one file where another one is. See `replacing` for what "where another
+ * one is" costs on each OS.
  */
 function place(from: string, to: string, platform: Platform, how: 'move' | 'copy' = 'move'): void {
   if (from === to) return
-  const put = (): void => {
+  replacing(to, platform, () => {
     if (how === 'copy') copyFileSync(from, to)
     else renameSync(from, to)
-  }
+  })
+}
+
+/**
+ * The one rule for writing anything at a path that may already hold
+ * something: *replace* what is there, never write through it — which on POSIX
+ * means unlinking first.
+ *
+ * The bundle being refreshed belongs to a running app (§4.1: the install
+ * happens in the background, and only the human's click restarts it), and
+ * that app has the shell's libraries mapped off these very inodes.
+ * `copyFileSync` onto an existing path truncates and rewrites that same
+ * inode, so writing through one is a SIGBUS at the running process's next
+ * page fault into it, or two generations of Chromium interleaved in one
+ * process. Unlinking leaves the old inode to whoever holds it open, and that
+ * is the POSIX property §3.3 leans on when it calls the Mac and Linux swap a
+ * straight copy-over.
+ *
+ * Windows locks the running executable and every DLL it has loaded against
+ * write *and* delete but allows renaming them: there the unlink is refused
+ * (silently, like every other removal here), the write is refused too, and
+ * the file is renamed beside itself so the new one can take its name.
+ */
+function replacing(to: string, platform: Platform, write: () => void): void {
+  removeBestEffort(to)
   try {
-    put()
+    write()
     return
   } catch (cause) {
-    if (!swapsAside(platform, cause)) throw cause
+    // Nothing left to rename aside means the removal above succeeded and the
+    // write failed for a reason of its own — a real failure, raised as it is.
+    if (!swapsAside(platform, cause) || !existsSync(to)) throw cause
   }
   renameSync(to, renamedAside(to))
-  put()
+  write()
 }
 
 function sweepRenamedAside(directory: string): void {
