@@ -126,7 +126,7 @@ export function layOutGraph(nodes: readonly RunNode[]): GraphLayout {
     ...new Set(node.parents.filter((parent) => parent !== node.id && index.has(parent)))
   ]
 
-  const reading = readLoops(nodes)
+  const reading = loopsInRunOrder(nodes, parentsOf)
   const rows = rowsOf(nodes, parentsOf, reading)
   const columns = columnsOf(nodes, parentsOf, reading, rows, cardWidth)
 
@@ -256,6 +256,62 @@ export function edgeState(
   if (from?.status === 'pending' || to?.status === 'pending') return 'planned'
   if (to?.status !== 'complete' && to?.status !== 'failed') return 'walking'
   return 'walked'
+}
+
+/**
+ * The record's loops, read in the order the run walked rather than the order
+ * the array holds. A workflow's `plan` registers the nodes it forecasts up
+ * front and the engine writes each back into its planned slot when it runs, so
+ * a node the plan never saw — a fixer, a second review — lands at the end of
+ * the array while nodes that ran long after it keep early slots. Read as it
+ * stands, such a record puts the merge gate inside the review loop it actually
+ * follows. The spots come back aligned with `nodes`, as `LoopReading` requires.
+ */
+function loopsInRunOrder(
+  nodes: readonly RunNode[],
+  parentsOf: (node: RunNode) => readonly string[]
+): LoopReading {
+  const order = runOrder(nodes, parentsOf)
+  const read = readLoops(order.map((at) => nodes[at]))
+  const spots: NodeSpot[] = nodes.map(() => ({ kind: 'spine' }))
+  order.forEach((at, place) => {
+    spots[at] = read.spots[place]
+  })
+  return { spots, loops: read.loops }
+}
+
+/**
+ * Record positions in the order the run walked them: a stable topological
+ * read, where a node follows every parent the record can honor, a node that
+ * has not started yet follows every node that has, and record order settles
+ * the rest. Statuses are not read — a node's own `startedAt` is what says
+ * whether it has run — so a loop mid-flight still reads like a finished one
+ * and only the plan's untouched forecasts move to the back. A record that
+ * walks into itself leaves nothing ready, and falls back to record order.
+ */
+function runOrder(
+  nodes: readonly RunNode[],
+  parentsOf: (node: RunNode) => readonly string[]
+): number[] {
+  const read = new Set<string>()
+  const taken = nodes.map(() => false)
+  const order: number[] = []
+  while (order.length < nodes.length) {
+    let pick = -1
+    let first = -1
+    for (let at = 0; at < nodes.length; at++) {
+      if (taken[at]) continue
+      if (first === -1) first = at
+      if (!parentsOf(nodes[at]).every((parent) => read.has(parent))) continue
+      if (pick === -1 || (nodes[at].startedAt !== undefined && nodes[pick].startedAt === undefined))
+        pick = at
+    }
+    const next = pick === -1 ? first : pick
+    taken[next] = true
+    read.add(nodes[next].id)
+    order.push(next)
+  }
+  return order
 }
 
 /** Ids are never truncated, so the longest one is what sizes every card. */
