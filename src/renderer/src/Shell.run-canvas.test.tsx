@@ -1,10 +1,4 @@
 // @vitest-environment jsdom
-//
-// The graph pane as a canvas: it opens fit and centred, the user pans and
-// zooms it with the pointer, and the two pills say where the view stands and
-// put it back. Driven through the same scripted run seam as the rest of the
-// run surfaces — the record is the whole input, and every assertion here is
-// something a person could see.
 import { act, fireEvent, render, screen, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it } from 'vitest'
 import type { ShellSnapshot } from '../../shared/agent/port'
@@ -83,7 +77,6 @@ function mount(runs: readonly RunRecord[]) {
   return { port, workflowRuns, view }
 }
 
-/** ⌘R, then Open run: the one door every run has. */
 async function openRun(runs: readonly RunRecord[] = [runOf()]) {
   const rig = mount(runs)
   await act(settled)
@@ -110,7 +103,6 @@ const cardFor = (id: string): HTMLElement => {
   return found
 }
 
-/** What the pane is drawn with, read back off the one transform. */
 function view(): {
   x: number
   y: number
@@ -132,7 +124,6 @@ function view(): {
   }
 }
 
-/** A canvas of a known size, since jsdom lays nothing out on its own. */
 async function sizeCanvas(width: number, height: number): Promise<void> {
   const element = canvas()
   element.getBoundingClientRect = () =>
@@ -158,7 +149,6 @@ const percentPill = (): HTMLElement => document.querySelector('.ghead .pill.pct'
 
 const detailHeader = (): string => document.querySelector('.detail .dhead .n')?.textContent ?? ''
 
-/** One wheel over the canvas, reporting whether the pane took the event. */
 function wheel(over: HTMLElement, init: WheelEventInit): boolean {
   const event = new WheelEvent('wheel', { bubbles: true, cancelable: true, ...init })
   act(() => {
@@ -167,7 +157,6 @@ function wheel(over: HTMLElement, init: WheelEventInit): boolean {
   return event.defaultPrevented
 }
 
-/** A press, a move and a release, as a browser delivers them. */
 async function press(
   on: HTMLElement,
   from: { x: number; y: number },
@@ -194,14 +183,11 @@ describe('the pane is a canvas', () => {
     await openRun()
     await sizeCanvas(600, 500)
 
-    // One drawing area, one stage, and nothing left of the scroller it was.
     expect(document.querySelectorAll('.gcanvas')).toHaveLength(1)
     expect(document.querySelectorAll('.cstage')).toHaveLength(1)
     expect(document.querySelector('.gscroll')).toBeNull()
     expect(canvas().contains(stage())).toBe(true)
 
-    // Cards and edges are one drawing: they move and scale together, under a
-    // single transform on the stage.
     const drawn = [...stage().children].map((child) => child.tagName.toLowerCase())
     expect(new Set(drawn)).toEqual(new Set(['svg', 'button']))
     expect(drawn.filter((tag) => tag === 'button')).toHaveLength(6)
@@ -236,7 +222,6 @@ describe('the pane is a canvas', () => {
       fireEvent.click(path)
       await settled()
     })
-    // The frontier is what the view opens on; clicking a line changes nothing.
     expect(detailHeader()).toBe('gate-alignment-1')
   })
 })
@@ -250,17 +235,14 @@ describe('fit, and when it stays live', () => {
     const opened = view()
     expect(opened.scale).toBeLessThanOrEqual(1)
     expect(opened.scale).toBeGreaterThanOrEqual(0.25)
-    // Centred: the room left of the drawing is the room right of it.
     expect(2 * opened.x + opened.width * opened.scale).toBeCloseTo(600, 6)
     expect(2 * opened.y + opened.height * opened.scale).toBeCloseTo(500, 6)
 
-    // A narrower pane refits by itself, with nobody touching anything.
     await sizeCanvas(300, 300)
     const tighter = view()
     expect(tighter.scale).toBeLessThan(opened.scale)
     expect(2 * tighter.x + tighter.width * tighter.scale).toBeCloseTo(300, 6)
 
-    // And so does a run that grew a node.
     await act(async () => {
       const grown = runOf()
       workflowRuns.setRuns([
@@ -283,11 +265,9 @@ describe('fit, and when it stays live', () => {
     expect(pill('fit')).toHaveAttribute('aria-pressed', 'false')
     expect(view().y).toBeCloseTo(opened.y - 40, 6)
 
-    // Held: the pane changing size now moves nothing.
     await sizeCanvas(400, 400)
     expect(view()).toEqual({ ...opened, y: opened.y - 40 })
 
-    // The fit pill refits and lights again, from any view.
     await act(async () => {
       fireEvent.click(pill('fit'))
       await settled()
@@ -335,9 +315,7 @@ describe('zoom', () => {
     })
     expect(view().scale).toBe(1)
     expect(percentPill().textContent).toBe('100%')
-    // Snapping is a zoom, so the fit pill goes dark with it.
     expect(pill('fit')).toHaveAttribute('aria-pressed', 'false')
-    // About the centre of the pane: what was in the middle still is.
     const snapped = view()
     expect(snapped.x + snapped.width / 2).toBeCloseTo(
       fitted.x + (fitted.width * fitted.scale) / 2,
@@ -354,11 +332,9 @@ describe('zoom', () => {
     expect(wheel(canvas(), { deltaY: -50, metaKey: true, clientX: 200, clientY: 150 })).toBe(true)
     const zoomed = view()
     expect(zoomed.scale).toBeGreaterThan(before.scale)
-    // The point of the drawing under the cursor did not move.
     expect(zoomed.x + under.x * zoomed.scale).toBeCloseTo(200, 4)
     expect(zoomed.y + under.y * zoomed.scale).toBeCloseTo(150, 4)
 
-    // At the ceiling, another turn of the wheel changes nothing at all.
     for (let turn = 0; turn < 12; turn++) {
       wheel(canvas(), { deltaY: -100, ctrlKey: true, clientX: 200, clientY: 150 })
     }
@@ -381,7 +357,6 @@ describe('zoom', () => {
     const zoomed = view()
     expect(zoomed.scale).toBeCloseTo(before.scale * 1.5, 6)
 
-    // On a card a double-click selects and does nothing else.
     await act(async () => {
       fireEvent.click(cardFor('builder'))
       fireEvent.doubleClick(cardFor('builder'))
@@ -400,8 +375,6 @@ describe('pan, and the click that still selects', () => {
 
     await press(cardFor('builder'), { x: 120, y: 120 }, { x: 180, y: 90 })
 
-    // One for one with the pointer, and the drag did not select the card it
-    // began on.
     const panned = view()
     expect(panned.x).toBeCloseTo(before.x + 60, 6)
     expect(panned.y).toBeCloseTo(before.y - 30, 6)
@@ -419,7 +392,6 @@ describe('pan, and the click that still selects', () => {
 
     expect(detailHeader()).toBe('review-1')
     expect(cardFor('review-1').className).toContain('sel')
-    // Selecting is not a gesture: the view is where it was, and fit is live.
     expect(view()).toEqual(before)
     expect(pill('fit')).toHaveAttribute('aria-pressed', 'true')
   })
@@ -462,7 +434,6 @@ describe('pan, and the click that still selects', () => {
     await openRun()
     await sizeCanvas(300, 200)
 
-    // Zoomed in far enough that cards spill past the pane's edges.
     for (let turn = 0; turn < 10; turn++) {
       wheel(canvas(), { deltaY: -100, metaKey: true, clientX: 0, clientY: 0 })
     }
@@ -473,8 +444,6 @@ describe('pan, and the click that still selects', () => {
     expect(top).toBeLessThan(200)
     expect(bottom).toBeGreaterThan(200)
 
-    // A press on a button focuses it before the pointer moves: that is what a
-    // browser does, and a click or a drag on a card is always such a press.
     await act(async () => {
       fireEvent.pointerDown(spilling, { button: 0, clientX: 280, clientY: 190 })
       spilling.focus()
@@ -485,7 +454,6 @@ describe('pan, and the click that still selects', () => {
       fireEvent.click(spilling, { clientX: 280, clientY: 190 })
       await settled()
     })
-    // Selected, and the view is exactly where it was.
     expect(detailHeader()).toBe('planner')
     expect(view()).toEqual(before)
 
@@ -500,8 +468,6 @@ describe('pan, and the click that still selects', () => {
       fireEvent.click(spilling, { clientX: 180, clientY: 190 })
       await settled()
     })
-    // One for one with the pointer: a hundred pixels, not a hundred plus a
-    // jump to show the card whole.
     expect(view().x).toBeCloseTo(before.x - 100, 6)
     expect(view().y).toBeCloseTo(before.y, 6)
   })
@@ -517,8 +483,6 @@ describe('pan, and the click that still selects', () => {
     expect(after.scale).toBe(before.scale)
     expect(after.x).toBeCloseTo(before.x - 30, 6)
     expect(after.y).toBeCloseTo(before.y + 20, 6)
-    // Taken by the canvas, so nothing outside it scrolls; the detail column's
-    // own wheel is left alone.
     const detail = document.querySelector('.detail') as HTMLElement
     const passed = new WheelEvent('wheel', { bubbles: true, cancelable: true, deltaY: 40 })
     detail.dispatchEvent(passed)
@@ -553,8 +517,6 @@ describe('the keyboard', () => {
     await openRun()
     await sizeCanvas(600, 500)
 
-    // A drag that starts on the canvas and ends over the detail column: the
-    // browser fires its click on the common ancestor, never on the canvas.
     await act(async () => {
       fireEvent.pointerDown(canvas(), { button: 0, clientX: 10, clientY: 10 })
       fireEvent.pointerMove(window, { clientX: 700, clientY: 10 })
@@ -570,7 +532,6 @@ describe('the keyboard', () => {
     })
     expect(detailHeader()).toBe('gate-alignment-1')
 
-    // Enter on a focused card is a click the card itself raises.
     await act(async () => {
       cardFor('builder').focus()
       fireEvent.click(cardFor('builder'))
@@ -583,7 +544,6 @@ describe('the keyboard', () => {
     await openRun()
     await sizeCanvas(300, 200)
 
-    // Zoomed in far enough that the end of the run is off the pane.
     for (let turn = 0; turn < 10; turn++) {
       wheel(canvas(), { deltaY: -100, metaKey: true, clientX: 0, clientY: 0 })
     }

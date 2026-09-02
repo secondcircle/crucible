@@ -2,14 +2,6 @@ import type { RunNode } from '../../../shared/workflows/run'
 import { money, nodeDuration, shortModel } from './format'
 import { readLoops, type Loop, type LoopReading, type NodeSpot } from './loops'
 
-// The run graph's geometry: a pure function from a run record's nodes to
-// positioned cards and routed edges. Layered top-down, longest-path depth, one
-// column per root, independent subtrees side by side — and a loop read out of
-// the ids laid sideways, one column per round, with the spine resuming under
-// the loop's first column. The same record always yields the identical
-// picture — that determinism is what lets the graph be read at a glance and
-// what these numbers are tested on.
-
 /** Below this a card stops being readable, whatever its ids are. */
 const MIN_CARD_WIDTH = 168
 
@@ -38,7 +30,6 @@ const CHANNEL_CLEARANCE = 10
 /** Room around the drawing, so a card's outline is not clipped by the pane. */
 const CANVAS_MARGIN = 4
 
-/** How far a return edge rounds the two corners of its band. */
 const CORNER = 12
 
 export type CardTone = 'done' | 'live' | 'bad' | 'wait' | 'parked'
@@ -61,33 +52,21 @@ export interface CardFace {
 export interface GraphCard {
   readonly node: RunNode
   readonly id: string
-  /**
-   * The row the card sits on, counting from the top. Outside a loop this is
-   * still longest-path depth from the roots; inside one it is the loop's top
-   * row plus the node's index in its round, so a later round can sit level
-   * with the first.
-   */
   readonly layer: number
   readonly x: number
   readonly y: number
 }
 
-/** How one edge travels, decided before any path is written. */
 export type EdgeRoute =
-  /** Adjacent rows with nothing in the way: straight, or gently curved. */
   | { readonly kind: 'direct' }
-  /** Down a free vertical lane at this x, clear of every card it passes. */
   | { readonly kind: 'lane'; readonly lane: number }
-  /** Round to round: out of the parent's right side, into the child's left. */
   | { readonly kind: 'across' }
-  /** Out of a loop: down the lane, back along the band at `band`, into the child's top. */
   | { readonly kind: 'return'; readonly lane: number; readonly band: number }
 
 export interface GraphEdge {
   readonly from: string
   readonly to: string
   readonly route: EdgeRoute
-  /** SVG path data, derived here from `route` and the two cards. */
   readonly d: string
 }
 
@@ -96,15 +75,10 @@ export interface GraphLayout {
   readonly edges: readonly GraphEdge[]
   readonly cardWidth: number
   readonly cardHeight: number
-  /**
-   * The drawing's extent: every card and every point of every path lies
-   * inside (0,0)–(width,height).
-   */
   readonly width: number
   readonly height: number
 }
 
-/** A stretch of a row that is already taken, in layout units. */
 interface Span {
   readonly from: number
   readonly to: number
@@ -130,8 +104,6 @@ export function layOutGraph(nodes: readonly RunNode[]): GraphLayout {
   const rows = rowsOf(nodes, parentsOf, reading)
   const columns = columnsOf(nodes, parentsOf, reading, rows, cardWidth)
 
-  // Cards stay positionally aligned with the record: `raw[at]` draws
-  // `nodes[at]`, which is what `reading.spots[at]` describes.
   const raw: GraphCard[] = nodes.map((node) => {
     const layer = rows.get(node.id) ?? 0
     return {
@@ -143,9 +115,6 @@ export function layOutGraph(nodes: readonly RunNode[]): GraphLayout {
     }
   })
 
-  // Routes first, positions after: a bow to the left of the leftmost card or a
-  // band above the topmost one moves the whole drawing, and a path string
-  // cannot be re-read.
   const routes = nodes.flatMap((node, at) =>
     parentsOf(node).map((parent) => {
       const from = raw[index.get(parent) as number]
@@ -277,14 +246,6 @@ function metaLines(node: RunNode): number {
     .length
 }
 
-/**
- * Every node's row. A loop member's row is its loop's top row plus its index
- * in its round, so every round starts level with the first. Any other node
- * sits one below the lowest row its parents release — and a parent inside a
- * loop releases the row under the loop's deepest one, which is what puts the
- * node after a loop below the whole excursion. For a record with no loop this
- * is longest-path depth, exactly as it has always been.
- */
 function rowsOf(
   nodes: readonly RunNode[],
   parentsOf: (node: RunNode) => readonly string[],
@@ -296,8 +257,6 @@ function rowsOf(
   const rows = new Map<string, number>()
   const tops = new Map<number, number>()
 
-  // The row a parent releases to its children: the one under itself, or the
-  // one under the whole loop it stands in.
   function releaseOf(id: string, walking: Set<string>): number {
     const spot = spots.get(id)
     if (spot !== undefined && spot.kind === 'loop') {
@@ -346,16 +305,6 @@ function rowsOf(
   return rows
 }
 
-/**
- * Every card's left edge. Rows are placed top down, one weakly connected
- * component at a time, by the rules the graph has always had: siblings
- * adjacent and centred under their parent, a fan-in under the spread of its
- * parents, record order settling ties, and a block that wants taken room
- * starting where the last one ended. Loops enter in two places — a loop's
- * leading node reserves its whole rectangle from its own column rightward, and
- * a parent inside a loop anchors its children at that lead column, so the
- * spine leaves the loop straight under where it entered.
- */
 function columnsOf(
   nodes: readonly RunNode[],
   parentsOf: (node: RunNode) => readonly string[],
@@ -375,8 +324,6 @@ function columnsOf(
     return spot !== undefined && spot.kind === 'loop' ? spot : undefined
   }
 
-  // Where a child of this node wants to stand: under the node, or under the
-  // first column of the loop it sits in.
   const anchorOf = (id: string): number | undefined => {
     const spot = spots.get(id)
     if (spot !== undefined && spot.kind === 'loop') return leadX.get(spot.loop)
@@ -387,8 +334,6 @@ function columnsOf(
     const anchors = parentsOf(node)
       .map(anchorOf)
       .filter((x): x is number => x !== undefined)
-    // A root wants nothing in particular, so it packs to the left in record
-    // order and starts its own column.
     return anchors.length === 0
       ? Number.NEGATIVE_INFINITY
       : anchors.reduce((sum, x) => sum + x + cardWidth / 2, 0) / anchors.length
@@ -398,8 +343,6 @@ function columnsOf(
     const blocked = reserved.get(at) ?? []
     reserved.set(at, blocked)
 
-    // The loop's leading node first: its column is where the whole loop
-    // stands, and everything placed after it keeps clear of the room it takes.
     for (const node of row) {
       const spot = loopOf(node)
       if (spot === undefined || leads.get(spot.loop) !== node) continue
@@ -409,8 +352,6 @@ function columnsOf(
       reserve(reading.loops[spot.loop], x, at, reserved, cardWidth)
     }
 
-    // The loop's other nodes stand in their round's column, not under their
-    // own parents: that is what makes the rounds read left to right.
     const free: RunNode[] = []
     for (const node of row) {
       if (left.has(node.id)) continue
@@ -426,8 +367,6 @@ function columnsOf(
     }
 
     const wanted = new Map(free.map((node) => [node.id, wantedFor(node)]))
-    // Stable, so the record's own order settles every tie and the picture
-    // holds still as the run grows.
     const ordered = [...free].sort((a, b) => {
       const wantsA = wanted.get(a.id) as number
       const wantsB = wanted.get(b.id) as number
@@ -437,8 +376,6 @@ function columnsOf(
 
     let cursor = Number.NEGATIVE_INFINITY
     for (let held = 0; held < ordered.length; ) {
-      // Cards wanting the same spot are one parent's siblings; they sit
-      // adjacent, and the block as a whole is centred where they wanted to be.
       const centre = wanted.get(ordered[held].id) as number
       let end = held
       while (end < ordered.length && wanted.get(ordered[end].id) === centre) end += 1
@@ -457,8 +394,6 @@ function columnsOf(
   for (const component of componentOrder(nodes, parentsOf, index)) {
     const members = component.map((id) => byId.get(id) as RunNode)
     const deepest = Math.max(...members.map((node) => rows.get(node.id) ?? 0))
-    // Room a loop has reserved, by row. Held per component, because
-    // components already stand in bands of their own.
     const reserved = new Map<number, Span[]>()
     for (let row = 0; row <= deepest; row++) {
       placeRow(
@@ -470,8 +405,6 @@ function columnsOf(
     const xs = members.map((node) => left.get(node.id) ?? 0)
     const shift = componentStart - Math.min(...xs)
     for (const node of members) left.set(node.id, (left.get(node.id) ?? 0) + shift)
-    // The loops of this component move with it, so a child placed later still
-    // lands under the loop's first column.
     for (const [loop, lead] of leads) {
       if (members.includes(lead)) leadX.set(loop, left.get(lead.id) ?? 0)
     }
@@ -481,7 +414,6 @@ function columnsOf(
   return left
 }
 
-/** Where a block of cards lands: where it wants, past what is already taken. */
 function placeBlock(
   count: number,
   centre: number,
@@ -498,7 +430,6 @@ function placeBlock(
   return x
 }
 
-/** The room one loop takes: its rounds wide, its deepest round tall. */
 function reserve(
   loop: Loop | undefined,
   x: number,
@@ -515,7 +446,6 @@ function reserve(
   }
 }
 
-/** Each node's spot by id, the first of a repeated id winning. */
 function spotsById(nodes: readonly RunNode[], reading: LoopReading): Map<string, NodeSpot> {
   const spots = new Map<string, NodeSpot>()
   nodes.forEach((node, at) => {
@@ -524,7 +454,6 @@ function spotsById(nodes: readonly RunNode[], reading: LoopReading): Map<string,
   return spots
 }
 
-/** The node that opens each loop, which is where its first column stands. */
 function leadingNodes(nodes: readonly RunNode[], reading: LoopReading): Map<number, RunNode> {
   const leads = new Map<number, RunNode>()
   nodes.forEach((node, at) => {
@@ -569,11 +498,6 @@ function componentOrder(
     .map(([, members]) => members)
 }
 
-/**
- * How one edge travels, first match winning: sideways from one round to the
- * next, back along the band under a loop it is leaving, down a free lane when
- * it crosses cards, or straight from one row to the next.
- */
 function routeFor(
   from: GraphCard,
   to: GraphCard,
@@ -596,7 +520,6 @@ function routeFor(
   return lane === undefined ? { kind: 'direct' } : { kind: 'lane', lane }
 }
 
-/** The spot of the node a card draws; cards and spots share the record's order. */
 function spotAt(
   reading: LoopReading,
   cards: readonly GraphCard[],
@@ -621,7 +544,6 @@ function channelFor(
   return freeLane((from.x + to.x) / 2 + cardWidth / 2, from, to, cards, cardWidth)
 }
 
-/** The free x nearest `wanted`, clear of every card in the rows between two cards. */
 function freeLane(
   wanted: number,
   from: GraphCard,
@@ -651,7 +573,6 @@ function merge(spans: [number, number][]): [number, number][] {
   return merged
 }
 
-/** The same route, translated with the drawing it belongs to. */
 function moved(route: EdgeRoute, offset: { x: number; y: number }): EdgeRoute {
   switch (route.kind) {
     case 'lane':
@@ -663,7 +584,6 @@ function moved(route: EdgeRoute, offset: { x: number; y: number }): EdgeRoute {
   }
 }
 
-/** The path one route draws between two cards. Every command is absolute. */
 function pathFor(
   route: EdgeRoute,
   from: GraphCard,
@@ -683,7 +603,6 @@ function pathFor(
   }
 }
 
-/** Out of the parent's bottom, into the child's top, straight or gently bent. */
 function directPath(
   from: GraphCard,
   to: GraphCard,
@@ -699,11 +618,6 @@ function directPath(
   return `M${x1},${y1} C${x1},${y1 + bend} ${x2},${y2 - bend} ${x2},${y2}`
 }
 
-/**
- * An edge crossing layers makes its sideways move inside the empty bands
- * between them and runs its length down a clear lane, so it goes around the
- * cards rather than through them.
- */
 function lanePath(
   lane: number,
   from: GraphCard,
@@ -726,12 +640,6 @@ function lanePath(
   )
 }
 
-/**
- * Round to round: out of the parent's right side and into the child's left,
- * inside the empty band between the two columns. A round further off than the
- * next one goes round by the band above both cards rather than through what
- * stands between.
- */
 function acrossPath(
   from: GraphCard,
   to: GraphCard,
@@ -752,10 +660,6 @@ function acrossPath(
   return `M${x1},${y1} L${out},${y1} L${out},${band} L${back},${band} L${back},${y2} L${x2},${y2}`
 }
 
-/**
- * Out of a loop: down the lane below the parent, back along the empty band
- * beneath the loop, and into the top of the node the run moved on to.
- */
 function returnPath(
   lane: number,
   band: number,
@@ -787,7 +691,6 @@ function returnPath(
   )
 }
 
-/** Every x (`axis` 0) or y (`axis` 1) a path names, control points included. */
 function coordsOf(d: string, axis: 0 | 1): number[] {
   return (d.match(/-?\d+(?:\.\d+)?/g) ?? [])
     .map(Number)

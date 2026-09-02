@@ -352,8 +352,6 @@
   cursor: grabbing;
 }
 
-/* One transform for the whole drawing: cards, their text and every edge move
-   and scale together. */
 .cstage {
   position: absolute;
   left: 0;

@@ -40,7 +40,6 @@ const card = (layout: ReturnType<typeof layOutGraph>, id: string) => {
 const centre = (layout: ReturnType<typeof layOutGraph>, id: string): number =>
   card(layout, id).x + layout.cardWidth / 2
 
-/** A record as a chain: every node follows the one the record names before it. */
 function chain(ids: readonly string[]): RunNode[] {
   return ids.map((id, at) => nodeOf(id, at === 0 ? [] : [ids[at - 1]]))
 }
@@ -50,7 +49,6 @@ interface Point {
   readonly y: number
 }
 
-/** Every point a path visits, its curves flattened, control points dropped. */
 function along(d: string): Point[] {
   const walked: Point[] = []
   let at: Point = { x: 0, y: 0 }
@@ -67,7 +65,6 @@ function along(d: string): Point[] {
   return walked
 }
 
-/** de Casteljau, which is all a curve is: corners cut until a point is left. */
 function bezier(points: readonly Point[], t: number): Point {
   let held = points
   while (held.length > 1) {
@@ -96,7 +93,6 @@ function expectNothingOverlaps(layout: Layout): void {
   }
 }
 
-/** No edge passes through a card: touching an edge of one is what a line does. */
 function expectNoEdgeCrossesACard(layout: Layout): void {
   for (const edge of layout.edges) {
     for (const point of along(edge.d)) {
@@ -112,7 +108,6 @@ function expectNoEdgeCrossesACard(layout: Layout): void {
   }
 }
 
-/** The reported extent holds every card and every point of every path. */
 function expectExtentHoldsEverything(layout: Layout): void {
   for (const one of layout.cards) {
     expect(one.x).toBeGreaterThanOrEqual(0)
@@ -132,7 +127,6 @@ function expectExtentHoldsEverything(layout: Layout): void {
   }
 }
 
-/** The build run of the intent brief: one loop of three rounds, then the gate. */
 const LOOPED: RunNode[] = [
   ...chain([
     'analyst',
@@ -150,7 +144,6 @@ const LOOPED: RunNode[] = [
   nodeOf('gate-verdict-1', ['gate-alignment-1', 'gate-comments-1'])
 ]
 
-/** The merge gate looping once: a loop whose first round is four deep. */
 const GATE: RunNode[] = chain([
   'gate-alignment-1',
   'gate-comments-1',
@@ -369,15 +362,12 @@ describe('a loop, laid out left to right', () => {
   }
 
   it('gives each round a column, left to right, and stacks the round down it', () => {
-    // Three rounds, three columns, evenly apart and never overlapping.
     const columns = ['review-1', 'review-2', 'review-3'].map((id) => card(layout, id).x)
     expect(columns[0]).toBeLessThan(columns[1])
     expect(columns[1]).toBeLessThan(columns[2])
     expect(columns[1] - columns[0]).toBe(columns[2] - columns[1])
     expect(columns[1] - columns[0]).toBeGreaterThan(layout.cardWidth)
 
-    // Every round starts on the loop's top row, and its nodes stack one row
-    // apart in record order: review-2, check-fixer-1, fixer-2 down one column.
     expect(card(layout, 'review-2').layer).toBe(card(layout, 'review-1').layer)
     expect(card(layout, 'review-3').layer).toBe(card(layout, 'review-1').layer)
     expect(card(layout, 'fixer-1').layer).toBe(card(layout, 'review-1').layer + 1)
@@ -390,10 +380,7 @@ describe('a loop, laid out left to right', () => {
   })
 
   it('stands the loop on the spine and brings the run back under its first column', () => {
-    // Where the leading node would have gone anyway: under its parent.
     expect(centre(layout, 'review-1')).toBeCloseTo(centre(layout, 'builder'), 5)
-    // And the spine leaves the loop where it entered it, three rows down —
-    // the loop's deepest round — however wide the loop got.
     expect(centre(layout, 'gate-alignment-1')).toBeCloseTo(centre(layout, 'review-1'), 5)
     expect(card(layout, 'gate-alignment-1').layer).toBe(card(layout, 'review-1').layer + 3)
     const spine = ['analyst', 'architect', 'builder', 'review-1', 'gate-alignment-1']
@@ -408,9 +395,7 @@ describe('a loop, laid out left to right', () => {
     const wider = layOutGraph(chain(['a-1', 'p-1', 'a-2', 'p-2', 'a-3']))
 
     expect([columnsOf(two), rowsOf(two)]).toEqual([2, 2])
-    // A node added to a round deepens the loop and never widens it.
     expect([columnsOf(deeper), rowsOf(deeper)]).toEqual([2, 3])
-    // A round added widens it and never deepens it.
     expect([columnsOf(wider), rowsOf(wider)]).toEqual([3, 2])
   })
 
@@ -427,8 +412,6 @@ describe('a loop, laid out left to right', () => {
     const beside = layOutGraph([
       nodeOf('planner'),
       nodeOf('builder', ['planner']),
-      // Before the loop opens, so it is a sibling of the leading node rather
-      // than a member of its first round.
       nodeOf('audit', ['builder']),
       nodeOf('review-1', ['builder']),
       nodeOf('fixer-1', ['review-1']),
@@ -437,8 +420,6 @@ describe('a loop, laid out left to right', () => {
     ])
 
     expectNothingOverlaps(beside)
-    // The sibling keeps the row it always had, and stands clear of the room
-    // the loop takes rather than in the middle of it.
     expect(card(beside, 'audit').layer).toBe(card(beside, 'review-1').layer)
     expect(card(beside, 'audit').x).toBeGreaterThanOrEqual(
       card(beside, 'review-2').x + beside.cardWidth
@@ -451,15 +432,11 @@ describe('a loop, laid out left to right', () => {
     expect(route('fixer-2', 'review-3').route).toEqual({ kind: 'across' })
     expect(route('review-2', 'check-fixer-1').route).toEqual({ kind: 'direct' })
 
-    // Out of the parent's right side and into the child's left, even though
-    // the child sits higher on the page.
     const across = along(route('fixer-1', 'review-2').d)
     expect(across[0].x).toBe(card(layout, 'fixer-1').x + layout.cardWidth)
     expect(across[across.length - 1].x).toBe(card(layout, 'review-2').x)
     expect(card(layout, 'review-2').y).toBeLessThan(card(layout, 'fixer-1').y)
 
-    // Leaving the loop: down, back along the empty band beneath the loop, and
-    // into the top of the node the run moved on to.
     const out = route('review-3', 'gate-alignment-1')
     expect(out.route.kind).toBe('return')
     const band = out.route.kind === 'return' ? out.route.band : 0
@@ -484,8 +461,6 @@ describe('a loop, laid out left to right', () => {
 
   it('draws the same loop twice, whatever the nodes are doing', () => {
     expect(layOutGraph(LOOPED.map((node) => ({ ...node })))).toEqual(layout)
-    // Status plays no part in the geometry: a loop mid-flight draws its
-    // rounds where a finished one draws them.
     const flying = layOutGraph(
       LOOPED.map((node) =>
         node.id === 'review-3' ? { ...node, status: 'running' as const, endedAt: undefined } : node
@@ -500,8 +475,6 @@ describe('a loop, laid out left to right', () => {
   it('draws round numbers that gap, that fall and that never arrive', () => {
     const gapped = chain(['review-1', 'fixer-1', 'review-4', 'ship-1'])
     const falling = chain(['review-2', 'fixer-1', 'review-1', 'fixer-2'])
-    // A leading name that opens on its own last round, so the rounds it would
-    // have led never arrive.
     const abandoned = chain(['review-3', 'ship', 'review-1', 'review-2'])
 
     for (const record of [gapped, falling, abandoned]) {
@@ -531,12 +504,7 @@ describe('a loop, laid out left to right', () => {
     expect(held.edges.filter((edge) => edge.to === 'fixer-1')).toHaveLength(1)
     expectNothingOverlaps(held)
     expectExtentHoldsEverything(held)
-    // A cycle's back edge is drawn level with the card it came from, which is
-    // the one shape no route can keep clear; such a record asks only to be
-    // drawn at all.
 
-    // Two nodes under one id are one place in a picture that names places by
-    // id: they still get a card each, and the drawing still ends.
     const twinned = layOutGraph([
       nodeOf('review-1'),
       nodeOf('fixer-1', ['review-1']),
@@ -547,12 +515,6 @@ describe('a loop, laid out left to right', () => {
     expect(Number.isFinite(twinned.height)).toBe(true)
   })
 
-  // The intent's 12-node build run, in the order the engine actually wrote it
-  // (workflow-runs/d420/run.json): the build workflow's `plan` registers the
-  // gate's three nodes right after `review-1`, and a planned node keeps its
-  // slot when it finally runs, so the record's order is not the run's order.
-  // The picture the intent promises for this run is one review loop of three
-  // rounds with the gate on the spine under it.
   it('draws the gate under the review loop when the record holds the gate’s planned slots first', () => {
     const held = layOutGraph([
       nodeOf('analyst'),
@@ -569,14 +531,11 @@ describe('a loop, laid out left to right', () => {
       nodeOf('review-3', ['fixer-2', 'analyst', 'architect', 'review-1', 'review-2'])
     ])
 
-    // Three rounds, three columns, each round stacked down its own.
     expect(card(held, 'review-2').x).toBeGreaterThan(card(held, 'review-1').x)
     expect(card(held, 'review-3').x).toBeGreaterThan(card(held, 'review-2').x)
     expect(card(held, 'fixer-1').x).toBe(card(held, 'review-1').x)
     expect(card(held, 'check-fixer-1').x).toBe(card(held, 'review-2').x)
     expect(card(held, 'fixer-2').x).toBe(card(held, 'review-2').x)
-    // The gate is the spine again: under the loop's first column, below its
-    // deepest row, not stacked inside round 1.
     const loopBottom = Math.max(
       ...['review-1', 'fixer-1', 'review-2', 'check-fixer-1', 'fixer-2', 'review-3'].map(
         (id) => card(held, id).layer
@@ -588,9 +547,6 @@ describe('a loop, laid out left to right', () => {
     }
   })
 
-  // The same run mid-flight (workflow-runs/ad2d/run.json at the time of this
-  // review): the gate's nodes are still the plan's pending ghosts, forecast
-  // under `review-1`, while the review loop is on its second round.
   it('keeps the gate’s pending ghosts out of the review loop while the run is in flight', () => {
     const ghost = (id: string, parents: string[]): RunNode =>
       nodeOf(id, parents, { status: 'pending', startedAt: undefined, endedAt: undefined })

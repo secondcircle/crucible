@@ -1,14 +1,4 @@
 // @vitest-environment node
-//
-// What a loop is, read from ids alone. Nothing declares a loop, so this is the
-// whole inference: a base name that recurs with rising round numbers, the
-// rounds it opens, and which of the nodes between them belong to which round.
-// A pure function of the record — its ids, the parents it can honor and when
-// each node started — with no pane, no view and no status in it.
-//
-// The engine's own records are read here beside the hand-written ones, because
-// the array order a workflow's `plan` leaves behind is not the order the run
-// walked and the reading has to recover that first.
 import { describe, expect, it } from 'vitest'
 import type { RunNode } from '../../../shared/workflows/run'
 import { baseName, readLoops, roundNumber, type LoopReading } from './loops'
@@ -24,7 +14,6 @@ function nodeOf(id: string, overrides: Partial<RunNode> = {}): RunNode {
   }
 }
 
-/** A node that has run, with the parents the plan gave it and a start time. */
 function ran(id: string, parents: string[], minute = 0): RunNode {
   const at = String(minute).padStart(2, '0')
   return nodeOf(id, {
@@ -34,17 +23,14 @@ function ran(id: string, parents: string[], minute = 0): RunNode {
   })
 }
 
-/** A node the plan forecast and the run has not reached: no start, no clock. */
 function forecast(id: string, parents: string[]): RunNode {
   return nodeOf(id, { status: 'pending', parents })
 }
 
-/** The record's ids as a chain, each following the one before it. */
 function chain(ids: readonly string[]): RunNode[] {
   return ids.map((id, at) => nodeOf(id, { parents: at === 0 ? [] : [ids[at - 1]] }))
 }
 
-/** What the reading says, in the record's own words: the loops and the spine. */
 function shapeOf(
   nodes: readonly RunNode[]
 ): { readonly spine: string[]; readonly loops: string[][][] } {
@@ -64,7 +50,6 @@ function shapeOf(
   return { spine, loops }
 }
 
-/** The build run the intent brief is drawn from. */
 const BUILD = [
   'analyst',
   'architect',
@@ -80,7 +65,6 @@ const BUILD = [
   'gate-verdict-1'
 ]
 
-/** The merge gate looping once. */
 const GATE = [
   'gate-alignment-1',
   'gate-comments-1',
@@ -97,7 +81,6 @@ describe('what an id carries', () => {
     expect(roundNumber('gate-alignment-12')).toBe(12)
     expect(roundNumber('builder')).toBeUndefined()
     expect(roundNumber('analyst')).toBeUndefined()
-    // A revision is the engine's replay of one node, not a round of a loop.
     expect(roundNumber('review-1·r1')).toBeUndefined()
   })
 
@@ -120,8 +103,6 @@ describe('the loops a record holds', () => {
         ['review-3']
       ]
     ])
-    // check-fixer-1 sits in round 2 even though its base name appears once,
-    // and the merge gate that follows starts the spine again.
     expect(spine).toEqual([
       'analyst',
       'architect',
@@ -167,8 +148,6 @@ describe('the loops a record holds', () => {
   })
 
   it('admits a stranger mid-loop and refuses one in the last round', () => {
-    // `audit` is nobody's round; mid-loop it joins the round in progress, and
-    // in the last round the same name ends the loop instead.
     const { spine, loops } = shapeOf(
       chain(['review-1', 'audit', 'review-2', 'audit', 'review-3', 'audit', 'shipper'])
     )
@@ -180,8 +159,6 @@ describe('the loops a record holds', () => {
         ['review-3', 'audit']
       ]
     ])
-    // The third `audit` was admitted because the loop had already shown that
-    // base name; `shipper` had not been seen, so it resumes the spine.
     expect(spine).toEqual(['shipper'])
   })
 
@@ -215,20 +192,14 @@ describe('the loops a record holds', () => {
     const once = readLoops(nodes)
 
     expect(readLoops([...nodes])).toEqual(once)
-    // A record the run already walked in array order reads the same with its
-    // parents dropped: they only ever settle an order the array got wrong.
     expect(readLoops(nodes.map((node) => ({ ...node, parents: [] })))).toEqual(once)
   })
 
   it('reads a record the engine would never write without inventing a loop', () => {
-    // A leading name whose later rounds never arrive is not a loop: the second
-    // `review-1` opens nothing that closes, so its nodes stay on the spine.
     expect(shapeOf(chain(['review-1', 'review-2', 'ship', 'review-1', 'fixer-9']))).toEqual({
       spine: ['ship', 'review-1', 'fixer-9'],
       loops: [[['review-1'], ['review-2']]]
     })
-    // A repeated round number, and round numbers with gaps: both draw, both
-    // deterministically.
     expect(shapeOf(chain(['review-1', 'review-1', 'after']))).toEqual({
       spine: ['review-1', 'review-1', 'after'],
       loops: []
@@ -249,7 +220,6 @@ describe('the loops a record holds', () => {
       expect(spot.loop).toBeGreaterThanOrEqual(0)
       expect(spot.loop).toBeLessThan(held.loops.length)
     }
-    // Every loop is a real one, and its summary is a reading of its own spots.
     held.loops.forEach((loop, at) => {
       expect(loop.rounds).toBeGreaterThanOrEqual(2)
       expect(loop).toEqual({
@@ -262,13 +232,6 @@ describe('the loops a record holds', () => {
 })
 
 describe('the order the run walked, which the record’s array is not', () => {
-  // The build workflow's `plan` registers the merge gate's three nodes up
-  // front, right behind `review-1`, and the engine writes a planned node back
-  // into its own slot when it finally runs; the fixers and the later reviews
-  // the plan never forecast are appended at the end. This is the intent's
-  // 12-node run exactly as the engine wrote it (workflow-runs/d420/run.json),
-  // and the reading it must give is the intent's: one review loop of three
-  // rounds, the gate back on the spine after it.
   const ENGINE_BUILD: RunNode[] = [
     ran('analyst', []),
     ran('architect', ['analyst']),
@@ -302,15 +265,10 @@ describe('the order the run walked, which the record’s array is not', () => {
       'gate-comments-1',
       'gate-verdict-1'
     ])
-    // Spots stay aligned with the array they were given, whatever order they
-    // were read in: the gate's slot is the fifth, and it is a spine spot.
     expect(readLoops(ENGINE_BUILD).spots[4]).toEqual({ kind: 'spine' })
   })
 
   it('leaves the plan’s forecasts out of the loop they were forecast into', () => {
-    // The same run in flight, on its second review round. The gate's nodes are
-    // still ghosts the plan hung under `review-1`; nothing has run them, so
-    // they read after everything that has run, on the spine.
     const { spine, loops } = shapeOf([
       ran('analyst', [], 1),
       ran('architect', ['analyst'], 2),
@@ -340,11 +298,6 @@ describe('the order the run walked, which the record’s array is not', () => {
   })
 
   it('lets the clock settle two nodes the parents leave level', () => {
-    // `audit` and the reviews all hang off `builder`, so nothing about the
-    // parents says which ran when. The record's own start times do: `audit`
-    // ran after the last review opened, so it is the run moving on and not a
-    // stranger caught in the first round, which is where the array's order
-    // would have put it.
     const { spine, loops } = shapeOf([
       ran('builder', [], 1),
       ran('review-1', ['builder'], 2),
@@ -357,8 +310,6 @@ describe('the order the run walked, which the record’s array is not', () => {
   })
 
   it('reads a record that walks into itself, in the order the array holds it', () => {
-    // Nothing is ever ready in a cycle. The reading falls back to the array,
-    // one node at a time, rather than hanging the window (R64).
     const nodes = [
       nodeOf('review-1', { parents: ['review-2'] }),
       nodeOf('fixer-1', { parents: ['review-1'] }),

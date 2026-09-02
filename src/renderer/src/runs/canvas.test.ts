@@ -1,11 +1,4 @@
 // @vitest-environment node
-//
-// The view the graph pane is looked at through: what fit resolves to, what a
-// gesture does to it, and what it takes to end a live fit. A value and its
-// transitions, so none of it needs a window — and the one rule that matters
-// most is structural: while fit is live the view holds no numbers, so a
-// drawing that grew or a pane that changed size is refitted by the next read
-// rather than by an event that might not fire.
 import { describe, expect, it } from 'vitest'
 import {
   DOUBLE_CLICK_STEP,
@@ -29,7 +22,6 @@ const frameOf = (drawing: [number, number], room: [number, number]): Frame => ({
   room: { width: room[0], height: room[1] }
 })
 
-/** Where a point of the drawing lands in the pane, which is what a pivot holds. */
 const shownAt = (view: GraphView, frame: Frame, point: { x: number; y: number }) => {
   const placement = placementOf(view, frame)
   return {
@@ -51,7 +43,6 @@ describe('fit', () => {
     const placement = placementOf(OPENING_VIEW, frame)
 
     expect(placement.scale).toBeCloseTo((800 - 2 * FIT_MARGIN) / 2000, 10)
-    // Centred on both axes, with the margin kept on the tighter one.
     expect(placement.at.x).toBeCloseTo(FIT_MARGIN, 10)
     expect(placement.at.y).toBeCloseTo((600 - 1000 * placement.scale) / 2, 10)
   })
@@ -60,9 +51,7 @@ describe('fit', () => {
     const placement = placementOf(OPENING_VIEW, frameOf([10_000, 10_000], [800, 600]))
 
     expect(placement.scale).toBe(MIN_SCALE)
-    // Centred horizontally, so the spine stays in the middle of the pane.
     expect(placement.at.x).toBe((800 - 10_000 * MIN_SCALE) / 2)
-    // And the top of the drawing at the margin, so the roots are what is seen.
     expect(placement.at.y).toBe(FIT_MARGIN)
   })
 
@@ -78,7 +67,6 @@ describe('fit', () => {
     const grown = placementOf(OPENING_VIEW, frameOf([400, 900], [800, 600]))
     const narrowed = placementOf(OPENING_VIEW, frameOf([400, 400], [500, 600]))
 
-    // The same view, and the picture is whole and centred in all three.
     expect(grown.scale).toBeLessThan(small.scale)
     expect(grown.at.y).toBeCloseTo((600 - 900 * grown.scale) / 2, 10)
     expect(narrowed.at.x).toBeCloseTo((500 - 400 * narrowed.scale) / 2, 10)
@@ -103,7 +91,6 @@ describe('zoom', () => {
     const after = placementOf(zoomed, frame)
 
     expect(after.scale).toBeCloseTo(before.scale * 2, 10)
-    // The point of the drawing under the pointer is where it was.
     const held = { x: (about.x - before.at.x) / before.scale, y: (about.y - before.at.y) / before.scale }
     expect(shownAt(zoomed, frame, held).x).toBeCloseTo(about.x, 8)
     expect(shownAt(zoomed, frame, held).y).toBeCloseTo(about.y, 8)
@@ -116,7 +103,6 @@ describe('zoom', () => {
 
     expect(placementOf(far, frame).scale).toBe(MAX_SCALE)
     expect(placementOf(near, frame).scale).toBe(MIN_SCALE)
-    // At a limit, asking for more leaves the placement identical.
     expect(placementOf(zoomedBy(far, frame, { x: 100, y: 100 }, 4), frame)).toEqual(
       placementOf(far, frame)
     )
@@ -132,21 +118,17 @@ describe('zoom', () => {
 
     expect(placement.scale).toBe(1)
     expect(Math.round(placement.scale * 100)).toBe(100)
-    // About the point given: what was in the middle of the pane still is.
     expect(placement.at.x).toBeCloseTo(centre.x - 1000 / 2, 8)
   })
 
   it('takes a pinch and a ⌘ or ctrl wheel as one thing, and a plain wheel as a pan', () => {
     expect(wheelIntent({ deltaX: 0, deltaY: -10, ctrlKey: true, metaKey: false }).kind).toBe('zoom')
     expect(wheelIntent({ deltaX: 0, deltaY: -10, ctrlKey: false, metaKey: true }).kind).toBe('zoom')
-    // Away from the user zooms in, towards them zooms out.
     const inward = wheelIntent({ deltaX: 0, deltaY: -10, ctrlKey: true, metaKey: false })
     const outward = wheelIntent({ deltaX: 0, deltaY: 10, ctrlKey: true, metaKey: false })
     expect(inward.kind === 'zoom' && inward.factor).toBeGreaterThan(1)
     expect(outward.kind === 'zoom' && outward.factor).toBeLessThan(1)
 
-    // A plain wheel or two-finger scroll pans, on both axes, the way a
-    // scrolled page's content moves.
     const panning = wheelIntent({ deltaX: 12, deltaY: 30, ctrlKey: false, metaKey: false })
     expect(panning).toEqual({ kind: 'pan', by: { x: -12, y: -30 } })
   })
@@ -159,9 +141,7 @@ describe('what ends a live fit', () => {
     expect(panned(OPENING_VIEW, frame, { x: 10, y: 0 }).kind).toBe('held')
     expect(zoomedBy(OPENING_VIEW, frame, { x: 0, y: 0 }, DOUBLE_CLICK_STEP).kind).toBe('held')
     expect(zoomedTo(OPENING_VIEW, frame, { x: 0, y: 0 }, 1).kind).toBe('held')
-    // A move the system makes on the user's behalf is not the user's gesture.
     expect(revealed(OPENING_VIEW, frame, { x: 0, y: 0, width: 10, height: 10 }).kind).toBe('fit')
-    // And the fit pill puts it back from anywhere.
     expect(OPENING_VIEW).toEqual({ kind: 'fit', shift: { x: 0, y: 0 } })
   })
 
@@ -172,7 +152,6 @@ describe('what ends a live fit', () => {
 
     expect(after.scale).toBe(before.scale)
     expect(after.at).toEqual({ x: before.at.x - 40, y: before.at.y + 25 })
-    // Held: the drawing growing moves nothing now.
     expect(placementOf(view, frameOf([1000, 4000], [800, 600]))).toEqual(after)
   })
 
@@ -197,7 +176,6 @@ describe('keeping a focused card in view', () => {
 
   it('makes the smallest move that brings the card whole into the pane', () => {
     const view = { kind: 'held', scale: 1, at: { x: 0, y: 0 } } as const
-    // Off the right edge and below: the card's far corner lands on the pane's.
     const moved = revealed(view, frame, card(500, 700))
     const placement = placementOf(moved, frame)
 
@@ -216,15 +194,12 @@ describe('keeping a focused card in view', () => {
   })
 
   it('keeps a live fit live, nudging the fitted placement instead', () => {
-    // A floored fit that cannot show everything: the roots are anchored, so a
-    // card further down needs the view to move to be seen at all.
     const moved = revealed(OPENING_VIEW, frame, card(0, 9000))
 
     expect(moved.kind).toBe('fit')
     const placement = placementOf(moved, frame)
     expect(placement.scale).toBe(MIN_SCALE)
     expect(placement.at.y + 9000 * MIN_SCALE + 60 * MIN_SCALE).toBeCloseTo(400, 8)
-    // And never far enough to pull the drawing's own edge into the pane.
     expect(placementOf({ kind: 'fit', shift: { x: 0, y: -100_000 } }, frame).at.y).toBe(
       400 - FIT_MARGIN - 10_000 * MIN_SCALE
     )

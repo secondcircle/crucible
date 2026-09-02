@@ -18,12 +18,6 @@ import {
 import { cardFace, edgeState, graphCount, layOutGraph } from '../runs/graph'
 import './runs.css'
 
-// The run graph, drawn on a canvas: one card per node, one line per edge, the
-// whole drawing moved and scaled by a single transform. Read-only like the
-// rest of the run view — a click selects a node and nothing here runs, re-runs
-// or edits anything. The view is this pane's own, never persisted: a graph
-// opens fit and live, whatever the last one was left at.
-
 const NO_ROOM: Size = { width: 0, height: 0 }
 
 export function RunGraph({
@@ -130,12 +124,6 @@ export function RunGraph({
                   height: layout.cardHeight
                 }}
                 onClick={() => onPick(card.id)}
-                // Tabbing to a card off the visible area brings it into view,
-                // the way the scrolling pane used to for free. The box comes
-                // from the layout, never from the DOM, so it cannot disagree
-                // with what is drawn. Not under a press, though: a browser
-                // focuses a button on mousedown, and a reveal there would
-                // jump the view before the click selects or the drag pans.
                 onFocus={() => {
                   if (pressing()) return
                   setView((held) =>
@@ -188,13 +176,6 @@ function edgeClass(
   }
 }
 
-/**
- * The room the canvas has, which is what a live fit measures itself against.
- * Re-read after every commit — full screen, the splitter and a node arriving
- * all re-render this tree — and by a ResizeObserver for the resize that
- * re-renders nothing. Stored only when the numbers change, so measuring
- * cannot loop.
- */
 function useRoom(canvas: React.RefObject<HTMLElement | null>): Size {
   const [room, setRoom] = useState<Size>(NO_ROOM)
 
@@ -219,7 +200,6 @@ function useRoom(canvas: React.RefObject<HTMLElement | null>): Size {
   return room
 }
 
-/** The element's box, or the size already held when the numbers have not moved. */
 function boxOf(element: HTMLElement | null, held: Size): Size {
   if (element === null) return held
   const box = element.getBoundingClientRect()
@@ -228,21 +208,12 @@ function boxOf(element: HTMLElement | null, held: Size): Size {
     : { width: box.width, height: box.height }
 }
 
-/** A press in flight, and whether it has become a pan. */
 interface Press {
   readonly from: Point
   at: Point
   panning: boolean
 }
 
-/**
- * Pointer, wheel and double-click on the canvas, turned into view transitions
- * and at most one selection per press. The wheel is listened for natively with
- * `{ passive: false }`: React registers wheel passively at the root, where
- * `preventDefault` is a no-op, and not scrolling the run view is the whole
- * promise. Pointer move and up go to the window, so a drag that leaves the
- * pane keeps working.
- */
 function useCanvasGestures(
   canvas: React.RefObject<HTMLDivElement | null>,
   frame: Frame,
@@ -253,15 +224,11 @@ function useCanvasGestures(
   useLayoutEffect(() => {
     held.current = frame
   })
-  // Read by the cards, which must tell a focus the user asked for from the
-  // one a press brings with it.
   const press = useRef<Press | undefined>(undefined)
 
   useEffect(() => {
     const element = canvas.current
     if (element === null) return
-    // The click a pan ends with belongs to the pan, not to the card under the
-    // pointer; it is swallowed once, and the next press clears the debt.
     let swallow = false
 
     const pointIn = (event: { clientX: number; clientY: number }): Point => {
@@ -270,8 +237,6 @@ function useCanvasGestures(
     }
 
     const onWheel = (event: WheelEvent): void => {
-      // Nothing a gesture over the canvas does scrolls the run view, the rail
-      // or the window, and nothing selects text.
       event.preventDefault()
       const intent = wheelIntent(event)
       if (intent.kind === 'pan') {
@@ -302,10 +267,6 @@ function useCanvasGestures(
       window.removeEventListener('pointermove', onMove)
       window.removeEventListener('pointerup', onUp)
       if (going?.panning !== true) return
-      // Only a release over the canvas raises its click here: let go over the
-      // detail column and the browser fires the click on an ancestor, where
-      // an armed swallow would outlive the pan and eat the next activation —
-      // the Enter on a focused card — instead.
       const box = element.getBoundingClientRect()
       swallow =
         event.clientX >= box.left &&
@@ -332,7 +293,6 @@ function useCanvasGestures(
     }
 
     const onDoubleClick = (event: MouseEvent): void => {
-      // On a card a double-click is two selections and nothing more.
       if ((event.target as Element | null)?.closest('.nd') !== null) return
       const about = pointIn(event)
       setView((view) => zoomedBy(view, held.current, about, DOUBLE_CLICK_STEP))
