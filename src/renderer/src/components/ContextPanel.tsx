@@ -81,6 +81,12 @@ export function ContextPanel({
   const mount = active === undefined ? undefined : mountOf(sessionId, active)
   const live: LiveExhibit =
     mount !== undefined && held.of === mount ? held : { of: mount ?? '', refreshes: 0 }
+  // Deriving alone is not enough: a mount identity recurs, because it is the
+  // guest's key and a key comes back unchanged when its tab does. Dropping the
+  // state the moment the mount changes is what keeps it from being served to a
+  // later guest that never navigated. (React's adjust-state-on-change pattern:
+  // the write during render re-runs this render before anything is painted.)
+  if (mount !== undefined && held.of !== mount) setHeld(live)
 
   function refresh(): void {
     if (active === undefined || mount === undefined) return
