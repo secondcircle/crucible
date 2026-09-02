@@ -448,13 +448,13 @@ describe('the refresh control', () => {
 
   it('spins the glyph on every click, mid-spin ones included', async () => {
     await shellWith(withTabs([BRIEF], 'addons'))
-    expect(glyph()).not.toHaveClass('spin')
+    expect(glyph()).not.toHaveClass('turning')
 
     await act(async () => {
       fireEvent.click(refresh())
     })
     const first = glyph()
-    expect(first).toHaveClass('spin')
+    expect(first).toHaveClass('turning')
 
     await act(async () => {
       fireEvent.click(refresh())
@@ -462,7 +462,7 @@ describe('the refresh control', () => {
 
     // A replaced node is what restarts the animation while it is still running.
     expect(glyph()).not.toBe(first)
-    expect(glyph()).toHaveClass('spin')
+    expect(glyph()).toHaveClass('turning')
   })
 
   // The one fix the mock's approval was conditioned on: the box never turns.
@@ -473,7 +473,7 @@ describe('the refresh control', () => {
       fireEvent.click(refresh())
     })
 
-    expect(refresh()).not.toHaveClass('spin')
+    expect(refresh()).not.toHaveClass('turning')
     expect(glyph()?.parentElement).toBe(refresh())
   })
 

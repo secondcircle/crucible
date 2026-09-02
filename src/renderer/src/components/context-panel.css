@@ -167,12 +167,16 @@
   background: var(--panel);
 }
 
-/* The directory gives way first and all the way: a shrink factor heavy enough
-   that the filename beside it keeps its width until nothing of the lead is
-   left. Both ellipsize, so a location that gave way never reads as a shorter
-   real path. */
+/* The directory gives way first and all the way, and only then the filename.
+   The tail does not shrink at all: flexbox splits a deficit in proportion to
+   shrink factor times basis, so any non-zero factor on the tail ellipsizes the
+   filename the moment the lead starts giving way, however heavy the lead's
+   factor. With the tail frozen, the lead absorbs the whole deficit and stops
+   at zero width; `max-width` then caps a filename wider than the row itself
+   and hands it back to its own ellipsis. Both parts ellipsize, so a location
+   that gave way never reads as a shorter real path. */
 .ctx .where .loc .head {
-  flex: 0 1000 auto;
+  flex: 0 1 auto;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -180,8 +184,8 @@
 }
 
 .ctx .where .loc .tail {
-  flex: 0 1 auto;
-  min-width: 0;
+  flex: 0 0 auto;
+  max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -230,13 +234,18 @@
 }
 
 /* The animation is declared on the glyph alone: the control's box, its
-   background, its border and its hover shape do not rotate. */
+   background, its border and its hover shape do not rotate.
+
+   The modifier is `turning`, not `spin`: these stylesheets are global and
+   `transcript.css` owns an unscoped `.spin` that draws an 11px ringed circle,
+   which no scoped rule here can undeclare. Same trap the row avoids by not
+   calling the control `.tool`. */
 .ctx .where .refresh .glyph {
   display: inline-block;
   line-height: 1;
 }
 
-.ctx .where .refresh .glyph.spin {
+.ctx .where .refresh .glyph.turning {
   animation: ctx-refresh-spin 0.5s linear;
 }
 

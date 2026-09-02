@@ -51,8 +51,9 @@ export function AddressRow({
         }}
       >
         {/* The glyph alone spins: the box, its background and its hover shape
-            never rotate. */}
-        <span key={spins} className={spins === 0 ? 'glyph' : 'glyph spin'}>
+            never rotate. `turning`, not `spin`: `spin` is a global class in
+            transcript.css that draws a ringed loading circle. */}
+        <span key={spins} className={spins === 0 ? 'glyph' : 'glyph turning'}>
           ⟳
         </span>
       </button>
