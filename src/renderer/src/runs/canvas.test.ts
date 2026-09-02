@@ -1,0 +1,207 @@
+// @vitest-environment node
+import { describe, expect, it } from 'vitest'
+import {
+  DOUBLE_CLICK_STEP,
+  FIT_MARGIN,
+  MAX_SCALE,
+  MIN_SCALE,
+  movedFar,
+  OPENING_VIEW,
+  panned,
+  placementOf,
+  revealed,
+  wheelIntent,
+  zoomedBy,
+  zoomedTo,
+  type Frame,
+  type GraphView
+} from './canvas'
+
+const frameOf = (drawing: [number, number], room: [number, number]): Frame => ({
+  drawing: { width: drawing[0], height: drawing[1] },
+  room: { width: room[0], height: room[1] }
+})
+
+const shownAt = (view: GraphView, frame: Frame, point: { x: number; y: number }) => {
+  const placement = placementOf(view, frame)
+  return {
+    x: placement.at.x + point.x * placement.scale,
+    y: placement.at.y + point.y * placement.scale
+  }
+}
+
+describe('fit', () => {
+  it('shows a small drawing whole and centred, and never blows it up', () => {
+    const placement = placementOf(OPENING_VIEW, frameOf([100, 100], [800, 600]))
+
+    expect(placement.scale).toBe(1)
+    expect(placement.at).toEqual({ x: 350, y: 250 })
+  })
+
+  it('shrinks a big drawing to the tighter axis, margin on all four sides', () => {
+    const frame = frameOf([2000, 1000], [800, 600])
+    const placement = placementOf(OPENING_VIEW, frame)
+
+    expect(placement.scale).toBeCloseTo((800 - 2 * FIT_MARGIN) / 2000, 10)
+    expect(placement.at.x).toBeCloseTo(FIT_MARGIN, 10)
+    expect(placement.at.y).toBeCloseTo((600 - 1000 * placement.scale) / 2, 10)
+  })
+
+  it('floors at 25% and anchors the roots at the top when even that overflows', () => {
+    const placement = placementOf(OPENING_VIEW, frameOf([10_000, 10_000], [800, 600]))
+
+    expect(placement.scale).toBe(MIN_SCALE)
+    expect(placement.at.x).toBe((800 - 10_000 * MIN_SCALE) / 2)
+    expect(placement.at.y).toBe(FIT_MARGIN)
+  })
+
+  it('reads a valid percent before anything has measured the pane', () => {
+    const placement = placementOf(OPENING_VIEW, frameOf([1000, 1000], [0, 0]))
+
+    expect(placement.scale).toBe(1)
+    expect(placement.at).toEqual({ x: 0, y: 0 })
+  })
+
+  it('refits itself when the drawing grows or the room changes', () => {
+    const small = placementOf(OPENING_VIEW, frameOf([400, 400], [800, 600]))
+    const grown = placementOf(OPENING_VIEW, frameOf([400, 900], [800, 600]))
+    const narrowed = placementOf(OPENING_VIEW, frameOf([400, 400], [500, 600]))
+
+    expect(grown.scale).toBeLessThan(small.scale)
+    expect(grown.at.y).toBeCloseTo((600 - 900 * grown.scale) / 2, 10)
+    expect(narrowed.at.x).toBeCloseTo((500 - 400 * narrowed.scale) / 2, 10)
+    expect(narrowed.scale).toBe(small.scale)
+  })
+
+  it('ignores a nudge on an axis that already shows whole', () => {
+    const frame = frameOf([400, 400], [800, 600])
+    const nudged: GraphView = { kind: 'fit', shift: { x: 90, y: -120 } }
+
+    expect(placementOf(nudged, frame)).toEqual(placementOf(OPENING_VIEW, frame))
+  })
+})
+
+describe('zoom', () => {
+  const frame = frameOf([1000, 1000], [800, 600])
+
+  it('holds the point under the pointer while it scales', () => {
+    const about = { x: 300, y: 200 }
+    const before = placementOf(OPENING_VIEW, frame)
+    const zoomed = zoomedBy(OPENING_VIEW, frame, about, 2)
+    const after = placementOf(zoomed, frame)
+
+    expect(after.scale).toBeCloseTo(before.scale * 2, 10)
+    const held = { x: (about.x - before.at.x) / before.scale, y: (about.y - before.at.y) / before.scale }
+    expect(shownAt(zoomed, frame, held).x).toBeCloseTo(about.x, 8)
+    expect(shownAt(zoomed, frame, held).y).toBeCloseTo(about.y, 8)
+  })
+
+  it('clamps to the range, and a gesture at the limit moves nothing at all', () => {
+    const about = { x: 400, y: 300 }
+    const far = zoomedBy(OPENING_VIEW, frame, about, 100)
+    const near = zoomedBy(OPENING_VIEW, frame, about, 0.001)
+
+    expect(placementOf(far, frame).scale).toBe(MAX_SCALE)
+    expect(placementOf(near, frame).scale).toBe(MIN_SCALE)
+    expect(placementOf(zoomedBy(far, frame, { x: 100, y: 100 }, 4), frame)).toEqual(
+      placementOf(far, frame)
+    )
+    expect(placementOf(zoomedBy(near, frame, { x: 100, y: 100 }, 0.5), frame)).toEqual(
+      placementOf(near, frame)
+    )
+  })
+
+  it('snaps to exactly 100% about a point, which is the percent pill', () => {
+    const centre = { x: 400, y: 300 }
+    const zoomed = zoomedTo(zoomedBy(OPENING_VIEW, frame, centre, 2), frame, centre, 1)
+    const placement = placementOf(zoomed, frame)
+
+    expect(placement.scale).toBe(1)
+    expect(Math.round(placement.scale * 100)).toBe(100)
+    expect(placement.at.x).toBeCloseTo(centre.x - 1000 / 2, 8)
+  })
+
+  it('takes a pinch and a ⌘ or ctrl wheel as one thing, and a plain wheel as a pan', () => {
+    expect(wheelIntent({ deltaX: 0, deltaY: -10, ctrlKey: true, metaKey: false }).kind).toBe('zoom')
+    expect(wheelIntent({ deltaX: 0, deltaY: -10, ctrlKey: false, metaKey: true }).kind).toBe('zoom')
+    const inward = wheelIntent({ deltaX: 0, deltaY: -10, ctrlKey: true, metaKey: false })
+    const outward = wheelIntent({ deltaX: 0, deltaY: 10, ctrlKey: true, metaKey: false })
+    expect(inward.kind === 'zoom' && inward.factor).toBeGreaterThan(1)
+    expect(outward.kind === 'zoom' && outward.factor).toBeLessThan(1)
+
+    const panning = wheelIntent({ deltaX: 12, deltaY: 30, ctrlKey: false, metaKey: false })
+    expect(panning).toEqual({ kind: 'pan', by: { x: -12, y: -30 } })
+  })
+})
+
+describe('what ends a live fit', () => {
+  const frame = frameOf([1000, 1000], [800, 600])
+
+  it('is every gesture, and nothing else', () => {
+    expect(panned(OPENING_VIEW, frame, { x: 10, y: 0 }).kind).toBe('held')
+    expect(zoomedBy(OPENING_VIEW, frame, { x: 0, y: 0 }, DOUBLE_CLICK_STEP).kind).toBe('held')
+    expect(zoomedTo(OPENING_VIEW, frame, { x: 0, y: 0 }, 1).kind).toBe('held')
+    expect(revealed(OPENING_VIEW, frame, { x: 0, y: 0, width: 10, height: 10 }).kind).toBe('fit')
+    expect(OPENING_VIEW).toEqual({ kind: 'fit', shift: { x: 0, y: 0 } })
+  })
+
+  it('moves the drawing one for one with a pan, and holds it there', () => {
+    const before = placementOf(OPENING_VIEW, frame)
+    const view = panned(OPENING_VIEW, frame, { x: -40, y: 25 })
+    const after = placementOf(view, frame)
+
+    expect(after.scale).toBe(before.scale)
+    expect(after.at).toEqual({ x: before.at.x - 40, y: before.at.y + 25 })
+    expect(placementOf(view, frameOf([1000, 4000], [800, 600]))).toEqual(after)
+  })
+
+  it('is not a press that never moved far enough to be a pan', () => {
+    expect(movedFar({ x: 10, y: 10 }, { x: 12, y: 12 })).toBe(false)
+    expect(movedFar({ x: 10, y: 10 }, { x: 10, y: 13.9 })).toBe(false)
+    expect(movedFar({ x: 10, y: 10 }, { x: 14, y: 10 })).toBe(true)
+    expect(movedFar({ x: 10, y: 10 }, { x: 13, y: 13 })).toBe(true)
+  })
+})
+
+describe('keeping a focused card in view', () => {
+  const frame = frameOf([10_000, 10_000], [400, 400])
+  const card = (x: number, y: number) => ({ x, y, width: 200, height: 60 })
+
+  it('leaves the view exactly as it is when the card is already whole', () => {
+    const view = zoomedTo(OPENING_VIEW, frame, { x: 0, y: 0 }, MIN_SCALE)
+    const inside = { x: -placementOf(view, frame).at.x / MIN_SCALE + 40, y: 40 }
+
+    expect(revealed(view, frame, card(inside.x, inside.y))).toBe(view)
+  })
+
+  it('makes the smallest move that brings the card whole into the pane', () => {
+    const view = { kind: 'held', scale: 1, at: { x: 0, y: 0 } } as const
+    const moved = revealed(view, frame, card(500, 700))
+    const placement = placementOf(moved, frame)
+
+    expect(placement.scale).toBe(1)
+    expect(placement.at.x + 500 + 200).toBeCloseTo(400, 8)
+    expect(placement.at.y + 700 + 60).toBeCloseTo(400, 8)
+  })
+
+  it('shows the start of a card too big for the pane', () => {
+    const view = { kind: 'held', scale: 1, at: { x: 0, y: 0 } } as const
+    const moved = revealed(view, frame, { x: 900, y: 900, width: 900, height: 900 })
+    const placement = placementOf(moved, frame)
+
+    expect(placement.at.x + 900).toBeCloseTo(0, 8)
+    expect(placement.at.y + 900).toBeCloseTo(0, 8)
+  })
+
+  it('keeps a live fit live, nudging the fitted placement instead', () => {
+    const moved = revealed(OPENING_VIEW, frame, card(0, 9000))
+
+    expect(moved.kind).toBe('fit')
+    const placement = placementOf(moved, frame)
+    expect(placement.scale).toBe(MIN_SCALE)
+    expect(placement.at.y + 9000 * MIN_SCALE + 60 * MIN_SCALE).toBeCloseTo(400, 8)
+    expect(placementOf({ kind: 'fit', shift: { x: 0, y: -100_000 } }, frame).at.y).toBe(
+      400 - FIT_MARGIN - 10_000 * MIN_SCALE
+    )
+  })
+})
