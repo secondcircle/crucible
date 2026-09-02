@@ -1,128 +1,256 @@
 // @vitest-environment node
 //
-// The whole detection is one file changing under a running process, so the
-// tests are a temp directory and a fake clock.
-import { mkdtempSync, rmSync, unlinkSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { UpdateReady } from '../../shared/app-update/service'
-import { createAppUpdateService, stillAppUpdateService } from './service'
+// The updater against fakes for everything it touches: the registry, the
+// stager, the assembler, the relaunch and the clock. What is proved here is
+// the order — staged, assembled into *this* bundle, and only then announced —
+// and that a failure anywhere leaves the reported state exactly as it was.
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import type { AppVersionState } from '../../shared/app-update/service'
+import { createAppUpdateService } from './service'
+import { createDevVersionService } from './dev-service'
 
-let directory: string
-let stampPath: string
+const RUNNING = '1.4.0'
+const BUNDLE = '/Applications/Crucible.app'
 
-function stamp(commit: string): void {
-  writeFileSync(stampPath, JSON.stringify({ commit, builtAt: 'whenever' }))
+// What the fakes answer, held in one mutable record so a test can change the
+// world between ticks the way the world changes.
+interface Plan {
+  latest: string | Error
+  stagingFails?: string
+  assemblyFails?: string
+  now: number
+}
+
+interface Rig {
+  readonly plan: Plan
+  readonly states: AppVersionState[]
+  readonly staged: string[]
+  readonly assembled: Array<{ readonly tree: string; readonly target: string }>
+  readonly failures: string[]
+  readonly relaunches: number[]
+  readonly service: ReturnType<typeof createAppUpdateService>
+}
+
+function watching(latest: string | Error): Rig {
+  const plan: Plan = { latest, now: 1_000_000 }
+  const states: AppVersionState[] = []
+  const staged: string[] = []
+  const assembled: Array<{ tree: string; target: string }> = []
+  const failures: string[] = []
+  const relaunches: number[] = []
+
+  const service = createAppUpdateService({
+    version: RUNNING,
+    bundleRoot: BUNDLE,
+    registry: {
+      latest: async () => {
+        if (plan.latest instanceof Error) throw plan.latest
+        return plan.latest
+      }
+    },
+    stage: async (version) => {
+      if (plan.stagingFails !== undefined) throw new Error(plan.stagingFails)
+      staged.push(version)
+      return `/staging/${version}`
+    },
+    assemble: async (tree, target) => {
+      if (plan.assemblyFails !== undefined) throw new Error(plan.assemblyFails)
+      assembled.push({ tree, target })
+    },
+    relaunch: () => relaunches.push(1),
+    now: () => plan.now,
+    onFailure: (message) => failures.push(message),
+    intervalMs: 50
+  })
+
+  return { plan, states, staged, assembled, failures, relaunches, service }
+}
+
+function subscribe(rig: Rig): void {
+  rig.service.onEvent((state) => rig.states.push(state))
+}
+
+/** Lets the check that runs at construction, or on a tick, settle. */
+async function settle(): Promise<void> {
+  for (let turn = 0; turn < 8; turn += 1) await Promise.resolve()
 }
 
 beforeEach(() => {
-  vi.useFakeTimers()
-  directory = mkdtempSync(join(tmpdir(), 'crucible-update-'))
-  stampPath = join(directory, 'build-stamp.json')
-})
-
-afterEach(() => {
   vi.useRealTimers()
-  rmSync(directory, { recursive: true, force: true })
 })
 
-function watching(relaunch = vi.fn()): {
-  events: UpdateReady[]
-  relaunch: ReturnType<typeof vi.fn>
-  service: ReturnType<typeof createAppUpdateService>
-} {
-  const service = createAppUpdateService({ stampPath, relaunch, intervalMs: 50 })
-  const events: UpdateReady[] = []
-  service.onEvent((event) => events.push(event))
-  return { events, relaunch, service }
-}
+describe('the installed app checking for a newer version', () => {
+  it('stages it, assembles it into its own bundle, and only then says it is ready', async () => {
+    const rig = watching('1.5.0')
+    subscribe(rig)
 
-describe('watching the installed bundle', () => {
-  it('says nothing while the stamp still names the running build', async () => {
-    stamp('aaa1111')
-    const { events, service } = watching()
+    await settle()
 
-    vi.advanceTimersByTime(500)
-
-    expect(events).toEqual([])
-    expect(await service.pending()).toBeNull()
-    service.dispose()
+    expect(rig.staged).toEqual(['1.5.0'])
+    // The running bundle's own root, handed in explicitly: the assembler
+    // derives nothing for an app that is already installed.
+    expect(rig.assembled).toEqual([{ tree: '/staging/1.5.0', target: BUNDLE }])
+    expect(rig.states).toEqual([
+      { kind: 'installed', version: RUNNING, update: { kind: 'ready', version: '1.5.0' } }
+    ])
+    expect(await rig.service.state()).toEqual(rig.states[0])
+    rig.service.dispose()
   })
 
-  it('announces a changed stamp once, and pending() then names it', async () => {
-    stamp('aaa1111')
-    const { events, service } = watching()
+  it('reports a version staged before any window subscribed', async () => {
+    const rig = watching('1.5.0')
+    await settle()
 
-    stamp('bbb2222')
-    vi.advanceTimersByTime(500)
-
-    expect(events).toEqual([{ type: 'update_ready', commit: 'bbb2222' }])
-    expect(await service.pending()).toBe('bbb2222')
-    service.dispose()
+    // No listener existed while that ran, and the snapshot still holds it.
+    expect(await rig.service.state()).toMatchObject({ update: { kind: 'ready', version: '1.5.0' } })
+    rig.service.dispose()
   })
 
-  it('rides out the install window, when the stamp is briefly unreadable', () => {
-    stamp('aaa1111')
-    const { events, service } = watching()
+  it('is current, with a fresh check time, when the registry has nothing newer', async () => {
+    const rig = watching(RUNNING)
+    subscribe(rig)
 
-    unlinkSync(stampPath)
-    vi.advanceTimersByTime(100)
-    expect(events).toEqual([])
+    await settle()
 
-    stamp('ccc3333')
-    vi.advanceTimersByTime(100)
-    expect(events).toEqual([{ type: 'update_ready', commit: 'ccc3333' }])
-    service.dispose()
+    expect(rig.staged).toEqual([])
+    expect(rig.states).toEqual([
+      { kind: 'installed', version: RUNNING, update: { kind: 'current', checkedAt: 1_000_000 } }
+    ])
+    rig.service.dispose()
   })
 
-  it('adopts the first readable stamp as the running build rather than announcing it', () => {
-    // No stamp at launch: a stamp appearing is not an update.
-    const { events, service } = watching()
+  it('never downgrades: an older latest is current, not an update', async () => {
+    const rig = watching('1.3.9')
+    subscribe(rig)
 
-    stamp('ddd4444')
-    vi.advanceTimersByTime(100)
-    expect(events).toEqual([])
+    await settle()
 
-    stamp('eee5555')
-    vi.advanceTimersByTime(100)
-    expect(events).toEqual([{ type: 'update_ready', commit: 'eee5555' }])
-    service.dispose()
+    expect(rig.staged).toEqual([])
+    expect(rig.states[0]).toMatchObject({ update: { kind: 'current' } })
+    rig.service.dispose()
   })
 
-  it('restarts through the injected relaunch', async () => {
-    stamp('aaa1111')
-    const { relaunch, service } = watching()
+  it('leaves the state untouched when the registry cannot be reached, and retries', async () => {
+    const rig = watching(new Error('getaddrinfo ENOTFOUND'))
+    subscribe(rig)
+    await settle()
 
-    await service.restart()
+    expect(rig.states).toEqual([])
+    expect(await rig.service.state()).toEqual({
+      kind: 'installed',
+      version: RUNNING,
+      update: { kind: 'unchecked' }
+    })
+    expect(rig.failures).toEqual(['getaddrinfo ENOTFOUND'])
 
-    expect(relaunch).toHaveBeenCalledTimes(1)
-    service.dispose()
+    // The next tick tries again, and this time the registry answers.
+    rig.plan.latest = '1.5.0'
+    await new Promise((wake) => setTimeout(wake, 80))
+    await settle()
+
+    expect(rig.states).toEqual([
+      { kind: 'installed', version: RUNNING, update: { kind: 'ready', version: '1.5.0' } }
+    ])
+    rig.service.dispose()
   })
 
-  it('is silent after dispose', () => {
-    stamp('aaa1111')
-    const { events, service } = watching()
+  it('announces nothing when staging fails, and holds the state it had', async () => {
+    const rig = watching(RUNNING)
+    subscribe(rig)
+    await settle()
+    const wasCurrent = rig.states[0]
 
-    service.dispose()
-    stamp('fff6666')
-    vi.advanceTimersByTime(500)
+    rig.plan.latest = '1.5.0'
+    rig.plan.stagingFails = 'npm install exited 1'
+    rig.plan.now = 2_000_000
+    await new Promise((wake) => setTimeout(wake, 80))
+    await settle()
 
-    expect(events).toEqual([])
+    expect(rig.states).toEqual([wasCurrent])
+    expect(rig.assembled).toEqual([])
+    expect(rig.failures).toEqual(['npm install exited 1'])
+    rig.service.dispose()
+  })
+
+  it('announces nothing when the assembly fails', async () => {
+    const rig = watching('1.5.0')
+    rig.plan.assemblyFails = 'EPERM'
+    subscribe(rig)
+
+    await settle()
+
+    expect(rig.staged).toEqual(['1.5.0'])
+    expect(rig.states).toEqual([])
+    expect(rig.failures).toEqual(['EPERM'])
+    rig.service.dispose()
+  })
+
+  it('stages a version once, however many checks see it', async () => {
+    const rig = watching('1.5.0')
+    subscribe(rig)
+    await settle()
+
+    await new Promise((wake) => setTimeout(wake, 120))
+    await settle()
+
+    expect(rig.staged).toEqual(['1.5.0'])
+    expect(rig.states).toHaveLength(1)
+    rig.service.dispose()
+  })
+
+  it('stages again when something newer still is published', async () => {
+    const rig = watching('1.5.0')
+    subscribe(rig)
+    await settle()
+
+    rig.plan.latest = '1.6.0'
+    await new Promise((wake) => setTimeout(wake, 80))
+    await settle()
+
+    expect(rig.staged).toEqual(['1.5.0', '1.6.0'])
+    expect(rig.states.at(-1)).toMatchObject({ update: { kind: 'ready', version: '1.6.0' } })
+    rig.service.dispose()
+  })
+
+  it('restarts through the injected relaunch, and never on its own', async () => {
+    const rig = watching('1.5.0')
+    await settle()
+    expect(rig.relaunches).toEqual([])
+
+    await rig.service.restart()
+
+    expect(rig.relaunches).toEqual([1])
+    rig.service.dispose()
+  })
+
+  it('is silent after dispose', async () => {
+    const rig = watching(RUNNING)
+    subscribe(rig)
+    rig.service.dispose()
+
+    rig.plan.latest = '1.5.0'
+    await new Promise((wake) => setTimeout(wake, 80))
+    await settle()
+
+    expect(rig.states).toEqual([])
   })
 })
 
-describe('the still service, which dev launches serve', () => {
-  it('never has an update and restarts nothing', async () => {
-    const service = stillAppUpdateService()
-    const events: UpdateReady[] = []
-    service.onEvent((event) => events.push(event))
+describe('the version service a dev launch serves', () => {
+  it('answers the checkout it is running, and can carry no update state at all', async () => {
+    const service = createDevVersionService({ version: '0.1.0', commit: 'd2d0bba' })
+    const states: AppVersionState[] = []
+    service.onEvent((state) => states.push(state))
 
-    expect(await service.pending()).toBeNull()
+    expect(await service.state()).toEqual({ kind: 'dev', version: '0.1.0', commit: 'd2d0bba' })
     await service.restart()
-    vi.advanceTimersByTime(500)
-
-    expect(events).toEqual([])
+    expect(states).toEqual([])
     service.dispose()
+  })
+
+  it('names no commit when git could not answer', async () => {
+    const service = createDevVersionService({ version: '0.1.0' })
+
+    expect(await service.state()).toEqual({ kind: 'dev', version: '0.1.0' })
   })
 })

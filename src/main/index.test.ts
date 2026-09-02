@@ -25,13 +25,15 @@ const harness = vi.hoisted(() => ({
   ipcHandlers: new Set<string>(),
   webContentsListeners: new Map<string, (...args: unknown[]) => void>(),
   privileged: [] as Array<{ scheme: string; privileges: Record<string, unknown> }>,
-  schemeHandlers: new Set<string>()
+  schemeHandlers: new Set<string>(),
+  menus: [] as unknown[]
 }))
 
 vi.mock('electron', () => ({
   app: {
     isPackaged: false,
     getAppPath: () => harness.appPath,
+    getVersion: () => '0.1.0',
     getPath: (name: string) => (name === 'userData' ? harness.userData : harness.appPath),
     setPath: (name: string, value: string) => {
       if (name === 'userData') harness.userData = value
@@ -55,6 +57,12 @@ vi.mock('electron', () => ({
   },
   dialog: {
     showOpenDialog: async () => ({ canceled: true, filePaths: [] })
+  },
+  // Off macOS main hides the menu entirely; on it the menu is left alone.
+  Menu: {
+    setApplicationMenu: (menu: unknown) => {
+      harness.menus.push(menu)
+    }
   },
   ipcMain: {
     handle: (channel: string) => {
@@ -126,6 +134,7 @@ beforeEach(async () => {
   harness.webContentsListeners.clear()
   harness.privileged.length = 0
   harness.schemeHandlers.clear()
+  harness.menus.length = 0
   vi.resetModules()
   vi.stubEnv('CRUCIBLE_AGENT', undefined)
   vi.stubEnv('CRUCIBLE_WORKSPACE', undefined)

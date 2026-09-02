@@ -8,7 +8,9 @@ import { INSTANCE_ARGUMENT } from '../shared/instance'
 /** The one place main names a color. */
 const EMBER_BACKGROUND = '#191419'
 
-export function createMainWindow(options: { readonly instance?: string } = {}): BrowserWindow {
+export function createMainWindow(
+  options: { readonly instance?: string; readonly icon?: string } = {}
+): BrowserWindow {
   const window = new BrowserWindow({
     width: 1180,
     height: 820,
@@ -17,6 +19,9 @@ export function createMainWindow(options: { readonly instance?: string } = {}): 
     show: false,
     title: 'Crucible',
     backgroundColor: EMBER_BACKGROUND,
+    // Windows and Linux take the taskbar and window icon from here; a Mac
+    // takes it from the bundle, and is handed none.
+    ...(options.icon === undefined ? {} : { icon: options.icon }),
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       sandbox: true,

@@ -20,6 +20,7 @@ import { collectIssues } from './collect-issues'
 import { listFiles } from './files'
 import { createResearchOperations } from './research'
 import { createResearchProcesses, type ResearchProcesses } from './research-processes'
+import { bashLocation, killTree } from '../platform/exec'
 import { createWorktree, isGitWorkspace } from './worktree'
 
 // The workspace service's real flavor: the one module that reads the user's
@@ -113,11 +114,23 @@ export function createWorkspaceService({
       minted += 1
       const runId = `run-${minted}`
 
+      // A bash run is bash on every OS; where that bash is, is the platform
+      // module's answer. When there is none — Windows without Git for Windows
+      // — the run says so in its own output rather than failing invisibly.
+      const bash = bashLocation()
+      if (!bash.ok) {
+        queueMicrotask(() => {
+          emit({ type: 'run_output', runId, chunk: `${bash.message}\n` })
+          emit({ type: 'run_ended', runId, exitCode: 127 })
+        })
+        return runId
+      }
+
       // Its own process group, so stopping the run stops what it started
       // rather than orphaning a tree of children.
-      const child = spawn('bash', ['-c', command], {
+      const child = spawn(bash.path, ['-c', command], {
         cwd: directory,
-        detached: true,
+        detached: process.platform !== 'win32',
         stdio: ['ignore', 'pipe', 'pipe']
       })
 
@@ -155,11 +168,7 @@ export function createWorkspaceService({
         kill(): void {
           if (child.pid === undefined) return
           stopped = true
-          try {
-            process.kill(-child.pid, 'SIGKILL')
-          } catch {
-            // Already gone, which is the outcome asked for.
-          }
+          killTree(child.pid)
         }
       })
 

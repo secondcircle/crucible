@@ -1,17 +1,25 @@
 {
-  "name": "crucible",
-  "version": "0.0.0",
+  "name": "@secondcircle/crucible",
+  "version": "0.1.0",
   "description": "Crucible — an Electron desktop app powered by the π SDK",
-  "private": true,
+  "productName": "Crucible",
   "main": "./out/main/index.js",
+  "license": "UNLICENSED",
+  "files": [
+    "out",
+    "resources",
+    "build/icon.icns",
+    "build/icon.ico",
+    "build/icon.png",
+    "scripts/postinstall.js"
+  ],
   "scripts": {
-    "postinstall": "install-electron",
+    "postinstall": "node scripts/postinstall.js",
     "dev": "CRUCIBLE_RENDERER_PORT=$(bash scripts/renderer-port.sh) electron-vite dev --remoteDebuggingPort=$(bash scripts/dev-port.sh)",
     "dev:port": "bash scripts/dev-port.sh",
     "dev:sdk": "CRUCIBLE_AGENT=sdk npm run dev",
     "prove:sdk": "CRUCIBLE_AGENT=sdk node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/prove-sdk.ts",
     "build": "electron-vite build",
-    "install:stable": "bash scripts/install-stable.sh",
     "lint": "eslint .",
     "typecheck": "npm run typecheck:node && npm run typecheck:web",
     "typecheck:node": "tsc --noEmit -p tsconfig.node.json",
@@ -27,8 +35,6 @@
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.2",
     "@vitejs/plugin-react": "^5.2.0",
-    "electron": "^43.4.0",
-    "electron-builder": "^26.15.3",
     "electron-vite": "^5.0.0",
     "eslint": "^10.8.1",
     "eslint-plugin-react-hooks": "^7.1.1",
@@ -42,6 +48,7 @@
   "dependencies": {
     "@earendil-works/pi-ai": "^0.84.2",
     "@earendil-works/pi-coding-agent": "^0.84.2",
+    "electron": "^43.4.0",
     "jiti": "^2.7.0",
     "react": "^19.2.8",
     "react-dom": "^19.2.8"

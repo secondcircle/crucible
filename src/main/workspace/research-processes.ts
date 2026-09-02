@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process'
+import { killTree } from '../platform/exec'
 
 // Not the board collector's runner: that one collapses every way a process can
 // fail into one failure, and only ever captures a process that finished.
@@ -119,7 +120,7 @@ export function createResearchProcesses(
       // browser, and cancelling has to take the whole tree with it.
       const child = spawn(command, [...args], {
         env: researchEnv(process.env),
-        detached: true,
+        detached: process.platform !== 'win32',
         stdio: ['ignore', 'pipe', 'pipe']
       })
 
@@ -176,13 +177,7 @@ export function createResearchProcesses(
         finished,
         cancel(): void {
           cancelled = true
-          if (child.pid !== undefined) {
-            try {
-              process.kill(-child.pid, 'SIGKILL')
-            } catch {
-              // Already gone, which is the outcome asked for.
-            }
-          }
+          if (child.pid !== undefined) killTree(child.pid)
           settle({ kind: 'cancelled' })
         }
       }

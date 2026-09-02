@@ -5,6 +5,7 @@ import type {
   BranchBoardSnapshot
 } from '../../../shared/workspace/service'
 import { boardAge, branchAge } from '../labels'
+import { chordPressed, keyLabel } from '../keys'
 import './branch-board.css'
 
 // The board reports and never acts on the repository: no delete, no checkout,
@@ -136,7 +137,7 @@ export function BranchBoard({
         setSaid(undefined)
         return
       }
-      if (pressed.key === 'Enter' && (pressed.metaKey || pressed.ctrlKey)) {
+      if (pressed.key === 'Enter' && chordPressed(pressed)) {
         claim()
         // Nothing at all with no session: the entry already says so.
         if (chosen.length > 0 && hasSession) onAsk(chosen)
@@ -166,7 +167,7 @@ export function BranchBoard({
         )
         return
       }
-      if ((pressed.key === 'c' || pressed.key === 'C') && (pressed.metaKey || pressed.ctrlKey)) {
+      if ((pressed.key === 'c' || pressed.key === 'C') && chordPressed(pressed)) {
         claim()
         if (row !== undefined) onCopy(row.name)
       }
@@ -273,7 +274,7 @@ export function BranchBoard({
 
       <div className="bfoot">
         <span>
-          <kbd>⌘B</kbd> close
+          <kbd>{keyLabel('⌘B')}</kbd> close
         </span>
         <span>
           <kbd>↑↓</kbd> move
@@ -287,11 +288,11 @@ export function BranchBoard({
           <kbd>space</kbd> select
         </span>
         <span>
-          <kbd>⌘C</kbd> copy branch name
+          <kbd>{keyLabel('⌘C')}</kbd> copy branch name
         </span>
         {chosen.length === 0 ? null : (
           <span className={hasSession ? 'ask' : 'ask dim'}>
-            <kbd>⌘⏎</kbd> ask about these
+            <kbd>{keyLabel('⌘⏎')}</kbd> ask about these
             {hasSession ? null : <span className="nosession"> · no session open</span>}
           </span>
         )}

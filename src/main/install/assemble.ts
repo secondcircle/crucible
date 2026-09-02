@@ -1,0 +1,379 @@
+import { execFile } from 'node:child_process'
+import {
+  chmodSync,
+  copyFileSync,
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  readlinkSync,
+  renameSync,
+  rmSync,
+  statSync,
+  symlinkSync,
+  writeFileSync
+} from 'node:fs'
+import { homedir } from 'node:os'
+import { basename, dirname, join } from 'node:path'
+import {
+  APP_ID,
+  APP_NAME,
+  assemblesFromHere,
+  bundleLayout,
+  bundleRootFor,
+  copiedDependency,
+  desktopEntry,
+  distExecutable,
+  distRoot,
+  isRenamedAside,
+  launcherPath,
+  swapsAside,
+  plistWithValues,
+  readTreeShape,
+  renamedAside,
+  type MachineView,
+  type Platform
+} from './layout'
+
+// One module with one job: given a directory tree that holds the package and
+// its resolved dependencies, produce or refresh the desktop app at a bundle
+// location. Two callers — postinstall at install time and the in-app updater —
+// and nothing else in Crucible knows where an app lives on any OS.
+//
+// Plain Node, no dependencies, no electron import: postinstall runs it before
+// there is an app at all.
+
+export interface AssembleRequest {
+  /** The tree holding the package and its dependencies. Two shapes, see layout. */
+  readonly tree: string
+  /** The package's name, as its own package.json gives it. */
+  readonly packageName: string
+  /**
+   * The bundle to refresh. Absent means derive this platform's install
+   * location — postinstall's case, and only postinstall's: an app that is
+   * already installed knows its own bundle and hands it in, so an update can
+   * never land somewhere the running process will not relaunch from.
+   */
+  readonly target?: string
+}
+
+export interface AssembleOutcome {
+  readonly bundleRoot: string
+  /** The version now sitting in that bundle. */
+  readonly version: string
+  /** Where the launcher entry or shortcut went, when the platform has one. */
+  readonly launcher?: string
+}
+
+/** The machine, injected whole so every decision above is testable. */
+export interface Machine extends MachineView {
+  /** Runs a command to completion; rejects when it fails. */
+  readonly run: (command: string, args: readonly string[]) => Promise<void>
+}
+
+export function thisMachine(): Machine {
+  return {
+    platform: process.platform,
+    home: homedir(),
+    env: process.env,
+    writable: (path: string) => {
+      try {
+        // Writability of the directory, asked the only way that answers
+        // honestly under MDM: try it.
+        const probe = join(path, `.crucible-probe-${process.pid}`)
+        writeFileSync(probe, '')
+        rmSync(probe, { force: true })
+        return true
+      } catch {
+        return false
+      }
+    },
+    run: (command, args) =>
+      new Promise<void>((resolve, reject) => {
+        execFile(command, [...args], (failure) => {
+          if (failure === null) resolve()
+          else reject(failure)
+        })
+      })
+  }
+}
+
+export async function assembleDesktopApp(
+  request: AssembleRequest,
+  machine: Machine = thisMachine()
+): Promise<AssembleOutcome> {
+  const platform = machine.platform
+  const shape = readTreeShape(request.tree, request.packageName, existsSync, platform)
+  if (shape === undefined) {
+    throw new Error(
+      `Crucible could not find ${request.packageName} in ${request.tree}, so there was nothing to install.`
+    )
+  }
+
+  const bundleRoot = bundleRootFor(machine, request.target)
+  const layout = bundleLayout(platform, bundleRoot)
+  const version = packageVersion(shape.packageDir)
+  const dist = electronDist(shape)
+
+  mkdirSync(bundleRoot, { recursive: true })
+  // Last update's leftovers, which unlock the moment the process that held
+  // them exits. Swept first so a bundle never grows a second generation.
+  sweepRenamedAside(bundleRoot)
+
+  // The shell first, the app second: everything electron ships, then our own
+  // files inside it.
+  copyTree(distRoot(platform, dist), bundleRoot, platform)
+  place(join(bundleRoot, distExecutable(platform)), layout.executable, platform)
+  rmSync(join(layout.resourcesDir, 'default_app.asar'), { force: true })
+
+  // The payload is replaced rather than merged, so nothing a previous version
+  // shipped survives into this one. On Windows whatever is locked stays and
+  // is written over by the copy below.
+  removeBestEffort(layout.appDir)
+  copyPackage(shape.packageDir, layout.appDir, platform)
+  copyDependencies(shape, layout.appDir, platform)
+
+  copyIcon(shape.packageDir, layout, platform)
+  if (platform === 'darwin') await finishMacBundle(bundleRoot, layout, version, machine)
+  else chmodSync(layout.executable, 0o755)
+
+  const launcher = await registerLauncher(machine, layout)
+
+  return { bundleRoot, version, ...(launcher === undefined ? {} : { launcher }) }
+}
+
+/**
+ * Postinstall's whole rule: a tree with `src/` is a repo checkout, and `npm
+ * ci` in this repository installs nothing to anybody's machine.
+ */
+export function assemblesInThisTree(tree: string): boolean {
+  return assemblesFromHere(existsSync, tree)
+}
+
+function packageVersion(packageDir: string): string {
+  const parsed: unknown = JSON.parse(readFileSync(join(packageDir, 'package.json'), 'utf8'))
+  const version = (parsed as { version?: unknown }).version
+  if (typeof version !== 'string' || version === '') {
+    throw new Error('The package Crucible was asked to install carries no version.')
+  }
+  return version
+}
+
+/** Electron's platform binaries, downloaded by its own postinstall. */
+function electronDist(shape: { readonly dependencyRoots: readonly string[] }): string {
+  for (const root of shape.dependencyRoots) {
+    const dist = join(root, 'electron', 'dist')
+    if (existsSync(dist)) return dist
+  }
+  throw new Error(
+    'Crucible found no electron binary to build the app from. Reinstall so electron can download its own.'
+  )
+}
+
+function copyPackage(packageDir: string, appDir: string, platform: Platform): void {
+  mkdirSync(appDir, { recursive: true })
+  for (const entry of readdirSync(packageDir)) {
+    // Dependencies are copied separately, with electron left out.
+    if (entry === 'node_modules') continue
+    copyTree(join(packageDir, entry), join(appDir, entry), platform)
+  }
+}
+
+// The main bundle externalizes its dependencies, so they have to be on disk
+// beside it at runtime. The nearer root wins where both hold a copy, which is
+// what nesting means to Node's own resolver.
+function copyDependencies(
+  shape: { readonly packageDir: string; readonly dependencyRoots: readonly string[] },
+  appDir: string,
+  platform: Platform
+): void {
+  const into = join(appDir, 'node_modules')
+
+  function copyOne(from: string, to: string): void {
+    // Our own package sits in the hoisted root beside its dependencies;
+    // copying it would nest the app inside itself. A package the nearer root
+    // already provided is left alone, which is what nesting means.
+    if (from === shape.packageDir || !copiedDependency(basename(from))) return
+    if (existsSync(to)) return
+    copyTree(from, to, platform)
+  }
+
+  for (const root of shape.dependencyRoots) {
+    if (!existsSync(root)) continue
+    for (const entry of readdirSync(root)) {
+      if (!copiedDependency(entry)) continue
+      if (!entry.startsWith('@')) {
+        copyOne(join(root, entry), join(into, entry))
+        continue
+      }
+      // A scope is a directory of packages, not a package.
+      for (const scoped of readdirSync(join(root, entry))) {
+        copyOne(join(root, entry, scoped), join(into, entry, scoped))
+      }
+    }
+  }
+}
+
+function copyIcon(packageDir: string, layout: ReturnType<typeof bundleLayout>, platform: Platform): void {
+  const source = join(packageDir, layout.icon.source)
+  if (!existsSync(source)) return
+  mkdirSync(dirname(layout.icon.path), { recursive: true })
+  place(source, layout.icon.path, platform, 'copy')
+}
+
+async function finishMacBundle(
+  bundleRoot: string,
+  layout: ReturnType<typeof bundleLayout>,
+  version: string,
+  machine: Machine
+): Promise<void> {
+  const plistPath = join(bundleRoot, 'Contents', 'Info.plist')
+  if (existsSync(plistPath)) {
+    writeFileSync(
+      plistPath,
+      plistWithValues(readFileSync(plistPath, 'utf8'), {
+        CFBundleExecutable: APP_NAME,
+        CFBundleName: APP_NAME,
+        CFBundleDisplayName: APP_NAME,
+        CFBundleIdentifier: APP_ID,
+        CFBundleIconFile: 'icon.icns',
+        CFBundleShortVersionString: version,
+        CFBundleVersion: version
+      })
+    )
+  }
+  chmodSync(layout.executable, 0o755)
+  // The bundle was modified after electron signed it, and a Mac refuses to
+  // launch a bundle whose signature no longer matches. Ad-hoc is all an
+  // unsigned local app needs; notarization is somebody else's story.
+  await machine
+    .run('codesign', ['--force', '--deep', '--sign', '-', bundleRoot])
+    .catch(() => {
+      // A missing codesign (no developer tools) is not a reason to leave the
+      // install half-done; the app may still launch, and the installer's
+      // output already told the user what it did.
+    })
+}
+
+/** The Start Menu shortcut on Windows, the launcher entry on Linux. */
+async function registerLauncher(
+  machine: Machine,
+  layout: ReturnType<typeof bundleLayout>
+): Promise<string | undefined> {
+  const path = launcherPath(machine)
+  if (path === undefined) return undefined
+  mkdirSync(dirname(path), { recursive: true })
+
+  if (machine.platform === 'linux') {
+    writeFileSync(
+      path,
+      desktopEntry({ executable: layout.executable, icon: layout.icon.path })
+    )
+    chmodSync(path, 0o755)
+    return path
+  }
+
+  // A .lnk is a binary format with no plain-file equivalent, so Windows' own
+  // shell object writes it. This is not a bash run: PowerShell is the OS's
+  // only way to ask for a shortcut without a dependency.
+  const script = [
+    `$s = (New-Object -ComObject WScript.Shell).CreateShortcut(${quote(path)})`,
+    `$s.TargetPath = ${quote(layout.executable)}`,
+    `$s.WorkingDirectory = ${quote(dirname(layout.executable))}`,
+    `$s.IconLocation = ${quote(layout.icon.path)}`,
+    `$s.Description = ${quote(`${APP_NAME} — a personal development system built on π`)}`,
+    '$s.Save()'
+  ].join('; ')
+  await machine
+    .run('powershell', ['-NoProfile', '-NonInteractive', '-Command', script])
+    .catch(() => {})
+  return path
+}
+
+function quote(text: string): string {
+  return `'${text.replace(/'/g, "''")}'`
+}
+
+// ------------------------------------------------------------ the file work
+
+function copyTree(from: string, to: string, platform: Platform): void {
+  const stats = lstatSync(from)
+  // Symlinks are copied as symlinks. A Mac framework is built out of them —
+  // `Versions/Current` and the links beside it — and following them instead
+  // would triple the bundle and leave a shape no framework has.
+  if (stats.isSymbolicLink()) {
+    rmSync(to, { recursive: true, force: true })
+    symlinkSync(readlinkSync(from), to)
+    return
+  }
+  if (stats.isDirectory()) {
+    mkdirSync(to, { recursive: true })
+    for (const entry of readdirSync(from)) {
+      copyTree(join(from, entry), join(to, entry), platform)
+    }
+    return
+  }
+  mkdirSync(dirname(to), { recursive: true })
+  place(from, to, platform, 'copy')
+  chmodSync(to, stats.mode & 0o777)
+}
+
+/**
+ * Puts one file where another one is, replacing whatever was there. Windows
+ * locks the running executable and every DLL it has loaded against write and
+ * delete but allows renaming them, so a file that cannot be replaced is
+ * renamed beside itself first. Everywhere else POSIX simply allows the write.
+ */
+function place(from: string, to: string, platform: Platform, how: 'move' | 'copy' = 'move'): void {
+  if (from === to) return
+  const put = (): void => {
+    if (how === 'copy') copyFileSync(from, to)
+    else renameSync(from, to)
+  }
+  try {
+    put()
+    return
+  } catch (cause) {
+    if (!swapsAside(platform, cause)) throw cause
+  }
+  renameSync(to, renamedAside(to))
+  put()
+}
+
+function sweepRenamedAside(directory: string): void {
+  let entries: string[]
+  try {
+    entries = readdirSync(directory)
+  } catch {
+    return
+  }
+  for (const entry of entries) {
+    const path = join(directory, entry)
+    if (isRenamedAside(entry)) {
+      // Still locked means the old process has not exited yet; the next run
+      // will get it.
+      rmSync(path, { recursive: true, force: true })
+      continue
+    }
+    if (isDirectory(path)) sweepRenamedAside(path)
+  }
+}
+
+function isDirectory(path: string): boolean {
+  try {
+    return statSync(path).isDirectory()
+  } catch {
+    return false
+  }
+}
+
+/** Removal that a locked file does not turn into a failed install. */
+function removeBestEffort(path: string): void {
+  try {
+    rmSync(path, { recursive: true, force: true })
+  } catch {
+    // Windows, holding something open. The copy that follows writes over what
+    // it can and renames aside what it cannot.
+  }
+}

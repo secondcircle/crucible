@@ -5,6 +5,7 @@ import {
   type RunRecord
 } from '../../../shared/workflows/run'
 import { chipNodeLabel, money, shortAge } from '../runs/format'
+import { keyLabel } from '../keys'
 import './cache-strip.css'
 import './runs.css'
 
@@ -56,7 +57,7 @@ export function RunStrip({
         )
       })}
       <span className="rshint">
-        click a run to open · <kbd>⌘R</kbd> all runs
+        click a run to open · <kbd>{keyLabel('⌘R')}</kbd> all runs
       </span>
     </div>
   )

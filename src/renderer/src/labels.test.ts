@@ -1,5 +1,23 @@
 import { describe, expect, it } from 'vitest'
-import { elapsedTime, issueAge } from './labels'
+import { agoLabel, elapsedTime, issueAge } from './labels'
+
+// The version strip's second line: when the registry was last asked.
+describe('agoLabel', () => {
+  const now = Date.parse('2026-08-20T10:00:00.000Z')
+  const ago = (ms: number): number => now - ms
+
+  it('says just now for the first minute, then counts', () => {
+    expect(agoLabel(ago(0), now)).toBe('just now')
+    expect(agoLabel(ago(59_000), now)).toBe('just now')
+    expect(agoLabel(ago(4 * 60_000), now)).toBe('4 min ago')
+    expect(agoLabel(ago(90 * 60_000), now)).toBe('1 hr ago')
+    expect(agoLabel(ago(50 * 60 * 60_000), now)).toBe('2 d ago')
+  })
+
+  it('floors at zero, because a clock behind the stamp is a rounding artifact', () => {
+    expect(agoLabel(now + 5000, now)).toBe('just now')
+  })
+})
 
 // The sidebar's running counter. Seconds while a turn is short, m:ss for as
 // long as anyone watches the seconds, hours and minutes after that.

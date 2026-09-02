@@ -1,10 +1,12 @@
 #!/bin/bash
-# Regenerates build/icon.icns from build/icon.svg.
+# Regenerates the app's icon art from build/icon.svg: icon.icns for the Mac
+# bundle, icon.ico for the Windows shortcut, icon.png for the Linux launcher
+# and the window on both.
 #
 # qlmanage (macOS's own SVG renderer) draws the gradients correctly but bakes
 # a white background, so the rounded plate is masked back out with ImageMagick
-# before sips/iconutil build the icns. Run after editing icon.svg; the icns is
-# committed, so packaging never needs this script.
+# before sips/iconutil build the icns. Run after editing icon.svg; all three
+# files are committed, so packaging never needs this script.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -29,3 +31,16 @@ done
 
 iconutil -c icns "$iconset" -o build/icon.icns
 echo "wrote build/icon.icns"
+
+# The window and the Linux launcher take a plain png.
+sips -z 512 512 "$work/icon-1024.png" --out build/icon.png >/dev/null
+echo "wrote build/icon.png"
+
+# The Windows shortcut takes an ico, which nothing on a Mac writes; the sizes
+# below are the ones Explorer picks between.
+for size in 16 24 32 48 64 128 256; do
+  sips -z "$size" "$size" "$work/icon-1024.png" --out "$work/ico-$size.png" >/dev/null
+done
+node scripts/make-ico.js build/icon.ico \
+  "$work/ico-16.png" "$work/ico-24.png" "$work/ico-32.png" "$work/ico-48.png" \
+  "$work/ico-64.png" "$work/ico-128.png" "$work/ico-256.png"

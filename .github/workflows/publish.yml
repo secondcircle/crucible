@@ -1,0 +1,53 @@
+# Every push to main that passes the checks becomes a release.
+#
+# The published artifact is platform-neutral — `out/` is JavaScript, and each
+# machine's electron binary arrives through electron's own postinstall — so one
+# Linux runner serves Mac, Windows and Linux alike.
+#
+# The version is decided here and never committed back: the repo's version is a
+# floor the author raises by hand, and the registry is the record of what
+# actually shipped (scripts/publish-version.ts).
+name: publish
+
+on:
+  push:
+    branches: [main]
+
+# Two pushes in a minute must not race each other to the registry.
+concurrency:
+  group: publish
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+
+      # electron is a dependency now, and its postinstall downloads a binary
+      # this job never runs. Nothing here needs it.
+      - run: npm ci
+        env:
+          ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
+
+      # In order, cheapest failure first. A failure publishes nothing and the
+      # version already on the registry stays current.
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm test
+      - run: npm run build
+
+      # Writes the chosen version into the package.json about to be published,
+      # and prints it. Nothing is committed back to the repo.
+      - name: Choose the version to publish
+        run: node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/publish-version.ts
+
+      # Scoped packages default to private, and this one is public by ruling.
+      - run: npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

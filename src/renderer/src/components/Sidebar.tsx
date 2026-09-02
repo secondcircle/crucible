@@ -6,10 +6,12 @@ import { elapsedTime, relativeTime, UNTITLED } from '../labels'
 import type { RunActivity } from '../runs/activity'
 import { shortAge } from '../runs/format'
 import type { Marks } from '../state/needs-you'
+import type { AppVersionState } from '../../../shared/app-update/service'
 import type { CacheHealth } from '../../../shared/cache/service'
 import type { QuotaView } from '../quota/use-quota'
 import { CacheStrip } from './CacheStrip'
 import { QuotaStrip } from './QuotaStrip'
+import { VersionStrip } from './VersionStrip'
 import './sidebar.css'
 
 // Relative times go stale on their own, so the rows are re-rendered on a slow
@@ -57,7 +59,8 @@ export function Sidebar({
   onOpenSettings,
   settingsOpen,
   cache,
-  quota
+  quota,
+  version
 }: {
   readonly snapshot: ShellSnapshot
   // Sessions whose turn ended while nobody was looking. In-memory only, and
@@ -86,6 +89,12 @@ export function Sidebar({
   // The quota strip's data. Absent without a quota service, and then no strip
   // renders at all.
   readonly quota?: QuotaView
+  // The version strip's snapshot and its one action. Absent without a version
+  // service, and then no strip renders at all.
+  readonly version?: {
+    readonly state: AppVersionState
+    readonly onRestart: () => void
+  }
 }): React.JSX.Element {
   const { workspaces, activeWorkspaceId, sessions, activeSessionId } = snapshot
   const now = useClock(sessions.some((session) => session.working))
@@ -281,6 +290,11 @@ export function Sidebar({
           and the other never is. */}
       {cache === undefined ? null : <CacheStrip health={cache.health} onOpen={cache.onOpen} />}
       {quota === undefined ? null : <QuotaStrip snapshot={quota.snapshot} now={quota.now} />}
+      {/* The foot order is fixed: cache, quota, version, then Add workspace
+          and the gear. */}
+      {version === undefined ? null : (
+        <VersionStrip state={version.state} now={now} onRestart={version.onRestart} />
+      )}
 
       <div className="sidefoot">
         <button className="addws" onClick={onAddWorkspace}>

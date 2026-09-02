@@ -12,7 +12,7 @@ import {
   type AppUpdateRequest,
   type AppUpdateResult
 } from '../shared/app-update/channels'
-import type { UpdateReady } from '../shared/app-update/service'
+import type { AppVersionState } from '../shared/app-update/service'
 import {
   CACHE_EVENT_CHANNEL,
   CACHE_REQUEST_CHANNEL,
@@ -84,6 +84,11 @@ function forwarder<T>(channel: string, listener: (event: T) => void): () => void
 contextBridge.exposeInMainWorld('crucible', {
   // A mark, not a capability: the renderer shows it and asks nothing of it.
   instance,
+
+  // Which OS this window is on, exposed once. The renderer's key module owns
+  // every reading of it — which chord is this platform's, and how a key is
+  // spelled on screen — so behavior and label cannot drift apart.
+  platform: process.platform,
 
   agent: {
     request: (request: PortRequest): Promise<PortResult> =>
@@ -159,12 +164,12 @@ contextBridge.exposeInMainWorld('crucible', {
       forwarder(SCHEDULE_EVENT_CHANNEL, listener)
   },
 
-  // The installed app's update seam: one question, one event, one restart.
+  // The version seam: one question, one event, one restart.
   appUpdate: {
     request: (request: AppUpdateRequest): Promise<AppUpdateResult> =>
       ipcRenderer.invoke(APP_UPDATE_REQUEST_CHANNEL, request),
 
-    onEvent: (listener: (event: UpdateReady) => void): (() => void) =>
+    onEvent: (listener: (state: AppVersionState) => void): (() => void) =>
       forwarder(APP_UPDATE_EVENT_CHANNEL, listener)
   }
 })

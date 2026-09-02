@@ -8,6 +8,7 @@ import type {
   MissingPiece
 } from '../../../shared/workspace/service'
 import { boardAge, issueAge, relativeTime } from '../labels'
+import { chordPressed, keyLabel } from '../keys'
 import { Markdown } from './Markdown'
 import './issue-board.css'
 
@@ -189,7 +190,7 @@ export function IssueBoard({
         setSaid(undefined)
         return
       }
-      if (pressed.key === 'Enter' && (pressed.metaKey || pressed.ctrlKey)) {
+      if (pressed.key === 'Enter' && chordPressed(pressed)) {
         claim()
         if (row !== undefined) onOpenIssue(row)
         return
@@ -207,7 +208,7 @@ export function IssueBoard({
         onAlign(row, pressed.shiftKey ? 'quick-align' : 'align')
         return
       }
-      if ((pressed.key === 'c' || pressed.key === 'C') && (pressed.metaKey || pressed.ctrlKey)) {
+      if ((pressed.key === 'c' || pressed.key === 'C') && chordPressed(pressed)) {
         claim()
         if (row !== undefined) onCopy(row.reference)
       }
@@ -347,7 +348,7 @@ export function IssueBoard({
 
       <div className="bfoot">
         <span>
-          <kbd>⌘I</kbd> close
+          <kbd>{keyLabel('⌘I')}</kbd> close
         </span>
         <span>
           <kbd>↑↓</kbd> read the next one
@@ -359,11 +360,11 @@ export function IssueBoard({
           <kbd>⇧⏎</kbd> quick align
         </span>
         <span>
-          <kbd>⌘⏎</kbd> open {host.where}
+          <kbd>{keyLabel('⌘⏎')}</kbd> open {host.where}
         </span>
         {reference === undefined ? null : (
           <span>
-            <kbd>⌘C</kbd> copy <code>{reference}</code>
+            <kbd>{keyLabel('⌘C')}</kbd> copy <code>{reference}</code>
           </span>
         )}
         <span className="sp">{said ?? host.promise}</span>
@@ -555,7 +556,7 @@ function Reading({
           </>
         )}
         <button className="browse" onClick={() => onOpenIssue(row)}>
-          Open {HOSTS[host].where} ⌘⏎
+          Open {HOSTS[host].where} {keyLabel('⌘⏎')}
         </button>
       </div>
     </>

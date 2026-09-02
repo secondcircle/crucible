@@ -36,6 +36,21 @@ export function relativeTime(iso: string, now = Date.now()): string {
   return days === 1 ? 'yesterday' : `${days}d ago`
 }
 
+/**
+ * How long ago something happened, in words the foot of the rail has room
+ * for: `just now`, `4 min ago`, `2 hr ago`, `3 d ago`. Epoch milliseconds,
+ * because the fact it dates is a clock reading and not a stamp.
+ */
+export function agoLabel(at: number, now = Date.now()): string {
+  const seconds = Math.max(0, Math.round((now - at) / 1000))
+  if (seconds < 60) return 'just now'
+  const minutes = Math.floor(seconds / 60)
+  if (minutes < 60) return `${minutes} min ago`
+  const hours = Math.floor(minutes / 60)
+  if (hours < 24) return `${hours} hr ago`
+  return `${Math.floor(hours / 24)} d ago`
+}
+
 /** How long ago a board was collected: `40s`, `3m`, `2h`. */
 export function boardAge(collectedAt: string, now = Date.now()): string {
   const at = new Date(collectedAt).getTime()

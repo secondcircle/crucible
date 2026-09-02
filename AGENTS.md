@@ -88,27 +88,28 @@ Other scripts: `npm run lint`, `npm run typecheck`, `npm test`.
 
 ## The installed app
 
-`/Applications/Crucible.app` is the stable Crucible in the human's Dock —
-their daily instance, built from `main` by `npm run install:stable` (clean
-`main` checkouts only; it refuses anything else). A packaged launch always
-runs the SDK adapter: there is no flavor switch, no env var, no debug port.
-Its state lives in `~/Library/Application Support/Crucible`; every dev launch
-uses `Crucible-Dev` instead, so no worktree or branch under test can ever
-touch the installed app's sessions.
+Crucible is installed from npm: `npm install -g` the package `package.json`
+names leaves a real desktop app on a Mac, on Windows and on Linux — in
+Applications and the Dock, in the Start Menu, in the launcher. The package's postinstall assembles
+it (`src/main/install/`), which is why one platform-neutral publish serves all
+three: `out/` is JavaScript and electron's own postinstall fetches that
+machine's binary. A packaged launch always runs the SDK adapter: there is no
+flavor switch, no env var, no debug port. Its state lives under the platform's
+appData as `Crucible`; every dev launch uses `Crucible-Dev` instead, so no
+worktree or branch under test can ever touch the installed app's sessions.
 
-Updates flow on their own: whenever `main` moves in this clone, the app is
-rebuilt in the background, logging to `logs/install-stable.log`. Three hooks
-(`scripts/git-hooks/`, wired by `git config core.hooksPath scripts/git-hooks`,
-once per clone) cover every way that happens — `post-merge`, `post-commit`
-and `post-rewrite` — and all three call `install-if-main.sh`, which holds the
-branch, dirty-tree and already-installed guards. The running app polls its
-own build stamp, and
-when the bundle on disk is newer it shows an "Update ready · Restart" pill in
-the top bar. Restarting is always the human's click, never automatic — a
-restart mid-turn drops that turn.
+Updates flow on their own, for the author exactly as for everybody else: a
+push to `main` that passes typecheck, lint and tests is published to npm by CI
+with a bumped patch version (`.github/workflows/publish.yml`), and every
+installed Crucible checks the registry at launch and every 15 minutes, stages
+a newer version and assembles it into its own bundle in the background. Only
+then does it offer the "Update ready · Restart" pill in the top bar and the
+same restart on the version strip at the foot of the sidebar. Restarting is
+always the human's click, never automatic — a restart mid-turn drops that
+turn.
 
 Agents never touch the installed app or its state: don't launch it, don't
-reinstall it, don't read or write its userData, and never click its restart
-pill for the human. Testing happens through `npm run dev` (agent-driven) or
-`npm run dev:sdk` (for the human) in whatever checkout holds the code under
-test.
+install or reinstall it, don't read or write its userData, and never click its
+restart pill for the human. Testing happens through `npm run dev`
+(agent-driven) or `npm run dev:sdk` (for the human) in whatever checkout holds
+the code under test.

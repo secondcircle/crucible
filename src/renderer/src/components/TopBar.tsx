@@ -56,8 +56,8 @@ export function TopBar({
     readonly needYou: number
     readonly onOpen: () => void
   }
-  /** A newer installed build, waiting. One click restarts into it. */
-  readonly update?: { readonly commit: string; readonly onRestart: () => void }
+  /** A newer version, on disk and waiting. One click restarts into it. */
+  readonly update?: { readonly version: string; readonly onRestart: () => void }
 }): React.JSX.Element {
   const usage = session?.usage
   const percent = contextPercent(usage)
@@ -134,7 +134,7 @@ export function TopBar({
         <button
           className="update"
           aria-label="Restart into the updated app"
-          title={`A newer build (${update.commit}) is installed. Restart to pick it up.`}
+          title={`${update.version} is installed. Restart to pick it up.`}
           onClick={update.onRestart}
         >
           ↻ Update ready · Restart

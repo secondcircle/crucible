@@ -1,5 +1,0 @@
-#!/bin/bash
-# A commit landing on main: an ordinary fix committed straight onto it, a
-# cherry-pick, a revert, or a merge that stopped on conflicts and was
-# concluded by `git commit` (git fires this hook, not post-merge).
-exec "$(dirname "$0")/install-if-main.sh"

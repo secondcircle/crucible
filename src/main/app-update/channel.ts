@@ -4,7 +4,7 @@ import {
   APP_UPDATE_REQUEST_CHANNEL,
   type AppUpdateResult
 } from '../../shared/app-update/channels'
-import type { AppUpdateService, UpdateReady } from '../../shared/app-update/service'
+import type { AppUpdateService, AppVersionState } from '../../shared/app-update/service'
 import { displaySafeMessage } from '../agent/adapter-error'
 
 // Plumbing only, exactly as the workspace channel is: what an update means
@@ -20,9 +20,9 @@ export function serveAppUpdateChannel(
   const { webContents } = window
   let serving = true
 
-  const unsubscribe = service.onEvent((event: UpdateReady) => {
+  const unsubscribe = service.onEvent((state: AppVersionState) => {
     if (!serving || webContents.isDestroyed()) return
-    webContents.send(APP_UPDATE_EVENT_CHANNEL, event)
+    webContents.send(APP_UPDATE_EVENT_CHANNEL, state)
   })
 
   ipcMain.handle(
@@ -60,8 +60,8 @@ export async function invoke(service: AppUpdateService, request: unknown): Promi
   if (typeof op !== 'string') throw new Error('A request has to name an operation.')
 
   switch (op) {
-    case 'pending':
-      return service.pending()
+    case 'state':
+      return service.state()
     case 'restart':
       return service.restart()
     default:

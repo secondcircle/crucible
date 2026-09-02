@@ -4,6 +4,7 @@ import type { ModelInfo, SessionWorktree, ThinkingLevel } from '../../../shared/
 import type { CommandInfo } from '../../../shared/commands/service'
 import { commandFragment, filterCommands } from '../../../shared/commands/template'
 import { worktreeLabel } from '../labels'
+import { keyLabel } from '../keys'
 import { boxHeight } from './composer-height'
 import './composer.css'
 
@@ -335,7 +336,7 @@ export function Composer({
             placeholder={
               disabled
                 ? 'No session'
-                : 'Message the agent — / for commands, @ a file, ! runs bash, ⌘V pastes an image'
+                : `Message the agent — / for commands, @ a file, ! runs bash, ${keyLabel('⌘V')} pastes an image`
             }
             value={draft}
             disabled={disabled}
@@ -550,7 +551,7 @@ export function Composer({
             <span className="workingnote">
               agent working{elapsedSeconds === undefined ? '' : ` · ${elapsedSeconds}s`}
             </span>{' '}
-            — <kbd>⏎</kbd> steer · <kbd>⌥⏎</kbd> follow-up · <kbd>esc</kbd> stop
+            — <kbd>⏎</kbd> steer · <kbd>{keyLabel('⌥⏎')}</kbd> follow-up · <kbd>esc</kbd> stop
           </>
         ) : null}
       </div>

@@ -1,6 +1,7 @@
 import { existsSync, statSync } from 'node:fs'
 import { access, constants } from 'node:fs/promises'
 import { isAbsolute, join } from 'node:path'
+import { scriptSpawn } from '../platform/exec'
 import { capture, headline, lastLine } from './capture'
 
 // Which variables exist is how the script tells its invocations apart, so a
@@ -49,7 +50,10 @@ export async function runWorktreeScript(
     }
   }
 
-  const ran = await capture(script, [], {
+  const spawning = scriptSpawn(script)
+  if (!spawning.ok) return { ok: false, output: `${spawning.message}\n` }
+
+  const ran = await capture(spawning.command, spawning.args, {
     cwd: workspacePath,
     ...(invocation.base === undefined && invocation.branch === undefined
       ? {}

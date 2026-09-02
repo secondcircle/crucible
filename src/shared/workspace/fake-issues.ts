@@ -241,9 +241,9 @@ function cannedFacts(now: number): readonly IssueFact[] {
     },
     {
       number: 121,
-      title: 'Installer log rotates into the repo root',
+      title: 'Run log grows without bound',
       url: `${URL}/issues/121`,
-      body: '`logs/install-stable.log` grows without bound and is never rotated.',
+      body: 'The run log is appended to forever and is never rotated.',
       createdAt: days(11),
       updatedAt: days(11),
       authorLogin: 'dev',

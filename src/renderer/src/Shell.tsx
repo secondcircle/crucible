@@ -14,7 +14,7 @@ import type {
   ThinkingLevel,
   WorkspaceId
 } from '../../shared/agent/port'
-import type { AppUpdateService } from '../../shared/app-update/service'
+import type { AppUpdateService, AppVersionState } from '../../shared/app-update/service'
 import type { CacheService } from '../../shared/cache/service'
 import type { CommandInfo, CommandService } from '../../shared/commands/service'
 import { commandFragment } from '../../shared/commands/template'
@@ -63,6 +63,7 @@ import { investigationPrompt as runInvestigationPrompt } from './runs/prompt'
 import { useCacheHealth } from './cache/use-cache'
 import { readAttachment, refuse } from './images'
 import { contextPercent, UNTITLED } from './labels'
+import { chordPressed } from './keys'
 import { useQuota } from './quota/use-quota'
 import { runActivity } from './runs/activity'
 import { parkedRuns, parkedWalk } from './schedules/board'
@@ -194,25 +195,32 @@ export function Shell({
   // The badge's jump: a counter the transcript watches, because the request
   // carries nothing but itself.
   const [missJump, setMissJump] = useState(0)
-  // The waiting build's commit, once main has announced one.
-  const [updateCommit, setUpdateCommit] = useState<string | undefined>(undefined)
+  // Which version is running and what, if anything, is waiting: one snapshot,
+  // and absent until the service has answered.
+  const [appVersion, setAppVersion] = useState<AppVersionState | undefined>(undefined)
 
   useEffect(() => {
     if (appUpdate === undefined) return
     let alive = true
-    // Asked once, so a pill main announced before this window subscribed is
-    // not lost; refusals mean only that there is nothing to show.
+    // Asked once, so a state main announced before this window subscribed is
+    // not lost; refusals mean only that there is nothing to show. An answer
+    // that arrives after an announcement never overwrites it.
     void appUpdate
-      .pending()
-      .then((commit) => {
-        if (alive && commit !== null) setUpdateCommit(commit)
+      .state()
+      .then((state) => {
+        if (alive) setAppVersion((known) => known ?? state)
       })
       .catch(() => {})
-    const unsubscribe = appUpdate.onEvent((event) => setUpdateCommit(event.commit))
+    const unsubscribe = appUpdate.onEvent((state) => setAppVersion(state))
     return () => {
       alive = false
       unsubscribe()
     }
+  }, [appUpdate])
+
+  // Both doors — the top bar pill and the version strip — are this one act.
+  const restartIntoUpdate = useCallback((): void => {
+    void appUpdate?.restart().catch(() => {})
   }, [appUpdate])
   const [popover, setPopover] = useState<Popover>('none')
   const [question, setQuestion] = useState<Question | undefined>(undefined)
@@ -1228,7 +1236,7 @@ export function Shell({
   useEffect(() => {
     function onKeyDown(pressed: KeyboardEvent): void {
       if (pressed.key !== 'r' && pressed.key !== 'R') return
-      if (!pressed.metaKey && !pressed.ctrlKey) return
+      if (!chordPressed(pressed)) return
       if (pressed.shiftKey || pressed.altKey) return
       if (workflowRuns === undefined) return
       pressed.preventDefault()
@@ -1287,7 +1295,7 @@ export function Shell({
   useEffect(() => {
     function onKeyDown(pressed: KeyboardEvent): void {
       if (pressed.key !== ',') return
-      if (!pressed.metaKey && !pressed.ctrlKey) return
+      if (!chordPressed(pressed)) return
       if (pressed.shiftKey || pressed.altKey) return
       pressed.preventDefault()
       occupy({ kind: 'settings', section: 'providers' })
@@ -1301,7 +1309,7 @@ export function Shell({
   useEffect(() => {
     function onKeyDown(pressed: KeyboardEvent): void {
       if (pressed.key !== 'b' && pressed.key !== 'B') return
-      if (!pressed.metaKey && !pressed.ctrlKey) return
+      if (!chordPressed(pressed)) return
       if (boardOpen) {
         pressed.preventDefault()
         closeRegion()
@@ -1324,7 +1332,7 @@ export function Shell({
   useEffect(() => {
     function onKeyDown(pressed: KeyboardEvent): void {
       if (pressed.key !== 'i' && pressed.key !== 'I') return
-      if (!pressed.metaKey && !pressed.ctrlKey) return
+      if (!chordPressed(pressed)) return
       if (issuesOpen) {
         pressed.preventDefault()
         closeRegion()
@@ -2464,6 +2472,11 @@ export function Shell({
             ? undefined
             : { snapshot: quotaHold.snapshot, now: quotaHold.now }
         }
+        version={
+          appVersion === undefined
+            ? undefined
+            : { state: appVersion, onRestart: restartIntoUpdate }
+        }
       />
 
       {/* Everything the overlay region spans, and the region itself: the chat
@@ -2499,14 +2512,9 @@ export function Shell({
                   }
             }
             update={
-              updateCommit === undefined || appUpdate === undefined
-                ? undefined
-                : {
-                    commit: updateCommit,
-                    onRestart: () => {
-                      void appUpdate.restart().catch(() => {})
-                    }
-                  }
+              appVersion?.kind === 'installed' && appVersion.update.kind === 'ready'
+                ? { version: appVersion.update.version, onRestart: restartIntoUpdate }
+                : undefined
             }
           />
 

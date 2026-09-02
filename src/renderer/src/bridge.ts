@@ -1,5 +1,5 @@
 import type { AppUpdateRequest, AppUpdateResult } from '../../shared/app-update/channels'
-import type { UpdateReady } from '../../shared/app-update/service'
+import type { AppVersionState } from '../../shared/app-update/service'
 import type { PortRequest, PortResult } from '../../shared/agent/channels'
 import type { PortEvent } from '../../shared/agent/port'
 import type { CacheRequest, CacheResult } from '../../shared/cache/channels'
@@ -41,10 +41,10 @@ export interface CrucibleCommands {
   request(request: CommandRequest): Promise<CommandResult>
 }
 
-/** The update half, same pattern: main announces a waiting build, we ask to restart. */
+/** The version half, same pattern: main announces a snapshot, we ask to restart. */
 export interface CrucibleAppUpdate {
   request(request: AppUpdateRequest): Promise<AppUpdateResult>
-  onEvent(listener: (event: UpdateReady) => void): () => void
+  onEvent(listener: (state: AppVersionState) => void): () => void
 }
 
 export interface CrucibleQuota {
@@ -80,6 +80,9 @@ declare global {
       // The state directory this window runs against, as a badge: `dev`, or
       // `dev · <suffix>` in a worktree launch. Absent in the installed app.
       instance?: string
+      // The OS this window is on, as main's own process reports it. Read by
+      // the key module and by nothing else.
+      platform?: string
       agent?: CrucibleAgent
       workspace?: CrucibleWorkspace
       commands?: CrucibleCommands
@@ -165,6 +168,14 @@ export function workflowRunsBridge(): CrucibleWorkflowRuns {
 export function instanceBadge(): string | undefined {
   const instance = window.crucible?.instance
   return instance === undefined || instance === '' ? undefined : instance
+}
+
+/**
+ * Which OS this window is on. Absent outside a running app — a component test
+ * has no OS — and the key module decides what to do with that.
+ */
+export function platformFact(): string | undefined {
+  return window.crucible?.platform
 }
 
 export function schedulesBridge(): CrucibleSchedules {

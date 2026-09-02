@@ -1,4 +1,0 @@
-#!/bin/bash
-# A merge or a fast-forward pull landing on main. Worktrees share hooksPath,
-# so the branch guard inside is what scopes this to the main checkout.
-exec "$(dirname "$0")/install-if-main.sh"

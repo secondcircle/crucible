@@ -78,9 +78,13 @@ function pageWithPreload(
       commands: {
         request: (request: CommandRequest): Promise<CommandResult> => answer(commands, request)
       },
-      // A dev launch's answer: never an update, so the pill stays absent.
+      // A dev launch's answer: the checkout's version, and never an update,
+      // so the pill stays absent and the strip says so.
       appUpdate: {
-        request: async (): Promise<{ ok: true; value: null }> => ({ ok: true, value: null }),
+        request: async (): Promise<{ ok: true; value: unknown }> => ({
+          ok: true,
+          value: { kind: 'dev', version: '0.1.0', commit: 'abc1234' }
+        }),
         onEvent: (): (() => void) => () => {}
       },
       // Nothing cached and nothing to fetch, so the strip renders no block.

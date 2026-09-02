@@ -1,23 +1,35 @@
-// The installed app's update seam. Main watches the bundle on disk for a
-// newer build (install-stable replaces it in place while the app runs) and
-// the renderer offers one button: restart into it. Dev launches serve the
-// still service, which never has anything to say.
+// The app's version seam. One snapshot answers every question the surfaces
+// ask: which version is running, whether the registry holds a newer one, and
+// whether a newer one is already on disk waiting for a restart.
+//
+// A dev launch cannot carry an update state at all — that is the type's job,
+// not a rule anybody has to remember: updates are not checked in dev, so
+// there is nothing an update state could truthfully say there.
 
 export type Unsubscribe = () => void
 
-/** A newer build is sitting in the installed bundle than the one running. */
-export interface UpdateReady {
-  readonly type: 'update_ready'
-  /** The short commit the waiting build was made from. */
-  readonly commit: string
-}
+export type UpdateStatus =
+  /** No check has answered yet. The strip claims nothing on no evidence. */
+  | { readonly kind: 'unchecked' }
+  /** The registry's latest is not newer than what runs. Epoch ms. */
+  | { readonly kind: 'current'; readonly checkedAt: number }
+  /** A newer version is assembled into the bundle; a restart picks it up. */
+  | { readonly kind: 'ready'; readonly version: string }
 
-export type AppUpdateListener = (event: UpdateReady) => void
+export type AppVersionState =
+  | { readonly kind: 'dev'; readonly version: string; readonly commit?: string }
+  | {
+      readonly kind: 'installed'
+      readonly version: string
+      readonly update: UpdateStatus
+    }
+
+export type AppVersionListener = (state: AppVersionState) => void
 
 export interface AppUpdateService {
-  /** The waiting build's commit, or null while the running one is current. */
-  pending(): Promise<string | null>
-  /** Relaunch into whatever build the bundle now holds. */
+  /** The whole snapshot, asked once at mount so nothing announced early is lost. */
+  state(): Promise<AppVersionState>
+  /** Relaunch into whatever the bundle now holds. Only ever the human's click. */
   restart(): Promise<void>
-  onEvent(listener: AppUpdateListener): Unsubscribe
+  onEvent(listener: AppVersionListener): Unsubscribe
 }

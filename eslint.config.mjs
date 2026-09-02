@@ -85,5 +85,13 @@ export default tseslint.config(
   {
     files: ['*.ts', '*.mjs', 'scripts/**/*.ts'],
     languageOptions: { globals: globals.node }
+  },
+  {
+    // The two scripts npm and the icon build run directly under plain Node,
+    // with no bundler and no type stripping in the way: CommonJS is what a
+    // `.js` file is here, and `require` is how it loads.
+    files: ['scripts/**/*.js'],
+    languageOptions: { globals: globals.node, sourceType: 'commonjs' },
+    rules: { '@typescript-eslint/no-require-imports': 'off' }
   }
 )

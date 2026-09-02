@@ -1,87 +1,121 @@
-import { readFileSync } from 'node:fs'
+import { isNewerVersion } from '../../shared/app-update/semver'
 import type {
-  AppUpdateListener,
   AppUpdateService,
+  AppVersionListener,
+  AppVersionState,
+  UpdateStatus,
   Unsubscribe
 } from '../../shared/app-update/service'
 
-// install-stable replaces /Applications/Crucible.app while the app runs; the
-// running process keeps its loaded code, but the stamp file on disk now names
-// the newer build. Polling that one file is the whole detection: no feed, no
-// server, no signature to check — the file is inside our own bundle.
+// The installed app's updater. Poll the registry, compare against the version
+// this process is running, and when something newer is published stage it and
+// assemble it into this bundle — so that "ready" means the new version is on
+// disk and a restart away, never an instruction to go run npm by hand.
+//
+// Every collaborator is injected: the registry, the stager, the assembler, the
+// relaunch and the clock. The renderer learns none of them; it sees one
+// snapshot and one button.
 
 export interface MainAppUpdateService extends AppUpdateService {
   dispose(): void
 }
 
-/** How often the stamp is read. Cheap: one small file, already-cached inode. */
-const POLL_MS = 15_000
+/** Every 15 minutes while the app runs, and once at launch. */
+const POLL_MS = 15 * 60 * 1000
 
-export function createAppUpdateService(options: {
-  /** `<appPath>/out/build-stamp.json`, written by install-stable. */
-  readonly stampPath: string
+export interface AppUpdateOptions {
+  /** What this process is running: the bundled package.json CI published. */
+  readonly version: string
+  /**
+   * The bundle to refresh — the running app's own root, walked up from its
+   * executable. The updater always knows it exactly, so the assembler never
+   * derives an install location for an app that is already installed.
+   */
+  readonly bundleRoot: string
+  readonly registry: { latest(): Promise<string> }
+  /** Fetches a version onto disk; answers the tree the assembler is handed. */
+  readonly stage: (version: string) => Promise<string>
+  /** Refreshes the bundle's contents in place from that tree. */
+  readonly assemble: (tree: string, target: string) => Promise<void>
   /** `app.relaunch()` + `app.quit()`, injected so this file needs no electron. */
   readonly relaunch: () => void
+  readonly now?: () => number
   readonly intervalMs?: number
-}): MainAppUpdateService {
-  const listeners = new Set<AppUpdateListener>()
+  /** Failures are quiet: they go to the run log and the next poll retries. */
+  readonly onFailure?: (message: string) => void
+}
 
-  function readCommit(): string | null {
-    // Unreadable covers the install window itself (the bundle is mid-replace)
-    // as well as a build without a stamp; both mean "nothing to say yet".
+export function createAppUpdateService(options: AppUpdateOptions): MainAppUpdateService {
+  const listeners = new Set<AppVersionListener>()
+  const now = options.now ?? Date.now
+  let update: UpdateStatus = { kind: 'unchecked' }
+  let checking = false
+  let disposed = false
+
+  function snapshot(): AppVersionState {
+    return { kind: 'installed', version: options.version, update }
+  }
+
+  function announce(next: UpdateStatus): void {
+    update = next
+    const state = snapshot()
+    for (const listener of [...listeners]) listener(state)
+  }
+
+  async function check(): Promise<void> {
+    // One check at a time: staging takes minutes, and a second poll landing
+    // mid-download would fetch the same version twice.
+    if (checking || disposed) return
+    checking = true
     try {
-      const parsed: unknown = JSON.parse(readFileSync(options.stampPath, 'utf8'))
-      const commit = (parsed as { commit?: unknown }).commit
-      return typeof commit === 'string' && commit !== '' ? commit : null
-    } catch {
-      return null
+      const latest = await options.registry.latest()
+
+      if (!isNewerVersion(latest, options.version)) {
+        // At or below what runs: current, and never a downgrade. A version
+        // already staged stays reported — the bundle really does hold it, and
+        // saying "up to date" over it would be a lie the strip repeats.
+        if (update.kind !== 'ready') announce({ kind: 'current', checkedAt: now() })
+        return
+      }
+
+      // Newer than the running version, but not newer than what is already
+      // waiting on disk: nothing to do and nothing to say.
+      if (update.kind === 'ready' && !isNewerVersion(latest, update.version)) return
+
+      const tree = await options.stage(latest)
+      await options.assemble(tree, options.bundleRoot)
+      if (disposed) return
+      // Announced last, and only here: on disk, and a restart away.
+      announce({ kind: 'ready', version: latest })
+    } catch (cause) {
+      // Unreachable registry, failed download, failed assembly: the reported
+      // state stays exactly as it was and the next poll tries again. No
+      // dialog, no red, no pill for a failure.
+      options.onFailure?.(cause instanceof Error ? cause.message : String(cause))
+    } finally {
+      checking = false
     }
   }
 
-  // The build this process is actually running. If the stamp is unreadable at
-  // launch, the first readable one is adopted as the baseline instead of being
-  // announced: a stamp appearing is not an update, only a stamp changing is.
-  let baseline = readCommit()
-  let announced: string | null = null
-
-  const timer = setInterval(() => {
-    const commit = readCommit()
-    if (commit === null) return
-    if (baseline === null) {
-      baseline = commit
-      return
-    }
-    if (commit === baseline || commit === announced) return
-    announced = commit
-    for (const listener of [...listeners]) listener({ type: 'update_ready', commit })
-  }, options.intervalMs ?? POLL_MS)
+  const timer = setInterval(() => void check(), options.intervalMs ?? POLL_MS)
   timer.unref()
+  // At launch too: an app opened after a week of updates should not wait a
+  // quarter of an hour to notice.
+  void check()
 
   return {
-    pending: async () => announced,
+    state: async () => snapshot(),
     restart: async () => options.relaunch(),
-    onEvent(listener: AppUpdateListener): Unsubscribe {
+    onEvent(listener: AppVersionListener): Unsubscribe {
       listeners.add(listener)
       return () => {
         listeners.delete(listener)
       }
     },
     dispose() {
+      disposed = true
       clearInterval(timer)
       listeners.clear()
     }
-  }
-}
-
-/**
- * What a dev launch serves: never an update, and a restart that does nothing,
- * because the pill that would ask for one can never appear.
- */
-export function stillAppUpdateService(): MainAppUpdateService {
-  return {
-    pending: async () => null,
-    restart: async () => {},
-    onEvent: () => () => {},
-    dispose: () => {}
   }
 }

@@ -1,5 +1,5 @@
 import { join } from 'node:path'
-import { app, BrowserWindow, dialog, shell as electronShell } from 'electron'
+import { app, BrowserWindow, dialog, Menu, shell as electronShell } from 'electron'
 import { type AgentChannel, serveAgentChannel } from './agent/channel'
 import type { SessionId } from '../shared/agent/port'
 import { type AppUpdateChannel, serveAppUpdateChannel } from './app-update/channel'
@@ -7,7 +7,13 @@ import { type CacheChannel, serveCacheChannel } from './cache/channel'
 import { createCacheLedger } from './cache/ledger'
 import { retentionInForce } from './cache/retention'
 import { useCacheLedgerDir } from './cache/paths'
-import { createAppUpdateService, stillAppUpdateService } from './app-update/service'
+import { createAppUpdateService, type MainAppUpdateService } from './app-update/service'
+import { checkoutCommit, createDevVersionService } from './app-update/dev-service'
+import { npmRegistry } from './app-update/registry'
+import { npmStager } from './app-update/stager'
+import { assembleDesktopApp } from './install/assemble'
+import { bundleRootFromExecutable } from './install/layout'
+import { readPackageIdentity } from './install/package-json'
 import { decideFlavor, selectAdapter } from './agent/select-adapter'
 import { withLogging } from './agent/with-logging'
 import { type CommandChannel, serveCommandChannel } from './commands/channel'
@@ -45,9 +51,11 @@ import { selectWorkflowRunService } from './workflows/select-service'
 // snapshot the setting. Set `PI_CACHE_RETENTION` yourself and that wins.
 const retention = retentionInForce()
 
-if (app.isPackaged) {
+if (app.isPackaged && process.platform === 'darwin') {
   // Dock-launched apps inherit the bare GUI PATH, and the agent's tools need
-  // more than /usr/bin. Prepend the usual install prefixes once, here.
+  // more than /usr/bin. Prepend the usual install prefixes once, here. Mac
+  // only: a Windows or Linux launcher inherits a usable PATH already, and
+  // inventing prefixes without evidence is a bug farm.
   const path = process.env.PATH ?? ''
   if (!path.includes('/opt/homebrew/bin')) {
     process.env.PATH = `/opt/homebrew/bin:/usr/local/bin:${path}`
@@ -226,19 +234,47 @@ const workspace = selectWorkspaceService(flavor, log, (url: string) => {
 })
 const commands = selectCommandService(flavor, log, app.getAppPath())
 
-// Installed only: install-stable replaces the bundle in place, so watching
-// our own stamp file is how the running app learns a newer build is waiting.
-// A dev launch serves the still service and the pill can never appear.
+// Installed only: the registry is checked at launch and every 15 minutes, a
+// newer version is staged and assembled into this very bundle, and only then
+// is a restart offered. A dev launch serves the version service instead, which
+// has no update state to carry at all — and asks the registry nothing, so it
+// never even reads the package's name.
 const appUpdate = app.isPackaged
-  ? createAppUpdateService({
-      stampPath: join(app.getAppPath(), 'out', 'build-stamp.json'),
-      relaunch: () => {
-        log.append({ source: 'main', event: 'update_restart' })
-        app.relaunch()
-        app.quit()
-      }
+  ? createInstalledUpdateService()
+  : createDevVersionService({
+      version: app.getVersion(),
+      commit: checkoutCommit(app.getAppPath())
     })
-  : stillAppUpdateService()
+
+function createInstalledUpdateService(): MainAppUpdateService {
+  // The package's own name, read from the package.json this app was built
+  // from: the one place it is written, so renaming the package before first
+  // publish is one edit and the update check follows it.
+  const identity = readPackageIdentity(app.getAppPath())
+  return createAppUpdateService({
+    version: app.getVersion(),
+    // The bundle this process is running from, never a location derived
+    // afresh: an app installed under ~/Applications must not assemble its
+    // updates into a /Applications copy it will never relaunch.
+    bundleRoot: bundleRootFromExecutable(process.platform, app.getPath('exe')),
+    registry: npmRegistry(identity.name),
+    stage: npmStager({
+      packageName: identity.name,
+      root: join(app.getPath('userData'), 'update-staging')
+    }).stage,
+    assemble: async (tree, target) => {
+      await assembleDesktopApp({ tree, packageName: identity.name, target })
+    },
+    relaunch: () => {
+      log.append({ source: 'main', event: 'update_restart' })
+      app.relaunch()
+      app.quit()
+    },
+    onFailure: (message) => {
+      log.append({ source: 'main', event: 'update_check_failed', message })
+    }
+  })
+}
 
 // The dialog is the main process's to open, which is why adding a workspace is
 // an operation on the port rather than an argument to one.
@@ -314,9 +350,14 @@ let workflowRunChannel: WorkflowRunChannel | undefined
 let scheduleChannel: ScheduleChannel | undefined
 
 function openWindow(reason?: 'activate'): void {
-  const window = createMainWindow(
-    instance === undefined ? {} : { instance: instance.badge }
-  )
+  const window = createMainWindow({
+    ...(instance === undefined ? {} : { instance: instance.badge }),
+    // The Dock takes its icon from the bundle; a Windows taskbar and a Linux
+    // launcher take theirs from the window.
+    ...(process.platform === 'darwin'
+      ? {}
+      : { icon: join(app.getAppPath(), 'build', 'icon.png') })
+  })
   // The renderer writes nothing itself: its console output is forwarded here,
   // so one file holds both processes in one order.
   forwardRendererOutput(window.webContents, log)
@@ -354,6 +395,12 @@ function openWindow(reason?: 'activate'): void {
 
 void app.whenReady().then(() => {
   log.append({ source: 'main', event: 'app_ready' })
+
+  // Off macOS the default File/Edit/View menu is hidden entirely rather than
+  // populated with roles this app has no use for: every chord it would carry
+  // is handled in the app, and the clipboard chords are native Chromium
+  // there. On a Mac the menu is what keeps ⌘C/⌘V/⌘Q alive, so it stays.
+  if (process.platform !== 'darwin') Menu.setApplicationMenu(null)
 
   openWindow()
 

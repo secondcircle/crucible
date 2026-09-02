@@ -1,0 +1,83 @@
+/* Lifted from .crucible/align/260902-version-strip.html as approved. The same
+   grammar as the cache strip above it — rail gutter, 11.5px label line, mono
+   10.5px second line — because it is the same kind of block. Every color is a
+   token: quiet accent when an update waits, amber for a dev launch, and never
+   red, since nothing here has failed. */
+
+/* Uninteractive by default, so it renders as a div with no hover: there is
+   nothing to click while the app is current. */
+.version {
+  border-top: 1px solid var(--line);
+  padding: 8px var(--gutter, 14px) 9px;
+}
+
+.vline {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 11.5px;
+  color: var(--dim);
+}
+
+/* The version carries the weight; the word "Crucible" is just the label, as
+   "Cache" is in the strip above. Tabular so a version never shifts width. */
+.vline b {
+  color: var(--ink);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.vwhen {
+  display: block;
+  margin-top: 2px;
+  font: 10.5px var(--mono);
+  color: var(--faint);
+}
+
+/* The right-hand slot of the first line sits on that line's baseline. */
+.vline .vwhen {
+  margin-top: 0;
+}
+
+/* When a version waits, the whole strip becomes the one clickable thing, the
+   way the cache strip is, and takes the top bar pill's accent grammar. */
+.version.ready {
+  display: block;
+  width: 100%;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+  background: none;
+  border-left: 0;
+  border-right: 0;
+  border-bottom: 0;
+  cursor: pointer;
+}
+
+.version.ready:hover {
+  background: var(--panel);
+}
+
+.vpill {
+  font: 11px var(--font);
+  color: var(--accent2);
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  padding: 1px 8px;
+  white-space: nowrap;
+  flex: none;
+}
+
+.version.ready:hover .vpill {
+  color: var(--ink);
+  border-color: var(--accent2);
+}
+
+/* A dev launch: the package's version, and the checkout beside it in the
+   instance badge's amber. Nothing to update, nothing to click. */
+.vdev {
+  font: 10.5px var(--mono);
+  color: var(--warn);
+  flex: none;
+}

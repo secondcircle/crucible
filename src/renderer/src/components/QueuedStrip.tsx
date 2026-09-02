@@ -1,4 +1,5 @@
 import type { QueuedKind, QueuedMessage, QueueState } from '../../../shared/agent/port'
+import { keyLabel } from '../keys'
 import './queued-strip.css'
 
 /** Past this the row says how many more rather than drawing them. */
@@ -46,7 +47,7 @@ export function QueuedStrip({
               <span className="qmore">+{images.length - THUMBNAILS}</span>
             ) : null}
             <span className="qtext">{entry.text}</span>
-            <span className="qhint">queued · click or ⌥↑ to edit</span>
+            <span className="qhint">queued · click or {keyLabel('⌥↑')} to edit</span>
           </button>
         )
       })}

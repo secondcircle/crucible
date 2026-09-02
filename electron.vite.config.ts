@@ -3,7 +3,19 @@ import { defineConfig, externalizeDepsPlugin } from 'electron-vite'
 
 export default defineConfig({
   main: {
-    plugins: [externalizeDepsPlugin()]
+    plugins: [externalizeDepsPlugin()],
+    build: {
+      rollupOptions: {
+        // Two entries out of one build: the app's main process, and the
+        // desktop installer npm runs after an install. They share the
+        // assembler, which is the point — one module decides where an app
+        // goes on each OS, and both callers get the same answer.
+        input: {
+          index: 'src/main/index.ts',
+          postinstall: 'src/main/install/postinstall.ts'
+        }
+      }
+    }
   },
   preload: {
     // D2/A5: no `externalizeDepsPlugin` here on purpose. A sandboxed preload

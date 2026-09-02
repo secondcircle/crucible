@@ -2,6 +2,7 @@ import { spawn } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import { access, constants } from 'node:fs/promises'
 import { join } from 'node:path'
+import { scriptSpawn } from '../platform/exec'
 
 // `.crucible/worktree` reports a *ready* worktree, so this script never runs
 // after it — only inside worktrees Crucible itself made with plain git. What
@@ -80,7 +81,18 @@ interface Ran {
 // environment: where it is, is what it is told.
 function run(script: string, cwd: string): Promise<Ran> {
   return new Promise((resolve) => {
-    const child = spawn(script, [], { cwd, stdio: ['ignore', 'pipe', 'pipe'] })
+    // A shebang is a POSIX fact, so on Windows the script runs through bash
+    // rather than being spawned directly. No bash, no run: the caller reports
+    // a script that could not be run, with the reason.
+    const spawning = scriptSpawn(script)
+    if (!spawning.ok) {
+      resolve({ timedOut: false, output: `${spawning.message}\n` })
+      return
+    }
+    const child = spawn(spawning.command, [...spawning.args], {
+      cwd,
+      stdio: ['ignore', 'pipe', 'pipe']
+    })
     let output = ''
     let timedOut = false
     child.stdout.setEncoding('utf8')
