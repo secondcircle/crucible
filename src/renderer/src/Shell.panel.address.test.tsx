@@ -694,4 +694,21 @@ describe('a web tab\u2019s row follows its guest', () => {
     expect(guest()?.getAttribute('src')).toBe('http://localhost:5241/extras')
     expect(shown()).toBe('http://localhost:5241/extras')
   })
+
+  // The fourth way a guest is unmounted and comes back, after a re-show, a tab
+  // switch and a session switch: the panel itself goes to the edge strip.
+  it('forgets where a guest went across a collapse and back', async () => {
+    await shellWith(withTabs([DEV_SERVER], 'extras'))
+    await navigate('http://localhost:5241/extras/confirm')
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Collapse context panel' }))
+    })
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Open context panel' }))
+    })
+
+    expect(guest()?.getAttribute('src')).toBe('http://localhost:5241/extras')
+    expect(shown()).toBe('http://localhost:5241/extras')
+  })
 })
