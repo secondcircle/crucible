@@ -324,22 +324,37 @@
   color: var(--accent2);
 }
 
-/* The canvas scrolls in both directions: fit stops at a floor where the
-   cards are still legible, and past that the pane scrolls. */
-.gscroll {
+/* The zoom's reading changes width as it counts; the pill does not. */
+.ghead .pill.pct {
+  min-width: 48px;
+  text-align: center;
+}
+
+/* The drawing area: one canvas the user pans and zooms, never a scroller.
+   No padding — the room fit keeps is FIT_MARGIN in canvas.ts, so the number
+   lives in one place. */
+.gcanvas {
   flex: 1;
-  overflow: auto;
-  padding: 22px 26px 30px;
   min-height: 0;
-}
-
-.gscroll .canvas {
   position: relative;
+  overflow: hidden;
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
 }
 
+.gcanvas.dragging {
+  cursor: grabbing;
+}
+
+/* One transform for the whole drawing: cards, their text and every edge move
+   and scale together. */
 .cstage {
-  position: relative;
+  position: absolute;
+  left: 0;
+  top: 0;
   transform-origin: 0 0;
+  will-change: transform;
 }
 
 .cstage svg {
