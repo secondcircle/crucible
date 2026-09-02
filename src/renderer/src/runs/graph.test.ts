@@ -546,6 +546,81 @@ describe('a loop, laid out left to right', () => {
     expect(Number.isFinite(twinned.width)).toBe(true)
     expect(Number.isFinite(twinned.height)).toBe(true)
   })
+
+  // The intent's 12-node build run, in the order the engine actually wrote it
+  // (workflow-runs/d420/run.json): the build workflow's `plan` registers the
+  // gate's three nodes right after `review-1`, and a planned node keeps its
+  // slot when it finally runs, so the record's order is not the run's order.
+  // The picture the intent promises for this run is one review loop of three
+  // rounds with the gate on the spine under it.
+  it('draws the gate under the review loop when the record holds the gate’s planned slots first', () => {
+    const held = layOutGraph([
+      nodeOf('analyst'),
+      nodeOf('architect', ['analyst']),
+      nodeOf('builder', ['architect', 'analyst']),
+      nodeOf('review-1', ['builder', 'analyst', 'architect']),
+      nodeOf('gate-alignment-1', ['review-3', 'analyst', 'architect']),
+      nodeOf('gate-comments-1', ['gate-alignment-1']),
+      nodeOf('gate-verdict-1', ['gate-alignment-1', 'gate-comments-1', 'analyst']),
+      nodeOf('fixer-1', ['review-1', 'analyst', 'architect']),
+      nodeOf('review-2', ['fixer-1', 'analyst', 'architect', 'review-1']),
+      nodeOf('check-fixer-1', ['review-2', 'analyst', 'architect']),
+      nodeOf('fixer-2', ['check-fixer-1', 'analyst', 'architect', 'review-1', 'review-2']),
+      nodeOf('review-3', ['fixer-2', 'analyst', 'architect', 'review-1', 'review-2'])
+    ])
+
+    // Three rounds, three columns, each round stacked down its own.
+    expect(card(held, 'review-2').x).toBeGreaterThan(card(held, 'review-1').x)
+    expect(card(held, 'review-3').x).toBeGreaterThan(card(held, 'review-2').x)
+    expect(card(held, 'fixer-1').x).toBe(card(held, 'review-1').x)
+    expect(card(held, 'check-fixer-1').x).toBe(card(held, 'review-2').x)
+    expect(card(held, 'fixer-2').x).toBe(card(held, 'review-2').x)
+    // The gate is the spine again: under the loop's first column, below its
+    // deepest row, not stacked inside round 1.
+    const loopBottom = Math.max(
+      ...['review-1', 'fixer-1', 'review-2', 'check-fixer-1', 'fixer-2', 'review-3'].map(
+        (id) => card(held, id).layer
+      )
+    )
+    for (const id of ['gate-alignment-1', 'gate-comments-1', 'gate-verdict-1']) {
+      expect(card(held, id).x, `${id} stands in the spine column`).toBe(card(held, 'review-1').x)
+      expect(card(held, id).layer, `${id} sits below the loop`).toBeGreaterThan(loopBottom)
+    }
+  })
+
+  // The same run mid-flight (workflow-runs/ad2d/run.json at the time of this
+  // review): the gate's nodes are still the plan's pending ghosts, forecast
+  // under `review-1`, while the review loop is on its second round.
+  it('keeps the gate’s pending ghosts out of the review loop while the run is in flight', () => {
+    const ghost = (id: string, parents: string[]): RunNode =>
+      nodeOf(id, parents, { status: 'pending', startedAt: undefined, endedAt: undefined })
+    const held = layOutGraph([
+      nodeOf('analyst'),
+      nodeOf('architect', ['analyst']),
+      nodeOf('builder', ['architect', 'analyst']),
+      nodeOf('review-1', ['builder', 'analyst', 'architect']),
+      ghost('gate-alignment-1', ['review-1']),
+      ghost('gate-comments-1', ['gate-alignment-1']),
+      ghost('gate-verdict-1', ['gate-alignment-1', 'gate-comments-1']),
+      nodeOf('check-fixer-1', ['review-1', 'analyst', 'architect']),
+      nodeOf('fixer-1', ['check-fixer-1', 'analyst', 'architect', 'review-1']),
+      nodeOf('review-2', ['fixer-1', 'analyst', 'architect', 'review-1'], {
+        status: 'running',
+        endedAt: undefined
+      })
+    ])
+
+    expect(card(held, 'review-2').x).toBeGreaterThan(card(held, 'review-1').x)
+    expect(card(held, 'check-fixer-1').x).toBe(card(held, 'review-1').x)
+    expect(card(held, 'fixer-1').x).toBe(card(held, 'review-1').x)
+    const loopBottom = Math.max(
+      ...['review-1', 'check-fixer-1', 'fixer-1', 'review-2'].map((id) => card(held, id).layer)
+    )
+    for (const id of ['gate-alignment-1', 'gate-comments-1', 'gate-verdict-1']) {
+      expect(card(held, id).x, `${id} stands in the spine column`).toBe(card(held, 'review-1').x)
+      expect(card(held, id).layer, `${id} sits below the loop`).toBeGreaterThan(loopBottom)
+    }
+  })
 })
 
 describe('what a card says', () => {
