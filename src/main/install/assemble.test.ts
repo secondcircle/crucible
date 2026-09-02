@@ -305,6 +305,37 @@ describe('a leftover the sweep cannot delete yet', () => {
   })
 })
 
+describe('a refresh under a running app', () => {
+  // §4.1: the update is assembled in the background, into the bundle of a
+  // *running* app, and nothing may disturb that app until the human restarts
+  // it. On Mac and Linux the running process has the shell's libraries mmap'd
+  // (Electron Framework, libffmpeg.so): POSIX makes *replacing* such a file
+  // safe — unlink or rename leaves the old inode to the process that holds it
+  // — but writing through it does not. `copyFileSync` onto an existing path
+  // truncates and rewrites the same inode, so a background refresh mutates
+  // the very bytes the running app is executing: a page it faults in after
+  // the truncation is gone (SIGBUS) or from the new generation (two versions
+  // interleaved in one process). The retired install-stable.sh removed the
+  // old contents before copying for exactly this reason, and copyTree's own
+  // symlink branch already removes before it writes; the file branch must
+  // too. The inode is the observable fact: a safe refresh gives the path a
+  // new one and leaves the old one to whoever holds it open.
+  it('replaces the shell’s files rather than writing through them', async () => {
+    const tree = staging('1.5.0', 'linux')
+    const target = join(root, 'opt', 'crucible')
+    await assembleDesktopApp({ tree, packageName: NAME, target }, machine('linux'))
+    const mapped = join(target, 'libffmpeg.so')
+    const before = statSync(mapped).ino
+
+    rmSync(join(root, 'staging'), { recursive: true, force: true })
+    staging('1.6.0', 'linux')
+    await assembleDesktopApp({ tree, packageName: NAME, target }, machine('linux'))
+
+    expect(readFileSync(mapped, 'utf8')).toBe('binary 1.6.0')
+    expect(statSync(mapped).ino).not.toBe(before)
+  })
+})
+
 describe('postinstall’s one rule', () => {
   it('assembles nothing in a tree that has src/', () => {
     mkdirSync(join(root, 'checkout', 'src'), { recursive: true })
