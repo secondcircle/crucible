@@ -458,6 +458,54 @@ describe('pan, and the click that still selects', () => {
     expect(canvas().className).not.toContain('dragging')
   })
 
+  it('pans one for one from a card the pane only half shows', async () => {
+    await openRun()
+    await sizeCanvas(300, 200)
+
+    // Zoomed in far enough that cards spill past the pane's edges.
+    for (let turn = 0; turn < 10; turn++) {
+      wheel(canvas(), { deltaY: -100, metaKey: true, clientX: 0, clientY: 0 })
+    }
+    const before = view()
+    const spilling = cardFor('planner')
+    const top = before.y + Number.parseFloat(spilling.style.top) * before.scale
+    const bottom = top + Number.parseFloat(spilling.style.height) * before.scale
+    expect(top).toBeLessThan(200)
+    expect(bottom).toBeGreaterThan(200)
+
+    // A press on a button focuses it before the pointer moves: that is what a
+    // browser does, and a click or a drag on a card is always such a press.
+    await act(async () => {
+      fireEvent.pointerDown(spilling, { button: 0, clientX: 280, clientY: 190 })
+      spilling.focus()
+      await settled()
+    })
+    await act(async () => {
+      fireEvent.pointerUp(window, { clientX: 280, clientY: 190 })
+      fireEvent.click(spilling, { clientX: 280, clientY: 190 })
+      await settled()
+    })
+    // Selected, and the view is exactly where it was.
+    expect(detailHeader()).toBe('planner')
+    expect(view()).toEqual(before)
+
+    await act(async () => {
+      fireEvent.pointerDown(spilling, { button: 0, clientX: 280, clientY: 190 })
+      spilling.focus()
+      fireEvent.pointerMove(window, { clientX: 180, clientY: 190 })
+      await settled()
+    })
+    await act(async () => {
+      fireEvent.pointerUp(window, { clientX: 180, clientY: 190 })
+      fireEvent.click(spilling, { clientX: 180, clientY: 190 })
+      await settled()
+    })
+    // One for one with the pointer: a hundred pixels, not a hundred plus a
+    // jump to show the card whole.
+    expect(view().x).toBeCloseTo(before.x - 100, 6)
+    expect(view().y).toBeCloseTo(before.y, 6)
+  })
+
   it('takes a plain wheel as a pan on both axes and never as a zoom', async () => {
     await openRun()
     await sizeCanvas(600, 500)
@@ -499,6 +547,36 @@ describe('the keyboard', () => {
       await settled()
     })
     expect(detailHeader()).toBe('fixer-1')
+  })
+
+  it('still selects from the keyboard after a drag let go outside the pane', async () => {
+    await openRun()
+    await sizeCanvas(600, 500)
+
+    // A drag that starts on the canvas and ends over the detail column: the
+    // browser fires its click on the common ancestor, never on the canvas.
+    await act(async () => {
+      fireEvent.pointerDown(canvas(), { button: 0, clientX: 10, clientY: 10 })
+      fireEvent.pointerMove(window, { clientX: 700, clientY: 10 })
+      await settled()
+    })
+    await act(async () => {
+      fireEvent.pointerUp(window, { clientX: 700, clientY: 10 })
+      fireEvent.click(document.querySelector('.rvbody') as HTMLElement, {
+        clientX: 700,
+        clientY: 10
+      })
+      await settled()
+    })
+    expect(detailHeader()).toBe('gate-alignment-1')
+
+    // Enter on a focused card is a click the card itself raises.
+    await act(async () => {
+      cardFor('builder').focus()
+      fireEvent.click(cardFor('builder'))
+      await settled()
+    })
+    expect(detailHeader()).toBe('builder')
   })
 
   it('brings a card the focus lands on into view', async () => {
