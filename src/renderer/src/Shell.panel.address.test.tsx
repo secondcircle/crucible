@@ -626,4 +626,72 @@ describe('a web tab\u2019s row follows its guest', () => {
 
     expect(shown()).toBe('http://localhost:5241/extras')
   })
+
+  // Leaving the tab unmounts its guest, and coming back mounts a fresh one at
+  // the address the agent showed. The row must not resurrect where the old
+  // guest had gone: that is an address the new guest is not displaying, and a
+  // copy in that state writes it.
+  it('forgets where a guest went across a switch to another tab and back', async () => {
+    await shellWith(withTabs([BRIEF, DEV_SERVER], 'extras'))
+    const before = guest()
+    await navigate('http://localhost:5241/extras/confirm')
+    expect(shown()).toBe('http://localhost:5241/extras/confirm')
+
+    await act(async () => {
+      fireEvent.click(screen.getAllByRole('tab')[0])
+    })
+    expect(shown()).toBe(BRIEF_PATH)
+
+    await act(async () => {
+      fireEvent.click(screen.getAllByRole('tab')[1])
+    })
+
+    expect(guest()).not.toBe(before)
+    expect(guest()?.getAttribute('src')).toBe('http://localhost:5241/extras')
+    expect(shown()).toBe('http://localhost:5241/extras')
+
+    await act(async () => {
+      fireEvent.click(location())
+    })
+    expect(copied).toEqual(['http://localhost:5241/extras'])
+  })
+
+  it('forgets where a guest went across a switch to another session and back', async () => {
+    await shellWith({
+      workspaces: [{ id: 'w1', name: 'crucible', path: '/repos/crucible' }],
+      activeWorkspaceId: 'w1',
+      activeSessionId: 's1',
+      sessions: [
+        {
+          id: 's1',
+          workspaceId: 'w1',
+          createdAt: SHOWN,
+          working: false,
+          fresh: false,
+          panel: { tabs: [DEV_SERVER], activeTabId: 'extras' }
+        },
+        {
+          id: 's2',
+          workspaceId: 'w1',
+          createdAt: SHOWN,
+          working: false,
+          fresh: false,
+          panel: { tabs: [BRIEF], activeTabId: 'addons' }
+        }
+      ]
+    })
+    await navigate('http://localhost:5241/extras/confirm')
+
+    await act(async () => {
+      fireEvent.click(sessionRows()[1])
+    })
+    expect(shown()).toBe(BRIEF_PATH)
+
+    await act(async () => {
+      fireEvent.click(sessionRows()[0])
+    })
+
+    expect(guest()?.getAttribute('src')).toBe('http://localhost:5241/extras')
+    expect(shown()).toBe('http://localhost:5241/extras')
+  })
 })
