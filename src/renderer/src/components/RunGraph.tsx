@@ -49,7 +49,7 @@ export function RunGraph({
     () => ({ drawing: { width: layout.width, height: layout.height }, room }),
     [layout.width, layout.height, room]
   )
-  const { panning } = useCanvasGestures(canvas, frame, setView)
+  const { panning, pressing } = useCanvasGestures(canvas, frame, setView)
   const placement = placementOf(view, frame)
   const live = view.kind === 'fit'
 
@@ -133,8 +133,11 @@ export function RunGraph({
                 // Tabbing to a card off the visible area brings it into view,
                 // the way the scrolling pane used to for free. The box comes
                 // from the layout, never from the DOM, so it cannot disagree
-                // with what is drawn.
-                onFocus={() =>
+                // with what is drawn. Not under a press, though: a browser
+                // focuses a button on mousedown, and a reveal there would
+                // jump the view before the click selects or the drag pans.
+                onFocus={() => {
+                  if (pressing()) return
                   setView((held) =>
                     revealed(held, frame, {
                       x: card.x,
@@ -143,7 +146,7 @@ export function RunGraph({
                       height: layout.cardHeight
                     })
                   )
-                }
+                }}
               >
                 <span className="ndtop">
                   <span className="nm">{face.id}</span>
@@ -244,17 +247,19 @@ function useCanvasGestures(
   canvas: React.RefObject<HTMLDivElement | null>,
   frame: Frame,
   setView: React.Dispatch<React.SetStateAction<GraphView>>
-): { readonly panning: boolean } {
+): { readonly panning: boolean; readonly pressing: () => boolean } {
   const [panning, setPanning] = useState(false)
   const held = useRef(frame)
   useLayoutEffect(() => {
     held.current = frame
   })
+  // Read by the cards, which must tell a focus the user asked for from the
+  // one a press brings with it.
+  const press = useRef<Press | undefined>(undefined)
 
   useEffect(() => {
     const element = canvas.current
     if (element === null) return
-    const press: { current: Press | undefined } = { current: undefined }
     // The click a pan ends with belongs to the pan, not to the card under the
     // pointer; it is swallowed once, and the next press clears the debt.
     let swallow = false
@@ -291,13 +296,22 @@ function useCanvasGestures(
       setView((view) => panned(view, held.current, by))
     }
 
-    const onUp = (): void => {
+    const onUp = (event: PointerEvent): void => {
       const going = press.current
       press.current = undefined
       window.removeEventListener('pointermove', onMove)
       window.removeEventListener('pointerup', onUp)
       if (going?.panning !== true) return
-      swallow = true
+      // Only a release over the canvas raises its click here: let go over the
+      // detail column and the browser fires the click on an ancestor, where
+      // an armed swallow would outlive the pan and eat the next activation —
+      // the Enter on a focused card — instead.
+      const box = element.getBoundingClientRect()
+      swallow =
+        event.clientX >= box.left &&
+        event.clientX <= box.right &&
+        event.clientY >= box.top &&
+        event.clientY <= box.bottom
       setPanning(false)
     }
 
@@ -338,7 +352,7 @@ function useCanvasGestures(
     }
   }, [canvas, setView])
 
-  return { panning }
+  return { panning, pressing: () => press.current !== undefined }
 }
 
 /** Kept honest without a render every second, and none at all once nothing moves. */
