@@ -15,7 +15,7 @@ import {
   writeFileSync
 } from 'node:fs'
 import { homedir } from 'node:os'
-import { basename, dirname, join } from 'node:path'
+import { dirname, join } from 'node:path'
 import {
   APP_ID,
   APP_NAME,
@@ -189,30 +189,49 @@ function copyDependencies(
   platform: Platform
 ): void {
   const into = join(appDir, 'node_modules')
-
-  function copyOne(from: string, to: string): void {
-    // Our own package sits in the hoisted root beside its dependencies;
-    // copying it would nest the app inside itself. A package the nearer root
-    // already provided is left alone, which is what nesting means.
-    if (from === shape.packageDir || !copiedDependency(basename(from))) return
-    if (existsSync(to)) return
-    copyTree(from, to, platform)
-  }
+  // What this run has already placed. "A nearer root already provided it" is a
+  // fact about this run, so it is remembered here rather than read back off
+  // the bundle: the bundle also holds whatever the previous version left when
+  // a locked file made its removal fail, and an existing directory there is no
+  // evidence that *we* wrote it.
+  const placed = new Set<string>()
 
   for (const root of shape.dependencyRoots) {
-    if (!existsSync(root)) continue
-    for (const entry of readdirSync(root)) {
-      if (!copiedDependency(entry)) continue
-      if (!entry.startsWith('@')) {
-        copyOne(join(root, entry), join(into, entry))
-        continue
-      }
-      // A scope is a directory of packages, not a package.
-      for (const scoped of readdirSync(join(root, entry))) {
-        copyOne(join(root, entry, scoped), join(into, entry, scoped))
-      }
+    for (const name of dependencyNames(root)) {
+      const from = join(root, name)
+      // Our own package sits in the hoisted root beside its dependencies;
+      // copying it would nest the app inside itself.
+      if (from === shape.packageDir || placed.has(name)) continue
+      placed.add(name)
+      const to = join(into, name)
+      // Replaced, never merged, one dependency at a time — the promise
+      // copyPackage keeps for the payload, kept here too because the payload's
+      // own removal may have been refused halfway.
+      removeBestEffort(to)
+      copyTree(from, to, platform)
     }
   }
+}
+
+/**
+ * The packages a `node_modules` directory holds, by name — scopes expanded,
+ * because a scope is a directory of packages and not a package, and npm's own
+ * bookkeeping (`.package-lock.json`, `.bin`) left out.
+ */
+function dependencyNames(root: string): string[] {
+  if (!existsSync(root)) return []
+  const names: string[] = []
+  for (const entry of readdirSync(root)) {
+    if (!copiedDependency(entry)) continue
+    if (!entry.startsWith('@')) {
+      names.push(entry)
+      continue
+    }
+    for (const scoped of readdirSync(join(root, entry))) {
+      if (copiedDependency(scoped)) names.push(join(entry, scoped))
+    }
+  }
+  return names
 }
 
 function copyIcon(packageDir: string, layout: ReturnType<typeof bundleLayout>, platform: Platform): void {
@@ -351,9 +370,11 @@ function sweepRenamedAside(directory: string): void {
   for (const entry of entries) {
     const path = join(directory, entry)
     if (isRenamedAside(entry)) {
-      // Still locked means the old process has not exited yet; the next run
-      // will get it.
-      rmSync(path, { recursive: true, force: true })
+      // Still locked means the old process has not exited yet — its own image,
+      // most often — and the next run gets it. Failing the assembly instead
+      // would mean no update ever lands until the human restarts, which is the
+      // silent never-updating app the rename-aside rule exists to prevent.
+      removeBestEffort(path)
       continue
     }
     if (isDirectory(path)) sweepRenamedAside(path)

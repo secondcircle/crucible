@@ -169,9 +169,11 @@ export interface TreeShape {
   /** The package's own directory: its `package.json` and published files. */
   readonly packageDir: string
   /**
-   * Directories that may hold resolved dependencies, nearest first. Both
-   * shapes occur in the wild — npm nests some deps under the package and
-   * hoists the rest beside it — so both are read and the nearer wins.
+   * Directories that hold this package's resolved dependencies, nearest
+   * first. Which directories those are is a fact about the shape, so it is
+   * decided where the shape is recognized and nowhere else: a global install
+   * nests everything under the package, while `npm install --prefix` hoists
+   * into the prefix's own `node_modules` beside the package.
    */
   readonly dependencyRoots: readonly string[]
 }
@@ -187,34 +189,26 @@ export function readTreeShape(
   platform: Platform = process.platform
 ): TreeShape | undefined {
   const { join } = pathsOf(platform)
-  // Postinstall's shape: the package directory itself.
+  // Postinstall's shape: the installed package directory itself, with npm's
+  // global install strategy having nested every dependency under it. The
+  // `node_modules` it *sits in* is the machine's global prefix, which holds
+  // every other globally installed package — npm itself among them — so it is
+  // not a dependency root and the bundle must never be built from it.
   if (exists(join(tree, 'package.json'))) {
-    return { packageDir: tree, dependencyRoots: dependencyRootsFor(tree, platform) }
+    return { packageDir: tree, dependencyRoots: [join(tree, 'node_modules')] }
   }
   // The updater's shape: `<staging>/node_modules/<name>`, dependencies hoisted
-  // into that same `node_modules`.
+  // into that same `node_modules`. That directory is the staging root's own
+  // and holds nothing but this install, so it is a dependency root — and it is
+  // known from the tree we were handed, not walked to.
   const staged = join(tree, 'node_modules', ...packageName.split('/'))
   if (exists(join(staged, 'package.json'))) {
-    return { packageDir: staged, dependencyRoots: dependencyRootsFor(staged, platform) }
+    return {
+      packageDir: staged,
+      dependencyRoots: [join(staged, 'node_modules'), join(tree, 'node_modules')]
+    }
   }
   return undefined
-}
-
-// The package's own `node_modules` first, then the one it sits inside — which
-// is where npm hoists what it deduplicated. A scoped package sits two levels
-// down, so the walk climbs past its scope directory.
-function dependencyRootsFor(packageDir: string, platform: Platform): readonly string[] {
-  const { basename, dirname, join } = pathsOf(platform)
-  const roots = [join(packageDir, 'node_modules')]
-  let above = dirname(packageDir)
-  for (let step = 0; step < 2; step += 1) {
-    if (basename(above) === 'node_modules') {
-      roots.push(above)
-      break
-    }
-    above = dirname(above)
-  }
-  return roots
 }
 
 /**

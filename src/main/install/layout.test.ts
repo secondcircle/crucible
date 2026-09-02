@@ -120,10 +120,12 @@ describe('which tree shape the assembler was handed', () => {
     )
 
     expect(shape?.packageDir).toBe('/global/lib/node_modules/@secondcircle/crucible')
-    // Its own node_modules first, then the one it is hoisted into.
+    // Its own node_modules and nothing else. A global install nests its
+    // dependencies there; the `node_modules` the package *sits in* is the
+    // machine's global prefix, holding npm and every other globally installed
+    // package side by side, and none of them belong in the bundle.
     expect(shape?.dependencyRoots).toEqual([
-      '/global/lib/node_modules/@secondcircle/crucible/node_modules',
-      '/global/lib/node_modules'
+      '/global/lib/node_modules/@secondcircle/crucible/node_modules'
     ])
   })
 
@@ -136,6 +138,9 @@ describe('which tree shape the assembler was handed', () => {
     )
 
     expect(shape?.packageDir).toBe('/staging/node_modules/@secondcircle/crucible')
+    // Here the enclosing `node_modules` is the staging root's own, holding
+    // this install's hoisted dependencies and nothing else, so it is a root —
+    // read from the tree the caller named rather than walked up to.
     expect(shape?.dependencyRoots).toEqual([
       '/staging/node_modules/@secondcircle/crucible/node_modules',
       '/staging/node_modules'
