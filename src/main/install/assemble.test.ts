@@ -212,6 +212,99 @@ describe('who decides where the app goes', () => {
   })
 })
 
+describe('what a global install must not drag along', () => {
+  // npm's global node_modules holds every globally installed package side by
+  // side — npm itself always among them. The walk up from the package to a
+  // hoisted dependency root is the *staging* tree's shape; applied to the
+  // global-install shape it makes the whole global prefix a dependency root,
+  // and every unrelated global package is copied into the bundle.
+  it('copies no sibling global packages into the bundle', async () => {
+    // The global-install shape: the package directory itself, dependencies
+    // nested under its own node_modules — exactly what postinstall hands in.
+    const packageDir = join(root, 'global', 'node_modules', '@secondcircle', 'crucible')
+    write(join(packageDir, 'package.json'), JSON.stringify({ name: NAME, version: '1.5.0' }))
+    write(join(packageDir, 'out', 'main', 'index.js'), '// version 1.5.0\n')
+    write(join(packageDir, 'node_modules', 'react', 'index.js'), 'module.exports = {}\n')
+    write(join(packageDir, 'node_modules', 'electron', 'dist', 'electron'), '#!/bin/sh\n')
+    // The neighbours every real global prefix has.
+    write(join(root, 'global', 'node_modules', 'npm', 'index.js'), 'the package manager\n')
+    write(
+      join(root, 'global', 'node_modules', '@other-scope', 'tool', 'index.js'),
+      'somebody else\n'
+    )
+
+    const target = join(root, 'opt', 'crucible')
+    await assembleDesktopApp({ tree: packageDir, packageName: NAME, target }, machine('linux'))
+
+    const modules = join(target, 'resources', 'app', 'node_modules')
+    expect(existsSync(join(modules, 'react'))).toBe(true)
+    expect(existsSync(join(modules, 'npm'))).toBe(false)
+    expect(existsSync(join(modules, '@other-scope'))).toBe(false)
+  })
+})
+
+describe('a refresh that cannot remove everything first', () => {
+  // Windows holds files the running app has loaded against delete; the spec's
+  // ruling (§3.3) is that the assembler still leaves the bundle holding the
+  // new version, renaming aside what it cannot replace. A dependency that
+  // survived the failed removal must therefore still be refreshed — skipping
+  // it because it "already exists" reads last version's leftovers as this
+  // run's own work. Reproduced here with a directory the removal cannot
+  // delete, which is what a locked file does to `rmSync` on Windows.
+  it('still refreshes a dependency the removal left behind', async () => {
+    const tree = staging('1.5.0', 'linux')
+    const modules = join(root, 'staging', 'node_modules')
+    write(join(modules, 'react', 'index.js'), '// react as of 1.5.0\n')
+    const target = join(root, 'opt', 'crucible')
+    await assembleDesktopApp({ tree, packageName: NAME, target }, machine('linux'))
+
+    rmSync(join(root, 'staging'), { recursive: true, force: true })
+    staging('1.6.0', 'linux')
+    write(join(modules, 'react', 'index.js'), '// react as of 1.6.0\n')
+
+    // The bundle's node_modules cannot have entries removed (as a locked file
+    // forbids on Windows), though every file inside them can still be written.
+    const bundled = join(target, 'resources', 'app', 'node_modules')
+    chmodSync(bundled, 0o555)
+    try {
+      await assembleDesktopApp({ tree, packageName: NAME, target }, machine('linux'))
+      expect(readFileSync(join(bundled, 'react', 'index.js'), 'utf8')).toContain('1.6.0')
+    } finally {
+      chmodSync(bundled, 0o755)
+    }
+  })
+})
+
+describe('a leftover the sweep cannot delete yet', () => {
+  // A `.crucible-old` name still held by the old process (its own executable,
+  // above all) unlocks only when that process exits. Until then the sweep
+  // must step past it — the comment in the sweep says the next run will get
+  // it — not fail the whole assembly: a second update published before the
+  // user restarts would otherwise never land, retried and refailed every
+  // fifteen minutes. `rmSync`'s `force` ignores only a missing path, not a
+  // delete the OS refuses.
+  it('does not fail the assembly', async () => {
+    const tree = staging('1.5.0', 'linux')
+    const target = join(root, 'opt', 'crucible')
+    await assembleDesktopApp({ tree, packageName: NAME, target }, machine('linux'))
+
+    // A leftover that cannot be deleted: its contents cannot be unlinked,
+    // which is Windows' locked-executable refusal in POSIX terms.
+    const held = join(target, 'held.crucible-old')
+    write(join(held, 'still-running'), 'the old executable')
+    chmodSync(held, 0o555)
+    try {
+      const outcome = await assembleDesktopApp(
+        { tree, packageName: NAME, target },
+        machine('linux')
+      )
+      expect(outcome.version).toBe('1.5.0')
+    } finally {
+      chmodSync(held, 0o755)
+    }
+  })
+})
+
 describe('postinstall’s one rule', () => {
   it('assembles nothing in a tree that has src/', () => {
     mkdirSync(join(root, 'checkout', 'src'), { recursive: true })
