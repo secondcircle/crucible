@@ -3,7 +3,17 @@
 // The assembler against a tree written for it: a package, its dependencies and
 // a stand-in electron dist. What the real thing does that this cannot is
 // download a binary and launch it; what it decides is all here.
-import { chmodSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
+import {
+  chmodSync,
+  closeSync,
+  existsSync,
+  mkdirSync,
+  openSync,
+  readFileSync,
+  readSync,
+  statSync,
+  writeFileSync
+} from 'node:fs'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
@@ -307,21 +317,29 @@ describe('a refresh under a running app', () => {
   // mmap'd. Replacing such a file is safe — an unlink leaves the old inode to
   // the process that holds it — but writing through it rewrites the very
   // bytes the app is executing: SIGBUS, or two versions interleaved in one
-  // process. A new inode at the same path is the observable fact of a safe
-  // refresh.
+  // process. The observable fact of a safe refresh is that whoever already
+  // holds the old file keeps reading the old bytes while the path serves the
+  // new ones. (Comparing inode numbers is not that fact: ext4 hands a freed
+  // number straight back to the next file, so the numbers match on Linux.)
   it('replaces the shell’s files rather than writing through them', async () => {
     const tree = staging('1.5.0', 'linux')
     const target = join(root, 'opt', 'crucible')
     await assembleDesktopApp({ tree, packageName: NAME, target }, machine('linux'))
     const mapped = join(target, 'libffmpeg.so')
-    const before = statSync(mapped).ino
+    const held = openSync(mapped, 'r')
 
-    rmSync(join(root, 'staging'), { recursive: true, force: true })
-    staging('1.6.0', 'linux')
-    await assembleDesktopApp({ tree, packageName: NAME, target }, machine('linux'))
+    try {
+      rmSync(join(root, 'staging'), { recursive: true, force: true })
+      staging('1.6.0', 'linux')
+      await assembleDesktopApp({ tree, packageName: NAME, target }, machine('linux'))
 
-    expect(readFileSync(mapped, 'utf8')).toBe('binary 1.6.0')
-    expect(statSync(mapped).ino).not.toBe(before)
+      expect(readFileSync(mapped, 'utf8')).toBe('binary 1.6.0')
+      const old = Buffer.alloc(64)
+      const length = readSync(held, old, 0, old.length, 0)
+      expect(old.subarray(0, length).toString('utf8')).toBe('binary 1.5.0')
+    } finally {
+      closeSync(held)
+    }
   })
 })
 
