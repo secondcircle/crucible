@@ -1,5 +1,12 @@
 import { join } from 'node:path'
-import { app, BrowserWindow, dialog, Menu, shell as electronShell } from 'electron'
+import {
+  app,
+  BrowserWindow,
+  dialog,
+  Menu,
+  shell as electronShell,
+  utilityProcess
+} from 'electron'
 import { type AgentChannel, serveAgentChannel } from './agent/channel'
 import type { SessionId } from '../shared/agent/port'
 import { type AppUpdateChannel, serveAppUpdateChannel } from './app-update/channel'
@@ -11,7 +18,7 @@ import { createAppUpdateService, type MainAppUpdateService } from './app-update/
 import { checkoutCommit, createDevVersionService } from './app-update/dev-service'
 import { npmRegistry } from './app-update/registry'
 import { npmStager } from './app-update/stager'
-import { assembleDesktopApp } from './install/assemble'
+import { forkedAssembler } from './app-update/forked-assembler'
 import { bundleRootFromExecutable } from './install/layout'
 import { readPackageIdentity } from './install/package-json'
 import { decideFlavor, selectAdapter } from './agent/select-adapter'
@@ -262,9 +269,14 @@ function createInstalledUpdateService(): MainAppUpdateService {
       packageName: identity.name,
       root: join(app.getPath('userData'), 'update-staging')
     }).stage,
-    assemble: async (tree, target) => {
-      await assembleDesktopApp({ tree, packageName: identity.name, target })
-    },
+    // In a process of its own: the assembler copies the whole Electron
+    // distribution with synchronous file calls, and inline here that held the
+    // window frozen for as long as the copy took.
+    assemble: forkedAssembler({
+      script: join(app.getAppPath(), 'out', 'main', 'assemble-cli.js'),
+      packageName: identity.name,
+      fork: (script, args) => utilityProcess.fork(script, [...args], { stdio: 'pipe' })
+    }),
     relaunch: () => {
       log.append({ source: 'main', event: 'update_restart' })
       app.relaunch()

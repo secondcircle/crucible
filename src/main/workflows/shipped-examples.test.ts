@@ -140,7 +140,10 @@ describe('the example workflows Crucible ships', () => {
 
   // This repository keeps its own copies enrolled, so retiring the built-ins
   // never broke its build path. Loaded exactly as the app would: a user root
-  // that finds nothing, this checkout as the workspace.
+  // that finds nothing, this checkout as the workspace. What is asked is that
+  // the tracked one is found and that everything there loads, not that the
+  // folder holds nothing else: `.crucible/workflows` is where a person drops
+  // a workflow to try, and an untracked file there must not turn the suite red.
   it("finds this repo's own workflows at the workspace rung", async () => {
     const loader = createWorkflowLoader({
       roots: { user: NO_WORKSPACE },
@@ -150,9 +153,11 @@ describe('the example workflows Crucible ships', () => {
       }
     })
     const listed = await loader.list(APP)
-    expect(listed.map((workflow) => [workflow.name, workflow.origin])).toEqual([
-      ['adr-audit', 'workspace']
+    expect(listed.map((workflow) => [workflow.name, workflow.origin])).toContainEqual([
+      'adr-audit',
+      'workspace'
     ])
+    for (const workflow of listed) expect(workflow.origin).toBe('workspace')
   })
 
   it('plans a graph from its inputs before anything costs money', async () => {

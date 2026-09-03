@@ -6,12 +6,15 @@ export default defineConfig({
     plugins: [externalizeDepsPlugin()],
     build: {
       rollupOptions: {
-        // Two entries out of one build: the app's main process, and the
-        // desktop installer npm runs after an install. They share the
-        // assembler, so both get the same answer to where an app goes.
+        // Three entries out of one build: the app's main process, the
+        // desktop installer npm runs after an install, and the assembler the
+        // installed app forks to lay an update into its own bundle. All three
+        // share the assembler, so they get the same answer to where an app
+        // goes.
         input: {
           index: 'src/main/index.ts',
-          postinstall: 'src/main/install/postinstall.ts'
+          postinstall: 'src/main/install/postinstall.ts',
+          'assemble-cli': 'src/main/install/assemble-cli.ts'
         }
       }
     }
