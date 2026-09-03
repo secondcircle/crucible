@@ -2639,6 +2639,9 @@ export function Shell({
             sessionId={activeSessionId}
             width={panelWidth}
             port={port}
+            onCopyLocation={(location) =>
+              void navigator.clipboard?.writeText(location).catch(report)
+            }
             onResize={setPanelWidth}
             onCollapse={() => setCollapsed((current) => ({ ...current, [activeSessionId]: true }))}
           />

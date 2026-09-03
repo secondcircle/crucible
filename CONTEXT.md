@@ -330,11 +330,21 @@ _Avoid_: blocked (π's word for an interactive run's wait), stuck, orphaned.
 
 **Run graph**:
 The drawn picture of a run's nodes and the edges between them, layered
-top-down in the run view's left pane: what followed what, what fanned out in
-parallel, what was sent back for revision. An edge means the work of one node
-reached another, and carries no text; a node states what it follows rather
-than having it inferred.
+top-down in the run view's left pane, with loops laid out left to right: what
+followed what, what fanned out in parallel, what was sent back for revision.
+A pannable, zoomable canvas that opens fit and centered. An edge means the
+work of one node reached another, and carries no text; a node states what it
+follows rather than having it inferred.
 _Avoid_: the flow, the graph rail, the DAG view, pipeline diagram.
+
+**Loop**:
+In the run graph, a stretch of nodes whose base name recurs with rising round
+numbers (`review-1`, `review-2`), inferred from ids alone, never declared by
+the workflow. Each **round** runs from one occurrence of the leading name to
+the next and is drawn as one column; rounds go left to right off the main
+line, and the main line resumes under the first round.
+_Avoid_: cycle (a run record has none), iteration, retry, revision (that is
+the engine's `·rN` record of a replayed node).
 
 **Artifact rail**:
 The third column of the run view, listing every artifact the run has touched

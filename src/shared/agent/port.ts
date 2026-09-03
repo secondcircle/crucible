@@ -60,18 +60,32 @@ export type TabId = string
 
 export type ExhibitKind = 'html' | 'markdown' | 'url'
 
-export interface PanelTab {
+interface PanelTabBase {
   readonly id: TabId
   readonly title: string
-  readonly kind: ExhibitKind
   /** ISO of the latest show; a change means the body should be re-fetched. */
   readonly shownAt: string
-  /**
-   * What the exhibit view loads: a `file:` URL for an html tab, the address
-   * itself for a url tab. Absent for markdown, whose body rides `exhibit`.
-   */
-  readonly src?: string
 }
+
+// One field says where the exhibit is, and its shape follows the kind. Main
+// resolved it at show time, against the session's own working directory, so a
+// worktree session's tab names the worktree's file; the renderer displays it,
+// copies it, and builds the `file:` URL a guest loads from it, resolving
+// nothing itself.
+export type PanelTab =
+  | (PanelTabBase & {
+      readonly kind: 'html'
+      readonly path: string
+    })
+  | (PanelTabBase & {
+      readonly kind: 'markdown'
+      readonly path: string
+    })
+  | (PanelTabBase & {
+      readonly kind: 'url'
+      /** The full http(s) address, scheme included. */
+      readonly address: string
+    })
 
 export interface PanelState {
   /** Show order, oldest first. Never empty: an empty panel is an absent one. */
@@ -565,8 +579,8 @@ export interface AgentPort {
   activateTab(sessionId: SessionId, tabId: TabId): Promise<void>
   /** User closed a tab. Unknown ids are a harmless no-op. */
   closeTab(sessionId: SessionId, tabId: TabId): Promise<void>
-  // The exhibit's body, read at call time. The tab's path never crosses: the
-  // renderer knows a tab by its id and by nothing else.
+  // The exhibit's body, read at call time. Asked for by tab id alone: the
+  // location a tab carries is what the panel displays, never what it reads by.
   exhibit(sessionId: SessionId, tabId: TabId): Promise<{ readonly body: string }>
 
   // Stop what this session is doing: the live turn, and a summarizing jump

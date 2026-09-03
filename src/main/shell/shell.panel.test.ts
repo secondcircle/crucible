@@ -68,14 +68,17 @@ describe('what a show puts on the port', () => {
   it('folds the tabs into the session and says the snapshot first', async () => {
     const sessionId = await withSession()
     const before = events.length
+    const path = exhibit('plan.md')
 
-    panel.show(sessionId, workspace, exhibit('plan.md'), 'the plan')
+    panel.show(sessionId, workspace, path, 'the plan')
 
     expect(types().slice(before)).toEqual(['state', 'panel_shown'])
     const said = events[before]
     // The snapshot the event names is already in the listener's hands.
     expect(said.type === 'state' && sessionOf(said.snapshot, sessionId)?.panel).toEqual({
-      tabs: [{ id: 'plan', title: 'the plan', kind: 'markdown', shownAt: expect.any(String) }],
+      tabs: [
+        { id: 'plan', title: 'the plan', kind: 'markdown', shownAt: expect.any(String), path }
+      ],
       activeTabId: 'plan'
     })
     expect(events[before + 1]).toEqual({ type: 'panel_shown', sessionId, tabId: 'plan' })
@@ -103,6 +106,33 @@ describe('what a show puts on the port', () => {
       sessionId: first,
       tabId: 'plan'
     })
+  })
+})
+
+describe('where the session works', () => {
+  it('names the worktree\u2019s own file, not the checkout\u2019s', async () => {
+    const worktree = mkdtempSync(join(tmpdir(), 'crucible-shell-worktree-'))
+    const checkoutSession = await withSession()
+    const worktreeSession = await withSession()
+    await shell.setWorktree(worktreeSession, { path: worktree })
+    writeFileSync(join(worktree, 'plan.md'), '# the worktree plan', 'utf8')
+    exhibit('plan.md', '# the checkout plan')
+
+    const snapshot = await shell.snapshot()
+    const worksIn = (id: SessionId): string =>
+      sessionOf(snapshot, id)?.worktree?.path ?? workspace
+    panel.show(checkoutSession, worksIn(checkoutSession), 'plan.md', 'plan')
+    panel.show(worktreeSession, worksIn(worktreeSession), 'plan.md', 'plan')
+
+    const after = await shell.snapshot()
+    const pathOf = (id: SessionId): string | undefined => {
+      const tab = sessionOf(after, id)?.panel?.tabs[0]
+      return tab?.kind === 'markdown' ? tab.path : undefined
+    }
+    expect(pathOf(worktreeSession)).toBe(join(worktree, 'plan.md'))
+    expect(pathOf(checkoutSession)).toBe(join(workspace, 'plan.md'))
+    expect(pathOf(worktreeSession)).not.toBe(pathOf(checkoutSession))
+    rmSync(worktree, { recursive: true, force: true })
   })
 })
 

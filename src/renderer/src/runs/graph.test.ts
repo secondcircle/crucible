@@ -40,6 +40,120 @@ const card = (layout: ReturnType<typeof layOutGraph>, id: string) => {
 const centre = (layout: ReturnType<typeof layOutGraph>, id: string): number =>
   card(layout, id).x + layout.cardWidth / 2
 
+function chain(ids: readonly string[]): RunNode[] {
+  return ids.map((id, at) => nodeOf(id, at === 0 ? [] : [ids[at - 1]]))
+}
+
+interface Point {
+  readonly x: number
+  readonly y: number
+}
+
+function along(d: string): Point[] {
+  const walked: Point[] = []
+  let at: Point = { x: 0, y: 0 }
+  for (const command of d.match(/[MLCQ][^MLCQ]*/g) ?? []) {
+    const numbers = (command.match(/-?\d+(?:\.\d+)?/g) ?? []).map(Number)
+    const points: Point[] = []
+    for (let read = 0; read + 1 < numbers.length; read += 2) {
+      points.push({ x: numbers[read], y: numbers[read + 1] })
+    }
+    if (command[0] === 'M' || command[0] === 'L') walked.push(...points)
+    else for (let step = 0; step <= 24; step++) walked.push(bezier([at, ...points], step / 24))
+    at = points[points.length - 1]
+  }
+  return walked
+}
+
+function bezier(points: readonly Point[], t: number): Point {
+  let held = points
+  while (held.length > 1) {
+    const from = held
+    held = from.slice(1).map((point, at) => ({
+      x: from[at].x + (point.x - from[at].x) * t,
+      y: from[at].y + (point.y - from[at].y) * t
+    }))
+  }
+  return held[0]
+}
+
+type Layout = ReturnType<typeof layOutGraph>
+
+function expectNothingOverlaps(layout: Layout): void {
+  for (const one of layout.cards) {
+    for (const other of layout.cards) {
+      if (one === other) continue
+      const apart =
+        one.x + layout.cardWidth <= other.x ||
+        other.x + layout.cardWidth <= one.x ||
+        one.y + layout.cardHeight <= other.y ||
+        other.y + layout.cardHeight <= one.y
+      expect(apart, `${one.id} overlaps ${other.id}`).toBe(true)
+    }
+  }
+}
+
+function expectNoEdgeCrossesACard(layout: Layout): void {
+  for (const edge of layout.edges) {
+    for (const point of along(edge.d)) {
+      for (const one of layout.cards) {
+        const inside =
+          point.x > one.x + 0.5 &&
+          point.x < one.x + layout.cardWidth - 0.5 &&
+          point.y > one.y + 0.5 &&
+          point.y < one.y + layout.cardHeight - 0.5
+        expect(inside, `${edge.from}→${edge.to} crosses ${one.id}`).toBe(false)
+      }
+    }
+  }
+}
+
+function expectExtentHoldsEverything(layout: Layout): void {
+  for (const one of layout.cards) {
+    expect(one.x).toBeGreaterThanOrEqual(0)
+    expect(one.y).toBeGreaterThanOrEqual(0)
+    expect(one.x + layout.cardWidth).toBeLessThanOrEqual(layout.width)
+    expect(one.y + layout.cardHeight).toBeLessThanOrEqual(layout.height)
+  }
+  for (const edge of layout.edges) {
+    for (const point of along(edge.d)) {
+      expect(point.x, `${edge.from}→${edge.to} left of the drawing`).toBeGreaterThanOrEqual(0)
+      expect(point.y, `${edge.from}→${edge.to} above the drawing`).toBeGreaterThanOrEqual(0)
+      expect(point.x, `${edge.from}→${edge.to} past the drawing`).toBeLessThanOrEqual(layout.width)
+      expect(point.y, `${edge.from}→${edge.to} under the drawing`).toBeLessThanOrEqual(
+        layout.height
+      )
+    }
+  }
+}
+
+const LOOPED: RunNode[] = [
+  ...chain([
+    'analyst',
+    'architect',
+    'builder',
+    'review-1',
+    'fixer-1',
+    'review-2',
+    'check-fixer-1',
+    'fixer-2',
+    'review-3',
+    'gate-alignment-1',
+    'gate-comments-1'
+  ]),
+  nodeOf('gate-verdict-1', ['gate-alignment-1', 'gate-comments-1'])
+]
+
+const GATE: RunNode[] = chain([
+  'gate-alignment-1',
+  'gate-comments-1',
+  'gate-verdict-1',
+  'gate-fixer-1',
+  'gate-alignment-2',
+  'gate-comments-2',
+  'gate-verdict-2'
+])
+
 describe('the run graph layout', () => {
   it('gives every node exactly one card and every parent edge one line', () => {
     const layout = layOutGraph(BUILD)
@@ -236,6 +350,232 @@ describe('the run graph layout', () => {
     expect(layout.cards).toEqual([])
     expect(layout.edges).toEqual([])
     expect(Number.isFinite(layout.width)).toBe(true)
+  })
+})
+
+describe('a loop, laid out left to right', () => {
+  const layout = layOutGraph(LOOPED)
+  const route = (from: string, to: string) => {
+    const found = layout.edges.find((edge) => edge.from === from && edge.to === to)
+    if (found === undefined) throw new Error(`no edge ${from}->${to}`)
+    return found
+  }
+
+  it('gives each round a column, left to right, and stacks the round down it', () => {
+    const columns = ['review-1', 'review-2', 'review-3'].map((id) => card(layout, id).x)
+    expect(columns[0]).toBeLessThan(columns[1])
+    expect(columns[1]).toBeLessThan(columns[2])
+    expect(columns[1] - columns[0]).toBe(columns[2] - columns[1])
+    expect(columns[1] - columns[0]).toBeGreaterThan(layout.cardWidth)
+
+    expect(card(layout, 'review-2').layer).toBe(card(layout, 'review-1').layer)
+    expect(card(layout, 'review-3').layer).toBe(card(layout, 'review-1').layer)
+    expect(card(layout, 'fixer-1').layer).toBe(card(layout, 'review-1').layer + 1)
+    expect(card(layout, 'check-fixer-1').layer).toBe(card(layout, 'review-2').layer + 1)
+    expect(card(layout, 'fixer-2').layer).toBe(card(layout, 'review-2').layer + 2)
+    for (const id of ['check-fixer-1', 'fixer-2']) {
+      expect(card(layout, id).x).toBe(card(layout, 'review-2').x)
+    }
+    expect(card(layout, 'fixer-1').x).toBe(card(layout, 'review-1').x)
+  })
+
+  it('stands the loop on the spine and brings the run back under its first column', () => {
+    expect(centre(layout, 'review-1')).toBeCloseTo(centre(layout, 'builder'), 5)
+    expect(centre(layout, 'gate-alignment-1')).toBeCloseTo(centre(layout, 'review-1'), 5)
+    expect(card(layout, 'gate-alignment-1').layer).toBe(card(layout, 'review-1').layer + 3)
+    const spine = ['analyst', 'architect', 'builder', 'review-1', 'gate-alignment-1']
+    expect(new Set(spine.map((id) => card(layout, id).x)).size).toBe(1)
+  })
+
+  it('widens with rounds and deepens with its tallest round, never the other way', () => {
+    const columnsOf = (held: Layout): number => new Set(held.cards.map((one) => one.x)).size
+    const rowsOf = (held: Layout): number => new Set(held.cards.map((one) => one.y)).size
+    const two = layOutGraph(chain(['a-1', 'p-1', 'a-2', 'p-2']))
+    const deeper = layOutGraph(chain(['a-1', 'p-1', 'q-1', 'a-2', 'p-2']))
+    const wider = layOutGraph(chain(['a-1', 'p-1', 'a-2', 'p-2', 'a-3']))
+
+    expect([columnsOf(two), rowsOf(two)]).toEqual([2, 2])
+    expect([columnsOf(deeper), rowsOf(deeper)]).toEqual([2, 3])
+    expect([columnsOf(wider), rowsOf(wider)]).toEqual([3, 2])
+  })
+
+  it('overlaps no two cards and keeps the gaps even, loop columns included', () => {
+    expectNothingOverlaps(layout)
+    expectNothingOverlaps(layOutGraph(GATE))
+
+    const rows = [...new Set(layout.cards.map((one) => one.y))].sort((a, b) => a - b)
+    const steps = rows.slice(1).map((y, at) => y - rows[at])
+    expect(new Set(steps).size).toBe(1)
+  })
+
+  it('lets a fan-out stand beside a loop rather than inside it', () => {
+    const beside = layOutGraph([
+      nodeOf('planner'),
+      nodeOf('builder', ['planner']),
+      nodeOf('audit', ['builder']),
+      nodeOf('review-1', ['builder']),
+      nodeOf('fixer-1', ['review-1']),
+      nodeOf('review-2', ['fixer-1']),
+      nodeOf('shipper', ['review-2', 'audit'])
+    ])
+
+    expectNothingOverlaps(beside)
+    expect(card(beside, 'audit').layer).toBe(card(beside, 'review-1').layer)
+    expect(card(beside, 'audit').x).toBeGreaterThanOrEqual(
+      card(beside, 'review-2').x + beside.cardWidth
+    )
+    expectNoEdgeCrossesACard(beside)
+  })
+
+  it('routes round to round sideways, down a column straight, and out along the band', () => {
+    expect(route('fixer-1', 'review-2').route).toEqual({ kind: 'across' })
+    expect(route('fixer-2', 'review-3').route).toEqual({ kind: 'across' })
+    expect(route('review-2', 'check-fixer-1').route).toEqual({ kind: 'direct' })
+
+    const across = along(route('fixer-1', 'review-2').d)
+    expect(across[0].x).toBe(card(layout, 'fixer-1').x + layout.cardWidth)
+    expect(across[across.length - 1].x).toBe(card(layout, 'review-2').x)
+    expect(card(layout, 'review-2').y).toBeLessThan(card(layout, 'fixer-1').y)
+
+    const out = route('review-3', 'gate-alignment-1')
+    expect(out.route.kind).toBe('return')
+    const band = out.route.kind === 'return' ? out.route.band : 0
+    const deepest = Math.max(
+      ...['fixer-1', 'fixer-2', 'review-3'].map((id) => card(layout, id).y + layout.cardHeight)
+    )
+    expect(band).toBeGreaterThan(deepest)
+    expect(band).toBeLessThan(card(layout, 'gate-alignment-1').y)
+    const walked = along(out.d)
+    expect(walked[walked.length - 1]).toEqual({
+      x: centre(layout, 'gate-alignment-1'),
+      y: card(layout, 'gate-alignment-1').y
+    })
+  })
+
+  it('passes no edge through a card, and holds every path inside the drawing', () => {
+    for (const held of [layout, layOutGraph(GATE), layOutGraph(BUILD)]) {
+      expectNoEdgeCrossesACard(held)
+      expectExtentHoldsEverything(held)
+    }
+  })
+
+  it('draws the same loop twice, whatever the nodes are doing', () => {
+    expect(layOutGraph(LOOPED.map((node) => ({ ...node })))).toEqual(layout)
+    const flying = layOutGraph(
+      LOOPED.map((node) =>
+        node.id === 'review-3' ? { ...node, status: 'running' as const, endedAt: undefined } : node
+      )
+    )
+    for (const node of LOOPED) {
+      expect(card(flying, node.id).x).toBe(card(layout, node.id).x)
+      expect(card(flying, node.id).y).toBe(card(layout, node.id).y)
+    }
+  })
+
+  it('draws round numbers that gap, that fall and that never arrive', () => {
+    const gapped = chain(['review-1', 'fixer-1', 'review-4', 'ship-1'])
+    const falling = chain(['review-2', 'fixer-1', 'review-1', 'fixer-2'])
+    const abandoned = chain(['review-3', 'ship', 'review-1', 'review-2'])
+
+    for (const record of [gapped, falling, abandoned]) {
+      const held = layOutGraph(record)
+      expect(held.cards.map((one) => one.id)).toEqual(record.map((node) => node.id))
+      expect(Number.isFinite(held.width)).toBe(true)
+      expect(Number.isFinite(held.height)).toBe(true)
+      expectNothingOverlaps(held)
+      expectExtentHoldsEverything(held)
+      expectNoEdgeCrossesACard(held)
+      expect(layOutGraph(record.map((node) => ({ ...node })))).toEqual(held)
+    }
+  })
+
+  it('draws a cycle, a self-parent and a record that names two nodes the same', () => {
+    const cyclic = [
+      nodeOf('review-1', ['review-2']),
+      nodeOf('review-2', ['review-1']),
+      nodeOf('review-3', ['review-3']),
+      nodeOf('fixer-1', ['review-1', 'review-1']),
+      nodeOf('after', ['ghost-that-was-pruned'])
+    ]
+    const held = layOutGraph(cyclic)
+
+    expect(held.cards.map((one) => one.id)).toEqual(cyclic.map((node) => node.id))
+    expect(held.edges.some((edge) => edge.from === edge.to)).toBe(false)
+    expect(held.edges.filter((edge) => edge.to === 'fixer-1')).toHaveLength(1)
+    expectNothingOverlaps(held)
+    expectExtentHoldsEverything(held)
+
+    const twinned = layOutGraph([
+      nodeOf('review-1'),
+      nodeOf('fixer-1', ['review-1']),
+      nodeOf('review-1', ['fixer-1'])
+    ])
+    expect(twinned.cards).toHaveLength(3)
+    expect(Number.isFinite(twinned.width)).toBe(true)
+    expect(Number.isFinite(twinned.height)).toBe(true)
+  })
+
+  it('draws the gate under the review loop when the record holds the gate’s planned slots first', () => {
+    const held = layOutGraph([
+      nodeOf('analyst'),
+      nodeOf('architect', ['analyst']),
+      nodeOf('builder', ['architect', 'analyst']),
+      nodeOf('review-1', ['builder', 'analyst', 'architect']),
+      nodeOf('gate-alignment-1', ['review-3', 'analyst', 'architect']),
+      nodeOf('gate-comments-1', ['gate-alignment-1']),
+      nodeOf('gate-verdict-1', ['gate-alignment-1', 'gate-comments-1', 'analyst']),
+      nodeOf('fixer-1', ['review-1', 'analyst', 'architect']),
+      nodeOf('review-2', ['fixer-1', 'analyst', 'architect', 'review-1']),
+      nodeOf('check-fixer-1', ['review-2', 'analyst', 'architect']),
+      nodeOf('fixer-2', ['check-fixer-1', 'analyst', 'architect', 'review-1', 'review-2']),
+      nodeOf('review-3', ['fixer-2', 'analyst', 'architect', 'review-1', 'review-2'])
+    ])
+
+    expect(card(held, 'review-2').x).toBeGreaterThan(card(held, 'review-1').x)
+    expect(card(held, 'review-3').x).toBeGreaterThan(card(held, 'review-2').x)
+    expect(card(held, 'fixer-1').x).toBe(card(held, 'review-1').x)
+    expect(card(held, 'check-fixer-1').x).toBe(card(held, 'review-2').x)
+    expect(card(held, 'fixer-2').x).toBe(card(held, 'review-2').x)
+    const loopBottom = Math.max(
+      ...['review-1', 'fixer-1', 'review-2', 'check-fixer-1', 'fixer-2', 'review-3'].map(
+        (id) => card(held, id).layer
+      )
+    )
+    for (const id of ['gate-alignment-1', 'gate-comments-1', 'gate-verdict-1']) {
+      expect(card(held, id).x, `${id} stands in the spine column`).toBe(card(held, 'review-1').x)
+      expect(card(held, id).layer, `${id} sits below the loop`).toBeGreaterThan(loopBottom)
+    }
+  })
+
+  it('keeps the gate’s pending ghosts out of the review loop while the run is in flight', () => {
+    const ghost = (id: string, parents: string[]): RunNode =>
+      nodeOf(id, parents, { status: 'pending', startedAt: undefined, endedAt: undefined })
+    const held = layOutGraph([
+      nodeOf('analyst'),
+      nodeOf('architect', ['analyst']),
+      nodeOf('builder', ['architect', 'analyst']),
+      nodeOf('review-1', ['builder', 'analyst', 'architect']),
+      ghost('gate-alignment-1', ['review-1']),
+      ghost('gate-comments-1', ['gate-alignment-1']),
+      ghost('gate-verdict-1', ['gate-alignment-1', 'gate-comments-1']),
+      nodeOf('check-fixer-1', ['review-1', 'analyst', 'architect']),
+      nodeOf('fixer-1', ['check-fixer-1', 'analyst', 'architect', 'review-1']),
+      nodeOf('review-2', ['fixer-1', 'analyst', 'architect', 'review-1'], {
+        status: 'running',
+        endedAt: undefined
+      })
+    ])
+
+    expect(card(held, 'review-2').x).toBeGreaterThan(card(held, 'review-1').x)
+    expect(card(held, 'check-fixer-1').x).toBe(card(held, 'review-1').x)
+    expect(card(held, 'fixer-1').x).toBe(card(held, 'review-1').x)
+    const loopBottom = Math.max(
+      ...['review-1', 'check-fixer-1', 'fixer-1', 'review-2'].map((id) => card(held, id).layer)
+    )
+    for (const id of ['gate-alignment-1', 'gate-comments-1', 'gate-verdict-1']) {
+      expect(card(held, id).x, `${id} stands in the spine column`).toBe(card(held, 'review-1').x)
+      expect(card(held, id).layer, `${id} sits below the loop`).toBeGreaterThan(loopBottom)
+    }
   })
 })
 

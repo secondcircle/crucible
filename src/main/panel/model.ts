@@ -1,10 +1,10 @@
 import { existsSync, readFileSync, statSync } from 'node:fs'
 import { basename, extname, isAbsolute, resolve } from 'node:path'
-import { pathToFileURL } from 'node:url'
 import type { PanelTools } from '../../shared/agent/panel-tools'
 import type {
   ExhibitKind,
   PanelState,
+  PanelTab,
   SessionId,
   TabId,
   Unsubscribe
@@ -252,22 +252,7 @@ export function createPanelModel({
       const panel = panelOf(sessionId)
       const activeTabId = panel.activeTabId
       if (panel.tabs.length === 0 || activeTabId === null) return undefined
-      return {
-        tabs: panel.tabs.map((tab) => ({
-          id: tab.id,
-          title: tab.title,
-          kind: tab.kind,
-          shownAt: tab.shownAt,
-          // What the view loads. A markdown body rides `exhibit` instead, so
-          // no path leaves for the renderer where none is needed.
-          ...(tab.kind === 'html'
-            ? { src: pathToFileURL(tab.path).href }
-            : tab.kind === 'url'
-              ? { src: tab.path }
-              : {})
-        })),
-        activeTabId
-      }
+      return { tabs: panel.tabs.map(crossing), activeTabId }
     },
 
     activate(sessionId: SessionId, tabId: TabId): void {
@@ -337,6 +322,13 @@ export function createPanelModel({
       }
     }
   }
+}
+
+function crossing(tab: Tab): PanelTab {
+  const carried = { id: tab.id, title: tab.title, shownAt: tab.shownAt }
+  if (tab.kind === 'url') return { ...carried, kind: 'url', address: tab.path }
+  if (tab.kind === 'html') return { ...carried, kind: 'html', path: tab.path }
+  return { ...carried, kind: 'markdown', path: tab.path }
 }
 
 function onDisk(path: string): boolean {
