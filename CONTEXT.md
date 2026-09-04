@@ -277,6 +277,15 @@ a commit named at kickoff. Observed in the UI, never conversed with: its
 questions and results are messages to its orchestrator.
 _Avoid_: job, build, using "workflow" for an execution.
 
+**Workflow host**:
+The process a workflow file's own code runs in — its `run()`, `plan()`, node
+checks, schedule check and top-level code — one utility process per file,
+opened by the engine and killed when the run stops. The engine stays in the
+main process; every `ctx` call the file makes is a message back to it. Never
+the main thread: nothing a repository's code does synchronously can hold the
+window.
+_Avoid_: worker, sandbox, workflow process, runner (that is the engine).
+
 **Orchestrator**:
 The session agent a run reports to. Every check-in, blocker, error and
 completion arrives as a message to it, and any answer a run gets comes from
