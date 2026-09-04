@@ -65,8 +65,12 @@ export interface AssembleOutcome {
 
 /** The machine, injected whole so every decision above is testable. */
 export interface Machine extends MachineView {
-  /** Runs a command to completion; rejects when it fails. */
-  readonly run: (command: string, args: readonly string[]) => Promise<void>
+  /** Runs a command to completion; rejects when it fails. `env` is added to this process's own. */
+  readonly run: (
+    command: string,
+    args: readonly string[],
+    env?: Readonly<Record<string, string>>
+  ) => Promise<void>
 }
 
 export function thisMachine(): Machine {
@@ -86,9 +90,10 @@ export function thisMachine(): Machine {
         return false
       }
     },
-    run: (command, args) =>
+    run: (command, args, env) =>
       new Promise<void>((resolve, reject) => {
-        execFile(command, [...args], (failure) => {
+        const options = env === undefined ? {} : { env: { ...process.env, ...env } }
+        execFile(command, [...args], options, (failure) => {
           if (failure === null) resolve()
           else reject(failure)
         })
@@ -160,7 +165,12 @@ function packageVersion(packageDir: string): string {
  * postinstall: the package ships `install.js` and fetches on the first
  * `require('electron')`, which nothing in a global install ever does. So when
  * `dist` is missing the assembler makes that first call itself, with the
- * node that is running it, and looks again.
+ * binary that is running it, and looks again.
+ *
+ * That binary is node under postinstall and Electron's own under the
+ * installed app's updater, and Electron handed a script starts an app that
+ * never exits. `ELECTRON_RUN_AS_NODE` makes it node for this one child;
+ * node itself ignores it.
  */
 async function electronDist(
   shape: { readonly dependencyRoots: readonly string[] },
@@ -179,7 +189,7 @@ async function electronDist(
   for (const root of shape.dependencyRoots) {
     const installer = join(root, 'electron', 'install.js')
     if (!existsSync(installer)) continue
-    await machine.run(process.execPath, [installer])
+    await machine.run(process.execPath, [installer], { ELECTRON_RUN_AS_NODE: '1' })
     const downloaded = found()
     if (downloaded !== undefined) return downloaded
   }

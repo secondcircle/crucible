@@ -10,6 +10,7 @@ export const ASSEMBLE_TIMEOUT_MS = 10 * 60 * 1000
 
 /** The little of a child process this needs, which is what utilityProcess gives. */
 export interface ForkedChild {
+  readonly stdout?: { on(event: 'data', listener: (chunk: Buffer | string) => void): void } | null
   readonly stderr: { on(event: 'data', listener: (chunk: Buffer | string) => void): void } | null
   on(event: 'exit', listener: (code: number) => void): void
   /** A child that died of a fatal error, in utilityProcess's own terms. */
@@ -44,6 +45,9 @@ export function forkedAssembler({
       child.stderr?.on('data', (chunk) => {
         said += chunk.toString()
       })
+      // Piped, so it has to be read, or a child that says enough would block
+      // on a full pipe; what it says on success is of no interest here.
+      child.stdout?.on('data', () => {})
 
       const timer = setTimeout(() => {
         settle(() => {

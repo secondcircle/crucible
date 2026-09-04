@@ -147,6 +147,20 @@ describe('which tree shape the assembler was handed', () => {
     ])
   })
 
+  // `npm install <name> --prefix <staging>` writes a package.json at the
+  // staging root naming the package as a dependency. It is not the package,
+  // and read as postinstall's shape it made every update fail for want of a
+  // version.
+  it('is not fooled by npm’s own package.json at the staging root', () => {
+    const present = new Set([
+      '/staging/package.json',
+      '/staging/node_modules/@secondcircle/crucible/package.json'
+    ])
+    const shape = readTreeShape('/staging', name, (path) => present.has(path), 'linux')
+
+    expect(shape?.packageDir).toBe('/staging/node_modules/@secondcircle/crucible')
+  })
+
   it('recognizes nothing else', () => {
     expect(readTreeShape('/somewhere', name, () => false, 'linux')).toBeUndefined()
   })

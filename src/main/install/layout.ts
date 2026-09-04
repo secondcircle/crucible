@@ -188,6 +188,19 @@ export function readTreeShape(
   platform: Platform = process.platform
 ): TreeShape | undefined {
   const { join } = pathsOf(platform)
+  // The updater's shape: `<staging>/node_modules/<name>`, dependencies hoisted
+  // into that same `node_modules`. That directory is the staging root's own
+  // and holds nothing but this install, so it is a dependency root — and it is
+  // known from the tree we were handed, not walked to. Asked first, because
+  // `npm install --prefix` leaves a package.json of its own at the staging
+  // root, which is not the package and carries no version.
+  const staged = join(tree, 'node_modules', ...packageName.split('/'))
+  if (exists(join(staged, 'package.json'))) {
+    return {
+      packageDir: staged,
+      dependencyRoots: [join(staged, 'node_modules'), join(tree, 'node_modules')]
+    }
+  }
   // Postinstall's shape: the installed package directory itself, with npm's
   // global install strategy having nested every dependency under it. The
   // `node_modules` it *sits in* is the machine's global prefix, which holds
@@ -195,17 +208,6 @@ export function readTreeShape(
   // not a dependency root and the bundle must never be built from it.
   if (exists(join(tree, 'package.json'))) {
     return { packageDir: tree, dependencyRoots: [join(tree, 'node_modules')] }
-  }
-  // The updater's shape: `<staging>/node_modules/<name>`, dependencies hoisted
-  // into that same `node_modules`. That directory is the staging root's own
-  // and holds nothing but this install, so it is a dependency root — and it is
-  // known from the tree we were handed, not walked to.
-  const staged = join(tree, 'node_modules', ...packageName.split('/'))
-  if (exists(join(staged, 'package.json'))) {
-    return {
-      packageDir: staged,
-      dependencyRoots: [join(staged, 'node_modules'), join(tree, 'node_modules')]
-    }
   }
   return undefined
 }

@@ -24,7 +24,7 @@ const NAME = '@secondcircle/crucible'
 
 let root: string
 let home: string
-let ran: Array<{ command: string; args: readonly string[] }>
+let ran: Array<{ command: string; args: readonly string[]; env?: Readonly<Record<string, string>> }>
 
 function write(path: string, text: string): void {
   mkdirSync(dirname(path), { recursive: true })
@@ -70,8 +70,8 @@ function machine(platform: NodeJS.Platform, over: Partial<Machine> = {}): Machin
     home,
     env: {},
     writable: () => true,
-    run: async (command, args) => {
-      ran.push({ command, args })
+    run: async (command, args, env) => {
+      ran.push({ command, args, ...(env === undefined ? {} : { env }) })
     },
     ...over
   }
@@ -227,7 +227,10 @@ describe('an electron that has not downloaded itself yet', () => {
   // `require('electron')`, and a global install never makes one. A fresh
   // `npm install -g` therefore hands the assembler an `electron/` with an
   // `install.js` and no `dist/`.
-  it('runs electron’s own installer, then assembles from what it fetched', async () => {
+  // As node, whatever binary runs the assembler: under the installed app's
+  // updater that is Electron itself, which handed a script starts an app
+  // that never exits, and the assembly timed out every poll.
+  it('runs electron’s own installer as node, then assembles from what it fetched', async () => {
     const tree = staging('1.5.0', 'linux')
     const electron = join(tree, 'node_modules', 'electron')
     rmSync(join(electron, 'dist'), { recursive: true, force: true })
@@ -235,8 +238,8 @@ describe('an electron that has not downloaded itself yet', () => {
 
     const target = join(root, 'opt', 'crucible')
     const fetching = machine('linux', {
-      run: async (command, args) => {
-        ran.push({ command, args })
+      run: async (command, args, env) => {
+        ran.push({ command, args, ...(env === undefined ? {} : { env }) })
         if (args[0] === join(electron, 'install.js')) {
           write(join(electron, 'dist', 'electron'), '#!/bin/sh\n')
           write(join(electron, 'dist', 'resources', 'default_app.asar'), 'electron default app')
@@ -245,7 +248,11 @@ describe('an electron that has not downloaded itself yet', () => {
     })
     await assembleDesktopApp({ tree, packageName: NAME, target }, fetching)
 
-    expect(ran[0]).toEqual({ command: process.execPath, args: [join(electron, 'install.js')] })
+    expect(ran[0]).toEqual({
+      command: process.execPath,
+      args: [join(electron, 'install.js')],
+      env: { ELECTRON_RUN_AS_NODE: '1' }
+    })
     expect(existsSync(join(target, 'crucible'))).toBe(true)
   })
 
