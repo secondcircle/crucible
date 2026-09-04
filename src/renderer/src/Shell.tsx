@@ -222,6 +222,17 @@ export function Shell({
   const restartIntoUpdate = useCallback((): void => {
     void appUpdate?.restart().catch(() => {})
   }, [appUpdate])
+  // A check the human asked for, held only for as long as it runs: what it
+  // found arrives as an announcement like any poll's.
+  const [checkingForUpdate, setCheckingForUpdate] = useState(false)
+  const checkForUpdate = useCallback((): void => {
+    if (appUpdate === undefined) return
+    setCheckingForUpdate(true)
+    void appUpdate
+      .check()
+      .catch(() => {})
+      .finally(() => setCheckingForUpdate(false))
+  }, [appUpdate])
   const [popover, setPopover] = useState<Popover>('none')
   const [question, setQuestion] = useState<Question | undefined>(undefined)
   // The cache expiry choice. Per session like everything else here: what one
@@ -2475,7 +2486,12 @@ export function Shell({
         version={
           appVersion === undefined
             ? undefined
-            : { state: appVersion, onRestart: restartIntoUpdate }
+            : {
+                state: appVersion,
+                checking: checkingForUpdate,
+                onRestart: restartIntoUpdate,
+                onCheck: checkForUpdate
+              }
         }
       />
 

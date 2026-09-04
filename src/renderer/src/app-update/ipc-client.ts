@@ -26,6 +26,7 @@ export function createAppUpdateClient(): AppUpdateService {
   return {
     state: () => call<AppVersionState>('state'),
     restart: () => call<void>('restart'),
+    check: () => call<void>('check'),
 
     onEvent(listener: AppVersionListener): Unsubscribe {
       listeners.add(listener)

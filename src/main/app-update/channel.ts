@@ -64,6 +64,8 @@ export async function invoke(service: AppUpdateService, request: unknown): Promi
       return service.state()
     case 'restart':
       return service.restart()
+    case 'check':
+      return service.check()
     default:
       throw new Error('Crucible was asked for something its update service does not do.')
   }

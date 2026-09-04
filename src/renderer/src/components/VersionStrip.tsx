@@ -1,22 +1,25 @@
 import type { AppVersionState } from '../../../shared/app-update/service'
-import { agoLabel } from '../labels'
 import './version-strip.css'
 
 // The rail-foot block: what is running, whether it is current, and — when a
 // newer version is already on disk — the second door to the restart the top
 // bar pill offers. It says nothing it cannot support: before the first check
 // has answered the right slot stays empty rather than claiming "up to date",
-// and a dev launch says plainly that nothing is being checked.
+// and a dev launch says plainly that nothing is being checked. While the app
+// is current the second line is the one thing to do here: ask now, rather
+// than wait for the next poll.
 
 export function VersionStrip({
   state,
-  now,
-  onRestart
+  checking,
+  onRestart,
+  onCheck
 }: {
   readonly state: AppVersionState
-  /** The sidebar's own clock, so `checked 4 min ago` ages without a reload. */
-  readonly now: number
+  /** A check the human asked for is still running. */
+  readonly checking: boolean
   readonly onRestart: () => void
+  readonly onCheck: () => void
 }): React.JSX.Element {
   if (state.kind === 'installed' && state.update.kind === 'ready') {
     const waiting = state.update.version
@@ -54,15 +57,17 @@ export function VersionStrip({
           <span className="vwhen">up to date</span>
         ) : null}
       </div>
-      <span className="vwhen">{secondLine(state, now)}</span>
+      {state.kind === 'dev' ? (
+        <span className="vwhen">updates are not checked in dev</span>
+      ) : checking || state.update.kind === 'unchecked' ? (
+        // Main's launch check, or the one just asked for: either way one is
+        // running, and asking again would only join it.
+        <span className="vwhen">checking for updates…</span>
+      ) : (
+        <button className="vcheck" onClick={onCheck}>
+          check for updates
+        </button>
+      )}
     </div>
   )
-}
-
-function secondLine(state: AppVersionState, now: number): string {
-  if (state.kind === 'dev') return 'updates are not checked in dev'
-  if (state.update.kind === 'current') return `checked ${agoLabel(state.update.checkedAt, now)}`
-  // Nothing has answered yet, and an app that has not looked must not say it
-  // is up to date.
-  return 'checking for updates…'
 }

@@ -18,7 +18,6 @@ interface Plan {
   latest: string | Error
   stagingFails?: string
   assemblyFails?: string
-  now: number
 }
 
 interface Rig {
@@ -32,7 +31,7 @@ interface Rig {
 }
 
 function watching(latest: string | Error): Rig {
-  const plan: Plan = { latest, now: 1_000_000 }
+  const plan: Plan = { latest }
   const states: AppVersionState[] = []
   const staged: string[] = []
   const assembled: Array<{ tree: string; target: string }> = []
@@ -58,7 +57,6 @@ function watching(latest: string | Error): Rig {
       assembled.push({ tree, target })
     },
     relaunch: () => relaunches.push(1),
-    now: () => plan.now,
     onFailure: (message) => failures.push(message),
     intervalMs: 50
   })
@@ -106,7 +104,7 @@ describe('the installed app checking for a newer version', () => {
     rig.service.dispose()
   })
 
-  it('is current, with a fresh check time, when the registry has nothing newer', async () => {
+  it('is current when the registry has nothing newer', async () => {
     const rig = watching(RUNNING)
     subscribe(rig)
 
@@ -114,7 +112,7 @@ describe('the installed app checking for a newer version', () => {
 
     expect(rig.staged).toEqual([])
     expect(rig.states).toEqual([
-      { kind: 'installed', version: RUNNING, update: { kind: 'current', checkedAt: 1_000_000 } }
+      { kind: 'installed', version: RUNNING, update: { kind: 'current' } }
     ])
     rig.service.dispose()
   })
@@ -162,7 +160,6 @@ describe('the installed app checking for a newer version', () => {
 
     rig.plan.latest = '1.5.0'
     rig.plan.stagingFails = 'npm install exited 1'
-    rig.plan.now = 2_000_000
     await new Promise((wake) => setTimeout(wake, 80))
     await settle()
 
@@ -223,6 +220,56 @@ describe('the installed app checking for a newer version', () => {
     rig.service.dispose()
   })
 
+  it('checks on request, settling when the check has said its piece', async () => {
+    const rig = watching(RUNNING)
+    subscribe(rig)
+    await settle()
+    expect(rig.states).toHaveLength(1)
+
+    rig.plan.latest = '1.5.0'
+    await rig.service.check()
+
+    expect(rig.staged).toEqual(['1.5.0'])
+    expect(rig.states.at(-1)).toMatchObject({ update: { kind: 'ready', version: '1.5.0' } })
+    rig.service.dispose()
+  })
+
+  it('joins a check already in flight rather than starting a second', async () => {
+    let answer: ((latest: string) => void) | undefined
+    const staged: string[] = []
+    const service = createAppUpdateService({
+      version: RUNNING,
+      bundleRoot: BUNDLE,
+      registry: { latest: () => new Promise((resolve) => (answer = resolve)) },
+      stage: async (version) => {
+        staged.push(version)
+        return `/staging/${version}`
+      },
+      assemble: async () => {},
+      relaunch: () => {},
+      intervalMs: 60_000
+    })
+    // The launch check is waiting on the registry; both of these join it.
+    const first = service.check()
+    const second = service.check()
+    answer?.('1.5.0')
+    await Promise.all([first, second])
+
+    expect(staged).toEqual(['1.5.0'])
+    service.dispose()
+  })
+
+  it('settles a requested check that failed, quietly', async () => {
+    const rig = watching(new Error('getaddrinfo ENOTFOUND'))
+    await settle()
+
+    await expect(rig.service.check()).resolves.toBeUndefined()
+
+    expect(rig.failures).toEqual(['getaddrinfo ENOTFOUND', 'getaddrinfo ENOTFOUND'])
+    expect(await rig.service.state()).toMatchObject({ update: { kind: 'unchecked' } })
+    rig.service.dispose()
+  })
+
   it('is silent after dispose', async () => {
     const rig = watching(RUNNING)
     subscribe(rig)
@@ -244,6 +291,7 @@ describe('the version service a dev launch serves', () => {
 
     expect(await service.state()).toEqual({ kind: 'dev', version: '0.1.0', commit: 'd2d0bba' })
     await service.restart()
+    await service.check()
     expect(states).toEqual([])
     service.dispose()
   })

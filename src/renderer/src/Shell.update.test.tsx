@@ -28,17 +28,24 @@ const WAITING = '0.4.18'
 interface ScriptedUpdate extends AppUpdateService {
   announce(state: AppVersionState): void
   readonly restarts: ReadonlyArray<string>
+  /** Checks asked for, each settled by the test with `answer`. */
+  readonly checks: ReadonlyArray<() => void>
 }
 
 function scriptedUpdate(state: AppVersionState): ScriptedUpdate {
   const listeners = new Set<AppVersionListener>()
   const restarts: string[] = []
+  const checks: Array<() => void> = []
   let held = state
   return {
     state: async () => held,
     restart: async () => {
       restarts.push('restart')
     },
+    check: () =>
+      new Promise<void>((resolve) => {
+        checks.push(resolve)
+      }),
     onEvent(listener) {
       listeners.add(listener)
       return () => listeners.delete(listener)
@@ -47,15 +54,16 @@ function scriptedUpdate(state: AppVersionState): ScriptedUpdate {
       held = next
       for (const listener of [...listeners]) listener(next)
     },
-    restarts
+    restarts,
+    checks
   }
 }
 
-const current = (checkedAt: number): AppVersionState => ({
+const current: AppVersionState = {
   kind: 'installed',
   version: INSTALLED,
-  update: { kind: 'current', checkedAt }
-})
+  update: { kind: 'current' }
+}
 
 const ready: AppVersionState = {
   kind: 'installed',
@@ -108,18 +116,54 @@ describe('the version strip', () => {
     expect(strip()?.tagName).toBe('DIV')
   })
 
-  it('rests as an uninteractive block while the app is up to date', async () => {
-    await shellWith(scriptedUpdate(current(Date.now() - 4 * 60_000)))
+  it('offers one check, and nothing else to click, while the app is up to date', async () => {
+    await shellWith(scriptedUpdate(current))
 
     expect(strip()).toHaveTextContent(`Crucible ${INSTALLED}`)
     expect(strip()).toHaveTextContent('up to date')
-    expect(strip()).toHaveTextContent('checked 4 min ago')
     expect(strip()?.tagName).toBe('DIV')
+    expect(strip()?.querySelectorAll('button')).toHaveLength(1)
+    expect(screen.getByRole('button', { name: 'check for updates' })).not.toBeNull()
     expect(pill()).toBeNull()
   })
 
+  it('asks main for a check on the click, and says so until it settles', async () => {
+    const update = scriptedUpdate(current)
+    await shellWith(update)
+
+    fireEvent.click(screen.getByRole('button', { name: 'check for updates' }))
+
+    await vi.waitFor(() => expect(update.checks).toHaveLength(1))
+    expect(strip()).toHaveTextContent('checking for updates…')
+    expect(screen.queryByRole('button', { name: 'check for updates' })).toBeNull()
+
+    // Found nothing: the same block as before, ready to be asked again.
+    await act(async () => {
+      update.checks[0]?.()
+      await settled()
+    })
+    expect(strip()).not.toHaveTextContent('checking for updates…')
+    expect(screen.getByRole('button', { name: 'check for updates' })).not.toBeNull()
+  })
+
+  it('becomes the restart door when a requested check finds a version', async () => {
+    const update = scriptedUpdate(current)
+    await shellWith(update)
+    fireEvent.click(screen.getByRole('button', { name: 'check for updates' }))
+    await vi.waitFor(() => expect(update.checks).toHaveLength(1))
+
+    await act(async () => {
+      update.announce(ready)
+      update.checks[0]?.()
+      await settled()
+    })
+
+    expect(screen.getByRole('button', { name: `Restart into Crucible ${WAITING}` })).not.toBeNull()
+    expect(screen.queryByRole('button', { name: 'check for updates' })).toBeNull()
+  })
+
   it('becomes the second restart door when a version is waiting, beside the pill', async () => {
-    const update = scriptedUpdate(current(Date.now()))
+    const update = scriptedUpdate(current)
     await shellWith(update)
 
     act(() => update.announce(ready))
@@ -169,7 +213,7 @@ describe('the version strip', () => {
   })
 
   it('sits in the fixed foot order: cache, quota, version, then Add workspace', async () => {
-    await shellWith(scriptedUpdate(current(Date.now())), 'strips')
+    await shellWith(scriptedUpdate(current), 'strips')
 
     const feet = [...document.querySelectorAll('.side .cachestrip, .side .quota, .side .version, .side .addws')]
     expect(feet.map((foot) => foot.className.split(' ')[0])).toEqual([

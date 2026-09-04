@@ -21,6 +21,8 @@ export function createDevVersionService(options: {
     // A dev launch has nothing to restart into, and the strip that would ask
     // for one is uninteractive there.
     restart: async () => {},
+    // Nor anything to check: updates are not checked in dev.
+    check: async () => {},
     onEvent: () => () => {},
     dispose: () => {}
   }

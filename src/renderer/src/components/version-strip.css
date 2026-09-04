@@ -80,3 +80,21 @@
   color: var(--warn);
   flex: none;
 }
+
+/* The one thing to do while the app is current: the second line as a bare
+   text button, in the mono second-line grammar, lit only on hover. */
+.vcheck {
+  display: block;
+  margin-top: 2px;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: 10.5px var(--mono);
+  color: var(--faint);
+  cursor: pointer;
+}
+
+.vcheck:hover {
+  color: var(--ink);
+  text-decoration: underline;
+}

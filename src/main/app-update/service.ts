@@ -35,7 +35,6 @@ export interface AppUpdateOptions {
   readonly assemble: (tree: string, target: string) => Promise<void>
   /** `app.relaunch()` + `app.quit()`, injected so this file needs no electron. */
   readonly relaunch: () => void
-  readonly now?: () => number
   readonly intervalMs?: number
   /** Failures are quiet: they go to the run log and the next poll retries. */
   readonly onFailure?: (message: string) => void
@@ -43,9 +42,10 @@ export interface AppUpdateOptions {
 
 export function createAppUpdateService(options: AppUpdateOptions): MainAppUpdateService {
   const listeners = new Set<AppVersionListener>()
-  const now = options.now ?? Date.now
   let update: UpdateStatus = { kind: 'unchecked' }
-  let checking = false
+  // The check in flight, if one is: a poll or a click landing on top of it
+  // joins it rather than fetching the same version twice.
+  let inFlight: Promise<void> | undefined
   let disposed = false
 
   function snapshot(): AppVersionState {
@@ -58,11 +58,15 @@ export function createAppUpdateService(options: AppUpdateOptions): MainAppUpdate
     for (const listener of [...listeners]) listener(state)
   }
 
-  async function check(): Promise<void> {
-    // One check at a time: staging takes minutes, and a second poll landing
-    // mid-download would fetch the same version twice.
-    if (checking || disposed) return
-    checking = true
+  function check(): Promise<void> {
+    if (disposed) return Promise.resolve()
+    inFlight ??= run().finally(() => {
+      inFlight = undefined
+    })
+    return inFlight
+  }
+
+  async function run(): Promise<void> {
     try {
       const latest = await options.registry.latest()
 
@@ -70,7 +74,7 @@ export function createAppUpdateService(options: AppUpdateOptions): MainAppUpdate
         // At or below what runs: current, and never a downgrade. A version
         // already staged stays reported — the bundle really does hold it, and
         // saying "up to date" over it would be a lie the strip repeats.
-        if (update.kind !== 'ready') announce({ kind: 'current', checkedAt: now() })
+        if (update.kind !== 'ready') announce({ kind: 'current' })
         return
       }
 
@@ -88,8 +92,6 @@ export function createAppUpdateService(options: AppUpdateOptions): MainAppUpdate
       // state stays exactly as it was and the next poll tries again. No
       // dialog, no red, no pill for a failure.
       options.onFailure?.(cause instanceof Error ? cause.message : String(cause))
-    } finally {
-      checking = false
     }
   }
 
@@ -102,6 +104,7 @@ export function createAppUpdateService(options: AppUpdateOptions): MainAppUpdate
   return {
     state: async () => snapshot(),
     restart: async () => options.relaunch(),
+    check,
     onEvent(listener: AppVersionListener): Unsubscribe {
       listeners.add(listener)
       return () => {

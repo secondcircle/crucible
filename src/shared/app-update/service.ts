@@ -11,8 +11,8 @@ export type Unsubscribe = () => void
 export type UpdateStatus =
   /** No check has answered yet. The strip claims nothing on no evidence. */
   | { readonly kind: 'unchecked' }
-  /** The registry's latest is not newer than what runs. Epoch ms. */
-  | { readonly kind: 'current'; readonly checkedAt: number }
+  /** The registry's latest is not newer than what runs. */
+  | { readonly kind: 'current' }
   /** A newer version is assembled into the bundle; a restart picks it up. */
   | { readonly kind: 'ready'; readonly version: string }
 
@@ -31,5 +31,11 @@ export interface AppUpdateService {
   state(): Promise<AppVersionState>
   /** Relaunch into whatever the bundle now holds. Only ever the human's click. */
   restart(): Promise<void>
+  /**
+   * One check now, the same one the poll runs, settled when it is over:
+   * announced ready, announced current, or failed quietly. A check already
+   * in flight is the one waited for; nothing is asked twice.
+   */
+  check(): Promise<void>
   onEvent(listener: AppVersionListener): Unsubscribe
 }

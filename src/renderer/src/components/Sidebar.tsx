@@ -89,11 +89,13 @@ export function Sidebar({
   // The quota strip's data. Absent without a quota service, and then no strip
   // renders at all.
   readonly quota?: QuotaView
-  // The version strip's snapshot and its one action. Absent without a version
-  // service, and then no strip renders at all.
+  // The version strip's snapshot and its two actions. Absent without a
+  // version service, and then no strip renders at all.
   readonly version?: {
     readonly state: AppVersionState
+    readonly checking: boolean
     readonly onRestart: () => void
+    readonly onCheck: () => void
   }
 }): React.JSX.Element {
   const { workspaces, activeWorkspaceId, sessions, activeSessionId } = snapshot
@@ -293,7 +295,12 @@ export function Sidebar({
       {/* The foot order is fixed: cache, quota, version, then Add workspace
           and the gear. */}
       {version === undefined ? null : (
-        <VersionStrip state={version.state} now={now} onRestart={version.onRestart} />
+        <VersionStrip
+          state={version.state}
+          checking={version.checking}
+          onRestart={version.onRestart}
+          onCheck={version.onCheck}
+        />
       )}
 
       <div className="sidefoot">
