@@ -29,6 +29,7 @@ import { createSkillService, userSkillsPath } from './skills/service'
 import { shippedSkillsPath, shippedSystemPrompt } from './shipped'
 import { forwardRendererOutput } from './log/renderer-output'
 import { createFileSink } from './log/sink'
+import { startStallMonitor } from './log/stall-monitor'
 import { type NeedsYouChannel, serveNeedsYouChannel } from './needs-you/channel'
 import { selectNeedsYouService } from './needs-you/select-service'
 import type { LiveNeedsYouService } from './needs-you/service'
@@ -85,6 +86,10 @@ if (instance !== undefined) {
 const log = createFileSink(
   app.isPackaged ? join(app.getPath('userData'), 'logs') : join(app.getAppPath(), 'logs')
 )
+
+// Armed before anything else runs: a held event loop is the one failure the
+// log otherwise records only as silence.
+const stallMonitor = startStallMonitor({ log })
 
 log.append({
   source: 'main',
@@ -449,5 +454,6 @@ app.on('will-quit', () => {
   needsYou?.dispose()
   appUpdate.dispose()
   workspace.dispose()
+  stallMonitor.stop()
   log.append({ source: 'main', event: 'app_quitting' })
 })
