@@ -111,7 +111,7 @@ export async function assembleDesktopApp(
   const bundleRoot = bundleRootFor(machine, request.target)
   const layout = bundleLayout(platform, bundleRoot)
   const version = packageVersion(shape.packageDir)
-  const dist = electronDist(shape)
+  const dist = await electronDist(shape, machine)
 
   mkdirSync(bundleRoot, { recursive: true })
   // Last update's leftovers, which unlock the moment the process that held
@@ -155,11 +155,33 @@ function packageVersion(packageDir: string): string {
   return version
 }
 
-/** Electron's platform binaries, downloaded by its own postinstall. */
-function electronDist(shape: { readonly dependencyRoots: readonly string[] }): string {
+/**
+ * Electron's platform binaries. Electron 43 stopped downloading them in a
+ * postinstall: the package ships `install.js` and fetches on the first
+ * `require('electron')`, which nothing in a global install ever does. So when
+ * `dist` is missing the assembler makes that first call itself, with the
+ * node that is running it, and looks again.
+ */
+async function electronDist(
+  shape: { readonly dependencyRoots: readonly string[] },
+  machine: Machine
+): Promise<string> {
+  const found = (): string | undefined => {
+    for (const root of shape.dependencyRoots) {
+      const dist = join(root, 'electron', 'dist')
+      if (existsSync(dist)) return dist
+    }
+    return undefined
+  }
+  const dist = found()
+  if (dist !== undefined) return dist
+
   for (const root of shape.dependencyRoots) {
-    const dist = join(root, 'electron', 'dist')
-    if (existsSync(dist)) return dist
+    const installer = join(root, 'electron', 'install.js')
+    if (!existsSync(installer)) continue
+    await machine.run(process.execPath, [installer])
+    const downloaded = found()
+    if (downloaded !== undefined) return downloaded
   }
   throw new Error(
     'Crucible found no electron binary to build the app from. Reinstall so electron can download its own.'

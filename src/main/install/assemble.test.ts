@@ -222,6 +222,45 @@ describe('who decides where the app goes', () => {
   })
 })
 
+describe('an electron that has not downloaded itself yet', () => {
+  // Electron 43 ships no postinstall: the binary arrives on the first
+  // `require('electron')`, and a global install never makes one. A fresh
+  // `npm install -g` therefore hands the assembler an `electron/` with an
+  // `install.js` and no `dist/`.
+  it('runs electron’s own installer, then assembles from what it fetched', async () => {
+    const tree = staging('1.5.0', 'linux')
+    const electron = join(tree, 'node_modules', 'electron')
+    rmSync(join(electron, 'dist'), { recursive: true, force: true })
+    write(join(electron, 'install.js'), '// downloads')
+
+    const target = join(root, 'opt', 'crucible')
+    const fetching = machine('linux', {
+      run: async (command, args) => {
+        ran.push({ command, args })
+        if (args[0] === join(electron, 'install.js')) {
+          write(join(electron, 'dist', 'electron'), '#!/bin/sh\n')
+          write(join(electron, 'dist', 'resources', 'default_app.asar'), 'electron default app')
+        }
+      }
+    })
+    await assembleDesktopApp({ tree, packageName: NAME, target }, fetching)
+
+    expect(ran[0]).toEqual({ command: process.execPath, args: [join(electron, 'install.js')] })
+    expect(existsSync(join(target, 'crucible'))).toBe(true)
+  })
+
+  it('still says plainly when there is no installer to run either', async () => {
+    const tree = staging('1.5.0', 'linux')
+    rmSync(join(tree, 'node_modules', 'electron'), { recursive: true, force: true })
+
+    const target = join(root, 'opt', 'crucible')
+    await expect(
+      assembleDesktopApp({ tree, packageName: NAME, target }, machine('linux'))
+    ).rejects.toThrow('no electron binary')
+    expect(ran).toEqual([])
+  })
+})
+
 describe('what a global install must not drag along', () => {
   // npm's global node_modules holds every globally installed package side by
   // side — npm itself always among them. The walk up from the package to a
