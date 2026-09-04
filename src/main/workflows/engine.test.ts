@@ -9,8 +9,10 @@ import { afterEach, describe, expect, it } from 'vitest'
 import type { LoadedSkill, SkillService } from '../skills/service'
 import type { PlannedNode, WorkflowDef } from './authoring'
 import { createWorkflowEngine, type WorkflowEngine } from './engine'
+import { createWorkflowLoader } from './loader'
 import type { NodeSessionFactory } from './node-session'
 import { createRunStore } from './store'
+import { AUTHORING_MODULE, forkHost } from './testing/host-fork'
 import {
   cleanupScratch,
   git,
@@ -1150,5 +1152,69 @@ describe('what skills a node is started with', () => {
     await until(() => engine.runs()[0].status === 'complete')
 
     expect(sessions.requests.map((request) => request.skills)).toEqual([[], [], []])
+  })
+})
+
+// The engine over the real host: a workflow file in a process of its own,
+// reached through the loader exactly as a launch reaches it. What is proved
+// here is the wiring the in-process rig cannot: that the engine's cancel is
+// what ends a file the engine can no longer talk to, and that a host dying
+// is a run failing and nothing more.
+describe('the engine over a real workflow host', () => {
+  function realLoader(source: string) {
+    const user = tempDir('crucible-engine-user-')
+    writeFileSync(join(user, 'hosted.ts'), source, 'utf8')
+    return createWorkflowLoader({ roots: { user }, authoringModule: AUTHORING_MODULE, spawn: forkHost })
+  }
+
+  it('cancel ends a workflow file held in a synchronous loop', async () => {
+    const loader = realLoader(`
+      import { workflow } from 'crucible:workflow'
+      export default workflow({
+        description: 'asks, then spins',
+        inputs: {},
+        run: async (ctx) => {
+          await ctx.ask({ reason: 'may I spin?' })
+          for (;;) {}
+        }
+      })
+    `)
+    const { engine, repo, delivered } = rig({}, () => () => {}, { loader })
+    const started = await engine.start(startRequest(repo, 'hosted', {}))
+
+    // Once the ask is parked the file is one answer away from its loop; the
+    // answer sends it in, and the cancel has to end it from outside.
+    await until(() => engine.runs()[0].waiting === true)
+    engine.answer(started.id, 'go ahead')
+    await new Promise((resolve) => setTimeout(resolve, 200))
+    engine.cancel(started.id)
+
+    await until(() => engine.runs()[0].status === 'cancelled')
+    expect(delivered.at(-1)?.text).toContain('cancelled')
+  })
+
+  it('a host that dies fails the run, with what the process said', async () => {
+    const loader = realLoader(`
+      import { workflow } from 'crucible:workflow'
+      export default workflow({
+        description: 'dies',
+        inputs: {},
+        run: async (ctx) => {
+          await ctx.ask({ reason: 'about to go' })
+          console.error('the file blew up')
+          process.exit(9)
+        }
+      })
+    `)
+    const { engine, repo, delivered } = rig({}, () => () => {}, { loader })
+    const started = await engine.start(startRequest(repo, 'hosted', {}))
+
+    await until(() => engine.runs()[0].waiting === true)
+    engine.answer(started.id, 'go')
+
+    await until(() => engine.runs()[0].status === 'failed')
+    expect(engine.runs()[0].error).toMatch(/exited with code 9/)
+    expect(engine.runs()[0].error).toContain('the file blew up')
+    expect(delivered.at(-1)?.text).toContain('failed')
   })
 })
