@@ -77,6 +77,7 @@ import {
   type SkillsInForce
 } from './sdk-events.ts'
 import { sanitizeTitle, TITLE_INSTRUCTION, titleInput } from './sdk-titler.ts'
+import { branchSummaryExtension } from './sdk-branch-summary.ts'
 import {
   BASH_RUN_TYPE,
   deliveredBashRunId,
@@ -239,6 +240,11 @@ export function createSdkAdapter({
     for (const listener of [...listeners]) listener(event)
   }
 
+  // Why a summarizing jump went nowhere, when Crucible's own summarizer was
+  // the one that refused. π drops a hook's error, so the message crosses here
+  // instead: written by the hook, read and cleared by the jump that asked.
+  const summaryFailures = new Map<SessionId, string>()
+
   function sdk(): Promise<Sdk> {
     sdkModule ??= import('@earendil-works/pi-coding-agent')
     return sdkModule
@@ -287,8 +293,11 @@ export function createSdkAdapter({
   // when the workspace was first opened. Each session open reads the file as
   // it is now. Resumes go through here too, on purpose: a resumed conversation
   // pays one prompt-cache miss and gets the current instructions.
-  async function workspaceResources(workspacePath: string): Promise<WorkspaceResources> {
-    const pi = await sdk()
+  async function workspaceResources(
+    sessionId: SessionId,
+    workspacePath: string
+  ): Promise<WorkspaceResources> {
+    const [pi, models] = await Promise.all([sdk(), runtime()])
     const settingsManager = pi.SettingsManager.create(workspacePath, agentDir)
     // Read before the session being composed is created, so an agent is
     // offered its workspace's skills from its very first turn.
@@ -317,7 +326,27 @@ export function createSdkAdapter({
       systemPromptOverride: () => systemPrompt,
       // A Crucible-owned custom-instructions mechanism is deferred, so a file
       // dropped into the agent dir must not become one by accident.
-      appendSystemPromptOverride: () => []
+      appendSystemPromptOverride: () => [],
+      // The one extension a session runs, and Crucible's own: π's branch
+      // summarizer with its reply cap taken off.
+      extensionFactories: [
+        branchSummaryExtension({
+          generate: pi.generateBranchSummary,
+          stream: (model, context, options) => models.streamSimple(model, context, options),
+          retry: () => settingsManager.getRetrySettings(),
+          reserveTokens: () => settingsManager.getBranchSummarySettings().reserveTokens,
+          retryScheduled: (attempt, maxAttempts, delayMs, errorMessage) =>
+            emit({
+              type: 'summarize_retry',
+              sessionId,
+              attempt,
+              maxAttempts,
+              delayMs,
+              message: displaySafeMessage(errorMessage, 'The summary could not be written.')
+            }),
+          failed: (message) => summaryFailures.set(sessionId, message)
+        })
+      ]
     })
     await resourceLoader.reload()
     return {
@@ -450,7 +479,7 @@ export function createSdkAdapter({
     preferred?: { model?: ModelId; thinkingLevel?: ThinkingLevel }
   ): Promise<AgentSession> {
     const pi = await sdk()
-    const { resourceLoader, settingsManager } = await workspaceResources(workspacePath)
+    const { resourceLoader, settingsManager } = await workspaceResources(sessionId, workspacePath)
 
     const options: CreateAgentSessionOptions = {
       cwd: workspacePath,
@@ -1231,11 +1260,17 @@ export function createSdkAdapter({
       // Watched only for the call that pays for a summary, so a compaction
       // retry inside somebody's turn is never narrated as this jump's.
       const watching = summarize ? watchSummary(bound, sessionId) : undefined
+      summaryFailures.delete(sessionId)
       let navigated
       try {
         navigated = await bound.session.navigateTree(ref, { summarize })
       } finally {
         watching?.()
+      }
+      const failure = summaryFailures.get(sessionId)
+      if (failure !== undefined) {
+        summaryFailures.delete(sessionId)
+        throw new Error(failure)
       }
       const outcome = jumpOutcome(navigated)
       // Nothing moved, so nothing about the conversation changed either.
