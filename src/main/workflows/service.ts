@@ -103,10 +103,10 @@ export function createLiveWorkflowRunService({
       }
       return listed
         .map((workflow) => {
-          const inputs = Object.entries(workflow.def.inputs)
+          const inputs = Object.entries(workflow.manifest.inputs)
             .map(([name, description]) => `${name}: ${description}`)
             .join('; ')
-          return `- ${workflow.name} (${workflow.origin}) — ${workflow.def.description}${
+          return `- ${workflow.name} (${workflow.origin}) — ${workflow.manifest.description}${
             inputs === '' ? '' : `\n  inputs: ${inputs}`
           }`
         })

@@ -17,6 +17,28 @@ Crucible loads the file with a TypeScript-aware loader; `crucible:workflow`
 resolves to the authoring module without any `node_modules` in the folder.
 Node's own modules (`node:fs`, `node:child_process`) import as usual.
 
+## Where your code runs
+
+The file runs in a workflow host: a process of its own, started for the run
+and ended with it, never in Crucible's main process. Every method on `ctx` is
+a message to the engine and resolves when the engine answers, which is why
+all of them are async, `derive` included. The engine, the node sessions, the
+run record and the window are all on the other side of that message.
+
+Synchronous work is allowed and holds only your host. It holds it entirely,
+though: while `spawnSync` waits, nothing the engine sends reaches your code,
+and a cancel ends the process where it stands rather than letting the file
+finish. A short `git rev-parse` is fine either way. A test suite is not: run
+it inside a node, where an agent can read its output, or asynchronously with
+`execFile`, so a cancel lands between calls instead of killing one. A file
+that exits, or that throws at import, fails its run with the process's
+stderr on the run's error.
+
+The manifest, the declarations minus the functions, is read once per change
+to the file's bytes, by a host started for that and closed after. A run
+always imports the file afresh in a host of its own, so a helper the file
+imports is read live by every run.
+
 ## The smallest real workflow
 
 ```ts
@@ -83,14 +105,15 @@ export default workflow({
   day-of-week. `*`, lists (`,`), ranges (`-`), steps (`/`) and numeric values;
   day-of-week 0–7 with both 0 and 7 meaning Sunday. Evaluated in the machine's
   local time. No names for days or months, no presets, no plain English.
-- `check` — optional gate, evaluated in the main process at fire time, outside
+- `check` — optional gate, evaluated in a workflow host at fire time, outside
   any worktree and with the app's own privileges, exactly as this file was
   loaded. It receives `{ workspacePath }` and nothing else. Truthy fires the
   run; falsy leaves no trace anywhere — no run, no worktree, no board entry.
   Day one it is boolean only: nothing it computed reaches the run, which
   re-queries whatever it needs. A check that throws, rejects or takes longer
   than 30 seconds puts the schedule in a warning state on the schedule board;
-  it never fires and never lights the chip.
+  it never fires and never lights the chip, and a check still running at the
+  30-second mark is a process the scheduler ends.
 
 What a scheduled fire is: `git fetch --prune origin`, then a run branched from
 the trunk tip, in a worktree of its own, with no inputs and no orchestrator. A
@@ -150,7 +173,8 @@ repository — node outputs land there, never in the worktree.
     list means none at all, for a node that wants a lean context. A name
     matching no skill is ignored.
   - `check(outputs)` — deterministic lint over the output paths; returned
-    problems go back into the same agent session as a rejection.
+    problems go back into the same agent session as a rejection. Runs in
+    your host, and may return a promise.
 - `ctx.openNode(id, spec)` — like `node()`, but the session is held open so
   feedback can re-enter the same context: `opened.revise(message, { from })`
   appends a revision node (`id·r1`, `id·r2`, …) and resolves with the next
@@ -158,8 +182,9 @@ repository — node outputs land there, never in the worktree.
 - `ctx.ask({ reason, artifacts })` — a check-in. `reason` reaches the
   orchestrating session's agent verbatim, so write it as a prompt; the
   answer comes back verbatim. The run parks with no timeout.
-- `ctx.derive(path, fromNodeId)` — register a file the workflow itself wrote
-  as produced by a node, so later readers get a real graph parent.
+- `await ctx.derive(path, fromNodeId)` — register a file the workflow itself
+  wrote as produced by a node, so later readers get a real graph parent.
+  Rejects when the node does not exist.
 - `ctx.stage({ workflow, inputs })` — schedule a successor run. The name
   resolves through the origin ladder at stage time; the engine starts the
   successor only when this run completes cleanly, in a fresh worktree

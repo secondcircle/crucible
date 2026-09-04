@@ -3,12 +3,13 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
+import type { HostChild, SpawnHost } from './host/host'
 import { createWorkflowLoader, type WorkflowLoader } from './loader'
+import { AUTHORING_MODULE as AUTHORING, forkHost } from './testing/host-fork'
 
-// Real files loaded through the real jiti path, aliased to the real shipped
-// authoring module: what passes here is what a workflow author gets.
-
-const AUTHORING = join(__dirname, '..', '..', '..', 'resources', 'workflow-lib', 'workflow.ts')
+// Real files loaded through the real host: a forked process running the real
+// entry, aliased to the real shipped authoring module. What passes here is
+// what a workflow author gets.
 
 const scratch: string[] = []
 
@@ -36,12 +37,23 @@ function workflowFile(folder: string, name: string, description: string): void {
   )
 }
 
-function loaderOver(user: string, broken?: string[]): WorkflowLoader {
+function loaderOver(user: string, broken?: string[], spawn: SpawnHost = forkHost): WorkflowLoader {
   return createWorkflowLoader({
     roots: { user },
     authoringModule: AUTHORING,
+    spawn,
     onUnloadable: (path) => broken?.push(path)
   })
+}
+
+/** The real spawn, counted: how many processes a loader started. */
+function countingSpawn(): SpawnHost & { readonly started: string[] } {
+  const started: string[] = []
+  const spawn: SpawnHost = (file, authoring): HostChild => {
+    started.push(file)
+    return forkHost(file, authoring)
+  }
+  return Object.assign(spawn, { started })
 }
 
 describe('workflow loader', () => {
@@ -57,7 +69,7 @@ describe('workflow loader', () => {
       ['adhoc', 'user'],
       ['deploy', 'workspace']
     ])
-    expect(listed[1].def.description).toBe('the workspace one')
+    expect(listed[1].manifest.description).toBe('the workspace one')
   })
 
   it('lets workspace shadow user', async () => {
@@ -68,7 +80,7 @@ describe('workflow loader', () => {
 
     const resolved = await loaderOver(user).resolve(workspace, 'build')
     expect(resolved.origin).toBe('workspace')
-    expect(resolved.def.description).toBe('the workspace copy')
+    expect(resolved.manifest.description).toBe('the workspace copy')
   })
 
   it('names the known workflows when asked for one that is not there', async () => {
@@ -124,8 +136,8 @@ describe('workflow loader', () => {
     expect(listed.map((workflow) => workflow.name)).toEqual(['triage'])
 
     const resolved = await loader.resolve(workspace, 'triage')
-    expect(resolved.def.schedule?.cron).toBe('0 9 * * *')
-    expect(resolved.def.description).toBe('label untriaged issues')
+    expect(resolved.manifest.schedule?.cron).toBe('0 9 * * *')
+    expect(resolved.manifest.description).toBe('label untriaged issues')
 
     // And a nonsense schedule is still a loadable workflow: what it cannot do
     // is fire, which the board says and the loader does not.
@@ -150,9 +162,35 @@ describe('workflow loader', () => {
     const user = tempDir()
     workflowFile(user, 'adhoc', 'first wording')
     const loader = loaderOver(user)
-    expect((await loader.resolve(tempDir(), 'adhoc')).def.description).toBe('first wording')
+    expect((await loader.resolve(tempDir(), 'adhoc')).manifest.description).toBe('first wording')
 
     workflowFile(user, 'adhoc', 'second wording')
-    expect((await loader.resolve(tempDir(), 'adhoc')).def.description).toBe('second wording')
+    expect((await loader.resolve(tempDir(), 'adhoc')).manifest.description).toBe('second wording')
+  })
+
+  // A manifest costs a process, so the same bytes are not read twice; a run
+  // is a process of its own regardless, opened from the loaded workflow.
+  it('starts one process per distinct file for manifests, and one more per open()', async () => {
+    const user = tempDir()
+    workflowFile(user, 'adhoc', 'wording')
+    const spawn = countingSpawn()
+    const loader = loaderOver(user, undefined, spawn)
+
+    await loader.list(tempDir())
+    await loader.list(tempDir())
+    const resolved = await loader.resolve(tempDir(), 'adhoc')
+    expect(spawn.started).toHaveLength(1)
+
+    const host = resolved.open()
+    try {
+      expect((await host.manifest()).description).toBe('wording')
+    } finally {
+      host.kill()
+    }
+    expect(spawn.started).toHaveLength(2)
+
+    workflowFile(user, 'adhoc', 'rewording')
+    expect((await loader.resolve(tempDir(), 'adhoc')).manifest.description).toBe('rewording')
+    expect(spawn.started).toHaveLength(3)
   })
 })

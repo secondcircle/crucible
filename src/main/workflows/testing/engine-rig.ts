@@ -18,6 +18,7 @@ import type {
   NodeSessionFactory,
   NodeSessionRequest
 } from '../node-session'
+import { inProcessHost } from '../host/host'
 import type { LoadedWorkflow, WorkflowLoader } from '../loader'
 import { createRunStore } from '../store'
 
@@ -138,15 +139,24 @@ export function scriptedSessions(
   }
 }
 
+// Definitions built in the test, served through in-process hosts: the engine
+// is exercised against the host interface exactly as in a launch, minus the
+// process, which the host's own tests cover.
 export function loaderOf(defs: Record<string, WorkflowDef>): WorkflowLoader {
-  function loaded(name: string): LoadedWorkflow {
+  async function loaded(name: string): Promise<LoadedWorkflow> {
     const def = defs[name]
     if (def === undefined) throw new Error(`No workflow is named "${name}".`)
-    return { name, origin: 'workspace', path: `/workspace/.crucible/workflows/${name}.ts`, def }
+    return {
+      name,
+      origin: 'workspace',
+      path: `/workspace/.crucible/workflows/${name}.ts`,
+      manifest: await inProcessHost(def).manifest(),
+      open: () => inProcessHost(def)
+    }
   }
   return {
     async list() {
-      return Object.keys(defs).map(loaded)
+      return Promise.all(Object.keys(defs).map(loaded))
     },
     async resolve(_workspace: string, name: string) {
       return loaded(name)

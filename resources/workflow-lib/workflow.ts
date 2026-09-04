@@ -11,6 +11,14 @@
  * Workflow files import this surface as `crucible:workflow`; the loader
  * aliases that to the shipped copy of this module, so a workflow in any
  * repository resolves it without a node_modules of its own.
+ *
+ * Where this code runs: in a workflow host, a process of its own started for
+ * the run, never in Crucible's main process. Every method on `ctx` is a
+ * message to the engine and resolves when the engine answers, so all of them
+ * are async. Synchronous work here — `spawnSync`, a long loop — holds only
+ * the host, and holds it entirely: nothing the engine sends, a cancel
+ * included, reaches the file until that work returns, so prefer the async
+ * form for anything that takes more than a moment.
  */
 
 /**
@@ -58,8 +66,9 @@ export interface NodeSpec {
    * Deterministic output validation (lint). Runs alongside the built-in
    * checks on every complete_node; returned problems are delivered back into
    * the SAME agent session as a rejection, so fixes happen with full context.
+   * Runs in the workflow host, where this file lives, and may be async.
    */
-  check?(outputs: Record<string, string>): string[]
+  check?(outputs: Record<string, string>): string[] | Promise<string[]>
 }
 
 export interface ReviseOptions {
@@ -143,9 +152,9 @@ export interface RunContext {
   /**
    * Register a file the WORKFLOW wrote (a split, a merge, an extract) as
    * produced by `fromNodeId`, so nodes reading it infer a real parent instead
-   * of hanging parentless in the graph. Throws if the node does not exist.
+   * of hanging parentless in the graph. Rejects if the node does not exist.
    */
-  derive(path: string, fromNodeId: string): void
+  derive(path: string, fromNodeId: string): Promise<void>
   /**
    * Stage a successor run and return its id. Not idempotent — two calls
    * stage two runs. Call it once, outside any retried loop body.
@@ -177,9 +186,9 @@ export interface ScheduleSpec {
   /** Standard 5-field cron (min hour dom mon dow), evaluated in local time. */
   cron: string
   /**
-   * Optional gate, evaluated in-process at fire time. Truthy fires the run;
-   * falsy leaves no trace anywhere. Day one it is boolean only: no payload
-   * reaches the run, which re-queries what it needs.
+   * Optional gate, evaluated in a workflow host at fire time. Truthy fires
+   * the run; falsy leaves no trace anywhere. Day one it is boolean only: no
+   * payload reaches the run, which re-queries what it needs.
    */
   check?(ctx: { readonly workspacePath: string }): boolean | Promise<boolean>
 }

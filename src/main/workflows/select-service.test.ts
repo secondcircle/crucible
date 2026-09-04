@@ -93,6 +93,9 @@ describe('choosing a workflow run service', () => {
     selectWorkflowRunService('sdk', memorySink().sink, {
       appPath: process.cwd(),
       stateDir: stateDir(),
+      spawnHost: () => {
+        throw new Error('no host is started here')
+      },
       deliver: () => {},
       sessionExists: (sessionId) => alive.has(sessionId)
     })
@@ -110,6 +113,9 @@ describe('choosing a workflow run service', () => {
     selectWorkflowRunService('fake', memorySink().sink, {
       appPath: process.cwd(),
       stateDir: stateDir(),
+      spawnHost: () => {
+        throw new Error('no host is started here')
+      },
       deliver: () => {},
       sessionExists: () => true
     })
@@ -123,6 +129,9 @@ describe('choosing a workflow run service', () => {
     selectWorkflowRunService('fake', log.sink, {
       appPath: process.cwd(),
       stateDir: stateDir(),
+      spawnHost: () => {
+        throw new Error('no host is started here')
+      },
       deliver: () => {},
       sessionExists: () => true
     })

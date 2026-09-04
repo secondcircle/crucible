@@ -15,6 +15,7 @@ import type { LogSink } from '../log/sink'
 import { readShippedStandingPrompt, shippedSkillsPath, shippedWorkflowLibPath } from '../shipped'
 import { createSkillService, userSkillsPath } from '../skills/service'
 import { createWorkflowEngine } from './engine'
+import type { SpawnHost } from './host/host'
 import { createWorkflowLoader, type WorkflowLoader } from './loader'
 import { createLiveWorkflowRunService } from './service'
 import { createSdkNodeSessionFactory } from './sdk-node-session'
@@ -27,11 +28,16 @@ export function userWorkflowsPath(home = homedir()): string {
 
 // One loader shape for the launch: the engine resolves the workflow a run
 // executes through it, and the scheduler reads the schedules a repo declares
-// through it. Its module cache is off, so both see an edited file at once.
-export function shippedWorkflowLoader(appPath: string, log: LogSink): WorkflowLoader {
+// through it. Both read a file afresh the moment it changes.
+export function shippedWorkflowLoader(
+  appPath: string,
+  log: LogSink,
+  spawnHost: SpawnHost
+): WorkflowLoader {
   return createWorkflowLoader({
     roots: { user: userWorkflowsPath() },
     authoringModule: shippedWorkflowLibPath(appPath),
+    spawn: spawnHost,
     onUnloadable: (path, cause) => {
       log.append({
         source: 'main',
@@ -47,6 +53,9 @@ export interface WorkflowRunWiring {
   readonly appPath: string
   /** Crucible's own state directory; run records live under it. */
   readonly stateDir: string
+  // Starts the process a workflow file runs in. Electron's utilityProcess in
+  // a launch; handed in because this module is tested where there is none.
+  readonly spawnHost: SpawnHost
   /** How a run speaks: a message to its orchestrator session's agent. */
   readonly deliver: (sessionId: SessionId, text: string) => void
   // Whether a session the shell store holds still exists, asked when a run
@@ -134,7 +143,7 @@ export function selectWorkflowRunService(
     })
   }
 
-  const loader = shippedWorkflowLoader(wiring.appPath, log)
+  const loader = shippedWorkflowLoader(wiring.appPath, log, wiring.spawnHost)
 
   const store = createRunStore(join(wiring.stateDir, 'workflow-runs'), (path, cause) => {
     log.append({

@@ -2,8 +2,9 @@ import type { WorkflowLoader } from '../workflows/loader'
 import type { DeclaredSchedule } from './scheduler'
 
 // Where the scheduler's declarations come from: the workflow files, read
-// through the loader whose module cache is off, so an edited schedule is live
-// by the next evaluation and a deleted one stops existing.
+// through the loader, which re-reads a file the moment it changes, so an
+// edited schedule is live by the next evaluation and a deleted one stops
+// existing.
 //
 // Only repo workflows carry schedules: a `schedule` field on a user workflow
 // is ignored — not fired, not listed, no error. It would otherwise fire in
@@ -17,16 +18,34 @@ export function loaderSchedules(
     const declared: DeclaredSchedule[] = []
     for (const workflow of listed) {
       if (workflow.origin !== 'workspace') continue
-      const schedule = workflow.def.schedule
-      if (schedule === undefined || schedule === null) continue
+      const schedule = workflow.manifest.schedule
+      if (schedule === undefined) continue
       declared.push({
         workflow: workflow.name,
-        description: workflow.def.description,
+        description: workflow.manifest.description,
         // A cron that is not even text is an expression Crucible cannot fire,
         // which the scheduler says on the board rather than throwing here.
-        cron: typeof schedule.cron === 'string' ? schedule.cron : '',
-        declaresInputs: Object.keys(workflow.def.inputs).length > 0,
-        ...(typeof schedule.check === 'function' ? { check: schedule.check } : {})
+        cron: schedule.cron ?? '',
+        declaresInputs: Object.keys(workflow.manifest.inputs).length > 0,
+        ...(schedule.checks
+          ? {
+              // The file's check, run in a host of its own for the one
+              // question and stopped after it — or when the scheduler stops
+              // waiting, so a check that hangs is a process that ends rather
+              // than one that stays.
+              check: async ({ workspacePath: at, signal }) => {
+                const host = workflow.open()
+                const stop = (): void => host.kill()
+                signal?.addEventListener('abort', stop, { once: true })
+                try {
+                  return await host.scheduleCheck(at)
+                } finally {
+                  signal?.removeEventListener('abort', stop)
+                  host.kill()
+                }
+              }
+            }
+          : {})
       })
     }
     return declared
