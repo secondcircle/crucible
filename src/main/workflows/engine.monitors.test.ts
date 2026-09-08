@@ -11,7 +11,18 @@ import type { LostMonitor, MonitorOwner, MonitorScope } from '../../shared/monit
 import type { NodeMonitors, NodeWake } from '../../shared/monitors/service'
 import type { BoundMonitorTools } from '../../shared/agent/monitor-tools'
 import type { WorkflowDef } from './authoring'
-import { cleanupScratch, rig, startRequest, until, type Rig } from './testing/engine-rig'
+import { createMonitorModel } from '../monitors/model'
+import { memoryMonitorStore } from '../monitors/store'
+import type { CheckResult, CheckRunner } from '../monitors/check-runner'
+import {
+  cleanupScratch,
+  relaunch,
+  rig,
+  scriptedSessions,
+  startRequest,
+  until,
+  type Rig
+} from './testing/engine-rig'
 
 afterEach(cleanupScratch)
 
@@ -220,6 +231,93 @@ describe('a node that ends its turn waiting', () => {
     expect(prompts[0]).toContain('CI on PR #482 to finish')
     expect(prompts[0]).toContain('gh pr checks 482')
     expect(prompts[0]).toMatch(/no wake is coming/)
+  })
+})
+
+describe('a quit that catches a node waiting', () => {
+  // A node's monitor does not survive a quit: nothing is checking, no wake is
+  // coming, and the record closes with the run's interruption. The record must
+  // not go on saying the node is waiting on it — the run view's node header
+  // reads `waitingOn` off the record and would show a wait that ended when the
+  // process did.
+  it('leaves no wait on the record it interrupted', async () => {
+    const monitors = scriptedMonitors()
+    monitors.waits.set('work', {
+      description: 'CI on PR #482 to finish',
+      since: '2026-09-08T10:00:00.000Z'
+    })
+    const { rig: built } = repoRig(monitors, () => 'wait')
+
+    const prompt = join(built.repo, 'task.md')
+    writeFileSync(prompt, 'do it\n')
+    await built.engine.start(startRequest(built.repo, 'solo', { prompt }))
+    await until(() => built.engine.runs()[0].nodes[0].waitingOn !== undefined)
+
+    // The quit: the first engine is abandoned rather than disposed, and a
+    // second engine over the same store sweeps what it left.
+    const after = relaunch(built, { solo: oneNode }, () => () => {}, {
+      monitors: scriptedMonitors()
+    })
+    const node = after.engine.runs()[0].nodes[0]
+
+    expect(node.status).toBe('interrupted')
+    expect(node.waitingOn).toBeUndefined()
+  })
+
+  // A node's monitor does not survive a quit, but its *record* has to: the
+  // next launch's sweep is the only thing that turns it into the notice a
+  // resumed node reads. Releasing the owner at dispose drops the record
+  // instead, silently and for good, and the resumed node is never told what it
+  // had been waiting on.
+  it('leaves the record behind, so a resumed node can be told what it lost', async () => {
+    // A check that never lands, so the monitor is still live when the quit
+    // catches it.
+    const stuck: CheckRunner = {
+      run: () => ({ done: new Promise<CheckResult>(() => {}), kill: () => {} })
+    }
+    const store = memoryMonitorStore()
+    const model = createMonitorModel({
+      store,
+      checks: stuck,
+      deliver: async () => 'delivered',
+      sessionExists: () => true
+    })
+
+    const sessions = scriptedSessions(() => async () => {
+      await sessions.requests.at(-1)?.monitors?.set({
+        description: 'CI on PR #482 to finish',
+        reason: 'so I can pick it up the moment it changes',
+        command: 'gh pr checks 482'
+      })
+    })
+    const built = rig({ solo: oneNode }, () => () => {}, {
+      monitors: model.nodes,
+      sessions
+    })
+
+    const prompt = join(built.repo, 'task.md')
+    writeFileSync(prompt, 'do it\n')
+    const run = await built.engine.start(startRequest(built.repo, 'solo', { prompt }))
+    await until(() => built.engine.runs()[0].nodes[0].waitingOn !== undefined)
+
+    // The quit, in the order `will-quit` takes it.
+    built.engine.dispose()
+    model.dispose()
+    await new Promise((resolve) => setTimeout(resolve, 20))
+
+    // The next launch, over the records the last one left.
+    const next = createMonitorModel({
+      store: memoryMonitorStore(store.current),
+      checks: stuck,
+      deliver: async () => 'delivered',
+      sessionExists: () => true
+    })
+    expect(next.nodes.takeLost({ kind: 'node', runId: run.id, nodeId: 'work' })).toEqual([
+      expect.objectContaining({
+        description: 'CI on PR #482 to finish',
+        command: 'gh pr checks 482'
+      })
+    ])
   })
 })
 
