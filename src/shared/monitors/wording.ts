@@ -118,8 +118,8 @@ export function setAnswer(
 ): string {
   return [
     `Monitor ${monitor.id} is watching: ${monitor.description}`,
-    `Checking every ${briefDuration(timing.intervalMs)} in ${monitor.cwd}, ` +
-      `giving up after ${briefDuration(timing.timeoutMs)}.`,
+    `Checking every ${exactDuration(timing.intervalMs)} in ${monitor.cwd}, ` +
+      `giving up after ${exactDuration(timing.timeoutMs)}.`,
     'You will be woken with a message when it ends. End your turn now; do not poll.',
     `Stop it early with crucible_monitor_stop (monitorId "${monitor.id}").`
   ].join('\n')
@@ -142,7 +142,7 @@ export function listAnswer(monitors: readonly MonitorLine[], now: number): strin
       const output = monitor.last?.output.text ?? ''
       return [
         `- ${monitor.id} — ${monitor.description}`,
-        `  every ${briefDuration(monitor.intervalMs)} · up to ${briefDuration(monitor.timeoutMs)}` +
+        `  every ${exactDuration(monitor.intervalMs)} · up to ${exactDuration(monitor.timeoutMs)}` +
           ` · waited ${waited} · ${monitor.checks} ${monitor.checks === 1 ? 'check' : 'checks'}`,
         `  last output: ${output === '' ? '(nothing yet)' : firstLine(output)}`
       ].join('\n')
@@ -185,16 +185,36 @@ export function stoppedNote(
   ].join('\n')
 }
 
-/** The paragraph appended to a resumed node's first message about what the quit cut down. */
+/**
+ * The paragraph appended to a resumed node's first message about what the quit
+ * cut down. One that had already ended, its wake held back by the pause, is
+ * named here too and says how it ended: the answer is known, it just never
+ * became a turn, and this notice is the only place the node can still hear it.
+ */
 export function lostMonitorsNotice(lost: readonly LostMonitor[]): string {
   return [
     'Crucible quit while this node was waiting, so the monitors it had set are gone and no ' +
       'wake is coming for them. Set them again with crucible_monitor if they still matter:',
-    ...lost.map(
-      (monitor) =>
-        `- ${monitor.description} — \`${monitor.command}\` — had waited ` +
-        `${longDuration(monitor.waitedMs)} of ${briefDuration(monitor.timeoutMs)}.`
-    )
+    ...lost.map((monitor) => {
+      const head = `- ${monitor.description} — \`${monitor.command}\` — `
+      if (monitor.ending === undefined) {
+        return (
+          head +
+          `had waited ${longDuration(monitor.waitedMs)} of ${exactDuration(monitor.timeoutMs)}.`
+        )
+      }
+      // The same bound the wake puts on the same bytes: a check that died
+      // shouting does not get to shout through this notice either.
+      const outcome =
+        monitor.ending.reason === 'broke'
+          ? `${endingPhrase('broke')} (${boundOutput(monitor.ending.error, WAKE_OUTPUT_CHARS).text.trim()})`
+          : endingPhrase(monitor.ending.reason)
+      return (
+        head +
+        `${outcome} after ${longDuration(monitor.waitedMs)} of ` +
+        `${exactDuration(monitor.timeoutMs)}, but the quit came before the wake reached you.`
+      )
+    })
   ].join('\n')
 }
 
@@ -219,6 +239,25 @@ export function monitorCallSummary(args: unknown): string {
     `every ${briefDuration(intervalMs)}`,
     `up to ${briefDuration(timeoutMs)}`
   ].join(' · ')
+}
+
+// What an agent is told a monitor's timing is, and only that: the value in
+// force, to the second, never rounded to a neater unit. An agent that asked
+// for 90s and read "every 2m" cannot tell a rounding from a clamp, and being
+// able to tell is the whole point of stating what is in force. Rounding is the
+// chip's business, where a person is reading and a second either way is noise.
+/** `90s` as `1m 30s`, `45m`, `1h 4m 5s` — every unit that is not zero. */
+export function exactDuration(ms: number): string {
+  const total = Math.max(0, Math.round(ms / 1000))
+  if (total === 0) return '0s'
+  const hours = Math.floor(total / 3600)
+  const minutes = Math.floor((total % 3600) / 60)
+  const seconds = total % 60
+  return [
+    ...(hours === 0 ? [] : [`${hours}h`]),
+    ...(minutes === 0 ? [] : [`${minutes}m`]),
+    ...(seconds === 0 ? [] : [`${seconds}s`])
+  ].join(' ')
 }
 
 /** `4m`, `30s`, `1h` — the chip's units. */

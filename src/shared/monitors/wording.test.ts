@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { RETAINED_OUTPUT_CHARS, WAKE_OUTPUT_CHARS, type WakeFacts } from './monitor'
 import {
   briefDuration,
+  exactDuration,
   composeWake,
   isWakeMessage,
   listAnswer,
@@ -268,7 +269,7 @@ describe('the tool row\u2019s summary', () => {
   })
 })
 
-describe('the two duration formats', () => {
+describe('the three duration formats', () => {
   it('is the chip\u2019s shorthand', () => {
     expect(briefDuration(30_000)).toBe('30s')
     expect(briefDuration(240_000)).toBe('4m')
@@ -282,5 +283,17 @@ describe('the two duration formats', () => {
     expect(longDuration(252_000)).toBe('4m 12s')
     expect(longDuration(240_000)).toBe('4m')
     expect(longDuration(3_840_000)).toBe('1h 4m')
+  })
+
+  // What a tool answer says a monitor's timing is. It may not drop a unit that
+  // is not zero: the number an agent reads back is the number in force, so a
+  // clamp is visible and a rounding is never mistaken for one.
+  it('is exact wherever a value in force is stated', () => {
+    expect(exactDuration(90_000)).toBe('1m 30s')
+    expect(exactDuration(5_000)).toBe('5s')
+    expect(exactDuration(2_700_000)).toBe('45m')
+    expect(exactDuration(3_845_000)).toBe('1h 4m 5s')
+    expect(exactDuration(24 * 3_600_000)).toBe('24h')
+    expect(exactDuration(0)).toBe('0s')
   })
 })
