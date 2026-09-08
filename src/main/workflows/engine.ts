@@ -205,13 +205,25 @@ interface StagedSuccessor {
   readonly inputs: Record<string, string>
 }
 
+/**
+ * Why a live node is being let go. `run-ended` means the agent that owned it
+ * has ceased to exist — complete, failed, cancelled — and its monitors are
+ * released with it. `quitting` means the process is leaving while the run
+ * stands: the monitors stop because nothing is left to run them, but their
+ * records outlive the process for the next launch to close as lost.
+ */
+type ReleaseReason = 'run-ended' | 'quitting'
+
 interface Handle {
   readonly run: LiveRun
   desired: 'running' | 'paused' | 'cancelled'
   cancelRequested: boolean
   readonly pauseInterrupts: Set<() => void>
   readonly waiters: Waiter[]
-  readonly live: Set<{ release(): Promise<void>; forceDispose(): void }>
+  readonly live: Set<{
+    release(why?: ReleaseReason): Promise<void>
+    forceDispose(why?: ReleaseReason): void
+  }>
   readonly pending: Set<Promise<unknown>>
   readonly staged: StagedSuccessor[]
 }
@@ -275,6 +287,9 @@ export function createWorkflowEngine(options: EngineOptions): WorkflowEngine {
       node.error ??= INTERRUPTED_MESSAGE
       node.endedAt ??= node.lastActivityAt ?? nowIso()
       delete node.now
+      // Nothing is checking and no wake is coming: the monitor died with the
+      // process, so the record must stop saying this node waits on it.
+      delete node.waitingOn
     }
     // No shell exists this early, so delivery is not even attempted: the
     // record carries the debt until the session next wakes.
@@ -898,15 +913,19 @@ export function createWorkflowEngine(options: EngineOptions): WorkflowEngine {
       }, watchdogMs)
 
       let finished = false
-      const finishNode = (status: RunNodeStatus, error?: string): void => {
+      const finishNode = (
+        status: RunNodeStatus,
+        error?: string,
+        why: ReleaseReason = 'run-ended'
+      ): void => {
         if (finished) return
         finished = true
         handle.live.delete(control)
         handle.pauseInterrupts.delete(interruptForPause)
         // The agent that set them has ceased to exist, however this node
         // ended: checking stops at once, silently, and nothing is said to
-        // anybody about it.
-        monitors?.release(owner)
+        // anybody about it. A quit is not that, so it keeps its records.
+        if (why === 'run-ended') monitors?.release(owner)
         delete node.now
         delete node.waitingOn
         if (node.endedAt === undefined || node.status !== status) node.endedAt = nowIso()
@@ -924,20 +943,22 @@ export function createWorkflowEngine(options: EngineOptions): WorkflowEngine {
       // node but cannot be trusted to — the engine backstops the session.
       let releasing = false
       const control = {
-        async release(): Promise<void> {
+        async release(why: ReleaseReason = 'run-ended'): Promise<void> {
           if (finished) return
           releasing = true
           // Before the abort, so a node parked on a wake bails the moment its
-          // run ends rather than at the release timeout.
-          monitors?.release(owner)
+          // run ends rather than at the release timeout. A quit lets it stay
+          // parked instead: the process is going, and dropping the records
+          // here would leave the resumed node nothing to be told (R66, R67).
+          if (why === 'run-ended') monitors?.release(owner)
           if (parked) {
             parkResolve?.({ type: 'close' })
             return
           }
           await session.abort().catch(() => {})
         },
-        forceDispose(): void {
-          finishNode('failed', 'the run ended before this node finished')
+        forceDispose(why: ReleaseReason = 'run-ended'): void {
+          finishNode('failed', 'the run ended before this node finished', why)
         }
       }
       handle.live.add(control)
@@ -1372,9 +1393,12 @@ export function createWorkflowEngine(options: EngineOptions): WorkflowEngine {
   }
 
   /** However the workflow ended, no agent session outlives it. */
-  async function releaseLiveNodes(handle: Handle): Promise<void> {
+  async function releaseLiveNodes(
+    handle: Handle,
+    why: ReleaseReason = 'run-ended'
+  ): Promise<void> {
     if (handle.live.size === 0) return
-    await Promise.allSettled([...handle.live].map((control) => control.release()))
+    await Promise.allSettled([...handle.live].map((control) => control.release(why)))
     let timer: ReturnType<typeof setTimeout> | undefined
     try {
       await Promise.race([
@@ -1386,7 +1410,7 @@ export function createWorkflowEngine(options: EngineOptions): WorkflowEngine {
     } finally {
       if (timer !== undefined) clearTimeout(timer)
     }
-    for (const control of [...handle.live]) control.forceDispose()
+    for (const control of [...handle.live]) control.forceDispose(why)
   }
 
   function endingText(run: LiveRun, outcome: RunStatus, committed: boolean): string {
@@ -1611,7 +1635,7 @@ export function createWorkflowEngine(options: EngineOptions): WorkflowEngine {
         handle.cancelRequested = true
         handle.desired = 'cancelled'
         rejectWaiters(handle, 'Crucible is quitting')
-        void releaseLiveNodes(handle)
+        void releaseLiveNodes(handle, 'quitting')
       }
     }
   }
@@ -1642,6 +1666,7 @@ function revertToGhost(node: LiveNode): void {
   delete node.endedAt
   delete node.lastActivityAt
   delete node.now
+  delete node.waitingOn
   delete node.toolCalls
   delete node.contextPercent
 }
