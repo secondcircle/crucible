@@ -1,0 +1,205 @@
+/* The monitor chip and its detail, in the strip above the chat. Every monitor
+   surface is the monitor color and nothing else is: teal stays the run color,
+   green a session's own live turn. Visuals follow the approved mock. */
+
+/* The second group's label, set off from the run chips before it. */
+.runstrip .rslabel.second {
+  margin-left: 10px;
+}
+
+.monchip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 0 4px 0 0;
+  background: var(--panel);
+  color: var(--dim);
+  white-space: nowrap;
+}
+
+.monchip.open {
+  border-color: var(--thinking);
+}
+
+.monchip .monopen {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  padding: 3px 8px 3px 11px;
+  cursor: pointer;
+  max-width: 460px;
+}
+
+.monchip .dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--thinking);
+  flex-shrink: 0;
+  animation: monitor-breathe 2.2s infinite;
+}
+
+.monchip b {
+  color: var(--ink);
+  font-weight: 600;
+  max-width: 260px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.monchip .last {
+  font: 11px var(--mono);
+  color: var(--thinking);
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.monchip .left {
+  font: 11px var(--mono);
+  color: var(--faint);
+}
+
+.monchip .x {
+  border: 0;
+  background: none;
+  color: var(--faint);
+  font-size: 13px;
+  line-height: 1;
+  padding: 2px 5px;
+  cursor: pointer;
+  border-radius: 8px;
+}
+
+.monchip .x:hover {
+  color: var(--error);
+  background: var(--error-bg);
+}
+
+@keyframes monitor-breathe {
+  50% {
+    opacity: 0.35;
+  }
+}
+
+/* The detail, dropped under the strip and anchored to the chat column rather
+   than to the strip, which scrolls sideways and would clip it. One open detail
+   at a time, whichever chip opened it. */
+.mondetail {
+  position: absolute;
+  top: calc(var(--bar-h) + 30px);
+  left: 24px;
+  width: 520px;
+  max-width: calc(100% - 48px);
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  padding: 14px 16px;
+  box-shadow: 0 12px 32px rgb(0 0 0 / 60%);
+  z-index: 2;
+  font-size: 12.5px;
+  white-space: normal;
+}
+
+.mondetail .d {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--ink);
+  margin-bottom: 2px;
+}
+
+.mondetail .why {
+  color: var(--dim);
+  margin-bottom: 10px;
+}
+
+.mondetail .facts {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 4px 14px;
+  font: 11.5px var(--mono);
+  color: var(--dim);
+}
+
+.mondetail .facts > span:nth-child(odd) {
+  color: var(--faint);
+}
+
+.mondetail .facts b {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.mondetail .monout {
+  white-space: pre-wrap;
+  max-height: 120px;
+  overflow-y: auto;
+}
+
+.mondetail .moncmd {
+  font: 11.5px var(--mono);
+  background: var(--code);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 8px 10px;
+  color: var(--accent2);
+  white-space: pre-wrap;
+  margin: 8px 0;
+  max-height: 120px;
+  overflow-y: auto;
+}
+
+.mondetail .bar {
+  height: 3px;
+  background: var(--line);
+  border-radius: 2px;
+  margin: 10px 0 2px;
+  overflow: hidden;
+}
+
+.mondetail .bar i {
+  display: block;
+  height: 100%;
+  background: var(--thinking);
+}
+
+.mondetail .foot {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 12px;
+  font-size: 11.5px;
+  color: var(--faint);
+}
+
+.mondetail .btn.stop {
+  margin-left: auto;
+  color: var(--error);
+  border-color: var(--error-line);
+  white-space: nowrap;
+}
+
+/* What a run's chip and the run view's node header say while a node waits:
+   the monitor's own words, in the monitor color, beside the run's teal. */
+.runchip .waiting,
+.runview .dhead .waiting {
+  font: 11px var(--mono);
+  color: var(--thinking);
+  max-width: 320px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.runview .dhead .waiting {
+  display: block;
+  max-width: none;
+  margin-top: 4px;
+}

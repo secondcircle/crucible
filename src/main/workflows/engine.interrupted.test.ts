@@ -514,10 +514,10 @@ describe('the interruption notice', () => {
     expect(after.engine.runs()[0].noticePending).toBe(true)
 
     // Nobody else's turn wakes it.
-    after.engine.wake('someone-else')
+    after.engine.deliverNotices('someone-else')
     expect(after.delivered).toEqual([])
 
-    after.engine.wake('orchestrator-1')
+    after.engine.deliverNotices('orchestrator-1')
     expect(after.delivered).toHaveLength(1)
     const notice = after.delivered[0]
     expect(notice.sessionId).toBe('orchestrator-1')
@@ -528,7 +528,7 @@ describe('the interruption notice', () => {
 
     // Said once: the flag is cleared and the clear is written, so the next
     // launch does not say it again.
-    after.engine.wake('orchestrator-1')
+    after.engine.deliverNotices('orchestrator-1')
     expect(after.delivered).toHaveLength(1)
     expect(after.engine.runs()[0].noticePending).toBeUndefined()
     expect(createRunStore(after.stateDir).load()[0].noticePending).toBeUndefined()
@@ -539,12 +539,12 @@ describe('the interruption notice', () => {
     const after = relaunch(before, { gated }, planThenPark)
 
     after.refuseDelivery(true)
-    after.engine.wake('orchestrator-1')
+    after.engine.deliverNotices('orchestrator-1')
     expect(after.delivered).toEqual([])
     expect(after.engine.runs()[0].noticePending).toBe(true)
 
     after.refuseDelivery(false)
-    after.engine.wake('orchestrator-1')
+    after.engine.deliverNotices('orchestrator-1')
     expect(after.delivered).toHaveLength(1)
     expect(after.engine.runs()[0].noticePending).toBeUndefined()
   })
@@ -568,7 +568,7 @@ describe('the interruption notice', () => {
     // is asked for its model before it starts: waiting for it to be running is
     // what makes the name, rather than the fallback, the thing under test.
     await until(() => after.engine.runs()[0].nodes.some((node) => node.status === 'running'))
-    after.engine.wake('orchestrator-1')
+    after.engine.deliverNotices('orchestrator-1')
     const notice = after.delivered[0]
     expect(notice.text).toContain('has since been resumed')
     expect(notice.text).toContain('node "gate"')
@@ -591,7 +591,7 @@ describe('the interruption notice', () => {
     expect(after.engine.runs()[0].noticePending).toBeUndefined()
     expect(createRunStore(after.stateDir).load()[0].noticePending).toBeUndefined()
 
-    after.engine.wake('orchestrator-1')
+    after.engine.deliverNotices('orchestrator-1')
     expect(after.delivered.filter((message) => message.text.includes('was interrupted'))).toEqual(
       []
     )
@@ -605,9 +605,9 @@ describe('the interruption notice', () => {
     // Adoption moves the seat and settles nothing: the new session's next
     // wake receives it.
     expect(after.engine.runs()[0].noticePending).toBe(true)
-    after.engine.wake('orchestrator-1')
+    after.engine.deliverNotices('orchestrator-1')
     expect(after.delivered).toEqual([])
-    after.engine.wake('orchestrator-2')
+    after.engine.deliverNotices('orchestrator-2')
     expect(after.delivered.at(-1)?.sessionId).toBe('orchestrator-2')
   })
 })

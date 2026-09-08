@@ -12,6 +12,8 @@ import type {
 } from './adapter'
 import type { PanelToolName, PanelTools } from './panel-tools'
 import { isRunMessage } from '../workflows/run'
+import { bindMonitorTools, type MonitorTools } from './monitor-tools'
+import { isWakeMessage, monitorCallSummary } from '../monitors/wording'
 import type { RunTools } from './run-tools'
 import type {
   AuthMethod,
@@ -307,6 +309,28 @@ const RUN_LIST_DELTAS: readonly string[] = [
   'That is where every run of this session stands. Nothing was sent anywhere.'
 ]
 
+// What the scripted agent says around monitors, so the whole loop — setting a
+// wait, seeing the chip, being woken — is walkable with no model and no paid
+// call.
+const MONITOR_SET_DELTAS: readonly string[] = [
+  'I am watching that now and I will pick it up the moment it changes. ',
+  'Nothing is needed from you — keep going with whatever else, and I speak up when it is done. ',
+  '(Scripted: nothing was sent anywhere.)'
+]
+
+const MONITOR_WOKEN_DELTAS: readonly string[] = [
+  'CI finished; the e2e job failed. Reading its log now. ',
+  '(Scripted: nothing was read and nothing was paid for it.)'
+]
+
+const MONITOR_LIST_DELTAS: readonly string[] = [
+  'That is everything I am waiting on. Nothing was sent anywhere.'
+]
+
+const MONITOR_STOPPED_DELTAS: readonly string[] = [
+  'Stopped watching that; no wake is coming for it. (Scripted: no cost.)'
+]
+
 const REPLY_DELTAS: readonly string[] = [
   'The fake adapter answers every prompt with this same scripted turn.',
   ' Nothing was sent anywhere and nothing was paid for it.\n\n',
@@ -460,6 +484,55 @@ function queuedEntry(text: string, images?: readonly ImageAttachment[]): QueuedE
   return images === undefined || images.length === 0 ? { text } : { text, images: [...images] }
 }
 
+/** The units a scripted `every 30s · up to 30m` may be written in. */
+const UNIT_SECONDS: Readonly<Record<string, number>> = {
+  s: 1,
+  sec: 1,
+  secs: 1,
+  second: 1,
+  seconds: 1,
+  m: 60,
+  min: 60,
+  mins: 60,
+  minute: 60,
+  minutes: 60,
+  h: 3600,
+  hr: 3600,
+  hrs: 3600,
+  hour: 3600,
+  hours: 3600
+}
+
+// `watch pass every 5s up to 1m` — the cadence and the ceiling lifted out, so
+// what is left is what the chip's headline says and what the scripted runner
+// reads its fate from.
+export function timingWords(text: string): {
+  readonly rest: string
+  readonly intervalSeconds?: number
+  readonly timeoutSeconds?: number
+} {
+  let rest = text
+  let intervalSeconds: number | undefined
+  let timeoutSeconds: number | undefined
+
+  const every = /\bevery\s+(\d+)\s*([a-z]+)\b/i.exec(rest)
+  if (every !== null && UNIT_SECONDS[every[2].toLowerCase()] !== undefined) {
+    intervalSeconds = Number(every[1]) * UNIT_SECONDS[every[2].toLowerCase()]
+    rest = rest.replace(every[0], ' ')
+  }
+  const upTo = /\bup to\s+(\d+)\s*([a-z]+)\b/i.exec(rest)
+  if (upTo !== null && UNIT_SECONDS[upTo[2].toLowerCase()] !== undefined) {
+    timeoutSeconds = Number(upTo[1]) * UNIT_SECONDS[upTo[2].toLowerCase()]
+    rest = rest.replace(upTo[0], ' ')
+  }
+
+  return {
+    rest: rest.replace(/\s+/g, ' ').trim(),
+    ...(intervalSeconds === undefined ? {} : { intervalSeconds }),
+    ...(timeoutSeconds === undefined ? {} : { timeoutSeconds })
+  }
+}
+
 export function fakeTitle(text: string): string {
   return text.replace(/\s+/g, ' ').trim().split(' ').filter(Boolean).slice(0, 8).join(' ')
 }
@@ -489,7 +562,8 @@ function preferredLevel(preferred: ThinkingLevel | undefined): ThinkingLevel {
 export function createFakeAdapter({
   pauseMs = DEFAULT_PAUSE_MS,
   panel,
-  runs
+  runs,
+  monitors
 }: {
   /** Zero runs the script on microtasks. */
   readonly pauseMs?: number
@@ -497,6 +571,10 @@ export function createFakeAdapter({
   readonly panel?: FakePanel
   /** Absent leaves every run prompt to the standard script too. */
   readonly runs?: RunTools
+  // The same behaviors the SDK adapter mounts, driven by words in a prompt
+  // instead of by a model, so every chip, detail and wake is reachable with
+  // no paid call.
+  readonly monitors?: MonitorTools
 } = {}): ConversationAdapter {
   const listeners = new Set<AdapterEventListener>()
   const conversations = new Map<string, Conversation>()
@@ -755,6 +833,84 @@ export function createFakeAdapter({
     }
 
     return undefined
+  }
+
+  // The scripted agent around monitors. A wake is recognized by its own
+  // wording, exactly as a run's message is; everything else needs an opening
+  // word — `watch`, `wait for`, `monitor`, `stop watching` — so an ordinary
+  // prompt is never hijacked.
+  function monitorScript(
+    bound: Bound,
+    sessionId: SessionId,
+    text: string
+  ): ScriptedToolTurn | undefined {
+    if (monitors === undefined) return undefined
+    const asked = text.toLowerCase()
+    const bind = bindMonitorTools(
+      monitors,
+      { kind: 'session', sessionId },
+      bound.conversation.workspacePath
+    )
+
+    // A wake is a message to the agent, and the agent answers it in the chat
+    // rather than by calling anything.
+    if (isWakeMessage(text)) return { calls: [], closing: MONITOR_WOKEN_DELTAS }
+
+    const stopped = /^\s*stop watching\s+(\S+)/i.exec(text)
+    if (stopped !== null) {
+      const monitorId = stopped[1]
+      return {
+        calls: [
+          {
+            name: 'crucible_monitor_stop',
+            summary: monitorId,
+            answer: () => bind.stop(monitorId)
+          }
+        ],
+        closing: MONITOR_STOPPED_DELTAS
+      }
+    }
+
+    if (asked.includes('waiting on') && /^(what|which|list)/.test(asked.trim())) {
+      return {
+        calls: [{ name: 'crucible_monitors', summary: 'this session', answer: () => bind.list() }],
+        closing: MONITOR_LIST_DELTAS
+      }
+    }
+
+    const watched = /^\s*(?:watch|wait for|monitor)\s+(.+)$/i.exec(text)
+    if (watched === null) return undefined
+    const timing = timingWords(watched[1])
+    // The same words go in as the description and as the command, so the
+    // scripted check runner reads the fate out of what was typed.
+    const request = {
+      description: timing.rest,
+      reason: 'So I can pick this up the moment it changes rather than asking you to watch it.',
+      command: timing.rest,
+      ...(timing.intervalSeconds === undefined
+        ? {}
+        : { intervalSeconds: timing.intervalSeconds }),
+      ...(timing.timeoutSeconds === undefined ? {} : { timeoutSeconds: timing.timeoutSeconds })
+    }
+    return {
+      calls: [
+        {
+          name: 'crucible_monitor',
+          summary: monitorCallSummary(request),
+          answer: () => bind.set(request)
+        }
+      ],
+      closing: MONITOR_SET_DELTAS
+    }
+  }
+
+  /** Whichever scripted turn claims the prompt: monitors first, then runs. */
+  function toolScript(
+    bound: Bound,
+    sessionId: SessionId,
+    text: string
+  ): ScriptedToolTurn | undefined {
+    return monitorScript(bound, sessionId, text) ?? runScript(bound, sessionId, text)
   }
 
   // Checked in this order so that `close the panel` is never taken for the
@@ -1238,7 +1394,7 @@ export function createFakeAdapter({
           const queued = [...bound.followUp]
           if (!(await deliver('followUp'))) return false
           const answered = queued
-            .map((message) => runScript(bound, sessionId, message.text))
+            .map((message) => toolScript(bound, sessionId, message.text))
             .find((turn): turn is ScriptedToolTurn => turn !== undefined)
           if (answered === undefined) {
             if (!(await say(FOLLOW_UP_ANSWER_DELTAS))) return false
@@ -1514,7 +1670,12 @@ export function createFakeAdapter({
       // nobody typed them, and they are status rather than subject.
       const said = [...pathEntries(bound.conversation)]
         .reverse()
-        .find((entry) => entry.item.kind === 'user' && !isRunMessage(entry.item.text))
+        .find(
+          (entry) =>
+            entry.item.kind === 'user' &&
+            !isRunMessage(entry.item.text) &&
+            !isWakeMessage(entry.item.text)
+        )
       if (said === undefined || said.item.kind !== 'user') return undefined
       const title = fakeTitle(said.item.text)
       return title === '' ? undefined : { title }
@@ -1655,7 +1816,7 @@ export function createFakeAdapter({
                   ? PANEL_CLOSED_DELTAS
                   : PANEL_SHOWN_DELTAS
             }
-          : runScript(bound, sessionId, text)
+          : toolScript(bound, sessionId, text)
       return run(
         bound,
         sessionId,

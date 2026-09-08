@@ -19,6 +19,8 @@ import type { CacheService } from '../../shared/cache/service'
 import type { CommandInfo, CommandService } from '../../shared/commands/service'
 import { commandFragment } from '../../shared/commands/template'
 import type { NeedsYouService } from '../../shared/needs-you/service'
+import type { LiveMonitor, MonitorId } from '../../shared/monitors/monitor'
+import type { MonitorService, MonitorsSnapshot } from '../../shared/monitors/service'
 import { boardCounts } from '../../shared/workspace/classify-board'
 import { issueCounts, withSessions } from '../../shared/workspace/classify-issues'
 import type { QuotaService } from '../../shared/quota/service'
@@ -66,6 +68,8 @@ import { contextPercent, UNTITLED } from './labels'
 import { chordPressed } from './keys'
 import { useQuota } from './quota/use-quota'
 import { runActivity } from './runs/activity'
+import { monitorActivity } from './monitors/activity'
+import { useClock } from './clock'
 import { parkedRuns, parkedWalk } from './schedules/board'
 import { useAuth } from './settings/use-auth'
 import {
@@ -154,6 +158,7 @@ export function Shell({
   needsYou: needsYouService,
   workflowRuns,
   schedules: scheduleService,
+  monitors: monitorService,
   instance
 }: {
   readonly port: AgentPort
@@ -183,6 +188,10 @@ export function Shell({
   // repository's workflow files, and a run is a fact about the engine.
   // Without this service no chip and no schedule board render at all.
   readonly schedules?: ScheduleService
+  // Beside them all, and for the same reason: a monitor is Crucible's own
+  // state, observed through its own seam, and the tools that set one live
+  // with the agent. Without this service no chip and no ⏳ render at all.
+  readonly monitors?: MonitorService
   // Which state directory this window runs against, as main worked it out at
   // creation. Absent in the installed app, which shows no badge.
   readonly instance?: string
@@ -346,6 +355,15 @@ export function Shell({
   const cancelChoice = useRef<((chose: 'cancelled' | 'kept') => void) | undefined>(undefined)
   /** The engine's records, whole on every event. */
   const [runsSnapshot, setRunsSnapshot] = useState<RunsSnapshot | undefined>(undefined)
+  /** Every session's live monitors, whole on every event; nothing here is patched. */
+  const [monitorsSnapshot, setMonitorsSnapshot] = useState<MonitorsSnapshot | undefined>(
+    undefined
+  )
+  // Which chip's detail is open, and which monitors the user has just stopped.
+  // A stopped monitor leaves the strip in the frame of the click and is
+  // forgotten once the snapshot agrees, so the ✕ never waits on a round trip.
+  const [openMonitorId, setOpenMonitorId] = useState<MonitorId | undefined>(undefined)
+  const [stopping, setStopping] = useState<ReadonlySet<MonitorId>>(new Set())
   // A ref, not the state above: the needs-you verdict is taken inside an event,
   // and written where the snapshot arrives rather than in an effect so a turn
   // ending in the same batch is judged on the newer record.
@@ -449,6 +467,43 @@ export function Shell({
       : allRuns.filter(
           (candidate) => candidate.sessionId === activeSessionId && runIsLive(candidate)
         )
+  const allMonitors: readonly LiveMonitor[] = useMemo(
+    () => monitorsSnapshot?.monitors ?? [],
+    [monitorsSnapshot]
+  )
+  // Every workspace's, because the rail lists every workspace's sessions.
+  const railWaits = useMemo(
+    () => monitorActivity({ monitors: allMonitors.filter((one) => !stopping.has(one.id)) }),
+    [allMonitors, stopping]
+  )
+  // The strip is session-scoped, exactly as the runs group is, and in the
+  // snapshot's own order — which is the order they were set in, so a chip
+  // never moves because a check landed.
+  const sessionMonitors = useMemo(
+    () =>
+      activeSessionId === undefined
+        ? []
+        : allMonitors.filter(
+            (candidate) =>
+              candidate.sessionId === activeSessionId && !stopping.has(candidate.id)
+          ),
+    [activeSessionId, allMonitors, stopping]
+  )
+  // One clock for the strip's ages and its hairline, ticking only while this
+  // session is actually waiting on something.
+  const monitorNow = useClock(sessionMonitors.length > 0)
+
+  // A detail belongs to the session it was opened in and to the monitor it was
+  // opened on: switching away, or the monitor ending, closes it.
+  if (openMonitorId !== undefined && !sessionMonitors.some((one) => one.id === openMonitorId)) {
+    setOpenMonitorId(undefined)
+  }
+  // The optimistic hide is remembered only until the snapshot agrees, so a stop
+  // that failed puts the chip back rather than hiding it forever.
+  if (stopping.size > 0 && [...stopping].some((id) => !known(allMonitors, id))) {
+    setStopping(new Set([...stopping].filter((id) => known(allMonitors, id))))
+  }
+
   // What the region holds, topmost last. Every overlay's open state is read
   // off this and nowhere else, which is what makes "one at a time" a property
   // of the shape rather than a rule everything has to remember.
@@ -490,6 +545,30 @@ export function Shell({
   const announce = useCallback((text: string, owner?: SessionId): void => {
     setToast({ sessionId: owner ?? railNow.current.activeSessionId, text })
   }, [])
+
+  /** Clicking a chip opens its detail; clicking it again closes it. */
+  const toggleMonitor = useCallback((monitorId: MonitorId): void => {
+    setOpenMonitorId((open) => (open === monitorId ? undefined : monitorId))
+  }, [])
+
+  // No confirmation and no overlay: the chip is gone in the same frame as the
+  // click, and the model is told after it.
+  const stopMonitor = useCallback(
+    (monitorId: MonitorId): void => {
+      if (monitorService === undefined) return
+      setStopping((held) => new Set([...held, monitorId]))
+      setOpenMonitorId((open) => (open === monitorId ? undefined : open))
+      void monitorService.stop(monitorId).catch((cause: unknown) => {
+        setStopping((held) => {
+          const still = new Set(held)
+          still.delete(monitorId)
+          return still
+        })
+        report(cause)
+      })
+    },
+    [monitorService, report]
+  )
 
   // The rule itself lives in the needs-you module; this only applies it. Whether
   // the mark also leaves the window is main's call, because main is what knows
@@ -802,6 +881,18 @@ export function Shell({
       .catch(() => {})
     return stop
   }, [workflowRuns, toggleRuns])
+
+  // The monitor seam, shaped like the run seam: one snapshot, then whole
+  // snapshots on every change, so a dropped frame self-heals.
+  useEffect(() => {
+    if (monitorService === undefined) return
+    const stop = monitorService.onEvent((event) => setMonitorsSnapshot(event.snapshot))
+    void monitorService
+      .snapshot()
+      .then(setMonitorsSnapshot)
+      .catch(() => {})
+    return stop
+  }, [monitorService])
 
   // Subscribed before anything is asked for: events can arrive before the
   // operation that caused them resolves, and there is no backlog to catch up.
@@ -2463,6 +2554,7 @@ export function Shell({
         snapshot={snapshot}
         needsYou={asking}
         runActivity={railRuns}
+        waiting={railWaits}
         boardNeedYou={boardNeedYou}
         onNewSession={newSession}
         onAddWorkspace={addWorkspace}
@@ -2534,7 +2626,16 @@ export function Shell({
             }
           />
 
-          <RunStrip runs={sessionRuns} onOpen={openWorkflowRun} />
+          <RunStrip
+            runs={sessionRuns}
+            monitors={sessionMonitors}
+            now={monitorNow}
+            openMonitorId={openMonitorId}
+            checkout={active?.path}
+            onOpen={openWorkflowRun}
+            onOpenMonitor={toggleMonitor}
+            onStopMonitor={stopMonitor}
+          />
 
           {/* The transcript's own row. Nothing overlays it any more: every
               overlay is in the region, which covers this, the composer and the
@@ -2902,6 +3003,11 @@ function restoredNumber(attachment: { readonly name: string }): number {
 }
 
 /** Display-safe text of a refusal, which is all a banner ever shows. */
+/** Whether the snapshot still holds a monitor by that id. */
+function known(monitors: readonly LiveMonitor[], id: MonitorId): boolean {
+  return monitors.some((monitor) => monitor.id === id)
+}
+
 function messageOf(cause: unknown): string {
   return cause instanceof Error ? cause.message : String(cause)
 }

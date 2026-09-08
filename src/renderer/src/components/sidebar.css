@@ -467,3 +467,16 @@
   color: var(--accent2);
   border-color: var(--accent2);
 }
+
+/* A session waiting on a monitor: the ⏳ and how long it has waited, in the
+   monitor color. It is not an attention mark and not motion — a live wait
+   needs nobody — so it takes the slot only when nothing louder wants it. */
+.rowend .waiting {
+  font-family: var(--mono);
+  font-size: 10.5px;
+  line-height: 1;
+  color: var(--thinking);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+}

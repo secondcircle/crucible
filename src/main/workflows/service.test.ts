@@ -61,7 +61,7 @@ function engineOf(runs: RunRecord[]): WorkflowEngine & { started: StartRunReques
     }),
     cancel: vi.fn(),
     dismiss: vi.fn(),
-    wake: vi.fn(),
+    deliverNotices: vi.fn(),
     // The record is what crucible_runs reads, so the stub moves it the way
     // the engine does rather than only counting the call.
     adopt: vi.fn((runId: string, sessionId: string) => {
@@ -279,7 +279,7 @@ describe('the live run service', () => {
       expect(first).toContain('Crucible status update')
       expect(first).toContain('cd34')
       expect(first).not.toContain('zz99')
-      expect(engine.wake).toHaveBeenCalledWith('s1')
+      expect(engine.deliverNotices).toHaveBeenCalledWith('s1')
 
       // A quiet turn costs nothing at all.
       expect(service.turnStart('s1')).toBeUndefined()
@@ -299,7 +299,7 @@ describe('the live run service', () => {
       expect(service.turnStart('s1')).toBeUndefined()
       // Woken all the same: a session with no runs is owed nothing, and asking
       // is how that is found out.
-      expect(engine.wake).toHaveBeenCalledWith('s1')
+      expect(engine.deliverNotices).toHaveBeenCalledWith('s1')
     })
 
     it('keeps one picture per session, so two sessions are told separately', () => {

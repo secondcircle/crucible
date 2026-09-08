@@ -1,5 +1,6 @@
-import { useEffect, useState } from 'react'
 import type { SessionId, ShellSnapshot, WorkspaceId } from '../../../shared/agent/port'
+import { useClock } from '../clock'
+import { waitedFor, type MonitorActivity } from '../monitors/activity'
 // Titles are the model's now, so the row shows a title and a relative time;
 // sessionLabel is gone.
 import { elapsedTime, relativeTime, UNTITLED } from '../labels'
@@ -13,14 +14,6 @@ import { CacheStrip } from './CacheStrip'
 import { QuotaStrip } from './QuotaStrip'
 import { VersionStrip } from './VersionStrip'
 import './sidebar.css'
-
-// Relative times go stale on their own, so the rows are re-rendered on a slow
-// tick and "just now" cannot fossilize.
-const TICK_MS = 30_000
-
-// A counter that only moved every 30s would look stopped, so the whole rail
-// ticks per second for as long as anything is working, and drops back after.
-const WORKING_TICK_MS = 1_000
 
 // Three states, three channels, so a rail full of running agents still says
 // which session you are in. Viewing is the slab: a filled row with an accent
@@ -48,6 +41,7 @@ export function Sidebar({
   snapshot,
   needsYou,
   runActivity,
+  waiting: waitActivity,
   boardNeedYou,
   onNewSession,
   onAddWorkspace,
@@ -69,6 +63,10 @@ export function Sidebar({
   // Sessions with a live run of their own, derived from the runs snapshot by
   // the shell. Absent for a session with none.
   readonly runActivity: Readonly<Record<SessionId, RunActivity>>
+  // Sessions with a live monitor of their own, derived from the monitor
+  // snapshot by the shell. Absent for a session with none, and never anything
+  // about a run's node: a node's wait belongs to its run.
+  readonly waiting?: Readonly<Record<SessionId, MonitorActivity>>
   // A different count on the same row: the board's branches and pull requests,
   // and nothing for a workspace whose board has not answered.
   readonly boardNeedYou: Readonly<Record<WorkspaceId, number>>
@@ -99,7 +97,12 @@ export function Sidebar({
   }
 }): React.JSX.Element {
   const { workspaces, activeWorkspaceId, sessions, activeSessionId } = snapshot
-  const now = useClock(sessions.some((session) => session.working))
+  // A waiting row's age moves in the same units the chips do, so the fast tick
+  // covers it too.
+  const now = useClock(
+    sessions.some((session) => session.working) ||
+      Object.keys(waitActivity ?? {}).length > 0
+  )
 
   return (
     <nav className="side" aria-label="Workspaces and sessions">
@@ -176,12 +179,16 @@ export function Sidebar({
                     const viewing = session.id === activeSessionId
                     const asks = needsYou.has(session.id)
                     const activity = runActivity[session.id]
+                    const waits = waitActivity?.[session.id]
                     const turnSince = session.working ? session.workingSince : undefined
                     // One slot, one owner: needs-you over the turn over the
-                    // run. The row wears the run color only where the run
-                    // actually owns the slot, so nothing repaints the green
-                    // counter of a turn from under it.
+                    // run over a wait. The row wears the run color only where
+                    // the run actually owns the slot, so nothing repaints the
+                    // green counter of a turn from under it, and a session
+                    // with both a run and a wait shows the run's counter.
                     const runSlot = asks || turnSince !== undefined ? undefined : activity
+                    const waitSlot =
+                      asks || turnSince !== undefined || runSlot !== undefined ? undefined : waits
                     // Knowing *that* a session is in a worktree is the whole
                     // signal here; which worktree lives in the composer chip.
                     // A run working is named even when it lost the slot: the
@@ -190,6 +197,9 @@ export function Sidebar({
                       session.worktree === undefined ? undefined : 'worktree',
                       session.working ? 'working' : undefined,
                       activity === undefined ? undefined : 'run working',
+                      // Named even when it lost the slot, like a run: the
+                      // marks are the whole row for anyone not reading them.
+                      waits === undefined ? undefined : 'waiting',
                       asks ? 'needs you' : undefined
                     ].filter((mark): mark is string => mark !== undefined)
                     return (
@@ -255,6 +265,14 @@ export function Sidebar({
                                 <i />
                               </span>
                             </>
+                          ) : waitSlot !== undefined ? (
+                            // Not an attention marker: a live wait needs
+                            // nobody, so it counts toward nothing, walks in no
+                            // Tab order and reaches no dock badge. It says
+                            // only that this session is waiting on something.
+                            <span className="waiting" aria-hidden="true">
+                              ⏳ {waitedFor(waitSlot.since, now)}
+                            </span>
                           ) : (
                             <small aria-hidden="true">
                               {relativeTime(session.lastActivityAt ?? session.createdAt, now)}
@@ -322,18 +340,4 @@ export function Sidebar({
 
 function rowClass(active: boolean, title?: string): string {
   return `sess${active ? ' active' : ''}${title === undefined ? ' untitled' : ''}`
-}
-
-// The clock the times are read against, so they age on their own rather than
-// only when something else re-renders the sidebar. One clock for both kinds:
-// a running counter needs a second, a "4m ago" does not, and paying for the
-// fast one only while something works keeps an idle rail still.
-function useClock(working: boolean): number {
-  const [now, setNow] = useState(() => Date.now())
-  useEffect(() => {
-    const every = working ? WORKING_TICK_MS : TICK_MS
-    const tick = setInterval(() => setNow(Date.now()), every)
-    return () => clearInterval(tick)
-  }, [working])
-  return now
 }

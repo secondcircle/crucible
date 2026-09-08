@@ -101,6 +101,7 @@ vi.mock('./window', () => ({
           harness.webContentsListeners.set(event, listener)
         }
       },
+      isDestroyed: () => false,
       on: () => {}
     }
     harness.windows.push(window)
@@ -160,18 +161,20 @@ describe('what a launch does', () => {
       'app_starting',
       'cache_retention',
       'quota_service_selected',
+      'monitor_service_selected',
       'workflow_run_service_selected',
       'schedule_service_selected',
       'adapter_selected',
       'workspace_service_selected',
       'command_service_selected'
     ])
-    expect(records()[5]).toMatchObject({ adapter: 'fake' })
+    expect(records()[6]).toMatchObject({ adapter: 'fake' })
     // One flavor decision governs every seam: the fake launch runs scripted
     // runs, evaluates no schedule on a clock, reads no credential and never
     // touches the machine's quota cache.
-    expect(records()[3]).toMatchObject({ service: 'fake' })
+    expect(records()[3]).toMatchObject({ event: 'monitor_service_selected', service: 'fake' })
     expect(records()[4]).toMatchObject({ service: 'fake' })
+    expect(records()[5]).toMatchObject({ service: 'fake' })
     expect(records()[2]).toMatchObject({ event: 'quota_service_selected', service: 'canned' })
     expect(harness.windowsCreated).toBe(0)
   })
@@ -193,7 +196,7 @@ describe('what a launch does', () => {
   it('starts though it can read no shipped prompt file, because the fake needs none', () => {
     // Nothing is shipped under this launch's app directory, prompts included.
     expect(existsSync(join(harness.appPath, 'resources'))).toBe(false)
-    expect(records()[5]).toMatchObject({ event: 'adapter_selected', adapter: 'fake' })
+    expect(records()[6]).toMatchObject({ event: 'adapter_selected', adapter: 'fake' })
   })
 
   it('opens one window when Electron is ready and serves the port over it', async () => {
@@ -213,6 +216,7 @@ describe('what a launch does', () => {
       'app_starting',
       'cache_retention',
       'quota_service_selected',
+      'monitor_service_selected',
       'workflow_run_service_selected',
       'schedule_service_selected',
       'adapter_selected',

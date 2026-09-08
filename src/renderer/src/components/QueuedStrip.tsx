@@ -18,6 +18,17 @@ export function QueuedStrip({
     <div className="queue" aria-label="Queued messages">
       {entriesOf(queue).map((entry, index) => {
         const images = entry.images ?? []
+        // Crucible's own message is owed to the agent, not to the composer:
+        // the row says what it is and offers nothing to click.
+        if (entry.origin === 'system') {
+          return (
+            <div key={`${entry.kind}-${index}`} className="qitem system">
+              <span className="qkind sys">Crucible</span>
+              <span className="qtext">{entry.text}</span>
+              <span className="qhint">queued for the agent</span>
+            </div>
+          )
+        }
         return (
           // Two entries can hold the same words, so position within the strip
           // is what names one.

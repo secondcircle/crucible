@@ -20,6 +20,11 @@ import type {
   WorkflowRunRequest,
   WorkflowRunResult
 } from '../../shared/workflows/channels'
+import type {
+  MonitorEvent,
+  MonitorRequestMessage,
+  MonitorResult
+} from '../../shared/monitors/channels'
 
 // The one module in the renderer that may name `window.crucible`, so a missing
 // preload is caught in one place instead of surfacing as an absent method.
@@ -74,6 +79,12 @@ export interface CrucibleSchedules {
   onEvent(listener: (event: ScheduleEvent) => void): () => void
 }
 
+/** The monitor half, shaped like the run half for the same reason. */
+export interface CrucibleMonitors {
+  request(request: MonitorRequestMessage): Promise<MonitorResult>
+  onEvent(listener: (event: MonitorEvent) => void): () => void
+}
+
 declare global {
   interface Window {
     crucible?: {
@@ -92,6 +103,7 @@ declare global {
       needsYou?: CrucibleNeedsYou
       workflowRuns?: CrucibleWorkflowRuns
       schedules?: CrucibleSchedules
+      monitors?: CrucibleMonitors
     }
   }
 }
@@ -184,4 +196,12 @@ export function schedulesBridge(): CrucibleSchedules {
     throw new Error('renderer: window.crucible.schedules is missing — the preload did not load')
   }
   return schedules
+}
+
+export function monitorsBridge(): CrucibleMonitors {
+  const monitors = window.crucible?.monitors
+  if (monitors === undefined) {
+    throw new Error('renderer: window.crucible.monitors is missing — the preload did not load')
+  }
+  return monitors
 }

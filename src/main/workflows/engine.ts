@@ -14,6 +14,9 @@ import {
   type WorkflowRunId
 } from '../../shared/workflows/run'
 import { interruptionNotice } from '../../shared/workflows/status'
+import type { MonitorOwner } from '../../shared/monitors/monitor'
+import type { NodeMonitors } from '../../shared/monitors/service'
+import { lostMonitorsNotice } from '../../shared/monitors/wording'
 import type {
   NodeResult,
   NodeSpec,
@@ -80,8 +83,10 @@ export interface WorkflowEngine {
   cancel(runId: WorkflowRunId): void
   // Every run of this session that is owed an interruption notice says it now,
   // through the ordinary delivery path. Called by the run service's turn-start
-  // hook when a user turn begins, which is the only thing that wakes a session.
-  wake(sessionId: SessionId): void
+  // hook when a user turn begins. Not "wake": that word belongs to a monitor's
+  // message now, and a method of that name delivering interruption notices
+  // would mislead every reader.
+  deliverNotices(sessionId: SessionId): void
   /** Stamps a settled run dismissed; refuses a live one. Stamping twice is a no-op. */
   dismiss(runId: WorkflowRunId): void
   /** Hands the run to another session: every later message goes there. */
@@ -110,6 +115,10 @@ export interface EngineOptions {
   // Read against the run's own worktree, so a skill the run's branch adds is
   // offered to the nodes that follow. Absent means no node is offered any.
   readonly skills?: SkillService
+  // Every node's monitor tools and its wait. Absent — tests that are not
+  // about waiting — means nodes get no monitor tools and never wait;
+  // production always passes it.
+  readonly monitors?: NodeMonitors
   /** Fired after any record change; the service fans it out. */
   readonly onChanged: () => void
   readonly log?: (event: Record<string, unknown>) => void
@@ -149,6 +158,7 @@ interface LiveNode {
   contextPercent?: number
   cost?: number
   cacheMisses?: number
+  waitingOn?: { monitorId: string; description: string; since: string }
 }
 
 interface LiveRun {
@@ -215,6 +225,7 @@ export function createWorkflowEngine(options: EngineOptions): WorkflowEngine {
     sessionExists,
     cache,
     skills,
+    monitors,
     onChanged,
     log,
     defaultModel = 'anthropic/claude-opus-5:high',
@@ -577,12 +588,20 @@ export function createWorkflowEngine(options: EngineOptions): WorkflowEngine {
         return replayed(id, recorded, spec, outputPaths, onHold)
       }
 
+      // A node re-run by Resume is told what the quit cut down under it: a
+      // node's monitor does not survive a quit, so nothing is coming, and the
+      // node can set it again if it still matters. Consumed once, here, and
+      // never by a revision.
+      const lost = monitors?.takeLost(nodeOwner(id)) ?? []
       return liveNode({
         id,
         recordId: id,
         spec,
         outputPaths,
-        firstMessage: composeTaskPrompt(spec, outputPaths),
+        firstMessage:
+          lost.length === 0
+            ? composeTaskPrompt(spec, outputPaths)
+            : [composeTaskPrompt(spec, outputPaths), lostMonitorsNotice(lost)].join('\n\n'),
         ...(onHold === undefined ? {} : { onHold })
       })
     }
@@ -663,8 +682,14 @@ export function createWorkflowEngine(options: EngineOptions): WorkflowEngine {
       }
     }
 
+    /** The owner a node's monitors belong to: its own id, never a revision's. */
+    function nodeOwner(id: string): Extract<MonitorOwner, { kind: 'node' }> {
+      return { kind: 'node', runId: run.id, nodeId: id }
+    }
+
     async function liveNode(job: NodeJob): Promise<NodeResult> {
       const { id, spec, outputPaths } = job
+      const owner = nodeOwner(id)
 
       /** What the node says it will write, before it has written any of it. */
       const declaredArtifacts = (): RunArtifact[] =>
@@ -746,6 +771,10 @@ export function createWorkflowEngine(options: EngineOptions): WorkflowEngine {
         rolePrompt: nodeRolePrompt(id, run.workflow, cwd),
         tools: spec.tools ?? DEFAULT_TOOLS,
         skills: nodeSkills,
+        // Mounted beside complete_node and raise_blocker, so a node that
+        // declares a tool list of its own still has the tools it waits
+        // through, exactly as it still has the ones it completes through.
+        ...(monitors === undefined ? {} : { monitors: monitors.tools(owner, cwd) }),
         ...(spec.verdict === undefined ? {} : { verdictSchema: spec.verdict }),
         onComplete(done) {
           completion = { summary: done.summary, ...(done.verdict === undefined ? {} : { verdict: done.verdict }) }
@@ -874,7 +903,12 @@ export function createWorkflowEngine(options: EngineOptions): WorkflowEngine {
         finished = true
         handle.live.delete(control)
         handle.pauseInterrupts.delete(interruptForPause)
+        // The agent that set them has ceased to exist, however this node
+        // ended: checking stops at once, silently, and nothing is said to
+        // anybody about it.
+        monitors?.release(owner)
         delete node.now
+        delete node.waitingOn
         if (node.endedAt === undefined || node.status !== status) node.endedAt = nowIso()
         node.status = status
         if (error !== undefined) node.error = error
@@ -893,6 +927,9 @@ export function createWorkflowEngine(options: EngineOptions): WorkflowEngine {
         async release(): Promise<void> {
           if (finished) return
           releasing = true
+          // Before the abort, so a node parked on a wake bails the moment its
+          // run ends rather than at the release timeout.
+          monitors?.release(owner)
           if (parked) {
             parkResolve?.({ type: 'close' })
             return
@@ -1106,6 +1143,39 @@ export function createWorkflowEngine(options: EngineOptions): WorkflowEngine {
             message =
               `Your completion was rejected:\n${problems.map((p) => `- ${p}`).join('\n')}\n\n` +
               'Fix these problems, then call complete_node again.'
+            continue
+          }
+
+          // A node that ended its turn with a monitor of its own live is
+          // legitimately waiting, not quiet: no nudge, no stall, no question
+          // to the orchestrator, and the nudge counter is not touched. The
+          // wake starts its next turn.
+          const waiting = monitors?.wait(owner)
+          if (waiting !== undefined) {
+            node.waitingOn = waiting.on
+            save(run)
+            let woken: { readonly text: string }
+            try {
+              woken = await waiting.wake
+            } catch (cause) {
+              delete node.waitingOn
+              save(run)
+              bailIfReleased()
+              throw cause
+            }
+            delete node.waitingOn
+            // A run paused while its node waited keeps its monitors checking,
+            // and the wake waits for the un-pause rather than releasing the
+            // node into a paused run. The wake is the node's next message
+            // whatever the pause did in between.
+            while (pauseAsked() && !releasing) {
+              bailIfReleased()
+              await sleep(pollMs)
+            }
+            bailIfReleased()
+            node.lastActivityAt = nowIso()
+            save(run)
+            message = woken.text
             continue
           }
 
@@ -1475,7 +1545,7 @@ export function createWorkflowEngine(options: EngineOptions): WorkflowEngine {
 
     cancel: cancelRun,
 
-    wake(sessionId: SessionId): void {
+    deliverNotices(sessionId: SessionId): void {
       for (const run of records) {
         if (run.noticePending !== true || run.sessionId !== sessionId) continue
         // Composed here, from the record as it stands: a run resumed since the
@@ -1501,6 +1571,9 @@ export function createWorkflowEngine(options: EngineOptions): WorkflowEngine {
       // The first stamp stands: dismissing twice says nothing new.
       if (run.dismissedAt !== undefined) return
       run.dismissedAt = nowIso()
+      // Nobody will resume a dismissed run, so what its nodes were waiting on
+      // when the quit hit outlives nothing.
+      monitors?.release({ kind: 'run', runId })
       save(run)
     },
 

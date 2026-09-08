@@ -10,6 +10,7 @@ import {
   type RunRecord
 } from '../../../shared/workflows/run'
 import { artifactName } from '../../../shared/workflows/artifacts'
+import { waitedFor } from '../monitors/activity'
 import type { ArtifactView } from '../../../shared/workflows/service'
 import {
   money,
@@ -27,6 +28,7 @@ import { InvestigateButton } from './InvestigateButton'
 import { RunGraph } from './RunGraph'
 import { Transcript } from './Transcript'
 import './runs.css'
+import './monitors.css'
 
 /** What the graph pane is worth before anyone has dragged it. */
 const DEFAULT_GRAPH_WIDTH = 640
@@ -304,6 +306,13 @@ export function WorkflowRunView({
                     </span>
                   )}
                 </div>
+                {/* A node stopped on a wait never looks like a node stopped
+                    on nothing: the monitor's own words, in its own color. */}
+                {shown.waitingOn === undefined ? null : (
+                  <div className="waiting">
+                    ⏳ {shown.waitingOn.description} · {waitedFor(shown.waitingOn.since)}
+                  </div>
+                )}
                 {shown.now === undefined ? null : <div className="now">▸ {shown.now}</div>}
                 {shown.error === undefined ? null : (
                   <div className="nodeerror">{shown.error}</div>

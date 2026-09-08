@@ -443,3 +443,77 @@
   font: 12.5px/1.6 var(--mono);
   color: var(--dim);
 }
+
+/* A message Crucible delivered on its own behalf. Not a bubble and not the
+   agent's voice: a card with a badge, told apart from a user's message at a
+   glance, and toned by what it is reporting. */
+.syscard {
+  max-width: var(--column);
+  margin: 0 auto 18px;
+  padding: 0 22px;
+}
+
+.syscard .card {
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--thinking);
+  border-radius: var(--radius);
+  background: var(--bg2);
+  padding: 8px 13px;
+  font-size: 13px;
+}
+
+.syscard .head {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+  margin-bottom: 4px;
+}
+
+.syscard .badge {
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--thinking);
+  border: 1px solid var(--thinking);
+  border-radius: 9px;
+  padding: 1px 7px;
+  flex: none;
+}
+
+.syscard .head b {
+  color: var(--ink);
+}
+
+.syscard .head .t {
+  margin-left: auto;
+  font: 11px var(--mono);
+  color: var(--faint);
+  white-space: nowrap;
+}
+
+.syscard .out {
+  font: 11.5px var(--mono);
+  color: var(--dim);
+  white-space: pre-wrap;
+  margin-top: 4px;
+}
+
+/* Timed out is amber and broke is red: the three endings are told apart in
+   the wake's own appearance, not only in its words. */
+.syscard .card[data-tone='warn'] {
+  border-left-color: var(--warn);
+}
+
+.syscard .card[data-tone='warn'] .badge {
+  color: var(--warn);
+  border-color: var(--warn);
+}
+
+.syscard .card[data-tone='bad'] {
+  border-left-color: var(--error);
+}
+
+.syscard .card[data-tone='bad'] .badge {
+  color: var(--error);
+  border-color: var(--error);
+}

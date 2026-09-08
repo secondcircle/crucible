@@ -58,6 +58,8 @@ import { summarizeActivity } from '../../shared/agent/activity.ts'
 import { TITLE_MODEL } from '../../shared/agent/known-models.ts'
 import { PANEL_TOOLS, type PanelTools } from '../../shared/agent/panel-tools.ts'
 import { RUN_TOOLS, type RunTools } from '../../shared/agent/run-tools.ts'
+import { bindMonitorTools, type MonitorTools } from '../../shared/agent/monitor-tools.ts'
+import { monitorPiTools } from './monitor-pi-tools.ts'
 import { retentionInForce } from '../cache/retention.ts'
 import { displaySafeMessage } from './adapter-error.ts'
 import {
@@ -164,6 +166,7 @@ const PREVIEW_LIMIT = 140
 export function createSdkAdapter({
   panel,
   runs,
+  monitors,
   skills,
   systemPrompt,
   openExternal
@@ -175,6 +178,10 @@ export function createSdkAdapter({
   // agent (Q19: tools, not a bash CLI). Absent — as in `prove:sdk` — means no
   // run tools are mounted.
   readonly runs?: RunTools
+  // The monitor behaviors, mounted the same way and bound to this session and
+  // its working directory. Absent — as in `prove:sdk` — means no monitor
+  // tools are mounted.
+  readonly monitors?: MonitorTools
   // Crucible's three skill origins, resolved through π's own loader. Absent —
   // as in `prove:sdk` — means no folder is read and no skill is offered.
   readonly skills?: SkillService
@@ -472,6 +479,16 @@ export function createSdkAdapter({
     })
   }
 
+  // The monitor behaviors as π tools, bound to this session and the directory
+  // it was opened at: a monitor's checks run where its agent works, and that
+  // is fixed when the monitor is set.
+  function monitorCustomTools(sessionId: SessionId, workspacePath: string): ToolDefinition[] {
+    if (monitors === undefined) return []
+    return monitorPiTools(
+      bindMonitorTools(monitors, { kind: 'session', sessionId }, workspacePath)
+    )
+  }
+
   async function open(
     sessionId: SessionId,
     workspacePath: string,
@@ -490,7 +507,8 @@ export function createSdkAdapter({
       modelRuntime: await runtime(),
       customTools: [
         ...panelCustomTools(sessionId, workspacePath),
-        ...runCustomTools(sessionId, workspacePath)
+        ...runCustomTools(sessionId, workspacePath),
+        ...monitorCustomTools(sessionId, workspacePath)
       ]
     }
 

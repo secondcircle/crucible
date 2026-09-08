@@ -151,7 +151,7 @@ describe('the turn-start hook', () => {
 
     // What main's orchestrator inbox does with a run's message: a follow-up
     // marked as the system's, which here finds no live turn and prompts.
-    await shell.followUp(sessionId, '⚑ Crucible run 45c8 (build) was interrupted.', undefined, 'system')
+    await shell.deliver(sessionId, { text: '⚑ Crucible run 45c8 (build) was interrupted.' })
     await settled()
 
     expect(asked).toEqual([])
@@ -170,7 +170,7 @@ describe('the turn-start hook', () => {
     answer = (id) => {
       // What main's orchestrator inbox does when the engine wakes a session.
       void shell
-        .followUp(id, '⚑ Crucible run 45c8 (build) was interrupted.', undefined, 'system')
+        .deliver(id, { text: '⚑ Crucible run 45c8 (build) was interrupted.' })
         .catch((cause: unknown) => refused.push(String(cause)))
       return 'run 45c8 (build) — interrupted · app quit'
     }
@@ -200,7 +200,7 @@ describe('the turn-start hook', () => {
     const working = shell.prompt(sessionId, 'carry on')
     // Queued into the turn the user just claimed: never refused, never a turn
     // of its own, and it does not ask the hook.
-    await shell.followUp(sessionId, '⚑ Crucible run 45c8 (build) was interrupted.', undefined, 'system')
+    await shell.deliver(sessionId, { text: '⚑ Crucible run 45c8 (build) was interrupted.' })
     await working
     await settled()
 

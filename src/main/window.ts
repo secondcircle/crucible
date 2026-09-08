@@ -48,6 +48,13 @@ export function createMainWindow(
     })
   })
 
+  // Every seam main serves — the agent port, workspaces, commands, quota, the
+  // cache, needs-you, runs, schedules, monitors, updates — listens for this
+  // window closing so it can stop serving. That is more than Node's default
+  // ten, and each one is deliberate, so the ceiling is raised rather than the
+  // warning tolerated.
+  window.setMaxListeners(32)
+
   window.on('ready-to-show', () => window.show())
 
   // Denied outright, so no link an agent writes can replace the app with a web

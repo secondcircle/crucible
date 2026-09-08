@@ -6,6 +6,7 @@ import type { ObservedCacheMiss } from '../../shared/agent/adapter'
 import type { CacheMissFacts, TranscriptItem, Unsubscribe } from '../../shared/agent/port'
 // Spelled with extensions so plain Node can load this module too.
 import { composeSystemPrompt } from '../agent/system-prompt.ts'
+import { monitorPiTools } from '../agent/monitor-pi-tools.ts'
 import {
   scanCacheMisses,
   type CacheMissTrackerOptions,
@@ -122,7 +123,11 @@ export function createSdkNodeSessionFactory({
               ...(given.artifact === undefined ? {} : { artifact: given.artifact })
             })
           }
-        )
+        ),
+        // Beside the two a node completes through, and for the same reason:
+        // π's allowlist covers custom tools, so a node that lists only file
+        // tools would otherwise lose the tools it waits through.
+        ...(request.monitors === undefined ? [] : monitorPiTools(request.monitors))
       ]
 
       const skills = request.skills ?? []

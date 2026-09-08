@@ -197,6 +197,27 @@ function Item({
         </div>
       )
 
+    // A message Crucible delivered on its own behalf — a monitor's wake — told
+    // apart from a user's message at a glance: a card, a badge, and a tone
+    // that says which of the endings this was. The transcript learns nothing
+    // about monitors from it; the card is presentation and the facts stayed
+    // where they belong.
+    case 'system':
+      return (
+        <div className={`syscard ${item.card.tone}`} aria-label="Crucible">
+          <div className="card" data-tone={item.card.tone}>
+            <div className="head">
+              <span className="badge">{item.card.badge}</span>
+              <b>{item.card.title}</b>
+              <span className="t">{item.card.meta}</span>
+            </div>
+            {item.card.body === undefined ? null : (
+              <div className="out">{item.card.body}</div>
+            )}
+          </div>
+        </div>
+      )
+
     case 'stopped':
       return <div className="stopped">Stopped</div>
 

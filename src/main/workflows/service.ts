@@ -175,7 +175,7 @@ export function createLiveWorkflowRunService({
   // Every rule about runs stays in the engine; the wording is this module's.
   const turnStart = createTurnStart({
     runs: () => engine.runs(),
-    wake: (sessionId) => engine.wake(sessionId)
+    deliverNotices: (sessionId) => engine.deliverNotices(sessionId)
   })
 
   return {

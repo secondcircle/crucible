@@ -1,4 +1,9 @@
-import type { ImageAttachment, MessageOrigin, PortEvent, QueuedEntry } from '../../shared/agent/port'
+import type {
+  ImageAttachment,
+  PortEvent,
+  QueuedEntry,
+  SystemMessage
+} from '../../shared/agent/port'
 import type { Shell } from '../shell/shell'
 import type { LogSink } from '../log/sink'
 
@@ -120,8 +125,20 @@ export function withLogging(shell: Shell, log: LogSink, adapter: string): Shell 
     ),
     followUp: op(
       'followUp',
-      (sessionId, text, images, origin) => shell.followUp(sessionId, text, images, origin),
+      (sessionId, text, images) => shell.followUp(sessionId, text, images),
       describeQueueCall
+    ),
+    // Crucible's own road, logged like every other operation: the text a
+    // reader has to match against, and the card's title where there is one.
+    deliver: op(
+      'deliver',
+      (sessionId, message) => shell.deliver(sessionId, message),
+      (sessionId, message: SystemMessage) => [
+        sessionId,
+        message.card === undefined
+          ? { text: message.text }
+          : { text: message.text, card: message.card.title }
+      ]
     ),
     dequeue: op(
       'dequeue',
@@ -159,11 +176,9 @@ function describeImage(image: ImageAttachment): { mimeType: string; bytes: numbe
 function describeQueueCall(
   sessionId: string,
   text: string,
-  images?: readonly ImageAttachment[],
-  origin?: MessageOrigin
+  images?: readonly ImageAttachment[]
 ): unknown[] {
-  const call = images === undefined ? [sessionId, text] : [sessionId, text, images.map(describeImage)]
-  return origin === undefined ? call : [...call, origin]
+  return images === undefined ? [sessionId, text] : [sessionId, text, images.map(describeImage)]
 }
 
 /** A record as the log holds it: the port's own fields, bytes excepted. */

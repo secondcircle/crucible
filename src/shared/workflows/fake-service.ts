@@ -116,6 +116,7 @@ interface LiveNode {
   toolCalls?: number
   contextPercent?: number
   cost?: number
+  waitingOn?: { monitorId: string; description: string; since: string }
 }
 
 interface LiveRun {
@@ -663,8 +664,8 @@ export function createFakeWorkflowRunService({
   }
 
   // Every run of this session that is owed an interruption notice says it now,
-  // composed from the record as it stands — the engine's `wake`, in the fake.
-  function wake(sessionId: SessionId): void {
+  // composed from the record as it stands — the engine's own hook, in the fake.
+  function deliverNotices(sessionId: SessionId): void {
     for (const run of records) {
       if (run.noticePending !== true || run.sessionId !== sessionId) continue
       tell(run, interruptionNotice(run as RunRecord))
@@ -673,7 +674,7 @@ export function createFakeWorkflowRunService({
 
   const turnStart = createTurnStart({
     runs: () => records as readonly RunRecord[],
-    wake
+    deliverNotices
   })
 
   function requireRun(runId: WorkflowRunId): LiveRun {
@@ -790,6 +791,31 @@ export function createFakeWorkflowRunService({
       node.lastActivityAt = nowIso()
       node.now = 'writing response…'
       changed()
+
+      // The builder waits on something outside the run for a couple of beats
+      // before it completes, so a node's wait — the run chip's words and the
+      // run view's header — is reachable with no engine and no model.
+      if (run.workflow === 'build' && node.id === 'builder') {
+        node.waitingOn = {
+          monitorId: `m-${run.id}`,
+          description: 'CI on PR #482 to finish',
+          since: nowIso()
+        }
+        delete node.now
+        changed()
+        beat(run, () => {
+          beat(run, () => {
+            delete node.waitingOn
+            node.now = 'writing response…'
+            changed()
+            completeNode()
+          })
+        })
+        return
+      }
+      completeNode()
+
+      function completeNode(): void {
       beat(run, () => {
         node.status = 'complete'
         node.endedAt = nowIso()
@@ -834,6 +860,7 @@ export function createFakeWorkflowRunService({
 
         startNode(run, index + 1, cost + 0.31)
       })
+      }
     })
   }
 

@@ -122,8 +122,9 @@ export interface TurnStartOptions {
   readonly runs: () => readonly RunRecord[]
   // Delivers whatever this session is owed about its runs — an interruption
   // notice — before the block is built, so the block reads the records as
-  // they stand once that has happened.
-  readonly wake: (sessionId: SessionId) => void
+  // they stand once that has happened. Not "wake": that word names a
+  // monitor's message, and nothing here is one.
+  readonly deliverNotices: (sessionId: SessionId) => void
 }
 
 /**
@@ -138,12 +139,12 @@ export interface TurnStartOptions {
  */
 export function createTurnStart({
   runs,
-  wake
+  deliverNotices
 }: TurnStartOptions): (sessionId: SessionId) => string | undefined {
   const injected = new Map<SessionId, Map<WorkflowRunId, string>>()
 
   return (sessionId: SessionId): string | undefined => {
-    wake(sessionId)
+    deliverNotices(sessionId)
     const mine = runs().filter((run) => run.sessionId === sessionId)
     // A session that orchestrates nothing is never injected into, whatever it
     // has heard before.

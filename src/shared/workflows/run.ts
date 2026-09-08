@@ -58,6 +58,18 @@ export interface RunQuestion {
   readonly answer?: string
 }
 
+// What a node is waiting on, while it is. Present only on a node whose turn
+// ended with a monitor of its own live and whose wake has not started its next
+// turn; the engine writes it at the wait's start and deletes it before any
+// other status write. `status` stays 'running': a wait is not a stop.
+export interface NodeWait {
+  readonly monitorId: string
+  /** The description verbatim: the run chip's and the node header's words. */
+  readonly description: string
+  /** ISO of the monitor's `setAt`: how long the chip says it has waited. */
+  readonly since: string
+}
+
 export interface RunNode {
   readonly id: string
   readonly status: RunNodeStatus
@@ -85,6 +97,10 @@ export interface RunNode {
   // Cache misses observed on this node's turns. What makes a sub-agent's
   // misses visible while nobody is watching that run.
   readonly cacheMisses?: number
+  // What this node is waiting on, present only while it genuinely is. The
+  // description is a copy of an immutable fact, which is what lets every run
+  // surface keep reading `RunRecord` and nothing richer.
+  readonly waitingOn?: NodeWait
 }
 
 export interface RunRecord {

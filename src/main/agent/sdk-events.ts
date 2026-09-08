@@ -6,6 +6,7 @@ import type { QueuedEntry, SessionId, TurnId } from '../../shared/agent/port'
 // Spelled with its extension so plain Node can load this module: its ESM
 // resolver does no extension guessing.
 import { SKILL_TOOL } from '../../shared/agent/skill-tool.ts'
+import { monitorCallSummary } from '../../shared/monitors/wording.ts'
 import { displaySafeMessage } from './adapter-error.ts'
 import { createQueuedImages, type QueuedImages } from './queued-images.ts'
 
@@ -51,6 +52,10 @@ export function displayToolCall(
   args: unknown,
   inForce?: SkillsInForce
 ): DisplayedCall {
+  // A monitor's row says what is being waited on and on what terms. The
+  // generic summary would print the shell command instead, which is the one
+  // thing the description exists not to be.
+  if (name === 'crucible_monitor') return { name, summary: monitorCallSummary(args) }
   const summary = summarizeToolArgs(args)
   if (inForce === undefined || name !== 'read') return { name, summary }
 

@@ -8,7 +8,9 @@ import {
   utilityProcess
 } from 'electron'
 import { type AgentChannel, serveAgentChannel } from './agent/channel'
-import type { SessionId } from '../shared/agent/port'
+import type { SessionId, SystemMessage } from '../shared/agent/port'
+import { type MonitorChannel, serveMonitorChannel } from './monitors/channel'
+import { selectMonitorService } from './monitors/select-service'
 import { type AppUpdateChannel, serveAppUpdateChannel } from './app-update/channel'
 import { type CacheChannel, serveCacheChannel } from './cache/channel'
 import { createCacheLedger } from './cache/ledger'
@@ -159,13 +161,36 @@ const quota = selectQuotaService(
   log
 )
 
-// The workflow engine exists before the adapter, because the run tools ride
-// every composed agent. A run speaks by messaging its orchestrator session,
-// and the shell that carries the message is built later — the indirection
-// below is that knot untied.
+// Everything Crucible says to a session's agent on its own behalf — a run's
+// report, a monitor's wake — travels this one road. The shell that carries it
+// is built later, because the run tools and the monitor tools ride every
+// composed agent; the indirection here is that knot untied.
 // Initialized explicitly so the one real assignment below stays an
-// assignment: the closure above it must keep reading this binding late.
-let orchestratorInbox: ((sessionId: SessionId, text: string) => void) | undefined = undefined
+// assignment: the closures above it must keep reading this binding late.
+let inbox: ((sessionId: SessionId, message: SystemMessage) => Promise<void>) | undefined =
+  undefined
+
+// The monitor service before the engine, because a node's monitor tools and
+// its wait are the engine's to hold, and before the adapter, because a
+// session's monitor tools ride every composed agent.
+const monitors = selectMonitorService(
+  decideFlavor(process.env.CRUCIBLE_AGENT, app.isPackaged).flavor,
+  log,
+  {
+    stateDir: app.getPath('userData'),
+    // The store is the authority on which sessions exist: a wake owed to a
+    // session the user has since deleted is dropped rather than delivered
+    // into nothing.
+    sessionExists: (sessionId) => store.session(sessionId) !== undefined,
+    deliver: async (sessionId, message) => {
+      if (store.session(sessionId) === undefined) return 'no-session'
+      if (inbox === undefined) throw new Error('no shell is up to carry a wake yet')
+      await inbox(sessionId, message)
+      return 'delivered'
+    }
+  }
+)
+
 const workflowRuns = selectWorkflowRunService(
   decideFlavor(process.env.CRUCIBLE_AGENT, app.isPackaged).flavor,
   log,
@@ -182,11 +207,21 @@ const workflowRuns = selectWorkflowRunService(
     // to a session the user has since deleted goes unattended and parks
     // instead of reporting into nothing.
     sessionExists: (sessionId) => store.session(sessionId) !== undefined,
+    // Every node's monitor tools and its wait, so a node waits on the world
+    // without the engine nudging it for going quiet.
+    monitors: monitors.nodes,
     deliver: (sessionId, text) => {
-      if (orchestratorInbox === undefined) {
+      if (inbox === undefined) {
         throw new Error('no shell is up to carry a run message yet')
       }
-      orchestratorInbox(sessionId, text)
+      void inbox(sessionId, { text }).catch((cause: unknown) => {
+        log.append({
+          source: 'main',
+          event: 'run_message_undeliverable',
+          sessionId,
+          message: cause instanceof Error ? cause.message : String(cause)
+        })
+      })
     }
   }
 )
@@ -231,7 +266,8 @@ const { adapter, flavor } = selectAdapter(
     }
   },
   app.isPackaged,
-  workflowRuns.tools
+  workflowRuns.tools,
+  monitors.tools
 )
 
 // One flavor decision governs every seam, so a fake-flavor launch reads no
@@ -314,11 +350,15 @@ const shell = withLogging(
     panel,
     pickFolder,
     seedWorkspacePath: seededWorkspace,
-    // Fresh run status at the start of every user turn, and whatever
-    // interruption notice this session is owed, delivered as it wakes. The
-    // shell carries an opaque string; every rule about runs stays behind this
-    // seam.
-    turnContext: (sessionId) => workflowRuns.turnStart(sessionId),
+    // Fresh run status at the start of every user turn, whatever interruption
+    // notice this session is owed, and whatever the user stopped watching
+    // since the last one. The shell carries an opaque string; every rule about
+    // runs and monitors stays behind these two seams.
+    turnContext: (sessionId) =>
+      joined([workflowRuns.turnStart(sessionId), monitors.turnStart(sessionId)]),
+    // The agent this session was has ceased to exist, so nothing may go on
+    // waiting in its name.
+    onSessionEnded: (sessionId) => monitors.release({ kind: 'session', sessionId }),
     cache,
     // Nobody asked for a title, so nobody is told it failed: the run log is
     // the whole of the report.
@@ -335,19 +375,15 @@ const shell = withLogging(
   flavor
 )
 
-// A run's message is a follow-up: queued while the orchestrator works,
-// prompted the moment it is idle — never lost, never refused. Marked as the
-// system's, so a message that ends up starting a turn of its own does not read
-// as the user taking one.
-orchestratorInbox = (sessionId, text) => {
-  void shell.followUp(sessionId, text, undefined, 'system').catch((cause: unknown) => {
-    log.append({
-      source: 'main',
-      event: 'run_message_undeliverable',
-      sessionId,
-      message: cause instanceof Error ? cause.message : String(cause)
-    })
-  })
+// Crucible's own messages take the shell's own road: queued while the agent
+// works, prompted the moment it is idle — never lost, never refused, and
+// never read as the user taking a turn.
+inbox = (sessionId, message) => shell.deliver(sessionId, message)
+
+/** Two turn-start hooks, one opaque string, and nothing at all when neither spoke. */
+function joined(blocks: readonly (string | undefined)[]): string | undefined {
+  const said = blocks.filter((block): block is string => block !== undefined && block !== '')
+  return said.length === 0 ? undefined : said.join('\n\n')
 }
 
 let channel: AgentChannel | undefined
@@ -360,6 +396,7 @@ let needsYouChannel: NeedsYouChannel | undefined
 let needsYou: LiveNeedsYouService | undefined
 let workflowRunChannel: WorkflowRunChannel | undefined
 let scheduleChannel: ScheduleChannel | undefined
+let monitorChannel: MonitorChannel | undefined
 
 function openWindow(reason?: 'activate'): void {
   const window = createMainWindow({
@@ -389,6 +426,7 @@ function openWindow(reason?: 'activate'): void {
   needsYouChannel = serveNeedsYouChannel(needsYou, window)
   workflowRunChannel = serveWorkflowRunChannel(workflowRuns, window)
   scheduleChannel = serveScheduleChannel(schedules.service, window)
+  monitorChannel = serveMonitorChannel(monitors, window)
   // ⌘R is the global runs view (Q15). Taken here, before the menu can spend
   // it on reload; dev reloads keep ⇧⌘R. On non-mac the chord is Ctrl+R.
   window.webContents.on('before-input-event', (event, input) => {
@@ -421,6 +459,10 @@ void app.whenReady().then(() => {
   // closed is found here and fires once, late and unbothered.
   schedules.scheduler?.begin()
 
+  // Beside it, and for the same reason: a monitor that outlived the quit picks
+  // its checking back up here, and a wake it is owed has a shell to reach.
+  monitors.begin()
+
   // macOS: the app stays alive with no windows; re-open one on dock activate.
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length > 0) return
@@ -440,6 +482,8 @@ app.on('will-quit', () => {
   schedules.service.dispose()
   workflowRunChannel?.dispose()
   workflowRuns.dispose()
+  monitorChannel?.dispose()
+  monitors.dispose()
   workspaceChannel?.dispose()
   commandChannel?.dispose()
   appUpdateChannel?.dispose()

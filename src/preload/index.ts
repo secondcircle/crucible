@@ -59,6 +59,13 @@ import {
   type WorkflowRunRequest,
   type WorkflowRunResult
 } from '../shared/workflows/channels'
+import {
+  MONITOR_EVENT_CHANNEL,
+  MONITOR_REQUEST_CHANNEL,
+  type MonitorEvent,
+  type MonitorRequestMessage,
+  type MonitorResult
+} from '../shared/monitors/channels'
 
 // Which state directory this window runs against, as main worked it out and
 // passed it at creation. A static value: it needs no channel and no event, and
@@ -162,6 +169,17 @@ contextBridge.exposeInMainWorld('crucible', {
 
     onEvent: (listener: (event: ScheduleEvent) => void): (() => void) =>
       forwarder(SCHEDULE_EVENT_CHANNEL, listener)
+  },
+
+  // Monitors: the strip's chips, their detail and the ✗ that stops one. The
+  // monitor tools never cross here — they live with the agent, exactly as the
+  // run tools do.
+  monitors: {
+    request: (request: MonitorRequestMessage): Promise<MonitorResult> =>
+      ipcRenderer.invoke(MONITOR_REQUEST_CHANNEL, request),
+
+    onEvent: (listener: (event: MonitorEvent) => void): (() => void) =>
+      forwarder(MONITOR_EVENT_CHANNEL, listener)
   },
 
   // The version seam: one question, one event, one restart.

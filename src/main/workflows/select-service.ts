@@ -2,6 +2,7 @@ import { mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { basename, join } from 'node:path'
 import type { SessionId } from '../../shared/agent/port'
+import type { NodeMonitors } from '../../shared/monitors/service'
 import { swapModel } from '../../shared/quota/model-swap'
 import type { QuotaService } from '../../shared/quota/service'
 import {
@@ -61,6 +62,9 @@ export interface WorkflowRunWiring {
    * node runs the model its workflow declared.
    */
   readonly quota?: QuotaService
+  // Every node's monitor tools and its wait. Absent leaves nodes unable to
+  // wait on anything, which is the fake flavor's own arrangement.
+  readonly monitors?: NodeMonitors
   /** Shows a file in the OS file manager, for the artifact reader's Reveal. */
   readonly reveal?: (path: string) => void
   // Fake flavor only: the workspace the canned runs claim. Investigate needs
@@ -157,6 +161,7 @@ export function selectWorkflowRunService(
     // An orphaned resumed run only parks for adoption if the engine is told
     // the session is gone; the shell store is the authority.
     sessionExists: wiring.sessionExists,
+    ...(wiring.monitors === undefined ? {} : { monitors: wiring.monitors }),
     ...(wiring.cache === undefined ? {} : { cache: wiring.cache }),
     ...(wiring.quota === undefined ? {} : { chooseModel: chooserFrom(wiring.quota) }),
     // Built only here, in the sdk branch, so a fake-flavor launch reads no

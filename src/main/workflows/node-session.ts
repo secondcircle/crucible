@@ -1,4 +1,5 @@
 import type { ObservedCacheMiss } from '../../shared/agent/adapter'
+import type { BoundMonitorTools } from '../../shared/agent/monitor-tools'
 import type { TranscriptItem, Unsubscribe } from '../../shared/agent/port'
 import type { LoadedSkill } from '../skills/service'
 
@@ -29,6 +30,10 @@ export interface NodeSessionRequest {
   readonly rolePrompt: string
   /** Built-in tool names the node gets, complete_node and raise_blocker aside. */
   readonly tools: readonly string[]
+  // The node's own monitor tools, mounted beside complete_node and
+  // raise_blocker so a declared tool list cannot take them away. Absent means
+  // this node cannot wait on anything.
+  readonly monitors?: BoundMonitorTools
   // Already resolved and already narrowed to what the node's spec asked for:
   // a node is offered nothing this does not name.
   readonly skills?: readonly LoadedSkill[]

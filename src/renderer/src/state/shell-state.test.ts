@@ -56,6 +56,48 @@ describe('a message the port delivered itself', () => {
     expect(items(state)).toEqual([{ kind: 'user', text: 'look at this', images }])
   })
 
+  // Crucible's own message wears the card it was sent with, so nothing on
+  // screen mistakes a wake for something the user typed. The transcript learns
+  // nothing about monitors from it: badge, tone, title, meta, body.
+  it('is a system item, never a user one, when it carries a card', () => {
+    const card = {
+      badge: 'monitor',
+      tone: 'monitor',
+      title: 'CI on PR #482 to finish',
+      meta: 'condition met · 6m 40s · 13 checks',
+      body: 'last output: completed'
+    } as const
+
+    const state = heard(working(), {
+      type: 'user_message',
+      sessionId: 's1',
+      turnId: 't-1',
+      text: '⏳ Crucible monitor m-1f3a — condition met: CI on PR #482 to finish',
+      card
+    })
+
+    expect(items(state)).toEqual([
+      {
+        kind: 'system',
+        text: '⏳ Crucible monitor m-1f3a — condition met: CI on PR #482 to finish',
+        card
+      }
+    ])
+  })
+
+  // A restored transcript reads a delivered message back as the user message
+  // it is stored as: the card is live presentation, not a stored fact.
+  it('produces no system item from restored history', () => {
+    const state = reduce(NOTHING_YET, {
+      type: 'loaded',
+      sessionId: 's1',
+      items: [{ kind: 'user', text: '⏳ Crucible monitor m-1f3a — condition met: CI' }]
+    })
+    expect(items(state)).toEqual([
+      { kind: 'user', text: '⏳ Crucible monitor m-1f3a — condition met: CI' }
+    ])
+  })
+
   it('changes nothing when it names a turn that is over', () => {
     const state = working()
 

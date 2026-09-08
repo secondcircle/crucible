@@ -87,3 +87,19 @@
   color: var(--faint);
   font-size: 11px;
 }
+
+/* Crucible's own message, waiting for the agent to stop. It is not the user's
+   to take back, so the row is not a button and does not light on hover. */
+.qitem.system {
+  cursor: default;
+  border-style: solid;
+}
+
+.qitem.system:hover {
+  border-color: var(--line);
+}
+
+.qkind.sys {
+  color: var(--faint);
+  border-color: var(--line);
+}

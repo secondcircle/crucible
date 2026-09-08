@@ -676,3 +676,29 @@ describe('a read attributed to a skill', () => {
     })
   })
 })
+
+describe('the row a monitor call gets', () => {
+  it('names what is being waited on and the cadence, never the shell command', () => {
+    const shown = displayToolCall('crucible_monitor', {
+      description: 'CI on PR #482 to finish',
+      reason: 'so I can read the log',
+      command: 'gh pr checks 482 | grep -q IN_PROGRESS && exit 1',
+      intervalSeconds: 60
+    })
+
+    expect(shown).toEqual({
+      name: 'crucible_monitor',
+      summary: 'CI on PR #482 to finish · every 1m · up to 30m'
+    })
+    // The generic summary would have printed the command, which is the one
+    // thing the description exists not to be.
+    expect(shown.summary).not.toContain('gh pr checks')
+  })
+
+  it('leaves the other two monitor tools to the ordinary summary', () => {
+    expect(displayToolCall('crucible_monitor_stop', { monitorId: 'm-1f3a' })).toEqual({
+      name: 'crucible_monitor_stop',
+      summary: 'm-1f3a'
+    })
+  })
+})

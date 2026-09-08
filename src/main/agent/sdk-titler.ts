@@ -1,4 +1,5 @@
 import type { TranscriptItem } from '../../shared/agent/port'
+import { isWakeMessage } from '../../shared/monitors/wording'
 import { isRunMessage } from '../../shared/workflows/run'
 
 // No SDK type reaches this module, so the shaping and sanitizing stay testable
@@ -13,6 +14,11 @@ export const TITLE_INSTRUCTION =
 /** Past this a message says nothing more about what the session is about. */
 const MESSAGE_LIMIT = 500
 
+/** A message in the user's role that no user typed. */
+function spokenByCrucible(text: string): boolean {
+  return isRunMessage(text) || isWakeMessage(text)
+}
+
 // The instruction asks for 5-8 words. Well past that the model is talking
 // rather than naming — "I need more context to name this conversation" must
 // read as a failed pass, not become the title.
@@ -26,9 +32,9 @@ const INPUT_LIMIT = 4_000
 // compaction or a summarized branch jump the summary IS the conversation,
 // and without it the titler would read an almost empty session.
 //
-// A run's messages arrive in the user's role because prompting an agent is
-// the only voice a run has, but nobody typed them and they are
-// status, not subject. Left in, they take over the name of any session short
+// A run's messages and a monitor's wakes arrive in the user's role because
+// prompting an agent is the only voice either has, but nobody typed them and
+// they are status, not subject. Left in, they take over the name of any session short
 // enough for a few of them to be most of it — the sidebar ends up reading
 // "Crucible run fk139 completed" instead of the work the human came for.
 //
@@ -41,7 +47,7 @@ export function titleInput(
 ): string | undefined {
   const lines: string[] = []
   for (const item of items) {
-    if (item.kind === 'user' && isRunMessage(item.text)) continue
+    if (item.kind === 'user' && spokenByCrucible(item.text)) continue
     if (item.kind === 'user') lines.push(`user: ${clip(item.text)}`)
     else if (item.kind === 'assistant') lines.push(`assistant: ${clip(item.markdown)}`)
     else if (item.kind === 'summary') lines.push(`summary: ${clip(item.text)}`)
@@ -49,7 +55,7 @@ export function titleInput(
   // The conversation may have caught up with it in the meantime, and the same
   // message twice says no more than once.
   const pending =
-    asked === undefined || isRunMessage(asked) ? undefined : `user: ${clip(asked)}`
+    asked === undefined || spokenByCrucible(asked) ? undefined : `user: ${clip(asked)}`
   if (pending !== undefined && !lines.includes(pending)) lines.push(pending)
   // The newest messages say most about what a session is about now, so the
   // oldest are the ones dropped when the whole is too long.

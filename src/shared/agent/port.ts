@@ -38,11 +38,33 @@ export type QueuedKind = 'steering' | 'followUp'
 // about what the text is — and what decides whether a turn is the user's.
 export type MessageOrigin = 'user' | 'system'
 
+// What the transcript shows for a message Crucible delivered on its own
+// behalf. Presentation, not facts: the badge word, the tone as a color role, a
+// title, a meta line and an optional body. The transcript learns nothing about
+// what produced it, and a run's report can wear one later.
+export interface SystemCard {
+  readonly badge: string
+  /** The color role the surface paints it in. */
+  readonly tone: 'monitor' | 'warn' | 'bad'
+  readonly title: string
+  readonly meta: string
+  readonly body?: string
+}
+
+// A message Crucible delivers to an agent: what the model reads, and what the
+// person sees at the moment it lands. No card means it renders as today.
+export interface SystemMessage {
+  readonly text: string
+  readonly card?: SystemCard
+}
+
 // One undelivered message and whatever rides with it. `images` is present only
 // for images genuinely attached to it.
 export interface QueuedEntry {
   readonly text: string
   readonly images?: readonly ImageAttachment[]
+  /** Absent means a person queued it. Crucible's own cannot be dequeued. */
+  readonly origin?: MessageOrigin
 }
 
 export interface QueuedMessage extends QueuedEntry {
@@ -399,6 +421,9 @@ export type PortEvent =
       readonly text: string
       /** Present only for images the delivered message genuinely carried. */
       readonly images?: readonly ImageAttachment[]
+      // Present only when the shell delivered a system message carrying one:
+      // what the person sees instead of a user's bubble.
+      readonly card?: SystemCard
     }
   // Announced at the moment a shared bash run genuinely enters the
   // conversation, which is its delivery point and never before it.
@@ -558,14 +583,13 @@ export interface AgentPort {
   // sent as the next prompt. Nothing enters the transcript at queue time.
   // Images ride a queued message exactly as they ride a prompt.
   steer(sessionId: SessionId, text: string, images?: readonly ImageAttachment[]): Promise<void>
-  // `origin` defaults to `'user'`, so every caller who does not say otherwise
-  // is a person queueing a message. It rides with the message: one that ends
-  // up starting a turn of its own still starts the kind of turn it is.
+  // A person's follow-up, always: Crucible's own messages take `deliver` on
+  // the shell instead, which is the one road every message it sends itself
+  // travels.
   followUp(
     sessionId: SessionId,
     text: string,
-    images?: readonly ImageAttachment[],
-    origin?: MessageOrigin
+    images?: readonly ImageAttachment[]
   ): Promise<void>
   // Named by content, because delivery may have shifted any index; answered
   // with the entry that left, because two queued messages can read alike.

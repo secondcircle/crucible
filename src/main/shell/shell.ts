@@ -26,6 +26,8 @@ import type {
   SessionUsage,
   SessionWorktree,
   ShellSnapshot,
+  SystemCard,
+  SystemMessage,
   TabId,
   ThinkingLevel,
   TranscriptItem,
@@ -43,6 +45,13 @@ import type { ShellStore, StoredSession } from './store'
 // Turn guards and ordering live here rather than in the UI or an adapter, so
 // they hold whoever is behind the port.
 export interface Shell extends AgentPort {
+  // A message from Crucible to a session's agent — a run's report, a
+  // monitor's wake — on one road rather than one road each: queued as a
+  // follow-up while the session works, delivered when it fully stops, the next
+  // prompt when it is idle. Never lost: a stop that hands the queue back
+  // re-queues it rather than restoring it to the composer, and the queued
+  // strip cannot dequeue it. Refuses an unknown session.
+  deliver(sessionId: SessionId, message: SystemMessage): Promise<void>
   // Drops live turns but keeps bindings, so the document that comes back after
   // a reload can prompt immediately.
   dispose(): void
@@ -66,6 +75,10 @@ export interface ShellOptions {
   // shows. An opaque string — the shell never learns what is in it — and a
   // launch without it prompts exactly as it always has.
   readonly turnContext?: (sessionId: SessionId) => string | undefined
+  // The session's agent ceased to exist: removed, reset, or its workspace
+  // removed. Called once per session, after the stop and before the state goes
+  // out; whatever was working on that agent's behalf stops there.
+  readonly onSessionEnded?: (sessionId: SessionId) => void
   // Where an observed miss is written down. Absent in tests that are not
   // about recording: with no ledger there is no entry to compose, and no
   // retention to state, so nothing about a miss crosses the port either.
@@ -83,6 +96,9 @@ type Announcement =
       readonly text: string
       /** Present only for images the message genuinely carried. */
       readonly images?: readonly ImageAttachment[]
+      // Present only for a system message that carries one: what the person
+      // sees where a user's bubble would be.
+      readonly card?: SystemCard
     }
   | { readonly kind: 'bashRun'; readonly run: BashRunShare }
 
@@ -113,6 +129,16 @@ function queued(queue: QueueState | undefined): boolean {
   return queue !== undefined && queue.steering.length + queue.followUp.length > 0
 }
 
+// Crucible's own messages are recognized by their text, because that is all
+// that survives the round trip through an adapter's queue. Two identical ones
+// are folded one for one, oldest first, so a duplicate cannot mark a person's
+// message as the system's.
+function takeMatch(kept: SystemMessage[], text: string): SystemMessage | undefined {
+  const at = kept.findIndex((message) => message.text === text)
+  if (at === -1) return undefined
+  return kept.splice(at, 1)[0]
+}
+
 export function createShell({
   store,
   adapter,
@@ -121,6 +147,7 @@ export function createShell({
   pickFolder,
   seedWorkspacePath,
   turnContext,
+  onSessionEnded,
   cache,
   onTitlingFailure = () => {}
 }: ShellOptions): Shell {
@@ -157,7 +184,13 @@ export function createShell({
   // one: which directory the work would happen in is not settled yet.
   const settling = new Map<SessionId, Promise<void>>()
   const bindings = new Map<SessionId, Promise<Binding>>()
+  // What Crucible itself put into a live turn's follow-up queue and has not
+  // yet seen delivered, in queue order. It is what lets the shell recognize
+  // its own message coming back — as a delivery, in a queue snapshot, or in a
+  // flush — without the adapter learning that system messages exist.
+  const systemQueued = new Map<SessionId, SystemMessage[]>()
   let turns = 0
+  let disposed = false
 
   function emit(event: PortEvent): void {
     // A copy, so a listener that unsubscribes while being called does not
@@ -516,7 +549,8 @@ export function createShell({
         sessionId,
         turnId,
         text: announce.text,
-        ...(announce.images === undefined ? {} : { images: announce.images })
+        ...(announce.images === undefined ? {} : { images: announce.images }),
+        ...(announce.card === undefined ? {} : { card: announce.card })
       })
       return
     }
@@ -657,14 +691,21 @@ export function createShell({
     kind: QueuedKind,
     text: string,
     images?: readonly ImageAttachment[],
-    origin: MessageOrigin = 'user'
+    origin: MessageOrigin = 'user',
+    card?: SystemCard
   ): Promise<void> {
     requireSession(sessionId)
 
     for (;;) {
       const turn = live.get(sessionId)
       if (turn === undefined) break
+      // Written down before it is offered, so a delivery announced in the same
+      // tick already knows whose message it is.
+      const kept = origin === 'system' ? keptOf(sessionId) : undefined
+      kept?.push(card === undefined ? { text } : { text, card })
       if (await offerToTurn(sessionId, kind, text, images, turn)) return
+      // The turn did not take it, so the bookkeeping goes with the attempt.
+      if (kept !== undefined) takeMatch(kept, text)
       // Waited out and offered again, because a message the user typed is
       // never lost whichever way the turn ended.
       await turn.over
@@ -678,13 +719,27 @@ export function createShell({
       {
         kind: 'text',
         text,
-        ...(images === undefined || images.length === 0 ? {} : { images })
+        ...(images === undefined || images.length === 0 ? {} : { images }),
+        ...(card === undefined ? {} : { card })
       },
       origin
     )
     // A queued message with no turn left to take it becomes the next prompt,
     // and a prompt is a user instruction whatever key sent it.
     panel.bumpTurn(sessionId)
+  }
+
+  function keptOf(sessionId: SessionId): SystemMessage[] {
+    const found = systemQueued.get(sessionId)
+    if (found !== undefined) return found
+    const fresh: SystemMessage[] = []
+    systemQueued.set(sessionId, fresh)
+    return fresh
+  }
+
+  /** Whether this text is one of Crucible's own, still undelivered. */
+  function isSystemQueued(sessionId: SessionId, text: string): boolean {
+    return (systemQueued.get(sessionId) ?? []).some((message) => message.text === text)
   }
 
   // A run is never lost and never queued: a live turn takes it, or it starts a
@@ -727,6 +782,36 @@ export function createShell({
       run: share
     })
     return 'delivered'
+  }
+
+  // A message of Crucible's own that a stop handed back: delivered again once
+  // the ending turn is genuinely over, so a wake or a run's report is never
+  // lost to a click on Stop.
+  function redeliver(sessionId: SessionId, messages: readonly SystemMessage[]): void {
+    if (messages.length === 0) return
+    const turn = live.get(sessionId)
+    const again = (): void => {
+      if (disposed || removing.has(sessionId) || store.session(sessionId) === undefined) return
+      for (const message of messages) {
+        void deliverSystem(sessionId, message).catch(() => {
+          // The session went away under it, which is the one case where a
+          // message of Crucible's own has nobody left to reach.
+        })
+      }
+    }
+    if (turn === undefined) again()
+    else void turn.over.then(again)
+  }
+
+  async function deliverSystem(sessionId: SessionId, message: SystemMessage): Promise<void> {
+    await queueMessage(
+      sessionId,
+      'followUp',
+      message.text,
+      undefined,
+      'system',
+      message.card
+    )
   }
 
   // A turn is live from the moment its prompt is accepted, seconds before its
@@ -787,16 +872,39 @@ export function createShell({
     // Queue events are session-scoped like usage: they belong to the session
     // rather than to whichever turn happens to be live.
     if (event.type === 'queue_changed') {
-      queues.set(event.sessionId, { steering: event.steering, followUp: event.followUp })
+      // Crucible's own entries are marked as they go out, so the queued strip
+      // can render one as a message nobody typed and refuse to take it back.
+      const kept = [...(systemQueued.get(event.sessionId) ?? [])]
+      queues.set(event.sessionId, {
+        steering: [...event.steering],
+        followUp: event.followUp.map((entry) =>
+          takeMatch(kept, entry.text) === undefined
+            ? entry
+            : { ...entry, origin: 'system' as const }
+        )
+      })
       emitState()
       return
     }
     if (event.type === 'queue_flushed') {
       queues.delete(event.sessionId)
+      const kept = systemQueued.get(event.sessionId) ?? []
+      // A stop hands the queue back to the composer, which is the right home
+      // for what a person typed and no home at all for what Crucible said. Its
+      // own messages leave the flush and are delivered again once the ending
+      // turn is genuinely over.
+      const mine: SystemMessage[] = []
+      const theirs = event.messages.filter((message) => {
+        const found = takeMatch(kept, message.text)
+        if (found === undefined) return true
+        mine.push(found)
+        return false
+      })
+      redeliver(event.sessionId, mine)
       // A session on its way out has nowhere to restore a message to, and the
       // removal emits the state that follows it.
       if (removing.has(event.sessionId) || store.session(event.sessionId) === undefined) return
-      emit(event)
+      emit({ type: 'queue_flushed', sessionId: event.sessionId, messages: theirs })
       emitState()
       return
     }
@@ -815,6 +923,16 @@ export function createShell({
     // No adapter should stream before it starts a turn; if one does, the start
     // is still said exactly once and first.
     announceStart(event.sessionId, turn)
+
+    // A message this shell delivered, landing in the conversation: it reaches
+    // the transcript wearing whatever card it was sent with, and the
+    // bookkeeping for it is over.
+    if (event.type === 'user_message') {
+      const kept = systemQueued.get(event.sessionId) ?? []
+      const mine = takeMatch(kept, event.text)
+      emit(mine?.card === undefined ? event : { ...event, card: mine.card })
+      return
+    }
 
     // Recorded before it is forwarded: the ledger is the point, and the
     // renderer's seam is a view of the same entry.
@@ -897,9 +1015,11 @@ export function createShell({
         bindings.delete(session.id)
         usage.delete(session.id)
         queues.delete(session.id)
+        systemQueued.delete(session.id)
         // The panel record leaves with the session record below; this is the
         // memory of it.
         panel.forget(session.id)
+        onSessionEnded?.(session.id)
       }
       store.removeWorkspace(id)
       emitState()
@@ -971,10 +1091,14 @@ export function createShell({
       // A queue has nowhere to be restored to once the entry holding it is
       // gone.
       queues.delete(id)
+      systemQueued.delete(id)
       titling.delete(id)
       // Removing a session forgets its tabs with it: the persisted copy went
       // out with the session record.
       panel.forget(id)
+      // The agent this session was does not exist any more, so whatever was
+      // working on its behalf stops here.
+      onSessionEnded?.(id)
       emitState()
     },
 
@@ -1004,6 +1128,10 @@ export function createShell({
         // back to saying nothing rather than keeping the old session's numbers.
         usage.delete(id)
         queues.delete(id)
+        systemQueued.delete(id)
+        // The agent the old conversation was is gone with it: a reset is the
+        // same ending for anything working in that agent's name as a removal.
+        onSessionEnded?.(id)
         // The conversation the title described is gone, and so is what naming
         // it cost: the row reads untitled again until the fresh one earns a
         // title.
@@ -1293,10 +1421,13 @@ export function createShell({
     async followUp(
       sessionId: SessionId,
       text: string,
-      images?: readonly ImageAttachment[],
-      origin: MessageOrigin = 'user'
+      images?: readonly ImageAttachment[]
     ): Promise<void> {
-      await queueMessage(sessionId, 'followUp', text, images, origin)
+      await queueMessage(sessionId, 'followUp', text, images)
+    },
+
+    async deliver(sessionId: SessionId, message: SystemMessage): Promise<void> {
+      await deliverSystem(sessionId, message)
     },
 
     async dequeue(
@@ -1305,6 +1436,11 @@ export function createShell({
       text: string
     ): Promise<QueuedEntry | undefined> {
       requireSession(sessionId)
+      // Crucible's own message is not the user's to take back: it is owed to
+      // the agent, and the composer is not where it belongs.
+      if (isSystemQueued(sessionId, text)) {
+        refuse('That message is Crucible’s own, so it cannot be taken back.')
+      }
       // Nothing can be queued behind a session that was never bound, and
       // binding one to say so would be work for no answer.
       if (bindings.get(sessionId) === undefined) return undefined
@@ -1342,6 +1478,7 @@ export function createShell({
     dispose(): void {
       // The launch is going away: work parked on these turns must not start
       // new ones behind it.
+      disposed = true
       for (const turn of live.values()) turn.settled('stopped')
       live.clear()
       adapter.dispose()
