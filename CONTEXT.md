@@ -451,3 +451,27 @@ The top-bar mark naming which state directory a dev window is running
 against — "dev" for the primary clone, "dev · <suffix>" for a worktree
 launch. The installed app shows none: the badge marks the exceptional case.
 _Avoid_: flavor chip, dev pill, environment indicator.
+
+**Monitor**:
+A wait an agent sets up in its own session: a shell check Crucible runs on a
+loop in the session's working directory, with a one-line description of what
+is awaited and why, until the check passes or a timeout expires. Asynchronous:
+the agent ends its turn and the conversation goes on. Available to session
+agents and, by default, to every workflow node.
+_Avoid_: watcher, poll, sensor, wait (alone), schedule check (that is the
+scheduler's predicate, not a session's).
+
+**Wake**:
+The message a monitor delivers to its agent when it ends — condition met,
+timed out, or the check itself broke — naming the monitor, the reason, the
+time waited and the last output. Travels the road a run's report takes: a
+follow-up, queued while the agent works and prompted when it is idle. A
+monitor the user stops sends none; the next turn's context says so instead.
+_Avoid_: notification, callback, trigger, alert.
+
+**Monitor chip**:
+One live monitor in the strip above the chat, beside the run chips under its
+own "Waiting on" label: the description, the check's last output, time waited,
+cadence and timeout, and a ✕ that stops it. Click opens its detail — the
+reason, the command, the timing and the last output.
+_Avoid_: monitor badge, wait pill, monitor card (there is no transcript card).
