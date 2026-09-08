@@ -21,7 +21,8 @@ import {
   scriptedSessions,
   startRequest,
   until,
-  type Rig
+  type Rig,
+  type RigOptions
 } from './testing/engine-rig'
 
 afterEach(cleanupScratch)
@@ -42,7 +43,10 @@ interface ScriptedNodeMonitors extends NodeMonitors {
 
 function scriptedMonitors(): ScriptedNodeMonitors {
   const waits = new Map<string, { description: string; since: string }>()
-  const parked = new Map<string, (wake: NodeWake) => void>()
+  const parked = new Map<
+    string,
+    { resolve: (wake: NodeWake) => void; reject: (cause: Error) => void }
+  >()
   const asked: string[] = []
   const released: MonitorScope[] = []
   const bound: { nodeId: string; cwd: string }[] = []
@@ -57,10 +61,10 @@ function scriptedMonitors(): ScriptedNodeMonitors {
     lost: [],
 
     wake(nodeId: string, text: string): void {
-      const settle = parked.get(nodeId)
+      const waiter = parked.get(nodeId)
       parked.delete(nodeId)
       waits.delete(nodeId)
-      settle?.({ text })
+      waiter?.resolve({ text })
     },
 
     tools(owner: NodeOwner, cwd: string): BoundMonitorTools {
@@ -78,7 +82,9 @@ function scriptedMonitors(): ScriptedNodeMonitors {
       if (on === undefined) return undefined
       return {
         on: { monitorId: `m-${owner.nodeId}`, description: on.description, since: on.since },
-        wake: new Promise<NodeWake>((resolve) => parked.set(owner.nodeId, resolve))
+        wake: new Promise<NodeWake>((resolve, reject) =>
+          parked.set(owner.nodeId, { resolve, reject })
+        )
       }
     },
 
@@ -91,12 +97,14 @@ function scriptedMonitors(): ScriptedNodeMonitors {
 
     release(scope: MonitorScope): void {
       released.push(scope)
-      for (const [nodeId, settle] of [...parked]) {
+      for (const [nodeId, waiter] of [...parked]) {
         if (scope.kind === 'node' && scope.nodeId !== nodeId) continue
         parked.delete(nodeId)
         waits.delete(nodeId)
-        // A released wait never resolves: the run is over.
-        void settle
+        // The real seam rejects a pending wait when its owner is released,
+        // and that rejection is what makes a parked node bail at once rather
+        // than at the release timeout. The script owes the engine the same.
+        waiter.reject(new Error('the monitor’s owner is gone'))
       }
     }
   }
@@ -117,7 +125,11 @@ const oneNode: WorkflowDef = {
   }
 }
 
-function repoRig(monitors: ScriptedNodeMonitors, turns: (prompt: string) => 'wait' | 'complete'): {
+function repoRig(
+  monitors: ScriptedNodeMonitors,
+  turns: (prompt: string) => 'wait' | 'complete',
+  options: RigOptions = {}
+): {
   readonly rig: Rig
   readonly prompts: string[]
 } {
@@ -132,7 +144,7 @@ function repoRig(monitors: ScriptedNodeMonitors, turns: (prompt: string) => 'wai
         tools.complete({ summary: 'finished' })
       }
     },
-    { monitors }
+    { monitors, ...options }
   )
   return { rig: built, prompts }
 }
@@ -211,6 +223,29 @@ describe('a node that ends its turn waiting', () => {
     })
   })
 
+  // The other half of the quit rule: when the run genuinely ends, the records
+  // do go, and the node parked on the wake bails on the rejection rather than
+  // hanging until the release timeout. `releaseWaitMs` is far longer than the
+  // wait below, so nothing but the rejection can get this run to `cancelled`.
+  it('bails the moment its run is cancelled, and its monitors go with it', async () => {
+    const monitors = scriptedMonitors()
+    monitors.waits.set('work', {
+      description: 'CI on PR #482 to finish',
+      since: '2026-09-08T10:00:00.000Z'
+    })
+    const { rig: built } = repoRig(monitors, () => 'wait', { releaseWaitMs: 30_000 })
+    const prompt = join(built.repo, 'task.md')
+    writeFileSync(prompt, 'do it\n')
+    const run = await built.engine.start(startRequest(built.repo, 'solo', { prompt }))
+    await until(() => built.engine.runs()[0].nodes[0].waitingOn !== undefined)
+
+    built.engine.cancel(run.id)
+    await until(() => built.engine.runs()[0].status === 'cancelled', 2000)
+
+    expect(monitors.released).toContainEqual({ kind: 'node', runId: run.id, nodeId: 'work' })
+    expect(built.engine.runs()[0].nodes[0].waitingOn).toBeUndefined()
+  })
+
   it('tells a resumed node what the quit cut down under it', async () => {
     const monitors = scriptedMonitors()
     monitors.lost = [
@@ -234,7 +269,7 @@ describe('a node that ends its turn waiting', () => {
   })
 })
 
-describe('a quit that catches a node waiting', () => {
+describe('a quit that catches a node with a monitor live', () => {
   // A node's monitor does not survive a quit: nothing is checking, no wake is
   // coming, and the record closes with the run's interruption. The record must
   // not go on saying the node is waiting on it — the run view's node header
@@ -317,6 +352,62 @@ describe('a quit that catches a node waiting', () => {
         description: 'CI on PR #482 to finish',
         command: 'gh pr checks 482'
       })
+    ])
+  })
+
+  // Parked on a wake is only one of the places a quit can catch a node. A node
+  // that set a monitor and is still working when ⌘Q lands ends through the
+  // ordinary bail instead, and that path must keep the records for the same
+  // reason: nothing about a quit says the agent ceased to exist.
+  it('leaves the record behind when the quit catches the node mid-turn', async () => {
+    const stuck: CheckRunner = {
+      run: () => ({ done: new Promise<CheckResult>(() => {}), kill: () => {} })
+    }
+    const store = memoryMonitorStore()
+    const model = createMonitorModel({
+      store,
+      checks: stuck,
+      deliver: async () => 'delivered',
+      sessionExists: () => true
+    })
+
+    // The turn sets its monitor and goes on working; the test ends it by hand,
+    // after the quit, which is what the quit's abort amounts to.
+    let endTurn = (): void => {}
+    const working = new Promise<void>((resolve) => {
+      endTurn = resolve
+    })
+    const sessions = scriptedSessions(() => async () => {
+      await sessions.requests.at(-1)?.monitors?.set({
+        description: 'the npm publish of 0.4.12 to land',
+        reason: 'so I can tag the release the moment it is up',
+        command: 'npm view crucible@0.4.12'
+      })
+      await working
+    })
+    const built = rig({ solo: oneNode }, () => () => {}, {
+      monitors: model.nodes,
+      sessions
+    })
+
+    const prompt = join(built.repo, 'task.md')
+    writeFileSync(prompt, 'do it\n')
+    const run = await built.engine.start(startRequest(built.repo, 'solo', { prompt }))
+    await until(() => store.current.length === 1)
+
+    built.engine.dispose()
+    model.dispose()
+    endTurn()
+    await until(() => built.engine.runs()[0].nodes[0].status !== 'running')
+
+    const next = createMonitorModel({
+      store: memoryMonitorStore(store.current),
+      checks: stuck,
+      deliver: async () => 'delivered',
+      sessionExists: () => true
+    })
+    expect(next.nodes.takeLost({ kind: 'node', runId: run.id, nodeId: 'work' })).toEqual([
+      expect.objectContaining({ description: 'the npm publish of 0.4.12 to land' })
     ])
   })
 })
