@@ -33,7 +33,12 @@ import type {
   RunId,
   WorkspaceService
 } from '../../shared/workspace/service'
-import { runIsLive, type RunRecord, type WorkflowRunId } from '../../shared/workflows/run'
+import {
+  currentNode,
+  runIsLive,
+  type RunRecord,
+  type WorkflowRunId
+} from '../../shared/workflows/run'
 import type {
   ArtifactView,
   RunsSnapshot,
@@ -489,9 +494,14 @@ export function Shell({
           ),
     [activeSessionId, allMonitors, stopping]
   )
-  // One clock for the strip's ages and its hairline, ticking only while this
-  // session is actually waiting on something.
-  const monitorNow = useClock(sessionMonitors.length > 0)
+  // One clock for the strip's ages and its hairline, ticking every second
+  // while anything in the strip is counting a wait: a monitor chip of this
+  // session's own, or a run chip whose node is waiting. A counter on screen
+  // moves; one that jumped half a minute at a time would read as stopped.
+  const monitorNow = useClock(
+    sessionMonitors.length > 0 ||
+      sessionRuns.some((run) => currentNode(run)?.waitingOn !== undefined)
+  )
 
   // A detail belongs to the session it was opened in and to the monitor it was
   // opened on: switching away, or the monitor ending, closes it.

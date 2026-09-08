@@ -22,6 +22,7 @@ import {
 } from '../runs/format'
 import { railOf, rowFor, type RailModel } from '../runs/rail'
 import { relativeTime } from '../labels'
+import { useClock } from '../clock'
 import { ArtifactRail } from './ArtifactRail'
 import { ArtifactReader } from './ArtifactReader'
 import { InvestigateButton } from './InvestigateButton'
@@ -112,6 +113,10 @@ export function WorkflowRunView({
     (picked === undefined ? undefined : run.nodes.find((node) => node.id === picked)) ??
     currentNode(run) ??
     run.nodes[0]
+
+  // The wait in the node header is a counter, and a counter on screen moves:
+  // nothing else re-renders this view while a node sits waiting.
+  const now = useClock(shown?.waitingOn !== undefined)
 
   const [items, setItems] = useState<readonly TranscriptItem[]>([])
   const fetchedFor = useRef<string>('')
@@ -310,7 +315,7 @@ export function WorkflowRunView({
                     on nothing: the monitor's own words, in its own color. */}
                 {shown.waitingOn === undefined ? null : (
                   <div className="waiting">
-                    ⏳ {shown.waitingOn.description} · {waitedFor(shown.waitingOn.since)}
+                    ⏳ {shown.waitingOn.description} · {waitedFor(shown.waitingOn.since, now)}
                   </div>
                 )}
                 {shown.now === undefined ? null : <div className="now">▸ {shown.now}</div>}

@@ -5,7 +5,7 @@
 // the transcript, and what a node's wait says on a run's chip. Nothing here
 // can talk to a monitor except through the seam's one action, which is Stop.
 import { act, fireEvent, render, screen, within } from '@testing-library/react'
-import { describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ShellSnapshot, SystemCard } from '../../shared/agent/port'
 import type { LiveMonitor } from '../../shared/monitors/monitor'
 import type { RunRecord } from '../../shared/workflows/run'
@@ -528,6 +528,86 @@ describe('a node\u2019s wait inside a run', () => {
       (button) => button.textContent ?? ''
     )
     expect(buttons.some((label) => /stop watching/i.test(label))).toBe(false)
+  })
+})
+
+// Every wait on screen is a counter, and a counter that jumped half a minute
+// at a time would read as stopped. The monitor chip, the run chip's ⏳ and the
+// run view's node header all move every second while they are visible — the
+// chip's clock is not special.
+describe('the counters a wait puts on screen', () => {
+  beforeEach(() => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  const secondsAgo = (seconds: number): string =>
+    new Date(Date.now() - seconds * 1000).toISOString()
+
+  const nodeWaiting = (): RunRecord =>
+    runOf({
+      nodes: [
+        {
+          id: 'implement',
+          status: 'running',
+          parents: [],
+          reads: [],
+          artifacts: [],
+          startedAt: minutesAgo(18),
+          waitingOn: {
+            monitorId: 'm-node1',
+            description: 'CI on PR #482 to finish',
+            since: secondsAgo(20)
+          }
+        }
+      ]
+    })
+
+  const second = async (): Promise<void> => {
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1_000)
+    })
+  }
+
+  it('moves the monitor chip’s wait every second', async () => {
+    await shown([monitorOf({ setAt: secondsAgo(20) })])
+    const waited = (): string => chip().querySelector('.left')?.textContent ?? ''
+    expect(waited()).toContain('20s')
+    await second()
+    expect(waited()).toContain('21s')
+  })
+
+  // No monitor of this session is on screen to carry the fast clock: the run
+  // chip's own wait is what has to keep it running.
+  it('moves the run chip’s ⏳ every second, with no monitor chip beside it', async () => {
+    await shown([], [nodeWaiting()])
+    const waited = (): string =>
+      document.querySelector('.runchip .waiting')?.textContent ?? ''
+    expect(waited()).toBe('⏳ CI on PR #482 to finish · 20s')
+    await second()
+    expect(waited()).toBe('⏳ CI on PR #482 to finish · 21s')
+  })
+
+  // Opened from the overview on somebody else's run: no chip of this
+  // session's is on screen, so nothing outside the view is re-rendering it.
+  it('moves the run view’s node header every second', async () => {
+    await shown([], [{ ...nodeWaiting(), sessionId: 's2' }])
+    await act(async () => {
+      fireEvent.keyDown(document, { key: 'r', metaKey: true })
+      await settled()
+    })
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Open run' }))
+      await settled()
+    })
+    const waited = (): string =>
+      document.querySelector('.detail .dhead .waiting')?.textContent ?? ''
+    expect(waited()).toBe('⏳ CI on PR #482 to finish · 20s')
+    await second()
+    expect(waited()).toBe('⏳ CI on PR #482 to finish · 21s')
   })
 })
 
