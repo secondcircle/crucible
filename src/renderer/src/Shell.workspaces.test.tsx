@@ -1,10 +1,4 @@
 // @vitest-environment jsdom
-//
-// The workspace list as the user reads it: the two bands and the hairline
-// between them, the chevron that folds a workspace, what a folded row keeps
-// saying, and Collapse idle. Driven through the same seams every other sidebar
-// behavior is — a scripted port, scripted runs, scripted monitors — because the
-// snapshot is the only thing the list reads any of it from.
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { SessionState, ShellSnapshot } from '../../shared/agent/port'
@@ -62,7 +56,6 @@ function snapshotOf(): ShellSnapshot {
   }
 }
 
-/** The order the bands put the fixture in, which is not the order it was added. */
 const SETTLED = ['baypool', 'crucible', 'financial', 'camping', 'train-4-tomorrow']
 
 interface Rig {
@@ -141,7 +134,6 @@ function fold(name: string): void {
   fireEvent.click(chevron(name))
 }
 
-/** A whole turn in one session, start to finish. */
 async function turn(port: ScriptedPort, sessionId: string): Promise<void> {
   await act(async () => {
     await port.prompt(sessionId, 'go')
@@ -197,7 +189,6 @@ describe('the order the list is in', () => {
 
     expect(document.querySelectorAll('.side .ws.bandstart')).toHaveLength(1)
     expect(rowOf('financial')).toHaveClass('bandstart')
-    // One list item per workspace and no other: the line is drawn on a row.
     expect(document.querySelectorAll('.side .wslist > li')).toHaveLength(5)
     expect(screen.getAllByRole('listitem').filter((item) => item.textContent === '')).toEqual([])
   })
@@ -298,7 +289,6 @@ describe('crossing the 24-hour line', () => {
       })
       expect(listed()).toEqual(['baypool', 'crucible', 'financial', 'camping', 'train-4-tomorrow'])
 
-      // Once: the next tick finds it already where the crossing left it.
       await act(async () => {
         await vi.advanceTimersByTimeAsync(31_000)
       })
@@ -580,8 +570,6 @@ describe('Collapse idle', () => {
     fireEvent.click(collapseIdle())
     expect(folded().sort()).toEqual(['baypool', 'camping', 'financial', 'train-4-tomorrow'])
 
-    // A folded workspace coming into use stays folded, and the open one that
-    // goes idle stays open.
     await act(async () => {
       await port.prompt('s4', 'go')
     })
@@ -601,7 +589,6 @@ describe('Collapse idle', () => {
     fireEvent.click(collapseIdle())
     expect(collapseIdle()).toHaveAttribute('aria-disabled', 'true')
 
-    // And a disabled control does nothing when it is clicked anyway.
     const held = folded()
     fireEvent.click(collapseIdle())
     expect(folded()).toEqual(held)
@@ -648,8 +635,6 @@ describe('what a relaunch remembers', () => {
     })
     expect(folded()).toEqual(['financial'])
 
-    // The record is tidied on the next write: meanwhile the id of a workspace
-    // that is gone matches nothing.
     fold('baypool')
     expect([...store.read()].sort()).toEqual(['w2', 'w4'])
   })
@@ -745,7 +730,6 @@ describe('the keyboard and the screen reader', () => {
 describe('the Tab walk', () => {
   it('visits sessions in the order the sidebar shows them', async () => {
     const { port } = await sidebar()
-    // Marked in one order, displayed in another: financial sits above camping.
     await turn(port, 's4')
     await turn(port, 's5')
 

@@ -1,8 +1,4 @@
 // @vitest-environment jsdom
-//
-// The three verbs and no fourth. What is checked here is that one workspace's
-// fold is its own, that a write never carries an id no workspace holds, and
-// that nothing folds or unfolds without being asked.
 import { act, renderHook } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 import type { WorkspaceState } from '../../../shared/agent/port'
@@ -76,8 +72,6 @@ describe('what is written', () => {
     expect([...store.read()]).toEqual(['w3'])
   })
 
-  // The record is not a second list of workspaces: an id whose workspace is
-  // gone drops on the next write rather than living there forever.
   it('drops ids of workspaces that no longer exist', () => {
     const { hook, store } = folding(['gone'])
 

@@ -136,8 +136,6 @@ export function Sidebar({
         New session
       </button>
 
-      {/* The label and the one list-wide action share a row, and the action
-          wears the label's own voice: it is furniture, not a feature. */}
       <div className="wshead">
         <div className="wslabel">Workspaces</div>
         {/* aria-disabled rather than disabled: the click that folds the last
@@ -178,8 +176,6 @@ export function Sidebar({
                   folded ? ' folded' : ''
                 }${workspace.id === bandStartId ? ' bandstart' : ''}`}
               >
-                {/* In the row's left padding, where a tree puts it, so the
-                    names keep the left edge they have always had. */}
                 <button
                   className="chev"
                   aria-expanded={!folded}
@@ -202,9 +198,6 @@ export function Sidebar({
                   <span className="dot" aria-hidden="true" />
                   {workspace.name}
                 </button>
-                {/* What the fold hid, in the faint mono the row times use. A
-                    count of rows rather than of anything needing you, so it
-                    wears no pill. */}
                 {folded && own.length > 0 ? (
                   <span
                     className="wsc"

@@ -10,40 +10,18 @@ import type { RunActivity } from '../runs/activity'
 import { runIsWorking } from '../runs/bands'
 import type { Marks } from '../state/needs-you'
 
-// Every rule about the order of the workspace list and about what counts as
-// work in a workspace, decided here and nowhere else, so no two surfaces can
-// disagree about a band or a dot. Pure: no React, no DOM, no clock of its own.
-//
-// Two nouns run through this module and are never interchangeable:
-//
-// - *used* is what decides band and order: a message sent, a turn working, a
-//   run working, in one of the workspace's sessions.
-// - *in use* is what Collapse idle spares: the green dot's condition, plus a
-//   session needing you, plus the workspace the user is looking at.
-//
-// They take different inputs and are computed by different functions on
-// purpose.
-
-/** The rolling window the recent band is measured over. */
 const RECENT_MS = 24 * 3_600_000
 
-/** When a workspace was last used, as the band rule needs to know it. */
 export type WorkspaceUse =
   // Something in it is working right now, so its use is the present moment
   // whenever the question is asked. Never a timestamp: a stamp taken at the
   // last render would age while the work goes on.
   | { readonly kind: 'now' }
-  /** Epoch ms of the last moment it was used. */
   | { readonly kind: 'at'; readonly at: number }
-  /** Nothing has ever been used in it. */
   | { readonly kind: 'never' }
 
-/** The workspace list, in the two bands the hairline separates. */
 export interface OrderedWorkspaces {
-  /** Used less than 24 hours ago, alphabetical by displayed name. */
   readonly recent: readonly WorkspaceState[]
-  // Everything below the hairline: used 24 hours ago or longer, most recent
-  // first, then every never-used workspace in the order it was added.
   readonly older: readonly WorkspaceState[]
 }
 
@@ -53,7 +31,6 @@ export interface OrderedWorkspaces {
 export interface ActivityFacts {
   readonly workspaces: readonly WorkspaceState[]
   readonly sessions: readonly SessionState[]
-  /** Every run the app knows; the rule picks out those with a session. */
   readonly runs: readonly RunRecord[]
 }
 
@@ -138,12 +115,10 @@ export function orderWorkspaces(
   return { recent, older: [...used, ...never] }
 }
 
-/** Both bands, top to bottom: the order the list renders and Tab walks. */
 export function rows(ordered: OrderedWorkspaces): readonly WorkspaceState[] {
   return [...ordered.recent, ...ordered.older]
 }
 
-/** Whether the hairline is drawn: both bands hold at least one workspace. */
 export function hairline(ordered: OrderedWorkspaces): boolean {
   return ordered.recent.length > 0 && ordered.older.length > 0
 }
@@ -196,30 +171,23 @@ export function idleWorkspaces(
     .map((workspace) => workspace.id)
 }
 
-/** Everything the sidebar reads about what is happening. */
 export interface SidebarFacts {
   readonly snapshot: ShellSnapshot
   readonly runs: readonly RunRecord[]
   readonly runActivity: Readonly<Record<SessionId, RunActivity>>
   readonly needsYou: Marks
-  /** Epoch ms the 24-hour window is measured back from. */
   readonly now: number
 }
 
 export interface SidebarModel {
   readonly ordered: OrderedWorkspaces
-  /** Which rows' dots are green. */
   readonly working: ReadonlySet<WorkspaceId>
-  /** Which workspaces Collapse idle must leave open. */
   readonly inUse: ReadonlySet<WorkspaceId>
 }
 
 /** One call, one answer, so the Shell wires four rules and learns one shape. */
 export function sidebarModel(facts: SidebarFacts): SidebarModel {
   const { snapshot } = facts
-  // Use is reached only through `ActivityFacts`, which cannot see the active
-  // workspace or the active session: that is what makes "looking is not use" a
-  // property of the shape rather than a rule to remember.
   const use = workspaceUse({
     workspaces: snapshot.workspaces,
     sessions: snapshot.sessions,
@@ -247,7 +215,6 @@ function instant(iso: string | undefined): WorkspaceUse {
   return Number.isNaN(at) ? { kind: 'never' } : { kind: 'at', at }
 }
 
-/** Working outranks every instant, and every instant outranks never. */
 function later(held: WorkspaceUse, contribution: WorkspaceUse): WorkspaceUse {
   if (held.kind === 'now' || contribution.kind === 'now') return { kind: 'now' }
   if (contribution.kind === 'never') return held

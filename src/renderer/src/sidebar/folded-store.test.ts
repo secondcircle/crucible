@@ -1,14 +1,9 @@
 // @vitest-environment jsdom
-//
-// What one launch leaves for the next, and what a launch does with a record it
-// cannot read: a lost fold is recoverable, a sidebar that will not render is
-// not.
 import { beforeEach, describe, expect, it } from 'vitest'
 import { localFoldedStore, memoryFoldedStore, type FoldedStore } from './folded-store'
 
 const KEY = 'crucible.sidebar.folded'
 
-/** Enough of Storage for the store, and nothing this app does not use. */
 function fakeStorage(seed: Record<string, string> = {}): Storage & {
   readonly held: Record<string, string>
 } {
@@ -60,8 +55,6 @@ describe('what survives a relaunch', () => {
     expect(JSON.parse(storage.held[KEY] ?? '')).toEqual({ version: 1, folded: ['w1'] })
   })
 
-  // Folded state belongs to a workspace by its id, so a record naming one that
-  // is gone is simply an id nothing matches.
   it('keeps an id whose workspace no longer exists without complaint', () => {
     store.write(new Set(['w1', 'gone']))
 
@@ -124,9 +117,6 @@ describe('a store that cannot write', () => {
 })
 
 describe('where the launch keeps it', () => {
-  // The window's own storage lives under the userData directory main pins per
-  // instance, so a dev launch never reads or writes what the installed app
-  // holds. No path is named here at all.
   it('is the window\u2019s own storage when none is handed in', () => {
     window.localStorage.clear()
 

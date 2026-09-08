@@ -889,8 +889,6 @@ describe('a relaunch', () => {
   })
 })
 
-// The sidebar orders workspaces by when each was last used, so what stamps a
-// workspace matters as much as what does not: looking at one never may.
 describe('when a workspace was last used', () => {
   const usedAt = async (workspaceId: string): Promise<string | undefined> =>
     (await shell.snapshot()).workspaces.find((workspace) => workspace.id === workspaceId)
@@ -917,8 +915,6 @@ describe('when a workspace was last used', () => {
     expect(Date.parse(ended ?? '')).toBeGreaterThanOrEqual(Date.parse(sent ?? ''))
   })
 
-  // Bringing a conversation back into the workspace is real activity, and the
-  // shell already records it as the session's; the workspace moves with it.
   it('moves on when a conversation is resumed from history', async () => {
     const { workspaceId, sessionId } = await withSession()
     await shell.prompt(sessionId, 'said before the reset')

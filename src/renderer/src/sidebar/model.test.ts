@@ -1,9 +1,4 @@
 // @vitest-environment node
-//
-// The whole of the band rule and the whole of "in use", provable without a
-// document because none of it touches one. What is checked here is what the
-// sidebar cannot be allowed to get wrong: which workspaces hold still while
-// the user works, what promoted one, and what Collapse idle may fold.
 import { describe, expect, it } from 'vitest'
 import type {
   SessionState,
@@ -72,7 +67,6 @@ function node(overrides: Partial<RunNode> = {}): RunNode {
   return { id: 'build', status: 'paused', parents: [], reads: [], artifacts: [], ...overrides }
 }
 
-/** Use as the band rule sees it, for one workspace at a time. */
 function lastUse(
   workspaces: readonly WorkspaceState[],
   sessions: readonly SessionState[] = [],
@@ -129,8 +123,6 @@ describe('what counts as use', () => {
     expect(use.get('w1')).toEqual({ kind: 'now' })
   })
 
-  // A paused run's clock is stopped: it holds the workspace where the work
-  // stopped rather than carrying it along for days.
   it('is the moment a paused run stopped, not the present one', () => {
     const use = lastUse(
       [workspace('w1', 'crucible')],
@@ -163,8 +155,6 @@ describe('what counts as use', () => {
     expect(bare.get('w1')).toEqual({ kind: 'at', at: NOW - 6 * HOUR })
   })
 
-  // A run counts through its session, exactly as the dot does: an unattended
-  // run lights nothing and promotes nothing.
   it('ignores a run with no session of this workspace', () => {
     const unattended = lastUse(
       [workspace('w1', 'crucible')],
@@ -197,8 +187,6 @@ describe('what counts as use', () => {
     expect(use.get('w1')).toEqual({ kind: 'never' })
   })
 
-  // A session created and never messaged carries no activity at all, so the
-  // workspace it was created in has never been used.
   it('leaves a workspace whose sessions never carried a message never used', () => {
     const use = lastUse([workspace('w1', 'crucible')], [session('s1', 'w1'), session('s2', 'w1')])
 
@@ -259,8 +247,6 @@ describe('the two bands', () => {
     expect(order(workspaces)).toEqual(['crucible', 'camping', 'train-4-tomorrow', 'rite'])
   })
 
-  // Membership follows the moment the question is asked and nothing else: the
-  // same data reads differently two hours later, with no midnight in it.
   it('measures the window from the moment it is asked about, not from a calendar', () => {
     const workspaces = [workspace('w1', 'crucible', iso(NOW - 23 * HOUR))]
     const use = lastUse(workspaces)
@@ -293,7 +279,6 @@ describe('the two bands', () => {
     expect(named(before)).toEqual(['baypool', 'crucible'])
     expect(named(after)).toEqual(['baypool'])
     expect(after.older.map((found) => found.name)).toEqual(['crucible', 'camping'])
-    // Once, and then it stays where the crossing left it.
     expect(rows(later).map((found) => found.name)).toEqual(rows(after).map((found) => found.name))
   })
 

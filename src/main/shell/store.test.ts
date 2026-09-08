@@ -438,8 +438,6 @@ describe('sessions', () => {
   })
 })
 
-// The sidebar orders workspaces by when each was last used, so the stamp is a
-// fact about the workspace and nothing else may write it.
 describe('when a workspace was last used', () => {
   it('is absent until something is used in it, adding it included', () => {
     const store = createShellStore(file)
@@ -462,7 +460,6 @@ describe('when a workspace was last used', () => {
     expect(createShellStore(file).workspace(workspace.id)?.lastUsedAt).toBe(stamped)
   })
 
-  // Monotonic, so a clock that steps back cannot move a workspace up the list.
   it('never moves backwards', () => {
     const written = join(directory, 'shell-state.json')
     writeFileSync(
@@ -489,8 +486,6 @@ describe('when a workspace was last used', () => {
     expect(store.state.workspaces).toEqual([])
   })
 
-  // Removing a session must not unwind what happened in it, which is why the
-  // stamp lives on the workspace rather than being rolled up from sessions.
   it('stands where it was after the session it came from is forgotten', () => {
     const store = createShellStore(file)
     const workspace = store.addWorkspace('/repos/crucible')
@@ -503,9 +498,6 @@ describe('when a workspace was last used', () => {
     expect(store.workspace(workspace.id)?.lastUsedAt).toBe(stamped)
   })
 
-  // A record written before workspaces carried a stamp: the sessions already on
-  // disk say when the workspace was last used, so the first launch after the
-  // update does not show every workspace as never used.
   it('is seeded once from the sessions of a record that has none', () => {
     const written = join(directory, 'shell-state.json')
     writeFileSync(
