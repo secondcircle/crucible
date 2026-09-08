@@ -31,8 +31,10 @@ export interface MonitorService {
   /** Live-only: no replay, no backlog. */
   onEvent(listener: MonitorListener): Unsubscribe
   // The user's ✕ and the detail's Stop: no wake, and a note on the session's
-  // next user turn. Refuses a node's monitor and an unknown or ended id with a
-  // sentence.
+  // next user turn. An id that names nothing live is already what the click
+  // asked for, so it is a silent no-op — a ✕ that lands in the same instant a
+  // check passes says nothing to anybody. A node's monitor is refused with a
+  // sentence: no surface offers one, so being asked is a mistake, not a race.
   stop(monitorId: MonitorId): Promise<void>
 }
 

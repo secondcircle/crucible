@@ -87,8 +87,11 @@ export type Owed =
   | { readonly kind: 'wake'; readonly ending: MonitorEnding }
   /** The user stopped it; the next user turn's context says so once. */
   | { readonly kind: 'note' }
-  /** Crucible quit under it; the node hears on Resume. */
-  | { readonly kind: 'lost' }
+  // Crucible quit under it; the node hears on Resume. `ending` is present when
+  // the quit caught it already ended and holding its wake for a paused run:
+  // the outcome is known, so the notice says it. No wake is ever delivered
+  // from a lost record.
+  | { readonly kind: 'lost'; readonly ending?: MonitorEnding }
 
 export interface EndedMonitorRecord extends MonitorFacts {
   readonly status: 'ended'
@@ -163,8 +166,11 @@ export function createMonitorModel(options: MonitorModelOptions): MainMonitorSer
   // The load sweep, at construction because a node's lost monitors must be
   // there for the first Resume whether or not a window ever opened: a node's
   // monitor does not survive a quit, so every node-owned live record becomes
-  // the notice its node reads when the run is resumed, and anything a node was
-  // merely owed dies with the run it belonged to.
+  // the notice its node reads when the run is resumed. A wake the quit caught
+  // undelivered — held because the run was paused — becomes the same notice
+  // rather than being dropped: the node had been waiting on it, and its
+  // outcome is known, so the notice says how it ended. No wake is delivered
+  // either way.
   for (const record of [...records]) {
     if (record.owner.kind !== 'node') continue
     if (record.status === 'live') {
@@ -174,6 +180,10 @@ export function createMonitorModel(options: MonitorModelOptions): MainMonitorSer
         endedAt: record.last?.at ?? record.setAt,
         owed: { kind: 'lost' }
       })
+      continue
+    }
+    if (record.owed.kind === 'wake') {
+      replace({ ...record, owed: { kind: 'lost', ending: record.owed.ending } })
       continue
     }
     if (record.owed.kind !== 'lost') drop(record.id)
@@ -704,7 +714,10 @@ export function createMonitorModel(options: MonitorModelOptions): MainMonitorSer
         description: record.description,
         command: record.command,
         waitedMs: Math.max(0, Date.parse(record.endedAt) - Date.parse(record.setAt)),
-        timeoutMs: record.timeoutMs
+        timeoutMs: record.timeoutMs,
+        ...(record.owed.kind === 'lost' && record.owed.ending !== undefined
+          ? { ending: record.owed.ending }
+          : {})
       }))
     },
 
@@ -756,9 +769,11 @@ export function createMonitorModel(options: MonitorModelOptions): MainMonitorSer
 
     async stop(monitorId: MonitorId): Promise<void> {
       const record = held(monitorId)
-      if (record === undefined || record.status !== 'live') {
-        throw new Error('That monitor is no longer live.')
-      }
+      // The user asked for this monitor to be gone, and it is gone: a ✕ that
+      // lands in the same instant a check passes has nothing left to stop and
+      // nothing to say about it. Saying so would be a monitor talking to the
+      // user about an outcome they did not ask after.
+      if (record === undefined || record.status !== 'live') return
       // A run's wait is the run's; Pause and Cancel stay a run's only
       // mechanical controls, so there is no ✕ for one anywhere.
       if (record.owner.kind === 'node') {

@@ -155,4 +155,9 @@ export interface LostMonitor {
   readonly command: string
   readonly waitedMs: number
   readonly timeoutMs: number
+  // How it ended, when the quit caught it already ended and holding its wake
+  // for a paused run. Absent means it was still checking when the quit hit,
+  // so there is no outcome to report. Either way no wake is delivered: the
+  // notice carries what is known.
+  readonly ending?: MonitorEnding
 }

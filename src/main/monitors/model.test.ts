@@ -6,6 +6,7 @@ import {
   type MonitorOwner
 } from '../../shared/monitors/monitor'
 import type { MainMonitorService } from '../../shared/monitors/service'
+import { lostMonitorsNotice } from '../../shared/monitors/wording'
 import type { CheckResult, CheckRun, CheckRunner } from './check-runner'
 import { createMonitorModel, type MonitorRecord } from './model'
 import { memoryMonitorStore } from './store'
@@ -508,6 +509,24 @@ describe('stopping a monitor', () => {
     expect(rig.checks.runs).toHaveLength(ran)
   })
 
+  // A ✕ and a passing check can land in the same instant. The user asked for
+  // the monitor to be gone and it is gone, so the click is a silent no-op:
+  // nothing to stop, nothing said, and no note owed to anybody.
+  it('says nothing when the ✕ lands on a monitor that has already ended', async () => {
+    const rig = rigOf()
+    rig.checks.script(REQUEST.command, [
+      { kind: 'exited', exitCode: 0, output: 'done', stderr: '' }
+    ])
+    await rig.model.tools.set(SESSION, '/repos', REQUEST)
+    await beat()
+
+    await expect(rig.model.stop('m-0001')).resolves.toBeUndefined()
+    await expect(rig.model.stop('m-9999')).resolves.toBeUndefined()
+    // The wake the passing check earned, and no note beside it.
+    expect(rig.delivered).toHaveLength(1)
+    expect(rig.model.turnStart('s1')).toBeUndefined()
+  })
+
   it('will not let the user stop a run\u2019s wait', async () => {
     const rig = rigOf()
     await rig.model.tools.set(NODE, '/worktree', REQUEST)
@@ -726,6 +745,37 @@ describe('across a quit', () => {
       timeoutMs: 30 * 60_000
     })
     // Handed over once and then gone.
+    expect(rig.model.nodes.takeLost(NODE)).toEqual([])
+  })
+
+  // A wake held back because the run was paused is an answer the node was
+  // owed, and the quit is the one thing that can never hand it over. It is
+  // treated as a live monitor is: named in the resume notice, with the outcome
+  // it reached, and no wake delivered.
+  it('tells a resumed node how a wake it never got had ended', async () => {
+    const rig = rigOf([
+      {
+        ...(liveRecord({ id: 'm-node2', owner: NODE }) as MonitorRecord),
+        status: 'ended',
+        endedAt: new Date(START - 5 * 60_000).toISOString(),
+        owed: { kind: 'wake', ending: { reason: 'met' } }
+      } as MonitorRecord
+    ])
+    rig.model.begin()
+    await beat()
+
+    expect(rig.delivered).toEqual([])
+    expect(rig.model.nodes.wait(NODE)).toBeUndefined()
+
+    const lost = rig.model.nodes.takeLost(NODE)
+    expect(lost).toEqual([
+      expect.objectContaining({
+        description: REQUEST.description,
+        command: REQUEST.command,
+        ending: { reason: 'met' }
+      })
+    ])
+    expect(lostMonitorsNotice(lost)).toContain('condition met')
     expect(rig.model.nodes.takeLost(NODE)).toEqual([])
   })
 
