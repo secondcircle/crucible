@@ -6,7 +6,6 @@ import {
   WAKE_OUTPUT_CHARS,
   type LiveMonitor,
   type LostMonitor,
-  type MonitorEnding,
   type MonitorId,
   type MonitorTiming,
   type WakeFacts,
@@ -254,11 +253,4 @@ export function elapsedOfTimeout(elapsedMs: number, timeoutMs: number): string {
 
 function firstLine(text: string): string {
   return text.split('\n').find((line) => line.trim() !== '') ?? ''
-}
-
-/** How an ending reads on one line, error and all. */
-export function monitorEndingText(ending: MonitorEnding): string {
-  return ending.reason === 'broke'
-    ? `${endingPhrase(ending.reason)}: ${ending.error}`
-    : endingPhrase(ending.reason)
 }

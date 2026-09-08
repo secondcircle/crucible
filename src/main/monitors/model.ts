@@ -362,27 +362,32 @@ export function createMonitorModel(options: MonitorModelOptions): MainMonitorSer
     if (record === undefined) return
 
     const finishedAt = now()
-    const text = result.kind === 'exited' ? result.output : result.message
+    // Everything a check produced is bounded here, once, before any of it
+    // becomes a stored fact: what the run printed, why it could not run, and
+    // the stderr a strike is compared by. Nothing downstream — the store, a
+    // strike kept on every check, an ending's error, the wake composed from it
+    // — then holds more of a chatty check than the record keeps of any other
+    // output.
+    const message =
+      result.kind === 'failed' ? boundOutput(result.message, RETAINED_OUTPUT_CHARS).text : ''
+    const text = result.kind === 'exited' ? result.output : message
     const last: LastCheck = {
       at: new Date(finishedAt).toISOString(),
       output: boundOutput(text, RETAINED_OUTPUT_CHARS),
       result:
         result.kind === 'exited'
           ? { kind: 'exited', exitCode: result.exitCode }
-          : { kind: 'failed', message: result.message }
+          : { kind: 'failed', message }
     }
 
     // A process that never ran breaks the monitor at once: retrying to the
     // timeout would tell the agent nothing it does not already know.
     if (result.kind === 'failed') {
       replace({ ...record, checks: record.checks + 1, last })
-      end(id, { kind: 'wake', ending: { reason: 'broke', error: result.message } })
+      end(id, { kind: 'wake', ending: { reason: 'broke', error: message } })
       return
     }
 
-    // Bounded once, here, before it becomes either a strike the store keeps on
-    // every check or the error a wake carries: a chatty failing check keeps of
-    // its stderr exactly what the record keeps of any other output.
     const stderr = boundOutput(result.stderr, RETAINED_OUTPUT_CHARS).text.trim()
 
     if (result.exitCode === 126 || result.exitCode === 127) {

@@ -393,6 +393,24 @@ describe('how a monitor ends', () => {
     expect(rig.delivered[0].message.text.length).toBeLessThan(WAKE_OUTPUT_CHARS + 800)
   })
 
+  // The other way a check's bytes become an ending's error: the process never
+  // ran and said so at length. A node's ended record holds its wake until the
+  // node asks for it, so that is where an unbounded error would sit in
+  // monitors.json rather than passing through.
+  it('keeps a long “could not run” message bounded, in the record and in the wake', async () => {
+    const rig = rigOf()
+    rig.checks.script(REQUEST.command, [
+      { kind: 'failed', message: `no bash on this machine: ${'y'.repeat(500_000)}` }
+    ])
+    await rig.model.tools.set(NODE, '/worktree', REQUEST)
+    await beat()
+
+    expect(JSON.stringify(rig.store.current).length).toBeLessThan(4 * RETAINED_OUTPUT_CHARS)
+    const wake = await rig.model.nodes.wait(NODE)?.wake
+    expect(wake?.text).toContain('no bash on this machine')
+    expect(wake?.text.length ?? 0).toBeLessThan(WAKE_OUTPUT_CHARS + 800)
+  })
+
   it('never breaks on a quiet non-zero exit, however often it repeats', async () => {
     const rig = rigOf()
     rig.checks.script(REQUEST.command, [

@@ -185,7 +185,6 @@ function text(value: unknown): string {
   return typeof value === 'string' ? value.trim() : ''
 }
 
-
 // An adapter is handed behaviors rather than the model itself. Every method
 // resolves with exactly the text the tool result must show; a failure throws,
 // carrying the sentence the model should read.
