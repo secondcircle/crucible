@@ -469,6 +469,22 @@ follow-up, queued while the agent works and prompted when it is idle. A
 monitor the user stops sends none; the next turn's context says so instead.
 _Avoid_: notification, callback, trigger, alert.
 
+**Recent band**:
+The top stretch of the sidebar's workspace list: every workspace used in the
+last 24 hours, in alphabetical order so it holds still while the user works.
+Below a hairline, the rest sit most recently used first, never-used ones
+last. "Used" means a message sent, a turn or a run working in one of its
+sessions; looking at a workspace is not use.
+_Avoid_: pinned, favorites, active group, today section.
+
+**Collapse idle**:
+The action on the WORKSPACES label row that folds every workspace not in
+use: one is in use when a turn or run is working in it, a session in it needs
+you, or the user is looking at it. Folding hides a workspace's session rows
+and nothing else; the dot and the counts stay on the row.
+_Avoid_: minimize all, collapse all (it never folds an in-use workspace),
+focus mode.
+
 **Monitor chip**:
 One live monitor in the strip above the chat, beside the run chips under its
 own "Waiting on" label: the description, the check's last output, time waited,
