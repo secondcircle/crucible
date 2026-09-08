@@ -1,10 +1,4 @@
 // @vitest-environment node
-//
-// The fake flavor's monitor wiring end to end: the adapter's scripted words
-// over the real model over the scripted check runner — what sets a wait, lists
-// one, stops one, and what a wake gets answered with. It is what makes every chip, detail and
-// wake reachable under `npm run dev` with no model and no paid call, so it is
-// pinned here.
 import { describe, expect, it } from 'vitest'
 import { createMonitorModel } from './model'
 import { createScriptedCheckRunner } from './scripted-checks'

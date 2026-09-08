@@ -48,9 +48,6 @@ export type ViewItem =
       readonly exitCode?: number
     }
   | { readonly kind: 'summary'; readonly text: string }
-  // A message Crucible delivered on its own behalf, wearing the card it was
-  // sent with. Produced from a delivery and from nothing else: a restored
-  // transcript reads one back as the user message it is stored as.
   | { readonly kind: 'system'; readonly text: string; readonly card: SystemCard }
   | { readonly kind: 'cacheMiss'; readonly miss: CacheMissFacts }
   | { readonly kind: 'stopped' }
@@ -247,10 +244,6 @@ function heard(state: ShellState, event: PortEvent, at: number): ShellState {
   if (view.turn === undefined || view.turn.turnId !== event.turnId) return state
 
   switch (event.type) {
-    // A message the port delivered itself, at its delivery point and never
-    // before it. A person's reads exactly as a sent one, pictures and all;
-    // one of Crucible's own wears its card instead, so nobody mistakes it for
-    // something the user typed.
     case 'user_message':
       return withView(state, sessionId, {
         ...view,

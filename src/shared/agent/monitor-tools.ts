@@ -140,14 +140,6 @@ export interface MonitorRequest {
   readonly timeoutSeconds?: number
 }
 
-/**
- * The tool boundary: a blank description, reason or command throws the
- * sentence the model reads, so a bad call fails in the model's face rather
- * than one transition later. A numeric string in a timing field is accepted as
- * a number — π's repairing parser hands one over often enough — and anything
- * else non-numeric is treated as absent, because a default is a better answer
- * than a refusal over a field the caller need not have sent at all.
- */
 export function monitorRequestFrom(params: unknown): MonitorRequest {
   const given = (typeof params === 'object' && params !== null ? params : {}) as Record<
     string,

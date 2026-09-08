@@ -63,9 +63,6 @@ export function Sidebar({
   // Sessions with a live run of their own, derived from the runs snapshot by
   // the shell. Absent for a session with none.
   readonly runActivity: Readonly<Record<SessionId, RunActivity>>
-  // Sessions with a live monitor of their own, derived from the monitor
-  // snapshot by the shell. Absent for a session with none, and never anything
-  // about a run's node: a node's wait belongs to its run.
   readonly waiting?: Readonly<Record<SessionId, MonitorActivity>>
   // A different count on the same row: the board's branches and pull requests,
   // and nothing for a workspace whose board has not answered.
@@ -97,8 +94,6 @@ export function Sidebar({
   }
 }): React.JSX.Element {
   const { workspaces, activeWorkspaceId, sessions, activeSessionId } = snapshot
-  // A waiting row's age moves in the same units the chips do, so the fast tick
-  // covers it too.
   const now = useClock(
     sessions.some((session) => session.working) ||
       Object.keys(waitActivity ?? {}).length > 0
@@ -181,11 +176,6 @@ export function Sidebar({
                     const activity = runActivity[session.id]
                     const waits = waitActivity?.[session.id]
                     const turnSince = session.working ? session.workingSince : undefined
-                    // One slot, one owner: needs-you over the turn over the
-                    // run over a wait. The row wears the run color only where
-                    // the run actually owns the slot, so nothing repaints the
-                    // green counter of a turn from under it, and a session
-                    // with both a run and a wait shows the run's counter.
                     const runSlot = asks || turnSince !== undefined ? undefined : activity
                     const waitSlot =
                       asks || turnSince !== undefined || runSlot !== undefined ? undefined : waits
@@ -197,8 +187,6 @@ export function Sidebar({
                       session.worktree === undefined ? undefined : 'worktree',
                       session.working ? 'working' : undefined,
                       activity === undefined ? undefined : 'run working',
-                      // Named even when it lost the slot, like a run: the
-                      // marks are the whole row for anyone not reading them.
                       waits === undefined ? undefined : 'waiting',
                       asks ? 'needs you' : undefined
                     ].filter((mark): mark is string => mark !== undefined)
@@ -266,10 +254,6 @@ export function Sidebar({
                               </span>
                             </>
                           ) : waitSlot !== undefined ? (
-                            // Not an attention marker: a live wait needs
-                            // nobody, so it counts toward nothing, walks in no
-                            // Tab order and reaches no dock badge. It says
-                            // only that this session is waiting on something.
                             <span className="waiting" aria-hidden="true">
                               ⏳ {waitedFor(waitSlot.since, now)}
                             </span>

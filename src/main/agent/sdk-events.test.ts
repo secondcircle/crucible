@@ -690,8 +690,6 @@ describe('the row a monitor call gets', () => {
       name: 'crucible_monitor',
       summary: 'CI on PR #482 to finish · every 1m · up to 30m'
     })
-    // The generic summary would have printed the command, which is the one
-    // thing the description exists not to be.
     expect(shown.summary).not.toContain('gh pr checks')
   })
 

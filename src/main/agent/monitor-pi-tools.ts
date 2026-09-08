@@ -21,8 +21,6 @@ export function monitorPiTools(bound: BoundMonitorTools): ToolDefinition[] {
     parameters: parametersSchema(tool.parameters) as ToolDefinition['parameters'],
     async execute(_callId: string, params: unknown) {
       if (tool.name === 'crucible_monitor') {
-        // Throws the model-readable sentence when a required field is blank,
-        // so a bad call fails in the model's face and sets no monitor.
         return said(await bound.set(monitorRequestFrom(params)))
       }
       if (tool.name === 'crucible_monitor_stop') {
@@ -36,7 +34,6 @@ export function monitorPiTools(bound: BoundMonitorTools): ToolDefinition[] {
   }))
 }
 
-/** JSON schema from a definition's parameters: required strings, optional numbers. */
 export function parametersSchema(parameters: readonly MonitorToolParameter[]): unknown {
   return {
     type: 'object',

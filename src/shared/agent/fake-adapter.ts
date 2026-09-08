@@ -309,9 +309,6 @@ const RUN_LIST_DELTAS: readonly string[] = [
   'That is where every run of this session stands. Nothing was sent anywhere.'
 ]
 
-// What the scripted agent says around monitors, so the whole loop — setting a
-// wait, seeing the chip, being woken — is walkable with no model and no paid
-// call.
 const MONITOR_SET_DELTAS: readonly string[] = [
   'I am watching that now and I will pick it up the moment it changes. ',
   'Nothing is needed from you — keep going with whatever else, and I speak up when it is done. ',
@@ -484,7 +481,6 @@ function queuedEntry(text: string, images?: readonly ImageAttachment[]): QueuedE
   return images === undefined || images.length === 0 ? { text } : { text, images: [...images] }
 }
 
-/** The units a scripted `every 30s · up to 30m` may be written in. */
 const UNIT_SECONDS: Readonly<Record<string, number>> = {
   s: 1,
   sec: 1,
@@ -503,9 +499,6 @@ const UNIT_SECONDS: Readonly<Record<string, number>> = {
   hours: 3600
 }
 
-// `watch pass every 5s up to 1m` — the cadence and the ceiling lifted out, so
-// what is left is what the chip's headline says and what the scripted runner
-// reads its fate from.
 export function timingWords(text: string): {
   readonly rest: string
   readonly intervalSeconds?: number
@@ -835,10 +828,6 @@ export function createFakeAdapter({
     return undefined
   }
 
-  // The scripted agent around monitors. A wake is recognized by its own
-  // wording, exactly as a run's message is; everything else needs an opening
-  // word — `watch`, `wait for`, `monitor`, `stop watching` — so an ordinary
-  // prompt is never hijacked.
   function monitorScript(
     bound: Bound,
     sessionId: SessionId,
@@ -852,8 +841,6 @@ export function createFakeAdapter({
       bound.conversation.workspacePath
     )
 
-    // A wake is a message to the agent, and the agent answers it in the chat
-    // rather than by calling anything.
     if (isWakeMessage(text)) return { calls: [], closing: MONITOR_WOKEN_DELTAS }
 
     const stopped = /^\s*stop watching\s+(\S+)/i.exec(text)
@@ -881,8 +868,6 @@ export function createFakeAdapter({
     const watched = /^\s*(?:watch|wait for|monitor)\s+(.+)$/i.exec(text)
     if (watched === null) return undefined
     const timing = timingWords(watched[1])
-    // The same words go in as the description and as the command, so the
-    // scripted check runner reads the fate out of what was typed.
     const request = {
       description: timing.rest,
       reason: 'So I can pick this up the moment it changes rather than asking you to watch it.',

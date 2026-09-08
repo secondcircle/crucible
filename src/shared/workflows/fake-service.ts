@@ -663,8 +663,6 @@ export function createFakeWorkflowRunService({
     }
   }
 
-  // Every run of this session that is owed an interruption notice says it now,
-  // composed from the record as it stands — the engine's own hook, in the fake.
   function deliverNotices(sessionId: SessionId): void {
     for (const run of records) {
       if (run.noticePending !== true || run.sessionId !== sessionId) continue

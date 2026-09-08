@@ -56,9 +56,6 @@ describe('a message the port delivered itself', () => {
     expect(items(state)).toEqual([{ kind: 'user', text: 'look at this', images }])
   })
 
-  // Crucible's own message wears the card it was sent with, so nothing on
-  // screen mistakes a wake for something the user typed. The transcript learns
-  // nothing about monitors from it: badge, tone, title, meta, body.
   it('is a system item, never a user one, when it carries a card', () => {
     const card = {
       badge: 'monitor',
@@ -85,8 +82,6 @@ describe('a message the port delivered itself', () => {
     ])
   })
 
-  // A restored transcript reads a delivered message back as the user message
-  // it is stored as: the card is live presentation, not a stored fact.
   it('produces no system item from restored history', () => {
     const state = reduce(NOTHING_YET, {
       type: 'loaded',

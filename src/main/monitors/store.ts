@@ -2,10 +2,6 @@ import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { dirname } from 'node:path'
 import type { MonitorRecord } from './model'
 
-// Where monitor records live: one JSON file under Crucible's own state
-// directory, written whole and atomically. Crucible's state, never π's, so a
-// dev launch's monitors and the installed app's never see each other.
-
 export interface MonitorStore {
   load(): readonly MonitorRecord[]
   save(records: readonly MonitorRecord[]): void
@@ -49,7 +45,6 @@ export function createMonitorStore(
   }
 }
 
-/** What the model's tests run against: the same seam, no file. */
 export function memoryMonitorStore(
   initial: readonly MonitorRecord[] = []
 ): MonitorStore & { readonly current: readonly MonitorRecord[] } {

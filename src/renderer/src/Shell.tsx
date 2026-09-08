@@ -360,13 +360,9 @@ export function Shell({
   const cancelChoice = useRef<((chose: 'cancelled' | 'kept') => void) | undefined>(undefined)
   /** The engine's records, whole on every event. */
   const [runsSnapshot, setRunsSnapshot] = useState<RunsSnapshot | undefined>(undefined)
-  /** Every session's live monitors, whole on every event; nothing here is patched. */
   const [monitorsSnapshot, setMonitorsSnapshot] = useState<MonitorsSnapshot | undefined>(
     undefined
   )
-  // Which chip's detail is open, and which monitors the user has just stopped.
-  // A stopped monitor leaves the strip in the frame of the click and is
-  // forgotten once the snapshot agrees, so the ✕ never waits on a round trip.
   const [openMonitorId, setOpenMonitorId] = useState<MonitorId | undefined>(undefined)
   const [stopping, setStopping] = useState<ReadonlySet<MonitorId>>(new Set())
   // A ref, not the state above: the needs-you verdict is taken inside an event,
@@ -481,9 +477,6 @@ export function Shell({
     () => monitorActivity({ monitors: allMonitors.filter((one) => !stopping.has(one.id)) }),
     [allMonitors, stopping]
   )
-  // The strip is session-scoped, exactly as the runs group is, and in the
-  // snapshot's own order — which is the order they were set in, so a chip
-  // never moves because a check landed.
   const sessionMonitors = useMemo(
     () =>
       activeSessionId === undefined
@@ -494,17 +487,11 @@ export function Shell({
           ),
     [activeSessionId, allMonitors, stopping]
   )
-  // One clock for the strip's ages and its hairline, ticking every second
-  // while anything in the strip is counting a wait: a monitor chip of this
-  // session's own, or a run chip whose node is waiting. A counter on screen
-  // moves; one that jumped half a minute at a time would read as stopped.
   const monitorNow = useClock(
     sessionMonitors.length > 0 ||
       sessionRuns.some((run) => currentNode(run)?.waitingOn !== undefined)
   )
 
-  // A detail belongs to the session it was opened in and to the monitor it was
-  // opened on: switching away, or the monitor ending, closes it.
   if (openMonitorId !== undefined && !sessionMonitors.some((one) => one.id === openMonitorId)) {
     setOpenMonitorId(undefined)
   }
@@ -556,13 +543,10 @@ export function Shell({
     setToast({ sessionId: owner ?? railNow.current.activeSessionId, text })
   }, [])
 
-  /** Clicking a chip opens its detail; clicking it again closes it. */
   const toggleMonitor = useCallback((monitorId: MonitorId): void => {
     setOpenMonitorId((open) => (open === monitorId ? undefined : monitorId))
   }, [])
 
-  // No confirmation and no overlay: the chip is gone in the same frame as the
-  // click, and the model is told after it.
   const stopMonitor = useCallback(
     (monitorId: MonitorId): void => {
       if (monitorService === undefined) return
@@ -3013,7 +2997,6 @@ function restoredNumber(attachment: { readonly name: string }): number {
 }
 
 /** Display-safe text of a refusal, which is all a banner ever shows. */
-/** Whether the snapshot still holds a monitor by that id. */
 function known(monitors: readonly LiveMonitor[], id: MonitorId): boolean {
   return monitors.some((monitor) => monitor.id === id)
 }

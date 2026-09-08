@@ -16,10 +16,6 @@ import {
   WAKE_MESSAGE_PREFIX
 } from './wording'
 
-// Every sentence a monitor says, checked where it is written. One module says
-// them, so a wake in the fake flavor and a wake in the SDK flavor cannot read
-// two different ways.
-
 function facts(overrides: Partial<WakeFacts> = {}): WakeFacts {
   return {
     monitorId: 'm-1f3a',
@@ -77,10 +73,6 @@ describe('the wake', () => {
     expect(wake.text.length).toBeLessThan(WAKE_OUTPUT_CHARS + 800)
   })
 
-  // A broken check's error is the output the wake carries for that ending, so
-  // it is bounded like any other: a compile dump or a stack trace on stderr
-  // must not become a megabyte of a model's context, and the detail's retained
-  // copy must not end up the poorer of the two.
   it('bounds the error a broken check carries, as it bounds any other output', () => {
     const noise = 'x'.repeat(500_000)
     const wake = composeWake(
@@ -131,10 +123,6 @@ describe('the answers the tools give', () => {
     expect(answer).toMatch(/End your turn now/)
   })
 
-  // Review 3. R3 and R15: the answer states the interval and timeout actually
-  // in force, which is what lets a clamped agent know it was clamped. An
-  // answer that rounds 90s to "2m" states a cadence the monitor is not
-  // running at, and an agent asking for 90s cannot tell rounding from a clamp.
   it('states the timing in force exactly, never rounded to a neater unit', () => {
     const timing = { intervalMs: 90_000, timeoutMs: 2_700_000 }
     const answer = setAnswer(
@@ -249,9 +237,6 @@ describe('the tool row\u2019s summary', () => {
     )
   })
 
-  // The row is composed from the raw tool arguments, and the model boundary
-  // reads a numeric string as the number it means, so the row has to read it
-  // the same way or it states a cadence the monitor is not running at.
   it('reads a numeric string as the number the monitor was set with', () => {
     expect(
       monitorCallSummary({
@@ -285,9 +270,6 @@ describe('the three duration formats', () => {
     expect(longDuration(3_840_000)).toBe('1h 4m')
   })
 
-  // What a tool answer says a monitor's timing is. It may not drop a unit that
-  // is not zero: the number an agent reads back is the number in force, so a
-  // clamp is visible and a rounding is never mistaken for one.
   it('is exact wherever a value in force is stated', () => {
     expect(exactDuration(90_000)).toBe('1m 30s')
     expect(exactDuration(5_000)).toBe('5s')

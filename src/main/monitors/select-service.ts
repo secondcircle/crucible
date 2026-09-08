@@ -8,14 +8,7 @@ import { createMonitorModel } from './model'
 import { createScriptedCheckRunner } from './scripted-checks'
 import { createMonitorStore } from './store'
 
-// One flavor decision, one seam: the model, the records and every sentence a
-// monitor says are the same in both flavors, and only the process behind the
-// check changes. A fake-flavor launch runs the real model over a scripted
-// runner and the real file store, so its monitors survive a quit too and the
-// whole loop is drivable with no model and no paid call.
-
 export interface MonitorWiring {
-  /** Crucible's own state directory; the records live under it. */
   readonly stateDir: string
   readonly deliver: DeliverMonitorMessage
   readonly sessionExists: (sessionId: SessionId) => boolean

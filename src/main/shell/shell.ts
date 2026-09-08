@@ -96,8 +96,6 @@ type Announcement =
       readonly text: string
       /** Present only for images the message genuinely carried. */
       readonly images?: readonly ImageAttachment[]
-      // Present only for a system message that carries one: what the person
-      // sees where a user's bubble would be.
       readonly card?: SystemCard
     }
   | { readonly kind: 'bashRun'; readonly run: BashRunShare }
@@ -737,7 +735,6 @@ export function createShell({
     return fresh
   }
 
-  /** Whether this text is one of Crucible's own, still undelivered. */
   function isSystemQueued(sessionId: SessionId, text: string): boolean {
     return (systemQueued.get(sessionId) ?? []).some((message) => message.text === text)
   }
@@ -784,9 +781,6 @@ export function createShell({
     return 'delivered'
   }
 
-  // A message of Crucible's own that a stop handed back: delivered again once
-  // the ending turn is genuinely over, so a wake or a run's report is never
-  // lost to a click on Stop.
   function redeliver(sessionId: SessionId, messages: readonly SystemMessage[]): void {
     if (messages.length === 0) return
     const turn = live.get(sessionId)
@@ -872,8 +866,6 @@ export function createShell({
     // Queue events are session-scoped like usage: they belong to the session
     // rather than to whichever turn happens to be live.
     if (event.type === 'queue_changed') {
-      // Crucible's own entries are marked as they go out, so the queued strip
-      // can render one as a message nobody typed and refuse to take it back.
       const kept = [...(systemQueued.get(event.sessionId) ?? [])]
       queues.set(event.sessionId, {
         steering: [...event.steering],
@@ -889,10 +881,6 @@ export function createShell({
     if (event.type === 'queue_flushed') {
       queues.delete(event.sessionId)
       const kept = systemQueued.get(event.sessionId) ?? []
-      // A stop hands the queue back to the composer, which is the right home
-      // for what a person typed and no home at all for what Crucible said. Its
-      // own messages leave the flush and are delivered again once the ending
-      // turn is genuinely over.
       const mine: SystemMessage[] = []
       const theirs = event.messages.filter((message) => {
         const found = takeMatch(kept, message.text)
@@ -924,9 +912,6 @@ export function createShell({
     // is still said exactly once and first.
     announceStart(event.sessionId, turn)
 
-    // A message this shell delivered, landing in the conversation: it reaches
-    // the transcript wearing whatever card it was sent with, and the
-    // bookkeeping for it is over.
     if (event.type === 'user_message') {
       const kept = systemQueued.get(event.sessionId) ?? []
       const mine = takeMatch(kept, event.text)
@@ -1096,8 +1081,6 @@ export function createShell({
       // Removing a session forgets its tabs with it: the persisted copy went
       // out with the session record.
       panel.forget(id)
-      // The agent this session was does not exist any more, so whatever was
-      // working on its behalf stops here.
       onSessionEnded?.(id)
       emitState()
     },
@@ -1129,8 +1112,6 @@ export function createShell({
         usage.delete(id)
         queues.delete(id)
         systemQueued.delete(id)
-        // The agent the old conversation was is gone with it: a reset is the
-        // same ending for anything working in that agent's name as a removal.
         onSessionEnded?.(id)
         // The conversation the title described is gone, and so is what naming
         // it cost: the row reads untitled again until the fresh one earns a
@@ -1436,8 +1417,6 @@ export function createShell({
       text: string
     ): Promise<QueuedEntry | undefined> {
       requireSession(sessionId)
-      // Crucible's own message is not the user's to take back: it is owed to
-      // the agent, and the composer is not where it belongs.
       if (isSystemQueued(sessionId, text)) {
         refuse('That message is Crucible’s own, so it cannot be taken back.')
       }

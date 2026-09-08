@@ -1,16 +1,5 @@
 import type { CheckResult, CheckRun, CheckRunner } from './check-runner'
 
-// The fake flavor's process seam: no shell, no child process, a fate chosen by
-// words in the command the way the fake workspace service reads ENDLESS and
-// FAILING. It is what makes every monitor ending reachable under `npm run dev`
-// with no model and no paid call.
-//
-//   ...pass...     exit 1 "in_progress" twice, then exit 0 "completed"
-//   ...broken...   exit 4 with the same gh stderr every time, so the third
-//                  consecutive one breaks the monitor
-//   ...missing...  the process never runs at all
-//   anything else  exit 1 "in_progress" forever, so the monitor times out
-
 const IN_PROGRESS = 'in_progress\n'
 const COMPLETED = 'completed · e2e: failure · unit: success\n'
 const GH_ERROR = 'gh: Not logged in to github.com. Run `gh auth login`.\n'

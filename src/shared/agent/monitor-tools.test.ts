@@ -8,10 +8,6 @@ import {
   type MonitorTools
 } from './monitor-tools'
 
-// The tool boundary, the guidance the descriptions carry, and the binding that
-// makes owner isolation structural rather than a rule somebody has to
-// remember.
-
 function toolsSpy(): MonitorTools & {
   readonly calls: { op: string; owner: MonitorOwner; args: unknown[] }[]
 } {
@@ -58,7 +54,6 @@ describe('what a call to set a monitor must carry', () => {
       params[missing] = '   '
       expect(() => monitorRequestFrom(params)).toThrow(new RegExp(missing))
     }
-    // A call with nothing at all names all three rather than the first.
     expect(() => monitorRequestFrom({})).toThrow(/description, reason, command/)
   })
 
@@ -108,7 +103,6 @@ describe('the guidance the descriptions carry', () => {
   it('states the threshold at which repeated failure counts as the check breaking', () => {
     expect(set).toContain(`${BROKE_STRIKES} consecutive checks`)
     expect(set).toMatch(/identical error output on stderr/)
-    // And how to avoid it, which is the point of saying it at all.
     expect(set).toMatch(/dev\/null/)
   })
 
@@ -147,8 +141,6 @@ describe('binding the tools to one owner', () => {
     expect(tools.calls.map((call) => call.op)).toEqual(['set', 'list', 'stop'])
     expect(tools.calls.every((call) => call.owner === owner)).toBe(true)
     expect(tools.calls[0].args[0]).toBe('/repos/crucible')
-    // Nothing in the bound surface can name another owner: the methods take
-    // a request, nothing, and an id.
     expect(Object.keys(bound).sort()).toEqual(['list', 'set', 'stop'])
   })
 

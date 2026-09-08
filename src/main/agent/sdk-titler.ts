@@ -14,7 +14,6 @@ export const TITLE_INSTRUCTION =
 /** Past this a message says nothing more about what the session is about. */
 const MESSAGE_LIMIT = 500
 
-/** A message in the user's role that no user typed. */
 function spokenByCrucible(text: string): boolean {
   return isRunMessage(text) || isWakeMessage(text)
 }

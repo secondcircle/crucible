@@ -114,8 +114,6 @@ export function WorkflowRunView({
     currentNode(run) ??
     run.nodes[0]
 
-  // The wait in the node header is a counter, and a counter on screen moves:
-  // nothing else re-renders this view while a node sits waiting.
   const now = useClock(shown?.waitingOn !== undefined)
 
   const [items, setItems] = useState<readonly TranscriptItem[]>([])
@@ -311,8 +309,6 @@ export function WorkflowRunView({
                     </span>
                   )}
                 </div>
-                {/* A node stopped on a wait never looks like a node stopped
-                    on nothing: the monitor's own words, in its own color. */}
                 {shown.waitingOn === undefined ? null : (
                   <div className="waiting">
                     ⏳ {shown.waitingOn.description} · {waitedFor(shown.waitingOn.since, now)}

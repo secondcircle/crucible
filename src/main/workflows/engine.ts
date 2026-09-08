@@ -205,13 +205,6 @@ interface StagedSuccessor {
   readonly inputs: Record<string, string>
 }
 
-/**
- * Why a live node is being let go. `run-ended` means the agent that owned it
- * has ceased to exist — complete, failed, cancelled — and its monitors are
- * released with it. `quitting` means the process is leaving while the run
- * stands: the monitors stop because nothing is left to run them, but their
- * records outlive the process for the next launch to close as lost.
- */
 type ReleaseReason = 'run-ended' | 'quitting'
 
 interface Handle {
@@ -287,8 +280,6 @@ export function createWorkflowEngine(options: EngineOptions): WorkflowEngine {
       node.error ??= INTERRUPTED_MESSAGE
       node.endedAt ??= node.lastActivityAt ?? nowIso()
       delete node.now
-      // Nothing is checking and no wake is coming: the monitor died with the
-      // process, so the record must stop saying this node waits on it.
       delete node.waitingOn
     }
     // No shell exists this early, so delivery is not even attempted: the
@@ -603,10 +594,6 @@ export function createWorkflowEngine(options: EngineOptions): WorkflowEngine {
         return replayed(id, recorded, spec, outputPaths, onHold)
       }
 
-      // A node re-run by Resume is told what the quit cut down under it: a
-      // node's monitor does not survive a quit, so nothing is coming, and the
-      // node can set it again if it still matters. Consumed once, here, and
-      // never by a revision.
       const lost = monitors?.takeLost(nodeOwner(id)) ?? []
       return liveNode({
         id,
@@ -697,7 +684,6 @@ export function createWorkflowEngine(options: EngineOptions): WorkflowEngine {
       }
     }
 
-    /** The owner a node's monitors belong to: its own id, never a revision's. */
     function nodeOwner(id: string): Extract<MonitorOwner, { kind: 'node' }> {
       return { kind: 'node', runId: run.id, nodeId: id }
     }
@@ -786,9 +772,6 @@ export function createWorkflowEngine(options: EngineOptions): WorkflowEngine {
         rolePrompt: nodeRolePrompt(id, run.workflow, cwd),
         tools: spec.tools ?? DEFAULT_TOOLS,
         skills: nodeSkills,
-        // Mounted beside complete_node and raise_blocker, so a node that
-        // declares a tool list of its own still has the tools it waits
-        // through, exactly as it still has the ones it completes through.
         ...(monitors === undefined ? {} : { monitors: monitors.tools(owner, cwd) }),
         ...(spec.verdict === undefined ? {} : { verdictSchema: spec.verdict }),
         onComplete(done) {
@@ -826,10 +809,6 @@ export function createWorkflowEngine(options: EngineOptions): WorkflowEngine {
         }
       })
 
-      // Why the turn now running stopped, when something outside it stopped
-      // it. Read once by the loop and forgotten, so an abort can only ever
-      // describe the turn it cut short: a flag that outlives its turn reports
-      // an abort to a node two turns later.
       let abortedTurn: 'pause' | 'watchdog' | undefined
 
       const interruptForPause = (): void => {
@@ -925,12 +904,6 @@ export function createWorkflowEngine(options: EngineOptions): WorkflowEngine {
         finished = true
         handle.live.delete(control)
         handle.pauseInterrupts.delete(interruptForPause)
-        // The agent that set them has ceased to exist, however this node
-        // ended: checking stops at once, silently, and nothing is said to
-        // anybody about it. A quit is not that ending, and this is the one
-        // place every path out of the node passes — the bail after an abort,
-        // a throw, the force-dispose — so a quit keeps its records whichever
-        // path it takes (R66, R67).
         if (releasedBecause !== 'quitting') monitors?.release(owner)
         delete node.now
         delete node.waitingOn
@@ -945,9 +918,6 @@ export function createWorkflowEngine(options: EngineOptions): WorkflowEngine {
         save(run)
       }
 
-      // Set the moment something outside this node lets it go, and the one
-      // record of why: a run that ended, or a process that is leaving. Every
-      // ending below reads it rather than being told again.
       let releasedBecause: ReleaseReason | undefined
 
       // Runner-owned release: the workflow is expected to close() a held-open
@@ -956,10 +926,6 @@ export function createWorkflowEngine(options: EngineOptions): WorkflowEngine {
         async release(why: ReleaseReason): Promise<void> {
           if (finished) return
           releasedBecause ??= why
-          // Before the abort, so a node parked on a wake bails the moment its
-          // run ends rather than at the release timeout. A quit lets it stay
-          // parked instead: the process is going, and dropping the records
-          // here would leave the resumed node nothing to be told (R66, R67).
           if (releasedBecause === 'run-ended') monitors?.release(owner)
           if (parked) {
             parkResolve?.({ type: 'close' })
@@ -1088,8 +1054,6 @@ export function createWorkflowEngine(options: EngineOptions): WorkflowEngine {
       try {
         for (;;) {
           await session.prompt(message)
-          // Whoever stopped this turn is answered on this pass of the loop and
-          // on no later one.
           const aborted = abortedTurn
           abortedTurn = undefined
           bailIfReleased()
@@ -1182,33 +1146,13 @@ export function createWorkflowEngine(options: EngineOptions): WorkflowEngine {
             continue
           }
 
-          // A node that ended its turn with a monitor of its own live is
-          // legitimately waiting, not quiet: no nudge, no stall, no question
-          // to the orchestrator, and the nudge counter is not touched. The
-          // wake starts its next turn.
-          //
-          // "Ended its turn" means a turn that ended on its own. A turn a
-          // pause or the watchdog cut short is not one the node ended, so the
-          // node does not start waiting on it: the pause pauses it and the
-          // abort is reported at the time it happened, both below, and it
-          // waits only after the turn that follows ends by itself. Its
-          // monitors keep checking meanwhile, and a wake that lands while
-          // nobody is parked is held for the next ask.
           const waiting = aborted === undefined ? monitors?.wait(owner) : undefined
           if (waiting !== undefined) {
             node.waitingOn = waiting.on
             save(run)
-            // A parked node follows its run through a pause and out of it: a
-            // paused run has nothing running in it, so the node reads paused
-            // for as long as the pause lasts. It goes on saying what it is
-            // waiting on throughout, because it is still waiting on it, and
-            // its monitors keep checking either way.
             const parkedNode = node
             let parkedOnWake = true
             const followPause = async (): Promise<void> => {
-              // It follows the pause for exactly as long as the node is parked
-              // and its run is somebody's to pause: a released node, or a
-              // process on its way out, leaves the record where it stands.
               while (parkedOnWake && !finished && releasedBecause === undefined) {
                 const wanted = pauseAsked() ? 'paused' : 'running'
                 if (
@@ -1233,10 +1177,6 @@ export function createWorkflowEngine(options: EngineOptions): WorkflowEngine {
               throw cause
             }
             delete node.waitingOn
-            // A run paused while its node waited keeps its monitors checking,
-            // and the wake waits for the un-pause rather than releasing the
-            // node into a paused run. The wake is the node's next message
-            // whatever the pause did in between.
             while (pauseAsked() && releasedBecause === undefined) {
               bailIfReleased()
               await sleep(pollMs)

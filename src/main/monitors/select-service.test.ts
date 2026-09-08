@@ -5,10 +5,6 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { LogEntry, LogSink } from '../log/sink'
 import { selectMonitorService } from './select-service'
 
-// Where the records live and which process seam answers a check: the one
-// thing a flavor decides about monitors. Everything else — the model, the
-// endings, the wording — is the same object in both.
-
 let stateDir: string
 const appended: LogEntry[] = []
 
@@ -43,8 +39,6 @@ describe('choosing the monitor service', () => {
     const path = join(stateDir, 'monitors.json')
     expect(existsSync(path)).toBe(true)
     expect(readFileSync(path, 'utf8')).toContain('a port to free up')
-    // The whole state directory is Crucible's, flavor-scoped by whoever made
-    // it: nothing under a `.pi` folder is written on a monitor's account.
     expect(existsSync(join(stateDir, '.pi'))).toBe(false)
     service.dispose()
   })
@@ -59,7 +53,6 @@ describe('choosing the monitor service', () => {
     await service.tools.set({ kind: 'session', sessionId: 's1' }, stateDir, {
       description: 'CI to finish',
       reason: 'so I can read the log',
-      // The scripted runner reads the word, and no process is started at all.
       command: 'watch pass'
     })
     await new Promise((resolve) => setTimeout(resolve, 20))

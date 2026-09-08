@@ -7,10 +7,6 @@ import {
 } from '../../shared/agent/monitor-tools'
 import { monitorPiTools, parametersSchema } from './monitor-pi-tools'
 
-// The one builder both the SDK adapter and the node session factory use, so a
-// session agent and a run's node cannot be handed different tools. No SDK
-// session is constructed here: a tool definition is a plain object.
-
 function boundSpy(): BoundMonitorTools & { readonly calls: unknown[][] } {
   const calls: unknown[][] = []
   return {

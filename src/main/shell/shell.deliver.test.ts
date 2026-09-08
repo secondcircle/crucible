@@ -1,10 +1,4 @@
 // @vitest-environment node
-//
-// The one road Crucible's own messages take to a session's agent: a run's
-// report and a monitor's wake alike. Driven against the real fake adapter, so
-// what is tested is the shell's ordering — queued while the agent works,
-// delivered when it stops, a turn of its own when it is idle, never lost to a
-// stop, and never the user's to take back.
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -101,7 +95,6 @@ describe('delivering a message of Crucible\u2019s own', () => {
     await working
     await until(() => events.some((event) => event.type === 'turn_ended'))
 
-    // One turn, and the wake landed inside it wearing its card.
     expect(events.filter((event) => event.type === 'turn_started')).toHaveLength(1)
     expect(delivered().some((event) => event.type === 'user_message' && event.card !== undefined)).toBe(
       true
@@ -141,13 +134,11 @@ describe('a stop under a message of Crucible\u2019s own', () => {
     await working.catch(() => {})
     await until(() => delivered().some((event) => event.type === 'user_message' && event.text === WAKE))
 
-    // Nothing of Crucible's own was ever handed back to the composer.
     const flushed = events.filter((event) => event.type === 'queue_flushed')
     for (const flush of flushed) {
       if (flush.type !== 'queue_flushed') continue
       expect(flush.messages.some((message) => message.text === WAKE)).toBe(false)
     }
-    // And it arrived all the same, in a turn of its own.
     const landed = delivered().find((event) => event.type === 'user_message' && event.text === WAKE)
     expect(landed).toBeDefined()
   })

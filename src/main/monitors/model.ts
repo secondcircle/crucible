@@ -40,35 +40,15 @@ import {
 import type { CheckRun, CheckRunner, CheckResult } from './check-runner'
 import type { MonitorStore } from './store'
 
-// The monitor model: the records, the check loop, the endings, the delivery
-// and the load-time sweep, for both flavors. The only thing a flavor decides
-// is the process seam behind it — real bash or a scripted runner — so the two
-// cannot drift into meaning different things by a monitor.
-//
-// Ordering rules that are architectural, and live nowhere else:
-//
-//  - A monitor ends exactly once. `end` is the only transition out of `live`
-//    and returns early on an already-ended id, so a process result, a deadline
-//    and a stop racing each other settle to one ending and the losers are
-//    dropped.
-//  - Checks of one monitor never overlap: the next is scheduled from the
-//    moment the previous one finished.
-//  - A check that exits 0 ends the monitor in the same transition that records
-//    it, so no live record ever holds a passing result.
-//  - An ending emits the snapshot before it delivers, so the chip is gone from
-//    the strip before the wake is in the transcript.
-
 interface MonitorFacts {
   readonly id: MonitorId
   readonly owner: MonitorOwner
   readonly description: string
   readonly reason: string
   readonly command: string
-  /** Fixed at set time; no transition writes it again. */
   readonly cwd: string
   readonly intervalMs: number
   readonly timeoutMs: number
-  /** ISO. The deadline is `setAt + timeoutMs`, wall clock, never paused. */
   readonly setAt: string
   readonly checks: number
   readonly last?: LastCheck
@@ -76,21 +56,12 @@ interface MonitorFacts {
 
 export interface LiveMonitorRecord extends MonitorFacts {
   readonly status: 'live'
-  // Consecutive non-zero exits whose stderr was identical (trimmed). Absent
-  // means the last check exited 0, exited quietly, or failed in a new way.
   readonly strikes?: { readonly stderr: string; readonly count: number }
 }
 
-// What an ended record still owes somebody. A record that owes nothing is
-// deleted, never stored: "ended, delivered" is not a state.
 export type Owed =
   | { readonly kind: 'wake'; readonly ending: MonitorEnding }
-  /** The user stopped it; the next user turn's context says so once. */
   | { readonly kind: 'note' }
-  // Crucible quit under it; the node hears on Resume. `ending` is present when
-  // the quit caught it already ended and holding its wake for a paused run:
-  // the outcome is known, so the notice says it. No wake is ever delivered
-  // from a lost record.
   | { readonly kind: 'lost'; readonly ending?: MonitorEnding }
 
 export interface EndedMonitorRecord extends MonitorFacts {
@@ -104,29 +75,19 @@ export type MonitorRecord = LiveMonitorRecord | EndedMonitorRecord
 export interface MonitorModelOptions {
   readonly store: MonitorStore
   readonly checks: CheckRunner
-  // How a session's wake travels. `'no-session'` means the owner is gone and
-  // the wake is dropped; a rejection means "not now" — no shell yet — and the
-  // record stays owed until the next flush.
   readonly deliver: DeliverMonitorMessage
-  /** The shell store's answer: a record for a gone session is dropped silently. */
   readonly sessionExists: (sessionId: SessionId) => boolean
-  /** Milliseconds; tests pin it. */
   readonly now?: () => number
   readonly mintId?: () => MonitorId
   readonly log?: (event: Record<string, unknown>) => void
 }
 
-/** How long a wake that could not be delivered waits before trying again. */
 const DELIVERY_RETRY_MS = 5_000
 
-/** How an ending was reached, which decides what the record then owes. */
 type Ending =
   | { readonly kind: 'wake'; readonly ending: MonitorEnding }
-  /** The user's ✕ or Stop: no wake, a note on the next user turn. */
   | { readonly kind: 'user' }
-  /** The agent's own tool call: no wake, nothing owed. */
   | { readonly kind: 'agent' }
-  /** The owner ceased to exist: silent, nothing owed, nothing said. */
   | { readonly kind: 'gone' }
 
 interface Timers {
@@ -318,16 +279,12 @@ export function createMonitorModel(options: MonitorModelOptions): MainMonitorSer
     }
   }
 
-  // --- the loop -------------------------------------------------------------
-
   function armDeadline(record: LiveMonitorRecord): void {
     const deadline = Date.parse(record.setAt) + record.timeoutMs
     const timer = timersOf(record.id)
     if (timer.deadline !== undefined) clearTimeout(timer.deadline)
     timer.deadline = setTimeout(
       () => {
-        // A check may be in flight; the deadline stops it and the monitor ends
-        // timed out, because the clock is not waiting on a command.
         if (liveRecord(record.id) === undefined) return
         end(record.id, { kind: 'wake', ending: { reason: 'timedOut' } })
       },
@@ -340,9 +297,6 @@ export function createMonitorModel(options: MonitorModelOptions): MainMonitorSer
     if (record === undefined) return
     const deadline = Date.parse(record.setAt) + record.timeoutMs
     const startAt = now() + Math.max(0, delayMs)
-    // Nothing is scheduled past the deadline: the deadline timer owns that
-    // moment, and a check that could not finish before it would be answering a
-    // monitor that has already ended.
     if (startAt > deadline) return
     const timer = timersOf(id)
     if (timer.next !== undefined) clearTimeout(timer.next)
@@ -359,7 +313,6 @@ export function createMonitorModel(options: MonitorModelOptions): MainMonitorSer
     const run = runner.run(record.command, record.cwd)
     timer.run = run
     void run.done.then((result) => {
-      // A result for a run that was superseded or killed belongs to nobody.
       if (timers.get(id)?.run !== run) return
       timer.run = undefined
       if (result.kind === 'killed') return
@@ -372,12 +325,6 @@ export function createMonitorModel(options: MonitorModelOptions): MainMonitorSer
     if (record === undefined) return
 
     const finishedAt = now()
-    // Everything a check produced is bounded here, once, before any of it
-    // becomes a stored fact: what the run printed, why it could not run, and
-    // the stderr a strike is compared by. Nothing downstream — the store, a
-    // strike kept on every check, an ending's error, the wake composed from it
-    // — then holds more of a chatty check than the record keeps of any other
-    // output.
     const message =
       result.kind === 'failed' ? boundOutput(result.message, RETAINED_OUTPUT_CHARS).text : ''
     const text = result.kind === 'exited' ? result.output : message
@@ -390,8 +337,6 @@ export function createMonitorModel(options: MonitorModelOptions): MainMonitorSer
           : { kind: 'failed', message }
     }
 
-    // A process that never ran breaks the monitor at once: retrying to the
-    // timeout would tell the agent nothing it does not already know.
     if (result.kind === 'failed') {
       replace({ ...record, checks: record.checks + 1, last })
       end(id, { kind: 'wake', ending: { reason: 'broke', error: message } })
@@ -421,8 +366,6 @@ export function createMonitorModel(options: MonitorModelOptions): MainMonitorSer
       return
     }
 
-    // Any other exit is "keep waiting". A quiet one never breaks anything,
-    // however often it repeats: that is exactly what a healthy wait looks like.
     const strikes =
       stderr === ''
         ? undefined
@@ -430,8 +373,6 @@ export function createMonitorModel(options: MonitorModelOptions): MainMonitorSer
           ? { stderr, count: record.strikes.count + 1 }
           : { stderr, count: 1 }
 
-    // Rebuilt from the facts rather than spread over the old record, so a
-    // cleared strike is genuinely gone rather than merely overwritten.
     replace({
       ...factsOf(record),
       checks: record.checks + 1,
@@ -450,8 +391,6 @@ export function createMonitorModel(options: MonitorModelOptions): MainMonitorSer
     scheduleNext(id, record.intervalMs)
   }
 
-  // --- endings --------------------------------------------------------------
-
   function end(id: MonitorId, how: Ending): void {
     const record = liveRecord(id)
     if (record === undefined) return
@@ -469,7 +408,6 @@ export function createMonitorModel(options: MonitorModelOptions): MainMonitorSer
             : { kind: 'lost' }
     }
 
-    // An ending that owes nothing is not a state: the record simply goes.
     if (how.kind === 'agent' || how.kind === 'gone') drop(id)
     else replace(ended)
 
@@ -481,12 +419,10 @@ export function createMonitorModel(options: MonitorModelOptions): MainMonitorSer
       ...(how.kind === 'wake' ? { reason: how.ending.reason } : {}),
       checks: record.checks
     })
-    // The chip leaves the strip before the wake reaches the transcript.
     if (record.owner.kind === 'session') emit()
     if (how.kind === 'wake') settle(ended, how.ending)
   }
 
-  /** Hands an ended record's wake to whoever is owed it, or keeps it owed. */
   function settle(record: EndedMonitorRecord, ending: MonitorEnding): void {
     const facts = {
       monitorId: record.id,
@@ -499,9 +435,6 @@ export function createMonitorModel(options: MonitorModelOptions): MainMonitorSer
 
     if (record.owner.kind === 'node') {
       const waiter = waiters.get(ownerKey(record.owner))
-      // Nobody is parked on it: the run is paused, or the node is mid-turn.
-      // The wake is held until the engine asks, and a held wake is exactly
-      // what makes a paused run's node never lose the answer it waited for.
       if (waiter === undefined) return
       waiters.delete(ownerKey(record.owner))
       drop(record.id)
@@ -516,8 +449,6 @@ export function createMonitorModel(options: MonitorModelOptions): MainMonitorSer
     void deliver(sessionId, composeWake(facts))
       .then((outcome) => {
         delivering.delete(record.id)
-        // Delivered, or the session no longer exists: either way the debt is
-        // settled and the record goes.
         if (held(record.id) === undefined) return
         drop(record.id)
         store.save(records)
@@ -525,8 +456,6 @@ export function createMonitorModel(options: MonitorModelOptions): MainMonitorSer
       })
       .catch((cause: unknown) => {
         delivering.delete(record.id)
-        // "Not now": no shell is up yet, or the road is momentarily shut. The
-        // record stays owed and the flush tries again.
         log?.({
           event: 'monitor_wake_deferred',
           monitorId: record.id,
@@ -545,7 +474,6 @@ export function createMonitorModel(options: MonitorModelOptions): MainMonitorSer
     }, DELIVERY_RETRY_MS)
   }
 
-  /** Every owed session wake, tried again. A wake is never lost. */
   function flushOwed(): void {
     for (const record of [...records]) {
       if (record.status !== 'ended' || record.owner.kind !== 'session') continue
@@ -554,24 +482,18 @@ export function createMonitorModel(options: MonitorModelOptions): MainMonitorSer
     }
   }
 
-  // --- the sweep ------------------------------------------------------------
-
   function begin(): void {
     if (started || disposed) return
     started = true
 
     for (const record of [...records]) {
       if (record.owner.kind !== 'session') continue
-      // A session the user removed while Crucible was closed owes nobody
-      // anything: its agent ceased to exist.
       if (!sessionExists(record.owner.sessionId)) {
         drop(record.id)
         continue
       }
       if (record.status !== 'live') continue
       const deadline = Date.parse(record.setAt) + record.timeoutMs
-      // The clock counted wall time across the gap, so a wait whose time ran
-      // out while Crucible was closed ends timed out without checking again.
       if (deadline <= now()) {
         end(record.id, { kind: 'wake', ending: { reason: 'timedOut' } })
         continue
@@ -587,12 +509,8 @@ export function createMonitorModel(options: MonitorModelOptions): MainMonitorSer
     flushOwed()
   }
 
-  // --- the tool behaviors ---------------------------------------------------
-
   const tools: MonitorTools = {
     async set(owner: MonitorOwner, cwd: string, request: MonitorRequest): Promise<string> {
-      // Checked again here, so the boundary holds whoever built the request:
-      // a blank field never becomes a monitor nobody can read.
       const asked = monitorRequestFrom(request)
       const timing = timingInForce(asked)
       const record: LiveMonitorRecord = {
@@ -619,8 +537,6 @@ export function createMonitorModel(options: MonitorModelOptions): MainMonitorSer
       })
       if (owner.kind === 'session') emit()
       armDeadline(record)
-      // The first check runs at once, so the chip has something to say within
-      // seconds rather than at the end of the first interval.
       check(record.id)
       return setAnswer(record, timing)
     },
@@ -635,8 +551,6 @@ export function createMonitorModel(options: MonitorModelOptions): MainMonitorSer
 
     async stop(owner: MonitorOwner, monitorId: string): Promise<string> {
       const record = held(monitorId)
-      // Unknown, already ended, or somebody else's: all one answer, because
-      // telling one agent that another's monitor exists is a leak.
       if (record === undefined || record.status !== 'live' || !sameOwner(record.owner, owner)) {
         return stopRefusal(monitorId)
       }
@@ -652,9 +566,6 @@ export function createMonitorModel(options: MonitorModelOptions): MainMonitorSer
 
     wait(owner) {
       const key = ownerKey(owner)
-      // An ending that arrived while nobody was parked is answered first, so a
-      // monitor that ended between "is it live" and "wait" cannot lose its
-      // wake.
       const owedHere = records.find(
         (record): record is EndedMonitorRecord =>
           record.status === 'ended' &&
@@ -732,8 +643,6 @@ export function createMonitorModel(options: MonitorModelOptions): MainMonitorSer
       if (!inScope(record.owner, scope)) continue
       touched ||= record.owner.kind === 'session'
       if (record.status === 'live') {
-        // Silent: no wake, no note, no message to anybody. The agent that set
-        // it does not exist any more.
         clearTimers(record.id)
       }
       drop(record.id)
@@ -769,13 +678,7 @@ export function createMonitorModel(options: MonitorModelOptions): MainMonitorSer
 
     async stop(monitorId: MonitorId): Promise<void> {
       const record = held(monitorId)
-      // The user asked for this monitor to be gone, and it is gone: a ✕ that
-      // lands in the same instant a check passes has nothing left to stop and
-      // nothing to say about it. Saying so would be a monitor talking to the
-      // user about an outcome they did not ask after.
       if (record === undefined || record.status !== 'live') return
-      // A run's wait is the run's; Pause and Cancel stay a run's only
-      // mechanical controls, so there is no ✕ for one anywhere.
       if (record.owner.kind === 'node') {
         throw new Error(
           'That wait belongs to a run. Pause or cancel the run instead — a node’s monitor is ' +

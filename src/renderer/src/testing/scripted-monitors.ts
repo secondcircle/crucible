@@ -6,7 +6,6 @@ import type { MonitorListener, MonitorService } from '../../../shared/monitors/s
 // test replaces the live set and the event goes out whole, like the model's.
 export interface ScriptedMonitors extends MonitorService {
   readonly calls: ReadonlyArray<{ readonly op: string; readonly args: readonly string[] }>
-  /** Replaces the live set and announces the snapshot. */
   setMonitors(monitors: readonly LiveMonitor[]): void
 }
 

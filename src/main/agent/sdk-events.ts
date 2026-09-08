@@ -52,9 +52,6 @@ export function displayToolCall(
   args: unknown,
   inForce?: SkillsInForce
 ): DisplayedCall {
-  // A monitor's row says what is being waited on and on what terms. The
-  // generic summary would print the shell command instead, which is the one
-  // thing the description exists not to be.
   if (name === 'crucible_monitor') return { name, summary: monitorCallSummary(args) }
   const summary = summarizeToolArgs(args)
   if (inForce === undefined || name !== 'read') return { name, summary }

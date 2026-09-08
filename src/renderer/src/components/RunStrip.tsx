@@ -14,12 +14,6 @@ import './cache-strip.css'
 import './runs.css'
 import './monitors.css'
 
-// The bar above the chat where a session's runs and its waits live, one chip
-// each: runs first under their label, then what is being waited on under its
-// own. A run chip is workflow, current node, age, spend and an amber ⚑ when
-// the run asked something; a monitor chip is what is awaited, what the check
-// last said, and the timing. Glanceable: a run chip opens the run, a monitor
-// chip opens its detail, and the ✕ stops the wait.
 export function RunStrip({
   runs,
   monitors = [],
@@ -31,13 +25,9 @@ export function RunStrip({
   onStopMonitor
 }: {
   readonly runs: readonly RunRecord[]
-  /** The active session's live monitors, in the snapshot's own order. */
   readonly monitors?: readonly LiveMonitor[]
-  /** The window's clock, so every age in the strip moves together. */
   readonly now: number
   readonly openMonitorId?: string
-  // The workspace's checkout, so the detail can say whether a monitor's fixed
-  // directory is that checkout or a worktree.
   readonly checkout?: string
   readonly onOpen: (runId: string) => void
   readonly onOpenMonitor?: (monitorId: string) => void
@@ -45,9 +35,6 @@ export function RunStrip({
 }): React.JSX.Element | null {
   if (runs.length === 0 && monitors.length === 0) return null
   const open = monitors.find((monitor) => monitor.id === openMonitorId)
-  // A strip with no monitors is exactly the strip it has always been, down to
-  // the label and the hint: this feature adds a group, it does not rewrite
-  // one.
   const waits = monitors.length > 0
 
   return (
@@ -84,8 +71,6 @@ export function RunStrip({
                   ⚠ {misses}
                 </span>
               )}
-              {/* A run stopped on a wait never looks like a run stopped on
-                  nothing: the node's own words, in the monitor color. */}
               {waiting === undefined ? null : (
                 <span className="waiting" title={waiting.description}>
                   ⏳ {waiting.description} · {waitedFor(waiting.since, now)}

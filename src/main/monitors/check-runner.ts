@@ -8,27 +8,21 @@ import { bashLocation, killTree } from '../platform/exec'
 // answer a question nobody asked.
 
 export type CheckResult =
-  // bash ran and exited. `output` is stdout and stderr interleaved as they
-  // arrived; `stderr` alone is what the breaking rule reads.
   | {
       readonly kind: 'exited'
       readonly exitCode: number
       readonly output: string
       readonly stderr: string
     }
-  /** The process never ran: no bash, a spawn error, the directory is gone. */
   | { readonly kind: 'failed'; readonly message: string }
-  /** `kill()` was called before it exited. Used for nothing. */
   | { readonly kind: 'killed' }
 
 export interface CheckRun {
   readonly done: Promise<CheckResult>
-  /** Kills the process and everything it started. Harmless after exit. */
   kill(): void
 }
 
 export interface CheckRunner {
-  /** `bash -c <command>` in `cwd`, spawned exactly as a bash run is. */
   run(command: string, cwd: string): CheckRun
 }
 
@@ -78,9 +72,6 @@ export function createCheckRunner(): CheckRunner {
         settle(result)
       }
 
-      // Both streams land in `output` in arrival order — what the person
-      // watching a shell would have seen — while `stderr` keeps its own copy,
-      // because that is the one the breaking rule reads.
       child.stdout?.setEncoding('utf8')
       child.stdout?.on('data', (chunk: string) => {
         if (output.length < MAX_OUTPUT) output += chunk

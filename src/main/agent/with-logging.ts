@@ -128,8 +128,6 @@ export function withLogging(shell: Shell, log: LogSink, adapter: string): Shell 
       (sessionId, text, images) => shell.followUp(sessionId, text, images),
       describeQueueCall
     ),
-    // Crucible's own road, logged like every other operation: the text a
-    // reader has to match against, and the card's title where there is one.
     deliver: op(
       'deliver',
       (sessionId, message) => shell.deliver(sessionId, message),

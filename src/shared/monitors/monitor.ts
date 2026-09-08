@@ -16,7 +16,6 @@ export type MonitorOwner =
   | { readonly kind: 'session'; readonly sessionId: SessionId }
   | { readonly kind: 'node'; readonly runId: WorkflowRunId; readonly nodeId: string }
 
-/** What `release` may name: one owner, or every owner of one run. */
 export type MonitorScope = MonitorOwner | { readonly kind: 'run'; readonly runId: WorkflowRunId }
 
 export const INTERVAL_FLOOR_MS = 5_000
@@ -24,7 +23,6 @@ export const INTERVAL_DEFAULT_MS = 30_000
 export const TIMEOUT_FLOOR_MS = 1_000
 export const TIMEOUT_DEFAULT_MS = 30 * 60_000
 export const TIMEOUT_CEILING_MS = 24 * 60 * 60_000
-/** Consecutive checks failing the same way before the check counts as broken. */
 export const BROKE_STRIKES = 3
 /** What the record keeps of a check's output, and what the detail shows. */
 export const RETAINED_OUTPUT_CHARS = 4_000
@@ -85,22 +83,17 @@ function clamp(asked: number | undefined, fallback: number, floor: number, ceili
   return Math.min(ceiling, Math.max(floor, Math.round(asked)))
 }
 
-/** Output as retained or as carried: the head of it, and it says whether it was cut. */
 export interface CheckOutput {
   readonly text: string
   readonly truncated: boolean
 }
 
-// The head, because errors come first and an agent wanting a tail writes
-// `tail`. A cut output always says so, so nothing downstream has to guess.
 export function boundOutput(text: string, limit: number): CheckOutput {
   const trimmed = text.replace(/\s+$/, '')
   if (trimmed.length <= limit) return { text: trimmed, truncated: false }
   return { text: trimmed.slice(0, limit), truncated: true }
 }
 
-// The last check that ran. `exited` is bash's exit; `failed` is the process
-// never running at all (no bash, ENOENT on the directory, spawn error).
 export interface LastCheck {
   /** ISO of the moment the check finished. */
   readonly at: string

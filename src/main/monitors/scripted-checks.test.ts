@@ -1,10 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { createScriptedCheckRunner } from './scripted-checks'
 
-// The fake flavor's process seam. Its whole job is to make the three endings
-// reachable with no shell and no model, so what is tested is that each word
-// leads where the model needs it to.
-
 async function walk(command: string, times: number): Promise<string[]> {
   const runner = createScriptedCheckRunner()
   const seen: string[] = []
@@ -19,8 +15,6 @@ async function walk(command: string, times: number): Promise<string[]> {
 
 describe('the scripted check runner', () => {
   it('starts no process at all', async () => {
-    // No cwd is read and no bash is looked for: the command is a word, not a
-    // program.
     const result = await createScriptedCheckRunner().run('anything', '/nowhere-at-all').done
     expect(result.kind).toBe('exited')
   })

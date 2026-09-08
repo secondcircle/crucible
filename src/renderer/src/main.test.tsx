@@ -130,8 +130,6 @@ function pageWithPreload(
         }),
         onEvent: (): (() => void) => () => {}
       },
-      // Nothing is being waited on, so the strip carries no "Waiting on"
-      // group and no row wears a ⏳.
       monitors: {
         request: async (): Promise<{ ok: true; value: unknown }> => ({
           ok: true,

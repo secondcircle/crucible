@@ -3,9 +3,6 @@ import { describe, expect, it, vi } from 'vitest'
 import type { MonitorService } from '../../shared/monitors/service'
 import { invoke } from './channel'
 
-// The IPC boundary: two operations, and anything else refused. Every rule
-// about what a monitor is lives behind the service.
-
 function serviceRecorder(): MonitorService {
   return {
     snapshot: vi.fn(async () => ({ monitors: [] })),

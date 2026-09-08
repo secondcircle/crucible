@@ -8,11 +8,6 @@ import {
 import { elapsedFraction } from '../monitors/activity'
 import './monitors.css'
 
-// What a chip opens: the agent's reason in its own words, the cadence, how
-// long since the last check, how many checks so far, the ending rule in words,
-// where the checks run, the exact command, the retained output, a hairline of
-// elapsed against the timeout, and Stop. Nothing here is editable: to change a
-// wait, the agent stops it and sets another.
 export function MonitorDetail({
   monitor,
   now,
@@ -22,15 +17,12 @@ export function MonitorDetail({
 }: {
   readonly monitor: LiveMonitor
   readonly now: number
-  /** "checkout" or "worktree": whether the monitor's directory is the session's own. */
   readonly where: 'checkout' | 'worktree'
   readonly onClose: () => void
   readonly onStop: () => void
 }): React.JSX.Element {
   const box = useRef<HTMLDivElement>(null)
 
-  // Escape and a click outside close it, exactly as they close any popover.
-  // Closing is not stopping: nothing about the monitor changes either way.
   useEffect(() => {
     function onKey(event: KeyboardEvent): void {
       if (event.key === 'Escape') onClose()

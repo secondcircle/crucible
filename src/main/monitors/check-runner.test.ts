@@ -4,10 +4,6 @@ import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { createCheckRunner } from './check-runner'
 
-// The process seam against a real bash in a real directory: the command runs
-// where the monitor was set, exactly as it was written, and a command that
-// cannot run at all is told apart from one that ran and said no.
-
 const scratch: string[] = []
 
 function tempDir(): string {
@@ -27,7 +23,6 @@ describe('running a check', () => {
     expect(result.kind).toBe('exited')
     if (result.kind !== 'exited') return
     expect(result.exitCode).toBe(0)
-    // A Mac's /var is a symlink to /private/var, so the tail is what matters.
     expect(result.output.trim().endsWith(dir.replace(/^\/private/, ''))).toBe(true)
   })
 
@@ -78,7 +73,6 @@ describe('running a check', () => {
 
   it('is stopped by kill, and its result is used for nothing', async () => {
     const run = createCheckRunner().run('sleep 30', tempDir())
-    // A beat, so the process genuinely exists before it is killed.
     await new Promise((resolve) => setTimeout(resolve, 50))
     run.kill()
     expect((await run.done).kind).toBe('killed')

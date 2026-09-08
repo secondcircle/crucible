@@ -2,8 +2,6 @@ import { describe, expect, it } from 'vitest'
 import type { LiveMonitor } from '../../../shared/monitors/monitor'
 import { elapsedFraction, inlineOutput, monitorActivity, waitedFor } from './activity'
 
-// The arithmetic the rail and the strip are drawn from, without a DOM.
-
 const AT = Date.parse('2026-09-08T10:10:00.000Z')
 
 function monitorOf(overrides: Partial<LiveMonitor> = {}): LiveMonitor {
@@ -57,7 +55,6 @@ describe('the units every monitor surface shares', () => {
   it('is the chips\u2019 shorthand, from one function', () => {
     expect(waitedFor('2026-09-08T10:06:00.000Z', AT)).toBe('4m')
     expect(waitedFor('nonsense', AT)).toBe('')
-    // A stamp in the future is not a negative wait.
     expect(waitedFor('2026-09-08T10:20:00.000Z', AT)).toBe('0s')
   })
 })

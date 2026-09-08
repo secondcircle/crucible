@@ -11,9 +11,6 @@ import {
   timingInForce
 } from './monitor'
 
-// The bounds and the truncation, tested where they are decided: one function
-// constructs a timing, so nothing downstream can hold an out-of-range one.
-
 describe('the timing in force', () => {
   it('defaults to 30 seconds and 30 minutes when nothing was asked for', () => {
     expect(timingInForce({})).toEqual({

@@ -197,11 +197,6 @@ function Item({
         </div>
       )
 
-    // A message Crucible delivered on its own behalf — a monitor's wake — told
-    // apart from a user's message at a glance: a card, a badge, and a tone
-    // that says which of the endings this was. The transcript learns nothing
-    // about monitors from it; the card is presentation and the facts stayed
-    // where they belong.
     case 'system':
       return (
         <div className={`syscard ${item.card.tone}`} aria-label="Crucible">

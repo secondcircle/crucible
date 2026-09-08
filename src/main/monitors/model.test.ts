@@ -11,10 +11,6 @@ import type { CheckResult, CheckRun, CheckRunner } from './check-runner'
 import { createMonitorModel, type MonitorRecord } from './model'
 import { memoryMonitorStore } from './store'
 
-// The monitor model against a scripted process seam, a pinned clock and fake
-// timers: the whole loop — the checks, the three endings, the delivery, the
-// sweep across a quit — without a shell, a window or a model.
-
 const SESSION: MonitorOwner = { kind: 'session', sessionId: 's1' }
 const OTHER: MonitorOwner = { kind: 'session', sessionId: 's2' }
 const NODE: MonitorOwner = { kind: 'node', runId: 'en42', nodeId: 'builder' }
@@ -169,7 +165,6 @@ describe('setting a monitor', () => {
     })
 
     expect(answer).toContain('m-0001')
-    // Clamped to the floor, and the answer says what is really in force.
     expect(answer).toContain('every 5s')
     expect(answer).toContain('after 1m')
     expect(answer).toContain('/repos/crucible')
@@ -238,8 +233,6 @@ describe('the check loop', () => {
     rig.checks.hold(REQUEST.command)
     await rig.model.tools.set(SESSION, '/repos', REQUEST)
     await tick(120_000)
-    // The interval passed four times over and the first check has not
-    // finished, so nothing else was started.
     expect(rig.checks.runs).toHaveLength(1)
 
     rig.checks.settle(REQUEST.command, {
@@ -249,8 +242,6 @@ describe('the check loop', () => {
       stderr: ''
     })
     await beat()
-    // The next one is an interval after the previous finished, not after it
-    // started.
     await tick(29_000)
     expect(rig.checks.runs).toHaveLength(1)
     await tick(1_000)
@@ -303,8 +294,6 @@ describe('how a monitor ends', () => {
 
     expect(rig.delivered[0].message.text).toContain('timed out')
     expect(rig.checks.killed).toContain(REQUEST.command)
-    // The late result lands on a monitor that has already ended and changes
-    // nothing: still one wake, still no live record.
     rig.checks.settle(REQUEST.command, {
       kind: 'exited',
       exitCode: 0,
@@ -369,10 +358,6 @@ describe('how a monitor ends', () => {
     expect(rig.delivered[0].message.text).toContain('3 checks')
   })
 
-  // The record keeps a strike's stderr so the next check can be compared with
-  // it, and that copy is written to the store on every check and handed to the
-  // wake when the third strike lands. A chatty failing check must not grow
-  // either without limit.
   it('keeps a chatty failure bounded, in the record and in the wake it becomes', async () => {
     const rig = rigOf()
     const noise = `${'x'.repeat(500_000)}\n`
@@ -382,8 +367,6 @@ describe('how a monitor ends', () => {
     await rig.model.tools.set(SESSION, '/repos', REQUEST)
     await beat()
 
-    // Two strikes in: still live, and what the store holds of the failure is
-    // no more than a retained output ever is.
     const stored = JSON.stringify(rig.store.current)
     expect(stored.length).toBeLessThan(4 * RETAINED_OUTPUT_CHARS)
 
@@ -394,10 +377,6 @@ describe('how a monitor ends', () => {
     expect(rig.delivered[0].message.text.length).toBeLessThan(WAKE_OUTPUT_CHARS + 800)
   })
 
-  // The other way a check's bytes become an ending's error: the process never
-  // ran and said so at length. A node's ended record holds its wake until the
-  // node asks for it, so that is where an unbounded error would sit in
-  // monitors.json rather than passing through.
   it('keeps a long “could not run” message bounded, in the record and in the wake', async () => {
     const rig = rigOf()
     rig.checks.script(REQUEST.command, [
@@ -465,7 +444,6 @@ describe('stopping a monitor', () => {
     const note = rig.model.turnStart('s1')
     expect(note).toContain('The user stopped watching')
     expect(note).toContain(REQUEST.description)
-    // Once and only once.
     expect(rig.model.turnStart('s1')).toBeUndefined()
   })
 
@@ -495,7 +473,6 @@ describe('stopping a monitor', () => {
     expect(await rig.model.tools.stop(OTHER, 'm-0001')).toMatch(/No live monitor of yours/)
     await rig.model.tools.stop(SESSION, 'm-0001')
     expect(await rig.model.tools.stop(SESSION, 'm-0001')).toMatch(/No live monitor of yours/)
-    // Refused, not stopped: the other session's monitor is still live.
     expect(rig.checks.runs).toHaveLength(1)
   })
 
@@ -509,9 +486,6 @@ describe('stopping a monitor', () => {
     expect(rig.checks.runs).toHaveLength(ran)
   })
 
-  // A ✕ and a passing check can land in the same instant. The user asked for
-  // the monitor to be gone and it is gone, so the click is a silent no-op:
-  // nothing to stop, nothing said, and no note owed to anybody.
   it('says nothing when the ✕ lands on a monitor that has already ended', async () => {
     const rig = rigOf()
     rig.checks.script(REQUEST.command, [
@@ -522,7 +496,6 @@ describe('stopping a monitor', () => {
 
     await expect(rig.model.stop('m-0001')).resolves.toBeUndefined()
     await expect(rig.model.stop('m-9999')).resolves.toBeUndefined()
-    // The wake the passing check earned, and no note beside it.
     expect(rig.delivered).toHaveLength(1)
     expect(rig.model.turnStart('s1')).toBeUndefined()
   })
@@ -551,7 +524,6 @@ describe('what each agent may reach', () => {
 
     expect(await rig.model.tools.list(SESSION)).toMatch(/Nothing is being watched/)
     expect((await rig.model.snapshot()).monitors).toEqual([])
-    // And the node can still see its own.
     expect(await rig.model.tools.list(NODE)).toContain(REQUEST.description)
   })
 })
@@ -575,7 +547,6 @@ describe('a node\u2019s wait', () => {
     })
     await tick(30_000)
     expect(woken).toContain('condition met')
-    // Never a message to the orchestrator: a run's monitor is not news.
     expect(rig.delivered).toEqual([])
   })
 
@@ -591,7 +562,6 @@ describe('a node\u2019s wait', () => {
     ])
     await rig.model.tools.set(NODE, '/worktree', REQUEST)
     await beat()
-    // The monitor ended while the node was mid-turn, or its run was paused.
     expect(rig.model.nodes.wait(NODE)?.on).toBeDefined()
     const waiting = rig.model.nodes.wait(NODE)
     expect(waiting).toBeUndefined()
@@ -643,7 +613,6 @@ describe('when the owner goes away', () => {
   it('keeps counting the timeout whatever is on screen', async () => {
     const rig = rigOf()
     await rig.model.tools.set(SESSION, '/repos', { ...REQUEST, timeoutSeconds: 120 })
-    // Nothing is told about focus, screens or views; only time passes.
     await tick(121_000)
     expect(rig.delivered[0].message.text).toContain('timed out')
   })
@@ -682,16 +651,11 @@ describe('across a quit', () => {
 
     const [live] = (await rig.model.snapshot()).monitors
     expect(live.id).toBe('m-old1')
-    // Checks made counts checks, so the gap added none and the count goes on
-    // rather than restarting.
     expect(live.checks).toBe(7)
-    // The next check is due an interval after the last one finished, which the
-    // gap has eaten most of.
     expect(rig.checks.runs).toEqual([])
     await tick(20_000)
     expect(rig.checks.runs).toHaveLength(1)
     expect((await rig.model.snapshot()).monitors[0].checks).toBe(8)
-    // And the timeout counted the whole gap: 10 minutes of the 30 are gone.
     await tick(20 * 60_000)
     expect(rig.delivered[0].message.text).toContain('timed out')
   })
@@ -744,14 +708,9 @@ describe('across a quit', () => {
       command: REQUEST.command,
       timeoutMs: 30 * 60_000
     })
-    // Handed over once and then gone.
     expect(rig.model.nodes.takeLost(NODE)).toEqual([])
   })
 
-  // A wake held back because the run was paused is an answer the node was
-  // owed, and the quit is the one thing that can never hand it over. It is
-  // treated as a live monitor is: named in the resume notice, with the outcome
-  // it reached, and no wake delivered.
   it('tells a resumed node how a wake it never got had ended', async () => {
     const rig = rigOf([
       {

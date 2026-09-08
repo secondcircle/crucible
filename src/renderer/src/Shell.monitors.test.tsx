@@ -1,9 +1,4 @@
 // @vitest-environment jsdom
-//
-// Everything a live monitor puts on screen, driven through the monitor seam:
-// the chip in the strip, its detail, the ⏳ on the sidebar row, the wake in
-// the transcript, and what a node's wait says on a run's chip. Nothing here
-// can talk to a monitor except through the seam's one action, which is Stop.
 import { act, fireEvent, render, screen, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ShellSnapshot, SystemCard } from '../../shared/agent/port'
@@ -255,7 +250,6 @@ describe('the ✕ on a chip', () => {
       fireEvent.click(within(chip()).getByRole('button', { name: /Stop watching/ }))
     })
 
-    // Gone before the seam has answered, and nothing was asked of the user.
     expect(chips()).toHaveLength(0)
     expect(document.querySelector('.confirm')).toBeNull()
     expect(monitorService.calls).toEqual([{ op: 'stop', args: ['m-1f3a'] }])
@@ -326,7 +320,6 @@ describe('the detail a chip opens', () => {
       await settled()
     })
 
-    // Still open, and saying what the newest check said.
     expect(detail()).toBeTruthy()
     expect(detail()?.textContent).toContain('9 checks so far')
     expect(detail()?.querySelector('.monout')?.textContent).toContain('queued')
@@ -410,8 +403,6 @@ describe('the sidebar row', () => {
     const end = row(HERE).querySelector('.rowend')
     expect(end?.querySelector('.elapsed')?.textContent).toBe('18m')
     expect(end?.querySelector('.waiting')).toBeNull()
-    // Both are still named, because the name is the whole row for anyone not
-    // reading the marks.
     expect(nameOf(HERE)).toBe(`${HERE} (run working, waiting)`)
   })
 
@@ -522,8 +513,6 @@ describe('a node\u2019s wait inside a run', () => {
       fireEvent.click(document.querySelector('.runchip') as HTMLElement)
       await settled()
     })
-    // Pause and Cancel stay a run's only mechanical controls: nothing in the
-    // run view stops a node's wait either.
     const buttons = [...document.querySelectorAll('.runview button')].map(
       (button) => button.textContent ?? ''
     )
@@ -531,10 +520,6 @@ describe('a node\u2019s wait inside a run', () => {
   })
 })
 
-// Every wait on screen is a counter, and a counter that jumped half a minute
-// at a time would read as stopped. The monitor chip, the run chip's ⏳ and the
-// run view's node header all move every second while they are visible — the
-// chip's clock is not special.
 describe('the counters a wait puts on screen', () => {
   beforeEach(() => {
     vi.useFakeTimers({ shouldAdvanceTime: true })
@@ -580,8 +565,6 @@ describe('the counters a wait puts on screen', () => {
     expect(waited()).toContain('21s')
   })
 
-  // No monitor of this session is on screen to carry the fast clock: the run
-  // chip's own wait is what has to keep it running.
   it('moves the run chip’s ⏳ every second, with no monitor chip beside it', async () => {
     await shown([], [nodeWaiting()])
     const waited = (): string =>
@@ -591,8 +574,6 @@ describe('the counters a wait puts on screen', () => {
     expect(waited()).toBe('⏳ CI on PR #482 to finish · 21s')
   })
 
-  // Opened from the overview on somebody else's run: no chip of this
-  // session's is on screen, so nothing outside the view is re-rendering it.
   it('moves the run view’s node header every second', async () => {
     await shown([], [{ ...nodeWaiting(), sessionId: 's2' }])
     await act(async () => {
@@ -624,7 +605,6 @@ describe('what a wait does to the needs-you rules', () => {
   it('marks nothing by itself, however long it waits', async () => {
     await shown([monitorOf({ sessionId: 's2' })])
     expect(nameOf(OTHER)).toBe(`${OTHER} (waiting)`)
-    // No mark, no count, nothing for Tab to land on.
     expect(document.querySelector('.sessrow.asking')).toBeNull()
     act(() => {
       fireEvent.keyDown(document, { key: 'Tab' })
@@ -664,7 +644,6 @@ describe('what a wait does to the needs-you rules', () => {
   it('does not hush a turn ending in a session the user was not looking at', async () => {
     const { port } = await shown([monitorOf({ sessionId: 's2' })])
     await turn(port, 's2')
-    // The wait is not work on the user's behalf, so the ordinary rule stands.
     expect(nameOf(OTHER)).toContain('needs you')
   })
 
@@ -734,8 +713,6 @@ describe('the wake in the transcript', () => {
 
   it('leaves nothing else about the monitor in the transcript', async () => {
     const { monitorService } = await shown([monitorOf()])
-    // A live monitor writes nothing into the chat: no card, no status line,
-    // and nothing that updates while it waits.
     expect(document.querySelector('.chat .syscard')).toBeNull()
     await act(async () => {
       monitorService.setMonitors([

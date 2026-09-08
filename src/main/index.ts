@@ -178,9 +178,6 @@ const monitors = selectMonitorService(
   log,
   {
     stateDir: app.getPath('userData'),
-    // The store is the authority on which sessions exist: a wake owed to a
-    // session the user has since deleted is dropped rather than delivered
-    // into nothing.
     sessionExists: (sessionId) => store.session(sessionId) !== undefined,
     deliver: async (sessionId, message) => {
       if (store.session(sessionId) === undefined) return 'no-session'
@@ -207,8 +204,6 @@ const workflowRuns = selectWorkflowRunService(
     // to a session the user has since deleted goes unattended and parks
     // instead of reporting into nothing.
     sessionExists: (sessionId) => store.session(sessionId) !== undefined,
-    // Every node's monitor tools and its wait, so a node waits on the world
-    // without the engine nudging it for going quiet.
     monitors: monitors.nodes,
     deliver: (sessionId, text) => {
       if (inbox === undefined) {
@@ -356,8 +351,6 @@ const shell = withLogging(
     // runs and monitors stays behind these two seams.
     turnContext: (sessionId) =>
       joined([workflowRuns.turnStart(sessionId), monitors.turnStart(sessionId)]),
-    // The agent this session was has ceased to exist, so nothing may go on
-    // waiting in its name.
     onSessionEnded: (sessionId) => monitors.release({ kind: 'session', sessionId }),
     cache,
     // Nobody asked for a title, so nobody is told it failed: the run log is
