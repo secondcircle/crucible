@@ -130,6 +130,36 @@ describe('the answers the tools give', () => {
     expect(answer).toMatch(/End your turn now/)
   })
 
+  // Review 3. R3 and R15: the answer states the interval and timeout actually
+  // in force, which is what lets a clamped agent know it was clamped. An
+  // answer that rounds 90s to "2m" states a cadence the monitor is not
+  // running at, and an agent asking for 90s cannot tell rounding from a clamp.
+  it('states the timing in force exactly, never rounded to a neater unit', () => {
+    const timing = { intervalMs: 90_000, timeoutMs: 2_700_000 }
+    const answer = setAnswer(
+      { id: 'm-1f3a', description: 'CI on PR #482 to finish', cwd: '/repos/crucible' },
+      timing
+    )
+    expect(answer).not.toContain('every 2m')
+    expect(answer).toMatch(/every (90s|1m 30s)/)
+
+    const listed = listAnswer(
+      [
+        {
+          id: 'm-1f3a',
+          description: 'CI on PR #482 to finish',
+          intervalMs: 90_000,
+          timeoutMs: 2_700_000,
+          setAt: '2026-09-08T10:04:00.000Z',
+          checks: 1
+        }
+      ],
+      Date.parse('2026-09-08T10:05:00.000Z')
+    )
+    expect(listed).not.toContain('every 2m')
+    expect(listed).toMatch(/every (90s|1m 30s)/)
+  })
+
   it('lists each live monitor with everything an agent has to know about it', () => {
     const now = Date.parse('2026-09-08T10:10:00.000Z')
     const listed = listAnswer(
