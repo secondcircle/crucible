@@ -826,8 +826,16 @@ export function createWorkflowEngine(options: EngineOptions): WorkflowEngine {
         }
       })
 
+      // Why the turn now running stopped, when something outside it stopped
+      // it. Read once by the loop and forgotten, so an abort can only ever
+      // describe the turn it cut short: a flag that outlives its turn reports
+      // an abort to a node two turns later.
+      let abortedTurn: 'pause' | 'watchdog' | undefined
+
       const interruptForPause = (): void => {
-        if (session.isStreaming()) void session.abort().catch(() => {})
+        if (!session.isStreaming()) return
+        abortedTurn = 'pause'
+        void session.abort().catch(() => {})
       }
       handle.pauseInterrupts.add(interruptForPause)
 
@@ -899,13 +907,12 @@ export function createWorkflowEngine(options: EngineOptions): WorkflowEngine {
       // Watchdog: a hung tool call never ends its turn, so prolonged total
       // silence aborts the turn and the loop takes it from there.
       let nudges = 0
-      let watchdogAborted = false
       const watchdog = setInterval(() => {
         if (!session.isStreaming()) return
         const lastActivity = node.lastActivityAt ?? node.startedAt
         const quiet = Date.now() - (lastActivity === undefined ? Date.now() : Date.parse(lastActivity))
         if (quiet > quietAbortMs) {
-          watchdogAborted = true
+          abortedTurn = 'watchdog'
           node.now = 'aborting hung tool call…'
           save(run)
           void session.abort().catch(() => {})
@@ -1081,6 +1088,10 @@ export function createWorkflowEngine(options: EngineOptions): WorkflowEngine {
       try {
         for (;;) {
           await session.prompt(message)
+          // Whoever stopped this turn is answered on this pass of the loop and
+          // on no later one.
+          const aborted = abortedTurn
+          abortedTurn = undefined
           bailIfReleased()
 
           if (blockerRaised !== undefined) {
@@ -1175,14 +1186,47 @@ export function createWorkflowEngine(options: EngineOptions): WorkflowEngine {
           // legitimately waiting, not quiet: no nudge, no stall, no question
           // to the orchestrator, and the nudge counter is not touched. The
           // wake starts its next turn.
-          const waiting = monitors?.wait(owner)
+          //
+          // "Ended its turn" means a turn that ended on its own. A turn a
+          // pause or the watchdog cut short is not one the node ended, so the
+          // node does not start waiting on it: the pause pauses it and the
+          // abort is reported at the time it happened, both below, and it
+          // waits only after the turn that follows ends by itself. Its
+          // monitors keep checking meanwhile, and a wake that lands while
+          // nobody is parked is held for the next ask.
+          const waiting = aborted === undefined ? monitors?.wait(owner) : undefined
           if (waiting !== undefined) {
             node.waitingOn = waiting.on
             save(run)
+            // A parked node follows its run through a pause and out of it: a
+            // paused run has nothing running in it, so the node reads paused
+            // for as long as the pause lasts. It goes on saying what it is
+            // waiting on throughout, because it is still waiting on it, and
+            // its monitors keep checking either way.
+            const parkedNode = node
+            let parkedOnWake = true
+            const followPause = async (): Promise<void> => {
+              // It follows the pause for exactly as long as the node is parked
+              // and its run is somebody's to pause: a released node, or a
+              // process on its way out, leaves the record where it stands.
+              while (parkedOnWake && !finished && releasedBecause === undefined) {
+                const wanted = pauseAsked() ? 'paused' : 'running'
+                if (
+                  parkedNode.status !== wanted &&
+                  (parkedNode.status === 'running' || parkedNode.status === 'paused')
+                ) {
+                  parkedNode.status = wanted
+                  save(run)
+                }
+                await sleep(pollMs)
+              }
+            }
+            void followPause()
             let woken: { readonly text: string }
             try {
               woken = await waiting.wake
             } catch (cause) {
+              parkedOnWake = false
               delete node.waitingOn
               save(run)
               bailIfReleased()
@@ -1197,6 +1241,8 @@ export function createWorkflowEngine(options: EngineOptions): WorkflowEngine {
               bailIfReleased()
               await sleep(pollMs)
             }
+            parkedOnWake = false
+            if (node.status === 'paused') node.status = 'running'
             bailIfReleased()
             node.lastActivityAt = nowIso()
             save(run)
@@ -1207,7 +1253,6 @@ export function createWorkflowEngine(options: EngineOptions): WorkflowEngine {
           // Pause parks the node between turns; the interrupter aborted any
           // in-flight turn. Completed or blocked work above is honored first.
           if (pauseAsked() && releasedBecause === undefined) {
-            watchdogAborted = false
             node.status = 'paused'
             delete node.now
             save(run)
@@ -1225,8 +1270,7 @@ export function createWorkflowEngine(options: EngineOptions): WorkflowEngine {
             continue
           }
 
-          if (watchdogAborted) {
-            watchdogAborted = false
+          if (aborted === 'watchdog') {
             message =
               `Your work was interrupted: no activity for ${Math.round(quietAbortMs / 60000)}+ ` +
               'minutes — almost certainly a hung or runaway tool call. The in-flight call was ' +

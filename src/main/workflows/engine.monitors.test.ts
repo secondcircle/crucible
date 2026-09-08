@@ -151,6 +151,55 @@ function repoRig(
   return { rig: built, prompts }
 }
 
+/**
+ * A node session whose first turn hangs while streaming until something
+ * aborts it, whose second turn ends without completing, and whose third
+ * completes. The rig's own scripted sessions never stream, so nothing that
+ * aborts a live turn — the watchdog, a pause — can be reached through them.
+ */
+function hangingSessions(): {
+  readonly sessions: NodeSessionFactory
+  readonly prompts: string[]
+} {
+  const prompts: string[] = []
+  const sessions: NodeSessionFactory = {
+    async start(request): Promise<NodeSession> {
+      let turn = 0
+      let streaming = false
+      let release: (() => void) | undefined
+      let taskPrompt = ''
+      return {
+        async prompt(text: string): Promise<void> {
+          prompts.push(text.split('\n')[0])
+          turn += 1
+          if (turn === 1) {
+            taskPrompt = text
+            streaming = true
+            await new Promise<void>((resolve) => {
+              release = resolve
+            })
+            streaming = false
+            return
+          }
+          if (turn === 2) return
+          const report = /- (\S+) — report:/.exec(taskPrompt)?.[1]
+          if (report !== undefined) writeFileSync(report, 'done\n')
+          request.onComplete({ summary: 'finished' })
+        },
+        async abort(): Promise<void> {
+          release?.()
+        },
+        isStreaming: () => streaming,
+        stats: () => ({ toolCalls: 1, cost: 0.1, contextPercent: 10 }),
+        transcript: (): readonly TranscriptItem[] => [],
+        onActivity: () => () => {},
+        dispose: () => {}
+      }
+    }
+  }
+  return { sessions, prompts }
+}
+
 describe('a node that ends its turn waiting', () => {
   it('is waiting rather than quiet: no nudge, no stall, and the run stays running', async () => {
     const monitors = scriptedMonitors()
@@ -432,11 +481,20 @@ describe('a wait inside a paused run', () => {
 
     await until(() => monitors.asked.length > 0)
     built.engine.pause(run.id)
+
+    // Nothing in a paused run reads as running: the parked node pauses with
+    // it, and goes on saying what it is waiting on, because it still is.
+    await until(() => built.engine.runs()[0].nodes[0].status === 'paused')
+    expect(built.engine.runs()[0].nodes[0].waitingOn).toMatchObject({
+      description: 'the npm publish to land'
+    })
+
     monitors.wake('work', '⏳ Crucible monitor m-1 — condition met: the npm publish to land')
 
     // Released into nothing: the node is not prompted while the run is paused.
     await new Promise((resolve) => setTimeout(resolve, 60))
     expect(prompts).toHaveLength(1)
+    expect(built.engine.runs()[0].nodes[0].status).toBe('paused')
 
     await built.engine.resume(run.id)
     await until(() => built.engine.runs()[0].status === 'complete')
@@ -444,62 +502,54 @@ describe('a wait inside a paused run', () => {
     expect(prompts[1]).toContain('condition met')
     expect(prompts[1]).not.toContain('paused by a human')
   })
+
+  // The other half of the same rule: a pause that aborts a node's turn pauses
+  // the node, live monitor or not. A turn somebody else stopped is not a turn
+  // the node ended, so it does not start waiting on it — it stops where the
+  // pause caught it, and picks the work back up on Resume.
+  it('pauses a node it caught mid-turn rather than parking it on the wake', async () => {
+    const monitors = scriptedMonitors()
+    monitors.waits.set('work', {
+      description: 'the npm publish to land',
+      since: '2026-09-08T10:00:00.000Z'
+    })
+    const { sessions, prompts } = hangingSessions()
+    const built = rig({ solo: oneNode }, () => () => {}, { monitors, sessions })
+    const prompt = join(built.repo, 'task.md')
+    writeFileSync(prompt, 'do it\n')
+    const run = await built.engine.start(startRequest(built.repo, 'solo', { prompt }))
+
+    await until(() => built.engine.runs()[0].nodes[0].now !== undefined || prompts.length > 0)
+    built.engine.pause(run.id)
+
+    // Paused, and saying so: not running, and not waiting on anything.
+    await until(() => built.engine.runs()[0].nodes[0].status === 'paused')
+    expect(built.engine.runs()[0].nodes[0].waitingOn).toBeUndefined()
+    expect(monitors.asked).toEqual([])
+
+    await built.engine.resume(run.id)
+    // Resumed with the work, then waiting once that turn ends by itself.
+    await until(() => monitors.asked.length > 0)
+    expect(prompts[1]).toContain('paused by a human')
+    monitors.wake('work', '⏳ Crucible monitor m-1 — condition met: the npm publish to land')
+    await until(() => built.engine.runs()[0].status === 'complete')
+    expect(prompts[2]).toContain('condition met')
+  })
 })
 
-// Review 3. The wait branch sits ahead of the watchdog branch in the node
-// loop, and does not consume `watchdogAborted`. A turn the watchdog cut short
-// while a monitor is live therefore parks the node on the wake with the flag
-// still raised, and the "your work was interrupted" message is delivered to
-// whatever turn comes after the wake's, about an abort two turns gone.
+// A turn the watchdog cut short is not a turn the node ended, so a live
+// monitor neither defers nor replaces the report of the abort: the node hears
+// about it on the very next prompt, and starts waiting only after the turn
+// that follows ends on its own.
 describe('a watchdog abort while a monitor is live', () => {
-  it('does not deliver the interruption message to a later turn', async () => {
+  it('reports the abort at once and waits only after the next turn ends by itself', async () => {
     const monitors = scriptedMonitors()
     monitors.waits.set('work', {
       description: 'CI on PR #482 to finish',
       since: '2026-09-08T10:00:00.000Z'
     })
 
-    // A session whose first turn hangs, streaming, until it is aborted; whose
-    // second turn (the wake's) ends without completing; and whose third
-    // completes. The rig's own scripted sessions never stream, so the
-    // watchdog could not fire on them.
-    const prompts: string[] = []
-    const sessions: NodeSessionFactory = {
-      async start(request): Promise<NodeSession> {
-        let turn = 0
-        let streaming = false
-        let release: (() => void) | undefined
-        let taskPrompt = ''
-        return {
-          async prompt(text: string): Promise<void> {
-            prompts.push(text.split('\n')[0])
-            turn += 1
-            if (turn === 1) {
-              taskPrompt = text
-              streaming = true
-              await new Promise<void>((resolve) => {
-                release = resolve
-              })
-              streaming = false
-              return
-            }
-            if (turn === 2) return
-            const report = /- (\S+) — report:/.exec(taskPrompt)?.[1]
-            if (report !== undefined) writeFileSync(report, 'done\n')
-            request.onComplete({ summary: 'finished' })
-          },
-          async abort(): Promise<void> {
-            release?.()
-          },
-          isStreaming: () => streaming,
-          stats: () => ({ toolCalls: 1, cost: 0.1, contextPercent: 10 }),
-          transcript: (): readonly TranscriptItem[] => [],
-          onActivity: () => () => {},
-          dispose: () => {}
-        }
-      }
-    }
-
+    const { sessions, prompts } = hangingSessions()
     const built = rig({ solo: oneNode }, () => () => {}, {
       monitors,
       sessions,
@@ -510,14 +560,16 @@ describe('a watchdog abort while a monitor is live', () => {
     writeFileSync(prompt, 'do it\n')
     await built.engine.start(startRequest(built.repo, 'solo', { prompt }))
 
-    // The watchdog aborts the hung turn; the node then parks on its monitor.
+    // The watchdog aborts the hung turn; the node is told so, works its
+    // second turn, and only then parks on its monitor.
     await until(() => monitors.asked.length > 0)
     monitors.wake('work', '⏳ Crucible monitor m-1 — condition met: CI on PR #482 to finish')
     await until(() => built.engine.runs()[0].status === 'complete')
 
-    expect(prompts[1]).toContain('condition met')
-    // The turn after the wake's is an ordinary nudge, not a report of an
-    // abort that happened before the node ever started waiting.
-    expect(prompts[2]).not.toContain('Your work was interrupted')
+    // The abort is the next thing the node reads, not something it hears
+    // about two turns later or never.
+    expect(prompts[1]).toContain('Your work was interrupted')
+    expect(prompts[2]).toContain('condition met')
+    expect(prompts.slice(2).join('\n')).not.toContain('Your work was interrupted')
   })
 })
