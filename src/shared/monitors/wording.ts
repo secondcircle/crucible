@@ -1,6 +1,7 @@
 import type { SystemMessage } from '../agent/port'
 import {
   boundOutput,
+  numericSeconds,
   timingInForce,
   WAKE_OUTPUT_CHARS,
   type LiveMonitor,
@@ -46,9 +47,11 @@ export function endingTone(reason: WakeReason): 'monitor' | 'warn' | 'bad' {
 
 /**
  * The wake: what the agent reads and what the person sees, built from the same
- * facts in the same call. The last output is bounded here and says so when it
- * was cut; the full retained output stays in the chip's detail until the chip
- * goes.
+ * facts in the same call. Everything the wake carries of what the check
+ * printed is bounded here and says so when it was cut — the last output and a
+ * broken check's error alike, because that error is the same bytes coming the
+ * other way. The full retained output stays in the chip's detail until the
+ * chip goes.
  */
 export function composeWake(facts: WakeFacts): SystemMessage {
   const { ending, description, waitedMs, checks } = facts
@@ -59,7 +62,10 @@ export function composeWake(facts: WakeFacts): SystemMessage {
       : boundOutput(facts.lastOutput.text, WAKE_OUTPUT_CHARS)
   const cut = carried?.truncated === true || facts.lastOutput?.truncated === true
 
-  const error = ending.reason === 'broke' ? ending.error.trim() : undefined
+  const carriedError =
+    ending.reason === 'broke' ? boundOutput(ending.error, WAKE_OUTPUT_CHARS) : undefined
+  const error = carriedError?.text.trim()
+  const errorCut = carriedError?.truncated === true
   const output = carried?.text.trim() ?? ''
   // A broken check's error usually is its last output; saying it twice makes
   // the wake read like a machine rather than a report.
@@ -73,7 +79,10 @@ export function composeWake(facts: WakeFacts): SystemMessage {
     '',
     `Waited ${longDuration(waitedMs)} over ${checks} ${checks === 1 ? 'check' : 'checks'}.`
   ]
-  if (error !== undefined) lines.push('', `The check stopped being runnable: ${error}`)
+  if (error !== undefined) {
+    lines.push('', `The check stopped being runnable: ${error}`)
+    if (errorCut) lines.push('(cut to the first part; the rest was not kept for you.)')
+  }
   if (output !== '' && !echoes) {
     lines.push('', 'Last output:', output)
     if (cut) lines.push('(cut to the first part; the rest was not kept for you.)')
@@ -86,7 +95,7 @@ export function composeWake(facts: WakeFacts): SystemMessage {
   )
 
   const bodyLines: string[] = []
-  if (error !== undefined) bodyLines.push(error)
+  if (error !== undefined) bodyLines.push(`${error}${errorCut ? ' …' : ''}`)
   if (output !== '' && !echoes) bodyLines.push(`last output: ${output}${cut ? ' …' : ''}`)
 
   return {
@@ -200,11 +209,11 @@ export function monitorCallSummary(args: unknown): string {
   const description = typeof given.description === 'string' ? given.description.trim() : ''
   // The same bounds the model applies, so the row never states a cadence the
   // monitor is not actually running at.
+  const intervalSeconds = numericSeconds(given.intervalSeconds)
+  const timeoutSeconds = numericSeconds(given.timeoutSeconds)
   const { intervalMs, timeoutMs } = timingInForce({
-    ...(typeof given.intervalSeconds === 'number'
-      ? { intervalSeconds: given.intervalSeconds }
-      : {}),
-    ...(typeof given.timeoutSeconds === 'number' ? { timeoutSeconds: given.timeoutSeconds } : {})
+    ...(intervalSeconds === undefined ? {} : { intervalSeconds }),
+    ...(timeoutSeconds === undefined ? {} : { timeoutSeconds })
   })
   return [
     description === '' ? 'a monitor' : description,

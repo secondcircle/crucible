@@ -62,6 +62,19 @@ export function timingInForce(asked: {
   }
 }
 
+// π's repairing parser hands a number over as a string often enough that both
+// readers of a raw `crucible_monitor` call — the tool boundary that sets the
+// monitor and the tool row's summary that says what it runs at — have to read
+// one the same way, or the row states a cadence nothing is running at.
+export function numericSeconds(value: unknown): number | undefined {
+  if (typeof value === 'number' && Number.isFinite(value)) return value
+  if (typeof value !== 'string') return undefined
+  const trimmed = value.trim()
+  if (trimmed === '') return undefined
+  const parsed = Number(trimmed)
+  return Number.isFinite(parsed) ? parsed : undefined
+}
+
 function seconds(asked: number | undefined): number | undefined {
   if (asked === undefined || !Number.isFinite(asked)) return undefined
   return asked * 1000

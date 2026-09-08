@@ -4,6 +4,7 @@ import {
   INTERVAL_FLOOR_MS,
   TIMEOUT_CEILING_MS,
   TIMEOUT_DEFAULT_MS,
+  numericSeconds,
   type MonitorOwner
 } from '../monitors/monitor'
 
@@ -169,8 +170,8 @@ export function monitorRequestFrom(params: unknown): MonitorRequest {
     )
   }
 
-  const intervalSeconds = numeric(given.intervalSeconds)
-  const timeoutSeconds = numeric(given.timeoutSeconds)
+  const intervalSeconds = numericSeconds(given.intervalSeconds)
+  const timeoutSeconds = numericSeconds(given.timeoutSeconds)
   return {
     description,
     reason,
@@ -184,12 +185,6 @@ function text(value: unknown): string {
   return typeof value === 'string' ? value.trim() : ''
 }
 
-function numeric(value: unknown): number | undefined {
-  if (typeof value === 'number' && Number.isFinite(value)) return value
-  if (typeof value !== 'string') return undefined
-  const parsed = Number(value.trim())
-  return Number.isFinite(parsed) && value.trim() !== '' ? parsed : undefined
-}
 
 // An adapter is handed behaviors rather than the model itself. Every method
 // resolves with exactly the text the tool result must show; a failure throws,

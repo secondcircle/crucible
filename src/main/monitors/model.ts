@@ -380,7 +380,10 @@ export function createMonitorModel(options: MonitorModelOptions): MainMonitorSer
       return
     }
 
-    const stderr = result.stderr.trim()
+    // Bounded once, here, before it becomes either a strike the store keeps on
+    // every check or the error a wake carries: a chatty failing check keeps of
+    // its stderr exactly what the record keeps of any other output.
+    const stderr = boundOutput(result.stderr, RETAINED_OUTPUT_CHARS).text.trim()
 
     if (result.exitCode === 126 || result.exitCode === 127) {
       replace({ ...record, checks: record.checks + 1, last })
