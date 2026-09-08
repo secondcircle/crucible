@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { WAKE_OUTPUT_CHARS, type WakeFacts } from './monitor'
+import { RETAINED_OUTPUT_CHARS, WAKE_OUTPUT_CHARS, type WakeFacts } from './monitor'
 import {
   briefDuration,
   composeWake,
@@ -74,6 +74,22 @@ describe('the wake', () => {
     )
     expect(wake.text).toMatch(/cut to the first part/)
     expect(wake.text.length).toBeLessThan(WAKE_OUTPUT_CHARS + 800)
+  })
+
+  // A broken check's error is the output the wake carries for that ending, so
+  // it is bounded like any other: a compile dump or a stack trace on stderr
+  // must not become a megabyte of a model's context, and the detail's retained
+  // copy must not end up the poorer of the two.
+  it('bounds the error a broken check carries, as it bounds any other output', () => {
+    const noise = 'x'.repeat(500_000)
+    const wake = composeWake(
+      facts({
+        ending: { reason: 'broke', error: noise },
+        lastOutput: { text: noise.slice(0, RETAINED_OUTPUT_CHARS), truncated: true }
+      })
+    )
+    expect(wake.text.length).toBeLessThan(WAKE_OUTPUT_CHARS + 800)
+    expect(wake.card?.body?.length ?? 0).toBeLessThan(WAKE_OUTPUT_CHARS + 800)
   })
 
   it('says plainly when the check printed nothing at all', () => {
@@ -200,6 +216,21 @@ describe('the tool row\u2019s summary', () => {
     expect(monitorCallSummary({ description: 'a port to free up', intervalSeconds: 1 })).toContain(
       'every 5s'
     )
+  })
+
+  // The row is composed from the raw tool arguments, and the model boundary
+  // reads a numeric string as the number it means, so the row has to read it
+  // the same way or it states a cadence the monitor is not running at.
+  it('reads a numeric string as the number the monitor was set with', () => {
+    expect(
+      monitorCallSummary({
+        description: 'CI on PR #482 to finish',
+        reason: 'so I can read the failing job',
+        command: 'gh pr checks 482',
+        intervalSeconds: '45',
+        timeoutSeconds: '600'
+      })
+    ).toBe('CI on PR #482 to finish · every 45s · up to 10m')
   })
 
   it('says something sensible about a call that named nothing', () => {

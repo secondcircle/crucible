@@ -1,6 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { SessionId, SystemMessage } from '../../shared/agent/port'
-import type { MonitorOwner } from '../../shared/monitors/monitor'
+import {
+  RETAINED_OUTPUT_CHARS,
+  WAKE_OUTPUT_CHARS,
+  type MonitorOwner
+} from '../../shared/monitors/monitor'
 import type { MainMonitorService } from '../../shared/monitors/service'
 import type { CheckResult, CheckRun, CheckRunner } from './check-runner'
 import { createMonitorModel, type MonitorRecord } from './model'
@@ -362,6 +366,31 @@ describe('how a monitor ends', () => {
     expect(rig.delivered[0].message.text).toContain('check broke')
     expect(rig.delivered[0].message.text).toContain('Not logged in')
     expect(rig.delivered[0].message.text).toContain('3 checks')
+  })
+
+  // The record keeps a strike's stderr so the next check can be compared with
+  // it, and that copy is written to the store on every check and handed to the
+  // wake when the third strike lands. A chatty failing check must not grow
+  // either without limit.
+  it('keeps a chatty failure bounded, in the record and in the wake it becomes', async () => {
+    const rig = rigOf()
+    const noise = `${'x'.repeat(500_000)}\n`
+    rig.checks.script(REQUEST.command, [
+      { kind: 'exited', exitCode: 4, output: noise, stderr: noise }
+    ])
+    await rig.model.tools.set(SESSION, '/repos', REQUEST)
+    await beat()
+
+    // Two strikes in: still live, and what the store holds of the failure is
+    // no more than a retained output ever is.
+    const stored = JSON.stringify(rig.store.current)
+    expect(stored.length).toBeLessThan(4 * RETAINED_OUTPUT_CHARS)
+
+    await tick(30_000)
+    await tick(30_000)
+    expect(rig.delivered).toHaveLength(1)
+    expect(rig.delivered[0].message.text).toContain('check broke')
+    expect(rig.delivered[0].message.text.length).toBeLessThan(WAKE_OUTPUT_CHARS + 800)
   })
 
   it('never breaks on a quiet non-zero exit, however often it repeats', async () => {
