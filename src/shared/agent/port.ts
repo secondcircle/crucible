@@ -27,6 +27,12 @@ export interface WorkspaceState {
   readonly name: string
   /** An OS fact, never a π storage fact. */
   readonly path: string
+  // ISO of the last moment something was used in one of this workspace's
+  // sessions. Absent means nothing ever has been, which is what puts a
+  // workspace at the bottom of the sidebar's list. A fact about the workspace
+  // and not a roll-up of its sessions: forgetting a session does not unwind
+  // what happened in it.
+  readonly lastUsedAt?: string
 }
 
 // π's two kinds, adopted verbatim: steering redirects the live turn at the

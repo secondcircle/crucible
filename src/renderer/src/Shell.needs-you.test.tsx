@@ -229,7 +229,8 @@ describe('a session with a run working in its name', () => {
     await turn(port, 's2')
 
     expect(screen.getByRole('button', { name: `${NEARBY} (run working)` })).toBeInTheDocument()
-    expect(screen.queryByTitle(/waiting on you/)).toBeNull()
+    // The workspace row's amber count, which names the workspace it counts in.
+    expect(screen.queryByTitle(/waiting on you in/)).toBeNull()
     expect(service.counts.at(-1)).toBe(0)
     expect(service.banners).toEqual([])
 

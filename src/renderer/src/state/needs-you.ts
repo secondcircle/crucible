@@ -1,4 +1,4 @@
-import type { SessionId, SessionState, ShellSnapshot } from '../../../shared/agent/port'
+import type { SessionId, SessionState, WorkspaceState } from '../../../shared/agent/port'
 import type { RunRecord } from '../../../shared/workflows/run'
 import { runIsWorking } from '../runs/bands'
 
@@ -39,9 +39,17 @@ export function finishedAsking(
 
 // The sidebar's own order: workspaces top to bottom, and within each the
 // sessions it lists. Tab walks this, so the key goes where the eye would.
-export function railOrder(snapshot: ShellSnapshot): readonly SessionState[] {
-  return snapshot.workspaces.flatMap((workspace) =>
-    snapshot.sessions.filter((session) => session.workspaceId === workspace.id)
+//
+// The workspaces are handed in already ordered rather than taken from the
+// snapshot, because the sidebar no longer lists them in store order and the
+// walk must not disagree with the eye. A plain array, so this module never
+// imports the sidebar's own.
+export function railOrder(
+  workspaces: readonly WorkspaceState[],
+  sessions: readonly SessionState[]
+): readonly SessionState[] {
+  return workspaces.flatMap((workspace) =>
+    sessions.filter((session) => session.workspaceId === workspace.id)
   )
 }
 
@@ -52,8 +60,11 @@ export function railOrder(snapshot: ShellSnapshot): readonly SessionState[] {
  * mark, so pressing Tab repeatedly empties the queue from the top down, and
  * crosses into the next workspace when this one is clear.
  */
-export function nextAsking(snapshot: ShellSnapshot, marks: Marks): SessionState | undefined {
-  return railOrder(snapshot).find((session) => marks.has(session.id))
+export function nextAsking(
+  rail: readonly SessionState[],
+  marks: Marks
+): SessionState | undefined {
+  return rail.find((session) => marks.has(session.id))
 }
 
 /** The total, which is what the dock badge carries. */

@@ -1,5 +1,7 @@
 import type { SessionId, ShellSnapshot, WorkspaceId } from '../../../shared/agent/port'
 import { useClock } from '../clock'
+import { hairline, idleWorkspaces, rows, type SidebarModel } from '../sidebar/model'
+import type { Folding } from '../sidebar/use-folded'
 import { waitedFor, type MonitorActivity } from '../monitors/activity'
 // Titles are the model's now, so the row shows a title and a relative time;
 // sessionLabel is gone.
@@ -37,8 +39,15 @@ import './sidebar.css'
 // Every workspace lists its sessions, active or not, because work in one
 // workspace keeps running while another is in front. Only the human removes a
 // session from the list. A workspace with no sessions still gets its row.
+//
+// A folded workspace shows its own row and nothing else: the dot, the two
+// counts and, in the times' faint mono, how many session rows the fold hid.
+// Which rows are folded is the Shell's state, and so is their order — this
+// component renders what it is handed and decides neither.
 export function Sidebar({
   snapshot,
+  model,
+  folding,
   needsYou,
   runActivity,
   waiting: waitActivity,
@@ -57,6 +66,14 @@ export function Sidebar({
   version
 }: {
   readonly snapshot: ShellSnapshot
+  // The order, the dots and what is in use, all decided above. The workspace
+  // rows come from `model.ordered` and never from `snapshot.workspaces`:
+  // `snapshot` is read for sessions and for the two active ids.
+  readonly model: SidebarModel
+  // The folded set and the only three verbs that change it. There is no verb
+  // for folding on activity or unfolding on idleness, which is why neither
+  // can happen.
+  readonly folding: Folding
   // Sessions whose turn ended while nobody was looking. In-memory only, and
   // the document above decides what goes in and what comes out.
   readonly needsYou: Marks
@@ -93,11 +110,18 @@ export function Sidebar({
     readonly onCheck: () => void
   }
 }): React.JSX.Element {
-  const { workspaces, activeWorkspaceId, sessions, activeSessionId } = snapshot
+  const { activeWorkspaceId, sessions, activeSessionId } = snapshot
   const now = useClock(
     sessions.some((session) => session.working) ||
       Object.keys(waitActivity ?? {}).length > 0
   )
+  const workspaces = rows(model.ordered)
+  // The line between the bands is drawn on the first row below it, so there is
+  // no list item where it sits for a screen reader to announce.
+  const bandStartId = hairline(model.ordered) ? model.ordered.older[0]?.id : undefined
+  // Recomputed every render from the live folded set, so "nothing left to fold"
+  // is one fact read here and by the click below rather than a mode to keep.
+  const idle = idleWorkspaces(workspaces, folding.folded, model.inUse)
 
   return (
     <nav className="side" aria-label="Workspaces and sessions">
@@ -112,35 +136,83 @@ export function Sidebar({
         New session
       </button>
 
-      <div className="wslabel">Workspaces</div>
+      {/* The label and the one list-wide action share a row, and the action
+          wears the label's own voice: it is furniture, not a feature. */}
+      <div className="wshead">
+        <div className="wslabel">Workspaces</div>
+        {/* aria-disabled rather than disabled: the click that folds the last
+            foldable workspace disables this control, and a browser drops focus
+            to the body when a focused element becomes disabled. */}
+        <button
+          className="collapseidle"
+          aria-disabled={idle.length === 0}
+          title="Collapse every workspace with nothing working, waiting on you, or in front of you"
+          onClick={() => {
+            if (idle.length === 0) return
+            folding.foldAll(idle)
+          }}
+        >
+          Collapse idle
+        </button>
+      </div>
 
       <ul className="wslist">
         {workspaces.map((workspace) => {
           const own = sessions.filter((session) => session.workspaceId === workspace.id)
           const active = workspace.id === activeWorkspaceId
           // The dot is the coarse mark, "something in here is working", so a
-          // live run lights it exactly as a live turn does. A collapsed
-          // workspace must not go dark over a run going on inside it.
-          const working = own.some(
-            (session) => session.working || runActivity[session.id] !== undefined
-          )
-          // The roll-up, so a collapsed or scrolled-past workspace still says
+          // live run lights it exactly as a live turn does. Read from the model
+          // rather than computed here, so the dot and what Collapse idle spares
+          // are the same set.
+          const working = model.working.has(workspace.id)
+          const folded = folding.folded.has(workspace.id)
+          // The roll-up, so a folded or scrolled-past workspace still says
           // how many of its sessions are waiting.
           const asking = own.filter((session) => needsYou.has(session.id)).length
           const board = boardNeedYou[workspace.id] ?? 0
 
           return (
             <li key={workspace.id}>
-              <div className={`ws${active ? ' active' : ''}${working ? ' working' : ''}`}>
+              <div
+                className={`ws${active ? ' active' : ''}${working ? ' working' : ''}${
+                  folded ? ' folded' : ''
+                }${workspace.id === bandStartId ? ' bandstart' : ''}`}
+              >
+                {/* In the row's left padding, where a tree puts it, so the
+                    names keep the left edge they have always had. */}
+                <button
+                  className="chev"
+                  aria-expanded={!folded}
+                  aria-label={`${folded ? 'Expand' : 'Collapse'} ${workspace.name}`}
+                  onClick={() => folding.toggle(workspace.id)}
+                >
+                  <span aria-hidden="true">▼</span>
+                </button>
                 <button
                   className="wsname"
                   aria-current={active ? 'true' : undefined}
                   aria-label={working ? `${workspace.name} (working)` : workspace.name}
-                  onClick={() => onActivateWorkspace(workspace.id)}
+                  onClick={() => {
+                    onActivateWorkspace(workspace.id)
+                    // Going to a folded workspace opens it: arriving somewhere
+                    // means seeing what is there.
+                    folding.unfold(workspace.id)
+                  }}
                 >
                   <span className="dot" aria-hidden="true" />
                   {workspace.name}
                 </button>
+                {/* What the fold hid, in the faint mono the row times use. A
+                    count of rows rather than of anything needing you, so it
+                    wears no pill. */}
+                {folded && own.length > 0 ? (
+                  <span
+                    className="wsc"
+                    title={`${own.length} ${own.length === 1 ? 'session' : 'sessions'} folded in ${workspace.name}`}
+                  >
+                    {own.length}
+                  </span>
+                ) : null}
                 {/* Sessions first and filled; the board's count after it and
                     outlined. Two counts of two different things, told apart
                     by weight rather than by position alone. */}
@@ -167,7 +239,7 @@ export function Sidebar({
                 </button>
               </div>
 
-              {own.length > 0 || active ? (
+              {!folded && (own.length > 0 || active) ? (
                 <ul className="sessions">
                   {own.map((session) => {
                     const title = session.title ?? UNTITLED

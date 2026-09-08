@@ -11,6 +11,7 @@ import { createScheduleClient } from './schedules/ipc-client'
 import { createMonitorClient } from './monitors/ipc-client'
 import { instanceBadge } from './bridge'
 import { Shell } from './Shell'
+import { localFoldedStore } from './sidebar/folded-store'
 import { createWorkspaceClient } from './workspace/ipc-client'
 import './styles/base.css'
 
@@ -33,6 +34,7 @@ function mountApp(): void {
         workflowRuns={createWorkflowRunClient()}
         schedules={createScheduleClient()}
         monitors={createMonitorClient()}
+        folded={localFoldedStore()}
         instance={instanceBadge()}
       />
     </StrictMode>

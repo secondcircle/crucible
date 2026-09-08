@@ -889,6 +889,76 @@ describe('a relaunch', () => {
   })
 })
 
+// The sidebar orders workspaces by when each was last used, so what stamps a
+// workspace matters as much as what does not: looking at one never may.
+describe('when a workspace was last used', () => {
+  const usedAt = async (workspaceId: string): Promise<string | undefined> =>
+    (await shell.snapshot()).workspaces.find((workspace) => workspace.id === workspaceId)
+      ?.lastUsedAt
+
+  it('is absent through adding a workspace, creating a session and activating', async () => {
+    const { workspaceId, sessionId } = await withSession()
+    await shell.activateWorkspace(workspaceId)
+    await shell.activateSession(sessionId)
+
+    expect(await usedAt(workspaceId)).toBeUndefined()
+  })
+
+  it('is stamped when a message is sent, and again when the turn ends', async () => {
+    const { workspaceId, sessionId } = await withSession()
+
+    await shell.prompt(sessionId, 'the first thing said here')
+    const sent = await usedAt(workspaceId)
+    await settled()
+
+    expect(sent).toBeDefined()
+    const ended = await usedAt(workspaceId)
+    expect(ended).toBeDefined()
+    expect(Date.parse(ended ?? '')).toBeGreaterThanOrEqual(Date.parse(sent ?? ''))
+  })
+
+  // Bringing a conversation back into the workspace is real activity, and the
+  // shell already records it as the session's; the workspace moves with it.
+  it('moves on when a conversation is resumed from history', async () => {
+    const { workspaceId, sessionId } = await withSession()
+    await shell.prompt(sessionId, 'said before the reset')
+    await settled()
+    await shell.resetSession(sessionId)
+    const [match] = await shell.searchHistory(workspaceId, 'said before the reset')
+    const before = await usedAt(workspaceId)
+    await new Promise((resolve) => setTimeout(resolve, 5))
+
+    await shell.resumeSession(workspaceId, match.ref)
+
+    expect(Date.parse((await usedAt(workspaceId)) ?? '')).toBeGreaterThan(
+      Date.parse(before ?? '')
+    )
+  })
+
+  it('stands where it was when the session it came from is forgotten', async () => {
+    const { workspaceId, sessionId } = await withSession()
+    await shell.prompt(sessionId, 'said once')
+    await settled()
+    const stamped = await usedAt(workspaceId)
+
+    await shell.removeSession(sessionId)
+
+    expect(await usedAt(workspaceId)).toBe(stamped)
+  })
+
+  it('survives a relaunch, which is what keeps the list in its order', async () => {
+    const { workspaceId, sessionId } = await withSession()
+    await shell.prompt(sessionId, 'said before the relaunch')
+    await settled()
+    const stamped = await usedAt(workspaceId)
+    shell.dispose()
+
+    build()
+
+    expect(await usedAt(workspaceId)).toBe(stamped)
+  })
+})
+
 // The fake adapter is built with no pause, so one macrotask turn is past its
 // whole script however long that grows.
 async function settled(): Promise<void> {

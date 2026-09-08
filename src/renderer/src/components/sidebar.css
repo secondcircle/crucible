@@ -41,12 +41,44 @@
   cursor: default;
 }
 
-.wslabel {
+/* The label and the list's one action share a row: the label takes the width
+   and Collapse idle sits on the right edge, in the label's own voice. */
+.wshead {
+  display: flex;
+  align-items: center;
   padding: 4px 16px;
+}
+
+.wslabel {
+  flex: 1;
   font-size: 10.5px;
   text-transform: uppercase;
   letter-spacing: 0.12em;
   color: var(--faint);
+}
+
+.collapseidle {
+  background: none;
+  border: none;
+  padding: 0 0 0 8px;
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--faint);
+  margin-right: -2px;
+}
+
+.collapseidle:hover {
+  color: var(--dim);
+}
+
+/* Keyed off the ARIA state rather than :disabled, because the control stays in
+   the tab order and keeps focus through the click that empties it. */
+.collapseidle[aria-disabled='true'],
+.collapseidle[aria-disabled='true']:hover {
+  opacity: 0.45;
+  color: var(--faint);
+  cursor: default;
 }
 
 .wslist {
@@ -56,6 +88,24 @@
   flex: 1;
   min-height: 0;
   overflow-y: auto;
+  /* Thinner than the app's default, and the thumb is the line color: the list
+     scrolls without a bar competing with the rows. */
+  scrollbar-width: thin;
+  scrollbar-color: var(--line) transparent;
+}
+
+.wslist::-webkit-scrollbar {
+  width: 8px;
+}
+
+.wslist::-webkit-scrollbar-thumb {
+  background: var(--line);
+  border-radius: 4px;
+  border: 2px solid var(--bg2);
+}
+
+.wslist::-webkit-scrollbar-track {
+  background: transparent;
 }
 
 .ws {
@@ -65,12 +115,64 @@
   padding-right: var(--gutter);
 }
 
+/* The line between the bands, drawn on the first row below it rather than as a
+   row of its own: nothing sits there to be announced or focused. */
+.ws.bandstart {
+  margin-top: 15px;
+}
+
+.ws.bandstart::before {
+  content: '';
+  position: absolute;
+  left: 16px;
+  right: 16px;
+  top: -8px;
+  height: 1px;
+  background: var(--line);
+}
+
+/* The disclosure lives in the left padding, where a tree puts it, so the names
+   keep their left edge. Invisible at rest, faint on row hover or on keyboard
+   focus; it never competes with the dot. */
+.chev {
+  flex: none;
+  width: 16px;
+  height: 30px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: none;
+  color: transparent;
+  padding: 0;
+  font-size: 9px;
+  transition: transform 0.12s;
+}
+
+.ws:hover .chev,
+.chev:focus-visible {
+  color: var(--faint);
+}
+
+.ws.folded .chev {
+  transform: rotate(-90deg);
+}
+
+/* How many session rows the fold hid, in the faint mono of the times. Not a
+   pill: it counts rows, not anything wanting you. */
+.ws .wsc {
+  font: 10.5px var(--mono);
+  color: var(--faint);
+  flex: none;
+  margin-right: 6px;
+}
+
 .ws .wsname {
   flex: 1;
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 7px 8px 7px 16px;
+  padding: 7px 8px 7px 0;
   font-size: 13px;
   color: var(--dim);
   background: none;
@@ -335,7 +437,9 @@
 .ws:hover .n,
 .ws:focus-within .n,
 .ws:hover .wsn,
-.ws:focus-within .wsn {
+.ws:focus-within .wsn,
+.ws:hover .wsc,
+.ws:focus-within .wsc {
   visibility: hidden;
 }
 

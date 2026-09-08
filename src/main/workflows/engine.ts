@@ -5,6 +5,7 @@ import type { SessionId, TranscriptItem } from '../../shared/agent/port'
 import {
   dismissRefusal,
   INTERRUPTED_MESSAGE,
+  latestNodeActivity,
   resumeRefusal,
   runMessageHeader,
   type RunArtifact,
@@ -1626,15 +1627,11 @@ export function createWorkflowEngine(options: EngineOptions): WorkflowEngine {
   }
 }
 
-// The last moment any node of this run was seen doing something, which is the
-// most honest stop time a swept record can be given. Absent when no node ever
-// recorded activity at all.
+// The most honest stop time a swept record can be given. The rule itself lives
+// beside the record, because the sidebar reads the same fact about a stopped
+// run when it decides which band that run's workspace sits in.
 function latestNodeStop(run: LiveRun): string | undefined {
-  const stamps = run.nodes
-    .flatMap((node) => [node.lastActivityAt, node.endedAt])
-    .filter((at): at is string => at !== undefined)
-  if (stamps.length === 0) return undefined
-  return stamps.reduce((latest, at) => (Date.parse(at) > Date.parse(latest) ? at : latest))
+  return latestNodeActivity(run)
 }
 
 // An interrupted node back to the pending ghost the plan first drew: same id,

@@ -198,6 +198,23 @@ export function isRunMessage(text: string): boolean {
   return text.startsWith(RUN_MESSAGE_PREFIX)
 }
 
+/**
+ * The last moment any node of this run was seen doing something, ISO. Absent
+ * when no node ever recorded activity.
+ *
+ * Two readers, one definition: it is the most honest stop time a swept record
+ * can be given, and it is what a stopped run says about when its workspace was
+ * last used. Two copies would drift, and a workspace in the wrong band is a
+ * silent failure.
+ */
+export function latestNodeActivity(run: Pick<RunRecord, 'nodes'>): string | undefined {
+  const stamps = run.nodes
+    .flatMap((node) => [node.lastActivityAt, node.endedAt])
+    .filter((at): at is string => at !== undefined)
+  if (stamps.length === 0) return undefined
+  return stamps.reduce((latest, at) => (Date.parse(at) > Date.parse(latest) ? at : latest))
+}
+
 /** Billed dollars across the run's nodes, which is what the chip shows. */
 export function runCost(run: RunRecord): number | undefined {
   const costs = run.nodes
