@@ -3,7 +3,7 @@
 // What the scheduler is told the repository declares, read through the real
 // loader over real files: the `schedule` field as an author writes it, and
 // the boundary that keeps a user-level or built-in schedule out of it.
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -81,6 +81,34 @@ describe('what the scheduler reads', () => {
     const declared = await reader(user)(workspace)
 
     expect(declared.map((schedule) => schedule.workflow)).toEqual(['repo'])
+  })
+
+  // It never loads one either. A listing transforms every file it loads and
+  // runs its module body, and this listing happens every 30 seconds in every
+  // open workspace: a user workflow that can never fire on a clock should
+  // cost nothing at all.
+  it('does not even execute a user workflow file', async () => {
+    const user = tempDir()
+    const workspace = tempDir()
+    const marker = join(tempDir(), 'ran')
+    write(
+      user,
+      'heavy',
+      `import { writeFileSync } from 'node:fs'\n` +
+        `import { workflow } from 'crucible:workflow'\n` +
+        `writeFileSync(${JSON.stringify(marker)}, 'the module body ran')\n` +
+        `export default workflow({\n` +
+        `  description: 'the heavy workflow',\n` +
+        `  inputs: {},\n` +
+        `  run: async () => {}\n` +
+        `})\n`
+    )
+    workflowFile(join(workspace, '.crucible', 'workflows'), 'repo', `  schedule: { cron: '0 9 * * *' },\n`)
+
+    const declared = await reader(user)(workspace)
+
+    expect(declared.map((schedule) => schedule.workflow)).toEqual(['repo'])
+    expect(existsSync(marker)).toBe(false)
   })
 
   it('says a workflow declares inputs, which a scheduled fire cannot supply', async () => {

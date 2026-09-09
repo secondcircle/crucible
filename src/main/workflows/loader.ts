@@ -27,8 +27,14 @@ export interface LoadedWorkflow {
 }
 
 export interface WorkflowLoader {
-  /** Every winner of the origin ladder, loaded, sorted by name. */
-  list(workspacePath: string): Promise<readonly LoadedWorkflow[]>
+  /**
+   * Every winner of the origin ladder, loaded, sorted by name. Given an
+   * origin, only the winners from that origin are loaded at all: loading a
+   * file transforms it and runs its module body, so a caller that will
+   * discard an origin should never ask for it. The scheduler asks every 30
+   * seconds and wants workspace files only.
+   */
+  list(workspacePath: string, origin?: WorkflowOrigin): Promise<readonly LoadedWorkflow[]>
   /** The ladder's winner for one name. Unknown names and broken files throw. */
   resolve(workspacePath: string, name: string): Promise<LoadedWorkflow>
 }
@@ -96,9 +102,10 @@ export function createWorkflowLoader({
   }
 
   return {
-    async list(workspacePath: string): Promise<readonly LoadedWorkflow[]> {
+    async list(workspacePath: string, origin?: WorkflowOrigin): Promise<readonly LoadedWorkflow[]> {
       const listed: LoadedWorkflow[] = []
       for (const found of discover(workspacePath).values()) {
+        if (origin !== undefined && found.origin !== origin) continue
         // A broken file is skipped and reported; it never takes the rest of
         // the catalog down with it.
         try {
