@@ -1,4 +1,4 @@
-import { readFileSync, statSync } from 'node:fs'
+import { readFile, stat } from 'node:fs/promises'
 import { basename, join } from 'node:path'
 import type { SessionId, TranscriptItem, Unsubscribe } from '../../shared/agent/port'
 import type { RunTools } from '../../shared/agent/run-tools'
@@ -211,7 +211,7 @@ export function createLiveWorkflowRunService({
     },
 
     async nodeTranscript(runId: string, nodeId: string): Promise<readonly TranscriptItem[]> {
-      return engine.nodeTranscript(runId, nodeId)
+      return await engine.nodeTranscript(runId, nodeId)
     },
 
     async artifact(runId: string, path: string): Promise<ArtifactView> {
@@ -220,9 +220,12 @@ export function createLiveWorkflowRunService({
       let bytes: number
       let modifiedAt: string | undefined
       try {
-        const stat = statSync(path)
-        bytes = stat.size
-        modifiedAt = stat.mtime.toISOString()
+        // Off the loop, both calls: an agent chose this file and nothing caps
+        // its size, so a 100 MB artifact would otherwise hold the window for
+        // the whole read.
+        const stamp = await stat(path)
+        bytes = stamp.size
+        modifiedAt = stamp.mtime.toISOString()
       } catch {
         throw new Error(`That artifact could not be read: ${basename(path)}.`)
       }
@@ -232,7 +235,7 @@ export function createLiveWorkflowRunService({
       try {
         return {
           kind,
-          body: readFileSync(path, 'utf8'),
+          body: await readFile(path, 'utf8'),
           bytes,
           ...(modifiedAt === undefined ? {} : { modifiedAt })
         }

@@ -1,4 +1,5 @@
-import { existsSync, readFileSync, statSync } from 'node:fs'
+import { existsSync, statSync } from 'node:fs'
+import { readFile } from 'node:fs/promises'
 import { basename, extname, isAbsolute, resolve } from 'node:path'
 import type { PanelTools } from '../../shared/agent/panel-tools'
 import type {
@@ -68,8 +69,8 @@ export interface PanelModel extends PanelTools {
   activate(sessionId: SessionId, tabId: TabId): void
   /** The user's ×: `panel_close` semantics without a result text. */
   closeTab(sessionId: SessionId, tabId: TabId): void
-  /** The exhibit's body, read at call time. Throws when it cannot be read. */
-  exhibit(sessionId: SessionId, tabId: TabId): string
+  /** The exhibit's body, read at call time. Rejects when it cannot be read. */
+  exhibit(sessionId: SessionId, tabId: TabId): Promise<string>
   /** Once per user instruction; drives "shown N turns ago" ages. */
   bumpTurn(sessionId: SessionId): void
   /** A session reset: a fresh conversation never inherits a ghost panel. */
@@ -278,14 +279,18 @@ export function createPanelModel({
       notify({ sessionId })
     },
 
-    exhibit(sessionId: SessionId, tabId: TabId): string {
+    // The agent chose this path through `panel_show`, so its size is the
+    // agent's and nothing caps it. Read off the loop: an 18 MB exhibit used to
+    // hold the window for the whole read, and a 500 MB one would hold it far
+    // longer.
+    async exhibit(sessionId: SessionId, tabId: TabId): Promise<string> {
       const tab = findTab(sessionId, tabId)
       if (tab === undefined) throw new Error('That tab is no longer in the context panel.')
       if (tab.kind === 'url') {
         throw new Error('That tab shows a web address; it has no file to read.')
       }
       try {
-        return readFileSync(tab.path, 'utf8')
+        return await readFile(tab.path, 'utf8')
       } catch {
         // The tab stays open whatever this says: curation is the agent's.
         throw new Error(`That exhibit could not be read: ${basename(tab.path)}`)

@@ -46,15 +46,15 @@ describe('run store', () => {
     expect(createRunStore(join(tempRoot(), 'never-made')).load()).toEqual([])
   })
 
-  it('keeps transcripts per node, revision ids included', () => {
+  it('keeps transcripts per node, revision ids included', async () => {
     const store = createRunStore(tempRoot())
     store.save(record('cc33', '2026-08-20T10:00:00.000Z'))
     store.writeTranscript('cc33', 'review·r1', [{ kind: 'assistant', markdown: 'judged.' }])
-    expect(store.readTranscript('cc33', 'review·r1')).toEqual([
+    await expect(store.readTranscript('cc33', 'review·r1')).resolves.toEqual([
       { kind: 'assistant', markdown: 'judged.' }
     ])
     // No transcript yet is an ordinary state, not a failure.
-    expect(store.readTranscript('cc33', 'builder')).toEqual([])
+    await expect(store.readTranscript('cc33', 'builder')).resolves.toEqual([])
   })
 
   it('makes an artifact directory on first ask', () => {
