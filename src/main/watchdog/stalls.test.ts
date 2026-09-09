@@ -34,6 +34,11 @@ const profile: CpuProfile = {
 
 describe('stallFrames', () => {
   it('sums self time by frame inside the stall window, heaviest first', () => {
+    expect(stallFrames(profile, 500)).toEqual([
+      { frame: 'readFileSync node:fs:1', ms: 300 },
+      { frame: '(idle)', ms: 100 },
+      { frame: 'load /app/store.js:42', ms: 100 }
+    ])
     expect(stallFrames(profile, 400)).toEqual([
       { frame: 'readFileSync node:fs:1', ms: 300 },
       { frame: 'load /app/store.js:42', ms: 100 }
@@ -109,6 +114,8 @@ describe('startStallWatchdog', () => {
     startStallWatchdog({
       log,
       profiler,
+      // The whole stall was spent computing.
+      cpuTime: () => time.at,
       profileDir: '/logs',
       writeProfile: (path) => {
         written.push(path)
@@ -127,6 +134,7 @@ describe('startStallWatchdog', () => {
     const record = JSON.parse(log.lines[0] ?? '{}') as Record<string, unknown>
     expect(record.event).toBe('main_stalled')
     expect(record.ms).toBe(400)
+    expect(record.cpuMs).toBe(450)
     expect(record.top).toEqual([
       { frame: 'readFileSync node:fs:1', ms: 300 },
       { frame: 'load /app/store.js:42', ms: 100 }
@@ -147,13 +155,19 @@ describe('startStallWatchdog', () => {
     startStallWatchdog({
       log,
       now: () => time.at,
+      // A process that waited the whole time, on a disk or a core.
+      cpuTime: () => 0,
       setInterval: (fn) => time.ticks.push(fn),
       clearInterval: () => {}
     })
     time.advance(1000)
     await Promise.resolve()
     expect(log.lines).toHaveLength(1)
-    expect(JSON.parse(log.lines[0] ?? '{}')).toMatchObject({ event: 'main_stalled', ms: 950 })
+    expect(JSON.parse(log.lines[0] ?? '{}')).toMatchObject({
+      event: 'main_stalled',
+      ms: 950,
+      cpuMs: 0
+    })
   })
 
   it('rotates the profile when nothing stalled for long enough', async () => {

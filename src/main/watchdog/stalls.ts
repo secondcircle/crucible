@@ -35,6 +35,8 @@ export interface StallWatchdogOptions {
   readonly profiler?: StallProfiler
   /** Injected clock and timers, for tests. */
   readonly now?: () => number
+  /** This process's CPU time so far, milliseconds; `process.cpuUsage` by default. */
+  readonly cpuTime?: () => number
   readonly setInterval?: (fn: () => void, ms: number) => unknown
   readonly clearInterval?: (handle: unknown) => void
 }
@@ -86,11 +88,16 @@ export function startStallWatchdog(options: StallWatchdogOptions): StallWatchdog
     samplingIntervalUs = 2000,
     profiler,
     now = () => performance.now(),
+    cpuTime = () => {
+      const used = process.cpuUsage()
+      return (used.user + used.system) / 1000
+    },
     setInterval: schedule = (fn, ms) => setInterval(fn, ms),
     clearInterval: unschedule = (handle) => clearInterval(handle as NodeJS.Timeout)
   } = options
 
   let expected = now() + tickMs
+  let cpuAtLastTick = cpuTime()
   let profiling = false
   let profileStartedAt = now()
   let attributing = false
@@ -127,17 +134,21 @@ export function startStallWatchdog(options: StallWatchdogOptions): StallWatchdog
     }
   }
 
-  async function stalled(lateMs: number): Promise<void> {
+  // `cpuMs` is what tells a stall's kinds apart: close to `ms` means this
+  // process was computing the whole time; far below it means it was waiting,
+  // on a disk or a child process (the frames say which), or it was starved
+  // of a core by something else on the machine, which shows as `(idle)`.
+  async function stalled(lateMs: number, cpuMs: number): Promise<void> {
     const ms = Math.round(lateMs)
     if (attributing) {
-      log.append({ source: 'main', event: 'main_stalled', ms })
+      log.append({ source: 'main', event: 'main_stalled', ms, cpuMs })
       return
     }
     attributing = true
     try {
       const profile = await takeProfile()
       if (profile === undefined) {
-        log.append({ source: 'main', event: 'main_stalled', ms })
+        log.append({ source: 'main', event: 'main_stalled', ms, cpuMs })
         return
       }
       const top = stallFrames(profile, ms)
@@ -155,6 +166,7 @@ export function startStallWatchdog(options: StallWatchdogOptions): StallWatchdog
         source: 'main',
         event: 'main_stalled',
         ms,
+        cpuMs,
         top,
         stack,
         ...(profilePath === undefined ? {} : { profile: profilePath })
@@ -169,8 +181,11 @@ export function startStallWatchdog(options: StallWatchdogOptions): StallWatchdog
     const at = now()
     const late = at - expected
     expected = at + tickMs
+    const cpu = cpuTime()
+    const cpuSinceLastTick = Math.round(cpu - cpuAtLastTick)
+    cpuAtLastTick = cpu
     if (late >= thresholdMs) {
-      void stalled(late)
+      void stalled(late, cpuSinceLastTick)
       return
     }
     if (profiling && at - profileStartedAt >= rotateMs && !attributing) {
@@ -209,7 +224,9 @@ function sampleTimes(profile: CpuProfile): readonly number[] {
 /**
  * Self time per frame inside the last `stallMs` of the profile, heaviest first.
  * V8's sampler keeps ticking while the thread is inside a synchronous call, so
- * the frame that made the call is where the time lands.
+ * the frame that made the call is where the time lands. `(idle)` is kept: a
+ * stall spent there is the thread not running JavaScript at all, which is a
+ * process starved of a core or blocked in native code with no frame to name.
  */
 export function stallFrames(profile: CpuProfile, stallMs: number, limit = 6): StallFrame[] {
   const samples = profile.samples ?? []
@@ -230,7 +247,7 @@ export function stallFrames(profile: CpuProfile, stallMs: number, limit = 6): St
   }
 
   return [...selfUs.entries()]
-    .filter(([key]) => key !== '(idle)' && key !== '(root)')
+    .filter(([key]) => key !== '(root)')
     .sort((left, right) => right[1] - left[1])
     .slice(0, limit)
     .map(([frame, us]) => ({ frame, ms: Math.round(us / 1000) }))
