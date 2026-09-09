@@ -5,6 +5,10 @@ import './overlay.css'
 
 // The one place adapter-managed history is looked at. A result shows a preview
 // and a time, never a path or anything else about how it is stored.
+
+/** Long enough that a typed word is one search, short enough to feel live. */
+const TYPING_MS = 150
+
 export function ResumeOverlay({
   onSearch,
   onChoose,
@@ -15,12 +19,24 @@ export function ResumeOverlay({
   readonly onClose: () => void
 }): React.JSX.Element {
   const [query, setQuery] = useState('')
+  // What has actually been searched for. Every search reads and parses every
+  // conversation in the workspace — 114 ms of main-process work for a 97 MB
+  // history — and the old effect fired one per character typed. The overlay
+  // opens on this being equal to the empty query, so the first listing is not
+  // delayed; typing is.
+  const [searched, setSearched] = useState('')
   const [results, setResults] = useState<readonly HistoryMatch[]>([])
   const [failure, setFailure] = useState<string | undefined>(undefined)
 
   useEffect(() => {
+    if (query === searched) return
+    const timer = setTimeout(() => setSearched(query), TYPING_MS)
+    return () => clearTimeout(timer)
+  }, [query, searched])
+
+  useEffect(() => {
     let current = true
-    onSearch(query)
+    onSearch(searched)
       .then((found) => {
         if (current) {
           setResults(found)
@@ -33,7 +49,7 @@ export function ResumeOverlay({
     return () => {
       current = false
     }
-  }, [query, onSearch])
+  }, [searched, onSearch])
 
   return (
     <div className="overlaybg" onMouseDown={onClose}>

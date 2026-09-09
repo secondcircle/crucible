@@ -290,6 +290,13 @@ describe('reset', () => {
 })
 
 describe('resume', () => {
+  /** Outwaits the overlay's typing debounce, on real timers. */
+  async function afterTyping(): Promise<void> {
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 250))
+    })
+  }
+
   async function openOverlay(): Promise<ScriptedPort> {
     const port = await shellWithSession()
     port.history = [
@@ -314,9 +321,33 @@ describe('resume', () => {
         target: { value: 'palette' }
       })
     })
+    await afterTyping()
 
     expect(port.calls).toContainEqual({ op: 'searchHistory', args: ['w1', 'palette'] })
     expect(within(overlay).getAllByRole('button')).toHaveLength(1)
+  })
+
+  // Every search reads and parses every conversation in the workspace, so a
+  // search per character typed is the whole history re-read five times for one
+  // word. The overlay's own listing still arrives the moment it opens.
+  it('searches once for a word, not once per letter', async () => {
+    const port = await openOverlay()
+    const overlay = screen.getByRole('dialog', { name: 'Resume session' })
+    const searches = (): number =>
+      port.calls.filter((call) => call.op === 'searchHistory').length
+    expect(searches()).toBe(1)
+
+    await act(async () => {
+      for (const typed of ['p', 'pa', 'pal', 'pale', 'palet', 'palett', 'palette']) {
+        fireEvent.change(within(overlay).getByLabelText('Search conversations'), {
+          target: { value: typed }
+        })
+      }
+    })
+    await afterTyping()
+
+    expect(searches()).toBe(2)
+    expect(port.calls.at(-1)).toEqual({ op: 'searchHistory', args: ['w1', 'palette'] })
   })
 
   it('shows a display-safe preview and a relative time, and no storage detail', async () => {
