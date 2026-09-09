@@ -180,6 +180,12 @@ export interface ScheduleSpec {
    * Optional gate, evaluated in-process at fire time. Truthy fires the run;
    * falsy leaves no trace anywhere. Day one it is boolean only: no payload
    * reaches the run, which re-queries what it needs.
+   *
+   * It runs on the window's own thread, so anything synchronous in it — a
+   * spawnSync, an execFileSync, a big readFileSync — freezes the window for
+   * its whole duration, every time the scheduler ticks. Do the work
+   * asynchronously and await it. The 30-second bound can only interrupt a
+   * check that gives the thread back.
    */
   check?(ctx: { readonly workspacePath: string }): boolean | Promise<boolean>
 }
@@ -211,6 +217,12 @@ export interface WorkflowDef {
    * hand with inputs is untouched.
    */
   schedule?: ScheduleSpec
+  /**
+   * The workflow itself. It executes in the app's main process, on the same
+   * thread as the window, so anything synchronous in it holds the window:
+   * spawn and await rather than spawnSync, `node:fs/promises` rather than
+   * readFileSync of anything large. Nothing bounds a run() that blocks.
+   */
   run(ctx: RunContext): Promise<Record<string, unknown> | void>
 }
 

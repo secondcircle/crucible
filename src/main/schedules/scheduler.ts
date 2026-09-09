@@ -215,7 +215,16 @@ export function createScheduler(options: SchedulerOptions): Scheduler {
     warnings.delete(key)
   }
 
-  /** The gate's answer, bounded: anything but a clean truthy/falsy is an error. */
+  /**
+   * The gate's answer: anything but a clean truthy/falsy is an error.
+   *
+   * The bound below only holds a check that gives the thread back. A check
+   * that blocks — `execFileSync('gh', ...)` is the shape authors reach for —
+   * runs to completion before this race is even constructed, and the window
+   * is frozen for its whole duration. Nothing in this process can interrupt
+   * it; the authoring doc says so where authors read, and this is the same
+   * fact where the timeout is.
+   */
   async function askCheck(
     schedule: DeclaredSchedule,
     workspacePath: string
