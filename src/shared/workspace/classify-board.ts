@@ -104,10 +104,25 @@ export function classifyBoard(facts: BoardFacts, now: number): BranchBoardSnapsh
   // nowhere else, even when this clone has a copy of it.
   const waitingRefs = new Set(waiting.map((pr) => pr.headRef))
 
+  // One pass to index, then lookups: this runs for every workspace in the
+  // sidebar every minute, and scanning the pull-request list once per branch
+  // made it quadratic (429 ms at 5,000 branches). Each bucket keeps the list's
+  // own order, so the record picked is the record `find` used to pick.
+  const byHeadRef = new Map<string, PullRequestFact[]>()
+  for (const pr of pullRequests) {
+    const bucket = byHeadRef.get(pr.headRef)
+    if (bucket === undefined) byHeadRef.set(pr.headRef, [pr])
+    else bucket.push(pr)
+  }
+  const byBranchName = new Map<string, BranchFact>()
+  for (const branch of facts.branches) {
+    if (!byBranchName.has(branch.name)) byBranchName.set(branch.name, branch)
+  }
+
   const rows: BoardRow[] = []
 
   for (const pr of waiting) {
-    const branch = facts.branches.find((candidate) => candidate.name === pr.headRef)
+    const branch = byBranchName.get(pr.headRef)
     rows.push({
       group: 'waitingOnYou',
       name: pr.headRef,
@@ -131,7 +146,7 @@ export function classifyBoard(facts: BoardFacts, now: number): BranchBoardSnapsh
     // The trunk is the thing everything else is measured against, never a row.
     if (branch.name === facts.trunk) continue
     if (waitingRefs.has(branch.name)) continue
-    rows.push(branchRow(branch, facts, pullRequests, staleBefore))
+    rows.push(branchRow(branch, facts, byHeadRef.get(branch.name) ?? [], staleBefore))
   }
 
   return {
@@ -163,15 +178,12 @@ export function boardCounts(board: BranchBoardSnapshot): {
 function branchRow(
   branch: BranchFact,
   facts: BoardFacts,
-  pullRequests: readonly PullRequestFact[],
+  /** Only the pull requests whose head is this branch, in the list's order. */
+  onBranch: readonly PullRequestFact[],
   staleBefore: number
 ): BoardRow {
-  const merged = pullRequests.find(
-    (pr) => pr.headRef === branch.name && pr.state === 'merged'
-  )
-  const open = pullRequests.find(
-    (pr) => pr.headRef === branch.name && (pr.state === 'open' || pr.state === 'draft')
-  )
+  const merged = onBranch.find((pr) => pr.state === 'merged')
+  const open = onBranch.find((pr) => pr.state === 'open' || pr.state === 'draft')
   const counts: BoardDrift = { kind: 'counts', ahead: branch.ahead, behind: branch.behind }
   const yours =
     facts.userEmail !== undefined &&

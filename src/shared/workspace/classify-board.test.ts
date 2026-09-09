@@ -466,3 +466,41 @@ describe('the counts the chip and the badge show', () => {
     expect(boardCounts(classifyBoard(others, NOW)).needYou).toBe(0)
   })
 })
+
+// The classifier indexes the pull requests by head ref once instead of
+// scanning the list per branch. These hold the two properties that rewrite
+// had to keep: which record a branch is judged on when several name it, and
+// that a branch with none is judged the same as before.
+describe('several pull requests on one branch', () => {
+  const branches = [branch({ name: 'redesign', ahead: 3 }), branch({ name: 'untouched' })]
+
+  it('shows the first open record the host listed, as the scan did', () => {
+    const facts = hosted(branches, [
+      pullRequest({ number: 11, headRef: 'redesign', state: 'open' }),
+      pullRequest({ number: 12, headRef: 'redesign', state: 'open' })
+    ])
+
+    const row = classifyBoard(facts, NOW).rows.find((candidate) => candidate.name === 'redesign')
+    expect(row?.pr?.number).toBe(11)
+  })
+
+  it('lands on the merged record even when a later open one names the branch', () => {
+    const facts = hosted(branches, [
+      pullRequest({ number: 20, headRef: 'redesign', state: 'merged', mergedBy: 'secondcircle' }),
+      pullRequest({ number: 21, headRef: 'redesign', state: 'open' })
+    ])
+
+    const row = classifyBoard(facts, NOW).rows.find((candidate) => candidate.name === 'redesign')
+    // The open record is what the row shows; the merged one is what decides
+    // the group, and only when the tips agree.
+    expect(row?.group).toBe('landed')
+    expect(row?.pr?.number).toBe(21)
+  })
+
+  it('leaves a branch nobody opened a pull request for out of every bucket', () => {
+    const facts = hosted(branches, [pullRequest({ number: 11, headRef: 'redesign' })])
+
+    const row = classifyBoard(facts, NOW).rows.find((candidate) => candidate.name === 'untouched')
+    expect(row?.pr).toBeUndefined()
+  })
+})
