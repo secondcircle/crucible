@@ -3,7 +3,15 @@
 // The ledger against a temp directory: a real file, real appends, and no
 // Electron anywhere. The directory is injected exactly as the quota cache's
 // is, so nothing here can reach the machine's own ledger.
-import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import {
+  appendFileSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -245,5 +253,59 @@ describe('the cache ledger', () => {
 
     // Nobody was waiting on the write, so the trouble goes to the run log.
     expect(failures).toHaveLength(1)
+  })
+})
+
+// The counter is folded from the lines as they arrive rather than re-parsed
+// whole after every miss. What that has to keep true: whatever is in the file
+// is counted, including what this process did not write.
+describe('the counter over a growing file', () => {
+  it('counts a miss another writer appended between two reads', async () => {
+    const dir = tempDir()
+    const ledger = createCacheLedger({ dir })
+    await ledger.append(miss({ dollarsRebilled: 0.5 }))
+    expect((await ledger.read()).count).toBe(1)
+
+    appendFileSync(
+      join(dir, LEDGER_FILE_NAME),
+      `${JSON.stringify({ v: 1, type: 'miss', at: '2026-08-22T09:00:00.000Z', dollarsRebilled: 0.25 })}\n`
+    )
+
+    const health = await ledger.read()
+    expect(health.count).toBe(2)
+    expect(health.dollars).toBeCloseTo(0.75, 4)
+  })
+
+  it('waits for the newline before counting a half-written line', async () => {
+    const dir = tempDir()
+    const ledger = createCacheLedger({ dir })
+    await ledger.read()
+    const path = join(dir, LEDGER_FILE_NAME)
+    const half = JSON.stringify({ v: 1, type: 'miss', at: '2026-08-22T09:00:00.000Z', dollarsRebilled: 0.25 })
+
+    appendFileSync(path, half.slice(0, 20))
+    expect((await ledger.read()).count).toBe(0)
+
+    appendFileSync(path, `${half.slice(20)}\n`)
+    const health = await ledger.read()
+    expect(health.count).toBe(1)
+    expect(health.dollars).toBeCloseTo(0.25, 4)
+  })
+
+  it('counts a replaced file from the start rather than from where it was', async () => {
+    const dir = tempDir()
+    const ledger = createCacheLedger({ dir })
+    await ledger.append(miss({ dollarsRebilled: 0.5 }))
+    await ledger.append(miss({ dollarsRebilled: 0.5 }))
+    expect((await ledger.read()).count).toBe(2)
+
+    writeFileSync(
+      join(dir, LEDGER_FILE_NAME),
+      `${JSON.stringify({ v: 1, type: 'reset', at: '2026-08-22T09:00:00.000Z' })}\n`
+    )
+
+    const health = await ledger.read()
+    expect(health.count).toBe(0)
+    expect(health.since).toBe('2026-08-22T09:00:00.000Z')
   })
 })
