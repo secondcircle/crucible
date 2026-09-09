@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { memo, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { ViewItem } from '../state/shell-state'
 import {
   callSummary,
@@ -112,7 +112,13 @@ export function Transcript({
   )
 }
 
-function Item({
+// Memoized, all four of them, because every event that crosses the port
+// re-renders the whole document: one delta used to re-render every item of a
+// 1400-item session (15 ms of React work per delta, for a stream of thirty a
+// second, and the same again for a session nobody is looking at). The reducer
+// rebuilds only the item it touched — `items.with(...)` — so an item's
+// identity is a sound answer to "did this row change".
+const Item = memo(function Item({
   item,
   invocations
 }: {
@@ -223,7 +229,7 @@ function Item({
         </div>
       )
   }
-}
+})
 
 // Compact by default and honest underneath: the compact form is presentation,
 // never a different record, so what opens is exactly what crossed the port.
@@ -272,9 +278,33 @@ function Thinking({
   )
 }
 
+// A chain is derived per render rather than held by the reducer, so identity
+// says nothing and the comparison is over the calls it holds: those are the
+// reducer's own items, and everything else about a chain is computed from
+// them.
+export function sameChain(
+  before: { readonly chain: ToolChain },
+  after: { readonly chain: ToolChain }
+): boolean {
+  const left = before.chain
+  const right = after.chain
+  if (left === right) return true
+  if (left.key !== right.key || left.state !== right.state || left.label !== right.label) {
+    return false
+  }
+  if (left.live !== right.live || left.errors !== right.errors) return false
+  if (left.calls.length !== right.calls.length) return false
+  for (const [at, call] of left.calls.entries()) if (call !== right.calls[at]) return false
+  if (left.counts.length !== right.counts.length) return false
+  for (const [at, count] of left.counts.entries()) {
+    if (count.name !== right.counts[at].name || count.count !== right.counts[at].count) return false
+  }
+  return true
+}
+
 // Collapsed from the first call and never collapsing on its own afterwards, so
 // a chain that finishes does not move the transcript under the reader.
-function Chain({ chain }: { readonly chain: ToolChain }): React.JSX.Element {
+const Chain = memo(function Chain({ chain }: { readonly chain: ToolChain }): React.JSX.Element {
   const [open, setOpen] = useState(false)
   const counts = countsText(chain.counts)
 
@@ -325,7 +355,7 @@ function Chain({ chain }: { readonly chain: ToolChain }): React.JSX.Element {
       ) : null}
     </div>
   )
-}
+}, sameChain)
 
 // The faint tail is what makes a supporting file legible as part of the skill
 // read above it.
@@ -339,7 +369,7 @@ function skillSummary(summary: string): React.JSX.Element {
   )
 }
 
-function Call({ call }: { readonly call: ToolItem }): React.JSX.Element {
+const Call = memo(function Call({ call }: { readonly call: ToolItem }): React.JSX.Element {
   const [open, setOpen] = useState(false)
   const tail = useRef<HTMLPreElement>(null)
   const { name, output, ok, running } = call
@@ -385,4 +415,4 @@ function Call({ call }: { readonly call: ToolItem }): React.JSX.Element {
       ) : null}
     </div>
   )
-}
+})
