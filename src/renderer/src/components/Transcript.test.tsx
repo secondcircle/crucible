@@ -95,3 +95,44 @@ describe('a transcript that keeps streaming', () => {
     ).toBe(false)
   })
 })
+
+// Following the stream reads scrollHeight, which in Chromium forces a layout
+// of the whole list before paint. The document re-renders for events that say
+// nothing about the transcript, and those must not pay for it.
+describe('following the stream', () => {
+  function countScrollHeightReads(): () => number {
+    const scroller = document.querySelector('.chat')
+    if (scroller === null) throw new Error('no transcript scroller')
+    let reads = 0
+    Object.defineProperty(scroller, 'scrollHeight', {
+      configurable: true,
+      get: () => {
+        reads += 1
+        return 0
+      }
+    })
+    return () => reads
+  }
+
+  it('reads the layout when the transcript moved, and not when it did not', () => {
+    const items: readonly ViewItem[] = [
+      { kind: 'user', text: 'hello' },
+      { kind: 'assistant', markdown: 'hi', streaming: false }
+    ]
+    const view = render(<Transcript items={items} sessionId="s1" />)
+    const reads = countScrollHeightReads()
+
+    // The same list again: a runs broadcast, a schedule tick, the clock.
+    view.rerender(<Transcript items={items} sessionId="s1" />)
+    expect(reads()).toBe(0)
+
+    // What the reducer hands over when a delta lands: a new array.
+    view.rerender(
+      <Transcript
+        items={[items[0], { kind: 'assistant', markdown: 'hi there', streaming: true }]}
+        sessionId="s1"
+      />
+    )
+    expect(reads()).toBeGreaterThan(0)
+  })
+})

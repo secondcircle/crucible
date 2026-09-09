@@ -49,9 +49,17 @@ export function Transcript({
     pin()
   }, [sessionId])
 
+  // Keyed on the item list rather than firing on every commit: pinning reads
+  // scrollHeight, which forces Chromium to lay out a list of thousands of
+  // nodes before paint, and this document re-renders for events that say
+  // nothing about the transcript — a runs broadcast, a schedule tick, the
+  // one-second working clock. The reducer replaces the array whenever
+  // anything in it changes, so a new array is exactly "the transcript moved",
+  // and content that grows without it is what the resize observer below is
+  // for.
   useLayoutEffect(() => {
     if (following.current) pin()
-  })
+  }, [items])
 
   // Content also grows between React renders, when a settled message swaps in
   // taller than its stream or a font arrives, so any resize re-pins.
