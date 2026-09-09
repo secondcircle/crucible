@@ -32,7 +32,7 @@ vi.mock('./engine', () => ({
       dismiss: () => {},
       adopt: () => {},
       answer: () => {},
-      nodeTranscript: () => [],
+      nodeTranscript: async () => [],
       dispose: () => {}
     }
   }

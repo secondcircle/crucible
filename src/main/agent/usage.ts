@@ -89,3 +89,34 @@ export function sumUsage(usages: Iterable<StoredUsage | undefined>): SessionUsag
     totalCost
   }
 }
+
+/**
+ * The Usage pane asks for every session of the workspace when it opens and
+ * again at the end of every turn, and an unbound session is answered by
+ * parsing its whole conversation file: 16 ms for 5.4 MB, 39 ms for 16.2 MB,
+ * once per session, per refresh. The sum is a pure function of the file, so
+ * it is remembered against the file's revision — the same dev/inode/size/mtime
+ * tuple π's own `getFileRevision` uses — and recomputed the moment the file
+ * moves.
+ */
+export function createUsageCache(
+  revisionOf: (path: string) => string | undefined
+): {
+  of(path: string, compute: () => SessionUsage | undefined): SessionUsage | undefined
+} {
+  const remembered = new Map<string, { revision: string; usage: SessionUsage | undefined }>()
+
+  return {
+    of(path, compute) {
+      const revision = revisionOf(path)
+      // A file that cannot be stat'ed has no revision to key on, so nothing is
+      // remembered about it and nothing stale can be answered for it.
+      if (revision === undefined) return compute()
+      const held = remembered.get(path)
+      if (held !== undefined && held.revision === revision) return held.usage
+      const usage = compute()
+      remembered.set(path, { revision, usage })
+      return usage
+    }
+  }
+}

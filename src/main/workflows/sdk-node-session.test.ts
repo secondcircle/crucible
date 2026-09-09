@@ -7,7 +7,8 @@
 // missing, failed one engine turn later with less to go on, and burned the
 // node's retries (run 779a died exactly this way).
 import { describe, expect, it } from 'vitest'
-import { completeNodeParameters } from './sdk-node-session'
+import { toTranscript, type StoredMessage } from '../agent/sdk-transcript'
+import { completeNodeParameters, toolCallCount } from './sdk-node-session'
 
 describe('completeNodeParameters', () => {
   it('leaves verdict optional and untyped when the node declares no schema', () => {
@@ -46,5 +47,60 @@ describe('completeNodeParameters', () => {
       properties: { verdict: { description: string } }
     }
     expect(parameters.properties.verdict.description).toBe('yes or no')
+  })
+})
+
+// The engine asks a live node for its tool-call count on every lull in the
+// stream. It used to get it by building the whole transcript and throwing it
+// away; these hold the cheap count to the number the transcript reports.
+describe('toolCallCount', () => {
+  function messages(...stored: unknown[]): StoredMessage[] {
+    return stored as StoredMessage[]
+  }
+
+  const conversation = messages(
+    { role: 'user', content: 'Fix the classifier.' },
+    {
+      role: 'assistant',
+      stopReason: 'toolUse',
+      content: [
+        { type: 'thinking', thinking: 'read it first' },
+        { type: 'text', text: 'Reading.' },
+        { type: 'toolCall', id: 'c1', name: 'read', arguments: { path: 'a.ts' } },
+        { type: 'toolCall', id: 'c2', name: 'read', arguments: { path: 'b.ts' } }
+      ]
+    },
+    {
+      role: 'toolResult',
+      toolCallId: 'c1',
+      toolName: 'read',
+      isError: false,
+      content: [{ type: 'text', text: 'ok' }]
+    },
+    {
+      role: 'toolResult',
+      toolCallId: 'c2',
+      toolName: 'read',
+      isError: true,
+      content: [{ type: 'text', text: 'no such file' }]
+    },
+    { role: 'branchSummary', summary: 'went another way' },
+    { role: 'bashExecution', command: 'ls', output: 'a.ts', exitCode: 0 },
+    {
+      role: 'assistant',
+      stopReason: 'stop',
+      content: [{ type: 'text', text: 'Done.' }]
+    }
+  )
+
+  it('counts what the transcript would count', () => {
+    expect(toolCallCount(conversation)).toBe(
+      toTranscript(conversation).filter((item) => item.kind === 'tool').length
+    )
+  })
+
+  it('counts a failed call, and counts no bash run or summary as a call', () => {
+    expect(toolCallCount(conversation)).toBe(2)
+    expect(toolCallCount(messages())).toBe(0)
   })
 })

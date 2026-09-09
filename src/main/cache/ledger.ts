@@ -1,4 +1,4 @@
-import { appendFile, mkdir, readFile } from 'node:fs/promises'
+import { appendFile, mkdir, open } from 'node:fs/promises'
 import { dirname } from 'node:path'
 import type { CacheMissChanges } from '../../shared/agent/adapter'
 import type { CacheRetention, ThinkingLevel, Unsubscribe } from '../../shared/agent/port'
@@ -134,37 +134,83 @@ export function createCacheLedger(options: CacheLedgerOptions = {}): CacheLedger
     created = true
   }
 
-  async function health(): Promise<CacheHealth> {
-    await ensureFile()
-    let since: string | undefined
-    let earliestMiss: string | undefined
-    let count = 0
-    let dollars = 0
+  // The counter as the lines read so far leave it. The file is append-only and
+  // the fold is a fold, so every pass only has to read what arrived since the
+  // last one: at 200,000 misses a full re-parse was 236 ms, and it ran after
+  // every single recorded miss.
+  let since: string | undefined
+  let earliestMiss: string | undefined
+  let count = 0
+  let dollars = 0
+  /** Bytes already folded in. */
+  let read = 0
+  /** A trailing line another writer had not finished when we last looked. */
+  let carry = Buffer.alloc(0)
 
-    const content = await readFile(path, 'utf8')
-    for (const raw of content.split('\n')) {
-      if (raw.trim() === '') continue
-      let parsed: ParsedLine
-      try {
-        parsed = JSON.parse(raw) as ParsedLine
-      } catch {
-        // A permanent file has to survive its own future: a line this build
-        // cannot read is skipped and the count goes on.
-        continue
-      }
-      if (typeof parsed !== 'object' || parsed === null) continue
-      if (parsed.v !== LEDGER_VERSION) continue
-      if (parsed.type === 'reset' && typeof parsed.at === 'string') {
-        since = parsed.at
+  function foldLine(raw: string): void {
+    if (raw.trim() === '') return
+    let parsed: ParsedLine
+    try {
+      parsed = JSON.parse(raw) as ParsedLine
+    } catch {
+      // A permanent file has to survive its own future: a line this build
+      // cannot read is skipped and the count goes on.
+      return
+    }
+    if (typeof parsed !== 'object' || parsed === null) return
+    if (parsed.v !== LEDGER_VERSION) return
+    if (parsed.type === 'reset' && typeof parsed.at === 'string') {
+      since = parsed.at
+      count = 0
+      dollars = 0
+      return
+    }
+    if (parsed.type !== 'miss') return
+    count += 1
+    dollars += number(parsed.dollarsRebilled)
+    if (typeof parsed.at === 'string' && earliestMiss === undefined) earliestMiss = parsed.at
+  }
+
+  /**
+   * Folds in whatever was appended since the last pass, whoever appended it.
+   * A file that shrank was replaced rather than appended to, so it is folded
+   * again from the start.
+   */
+  async function absorb(): Promise<void> {
+    const handle = await open(path, 'r')
+    try {
+      const { size } = await handle.stat()
+      if (size < read) {
+        since = undefined
+        earliestMiss = undefined
         count = 0
         dollars = 0
-        continue
+        read = 0
+        carry = Buffer.alloc(0)
       }
-      if (parsed.type !== 'miss') continue
-      count += 1
-      dollars += number(parsed.dollarsRebilled)
-      if (typeof parsed.at === 'string' && earliestMiss === undefined) earliestMiss = parsed.at
+      if (size === read) return
+      const buffer = Buffer.allocUnsafe(size - read)
+      const { bytesRead } = await handle.read(buffer, 0, buffer.length, read)
+      read += bytesRead
+      const chunk = Buffer.concat([carry, buffer.subarray(0, bytesRead)])
+      let start = 0
+      for (;;) {
+        const newline = chunk.indexOf(0x0a, start)
+        if (newline === -1) break
+        foldLine(chunk.toString('utf8', start, newline))
+        start = newline + 1
+      }
+      // Held whole, bytes not characters, so a line split across two passes
+      // never loses a multi-byte character at the seam.
+      carry = Buffer.from(chunk.subarray(start))
+    } finally {
+      await handle.close()
     }
+  }
+
+  async function health(): Promise<CacheHealth> {
+    await ensureFile()
+    await absorb()
 
     return {
       count,

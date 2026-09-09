@@ -311,10 +311,10 @@ describe('a web address', () => {
     expect(panel.state(SESSION)?.tabs[0].title).toBe('the dev server')
   })
 
-  it('has no file to read, and the exhibit body says so', () => {
+  it('has no file to read, and the exhibit body says so', async () => {
     panel.show(SESSION, workspace, 'http://localhost:5173/', 'dev server')
 
-    expect(() => panel.exhibit(SESSION, 'localhost')).toThrow(
+    await expect(panel.exhibit(SESSION, 'localhost')).rejects.toThrow(
       'That tab shows a web address; it has no file to read.'
     )
   })
@@ -333,25 +333,25 @@ describe('a web address', () => {
 })
 
 describe('the exhibit body', () => {
-  it('reads the file at call time, so a re-show shows what the file says now', () => {
+  it('reads the file at call time, so a re-show shows what the file says now', async () => {
     const path = file('plan.md', '# first')
     panel.show(SESSION, workspace, path, 'plan')
 
-    expect(panel.exhibit(SESSION, 'plan')).toBe('# first')
+    await expect(panel.exhibit(SESSION, 'plan')).resolves.toBe('# first')
 
     writeFileSync(path, '# second', 'utf8')
-    expect(panel.exhibit(SESSION, 'plan')).toBe('# second')
+    await expect(panel.exhibit(SESSION, 'plan')).resolves.toBe('# second')
   })
 
-  it('refuses a tab it does not have, and a file it cannot read', () => {
+  it('refuses a tab it does not have, and a file it cannot read', async () => {
     const path = file('plan.md')
     panel.show(SESSION, workspace, path, 'plan')
     rmSync(path)
 
-    expect(() => panel.exhibit(SESSION, 'gone')).toThrow(
+    await expect(panel.exhibit(SESSION, 'gone')).rejects.toThrow(
       'That tab is no longer in the context panel.'
     )
-    expect(() => panel.exhibit(SESSION, 'plan')).toThrow(
+    await expect(panel.exhibit(SESSION, 'plan')).rejects.toThrow(
       'That exhibit could not be read: plan.md'
     )
   })

@@ -74,6 +74,27 @@ describe('staging a version', () => {
     expect(existsSync(join(root, 'from-1.5.0'))).toBe(false)
     expect(existsSync(root)).toBe(true)
   })
+
+  // The clear is awaited rather than synchronous, because deleting the last
+  // staged tree is one syscall per file and froze the window for the whole
+  // sweep. npm must still see an empty root when it starts.
+  it('finishes clearing before npm is spawned', async () => {
+    mkdirSync(root, { recursive: true })
+    writeFileSync(join(root, 'from-1.5.0'), 'last time')
+    let sawStaleTree: boolean | undefined
+    const watchful = async (): Promise<void> => {
+      sawStaleTree = existsSync(join(root, 'from-1.5.0'))
+    }
+
+    await npmStager({
+      packageName: NAME,
+      root,
+      machine: posixMachine,
+      run: watchful
+    }).stage('1.6.0')
+
+    expect(sawStaleTree).toBe(false)
+  })
 })
 
 describe('staging on a Windows install', () => {

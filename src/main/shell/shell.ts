@@ -1442,7 +1442,7 @@ export function createShell({
     async exhibit(sessionId: SessionId, tabId: TabId): Promise<{ body: string }> {
       requireSession(sessionId)
       try {
-        return { body: panel.exhibit(sessionId, tabId) }
+        return { body: await panel.exhibit(sessionId, tabId) }
       } catch (cause) {
         refuse(displaySafeMessage(cause, 'That exhibit could not be read.'))
       }

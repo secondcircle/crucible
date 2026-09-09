@@ -1,5 +1,6 @@
 import { execFile } from 'node:child_process'
-import { existsSync, mkdirSync, rmSync } from 'node:fs'
+import { existsSync } from 'node:fs'
+import { mkdir, rm } from 'node:fs/promises'
 import { npmSpawn, type MachineNpmView } from './npm-spawn'
 
 // Fetching a version onto disk, outside the bundle, with npm doing the work:
@@ -55,9 +56,11 @@ export function npmStager(options: {
       if (!spawn.ok) throw new Error(spawn.message)
 
       // Cleared before every staging, so successive versions never accumulate
-      // dependency trees in a directory nobody looks at.
-      rmSync(options.root, { recursive: true, force: true })
-      mkdirSync(options.root, { recursive: true })
+      // dependency trees in a directory nobody looks at. Off the loop: the
+      // cost is one syscall per file in the last staged tree, tens of
+      // thousands of them, and this runs in the app the human is using.
+      await rm(options.root, { recursive: true, force: true })
+      await mkdir(options.root, { recursive: true })
       await run(spawn.command, spawn.args, {
         cwd: options.root,
         env: { ...process.env, ...spawn.env, [STAGING_VARIABLE]: '1' }

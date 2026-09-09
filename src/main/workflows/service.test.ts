@@ -69,7 +69,9 @@ function engineOf(runs: RunRecord[]): WorkflowEngine & { started: StartRunReques
       if (at >= 0) runs[at] = { ...runs[at], sessionId }
     }),
     answer: vi.fn(),
-    nodeTranscript: (): readonly TranscriptItem[] => [{ kind: 'assistant', markdown: 'hi' }],
+    nodeTranscript: async (): Promise<readonly TranscriptItem[]> => [
+      { kind: 'assistant', markdown: 'hi' }
+    ],
     dispose: vi.fn()
   }
 }

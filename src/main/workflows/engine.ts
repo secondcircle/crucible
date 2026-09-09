@@ -93,7 +93,7 @@ export interface WorkflowEngine {
   adopt(runId: WorkflowRunId, sessionId: SessionId): void
   /** The orchestrator's answer to whatever the run is waiting on. */
   answer(runId: WorkflowRunId, message: string): void
-  nodeTranscript(runId: WorkflowRunId, nodeId: string): readonly TranscriptItem[]
+  nodeTranscript(runId: WorkflowRunId, nodeId: string): Promise<readonly TranscriptItem[]>
   /** Abandons live work; records keep whatever state they reached. */
   dispose(): void
 }
@@ -1608,7 +1608,10 @@ export function createWorkflowEngine(options: EngineOptions): WorkflowEngine {
       save(run)
     },
 
-    nodeTranscript(runId: WorkflowRunId, nodeId: string): readonly TranscriptItem[] {
+    async nodeTranscript(
+      runId: WorkflowRunId,
+      nodeId: string
+    ): Promise<readonly TranscriptItem[]> {
       requireRecord(runId)
       return store.readTranscript(runId, nodeId)
     },

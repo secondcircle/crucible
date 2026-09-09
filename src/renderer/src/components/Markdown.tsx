@@ -1,11 +1,19 @@
-import { createElement, type ReactNode } from 'react'
+import { createElement, memo, type ReactNode } from 'react'
 import './markdown.css'
 
 // Written by hand rather than pulled in so that no string from an agent can
 // become markup: no HTML is parsed here, and no sanitizer can be misconfigured.
-export function Markdown({ markdown }: { markdown: string }): React.JSX.Element {
+// Memoized on the one string it takes: the parse is pure, and everything that
+// renders markdown sits inside a document that re-renders on every port
+// event. An open artifact of a megabyte used to be re-parsed 6.7 times a
+// second while a run progressed, for a document that had not changed.
+export const Markdown = memo(function Markdown({
+  markdown
+}: {
+  markdown: string
+}): React.JSX.Element {
   return <div className="markdown">{blocks(markdown)}</div>
-}
+})
 
 /** A line that opens a block of its own, which is where a paragraph stops. */
 const BLOCK_START = /^\s*(```|#{1,6}\s|[-*+]\s|\d+\.\s|>\s?|\||(-{3,}|\*{3,}|_{3,})\s*$)/

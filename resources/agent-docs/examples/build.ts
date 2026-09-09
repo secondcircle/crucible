@@ -1,4 +1,4 @@
-import { spawnSync } from 'node:child_process'
+import { spawn } from 'node:child_process'
 import { workflow, type PlannedNode } from 'crucible:workflow'
 
 // Take an intent document to built code — a Spec, a fresh-context builder, a
@@ -130,27 +130,49 @@ const VERDICT = {
   }
 }
 
-function git(args: string[], cwd: string): { ok: boolean; status: number | null; out: string } {
-  const ran = spawnSync('git', args, { cwd, encoding: 'utf8', timeout: 120_000 })
-  return {
-    ok: ran.status === 0,
-    status: ran.status,
-    out: `${ran.stdout ?? ''}${ran.stderr ?? ''}`.trim()
-  }
+/**
+ * Spawned and awaited, never spawnSync: run() executes on the app's main
+ * thread, and a synchronous child process holds the window for as long as the
+ * command takes — `git add -A` alone is a quarter of a second in a large
+ * repository, and this workflow commits after every phase. The build gate
+ * below already got this right; the git calls did not.
+ */
+function git(
+  args: string[],
+  cwd: string
+): Promise<{ ok: boolean; status: number | null; out: string }> {
+  return new Promise((resolve) => {
+    let stdout = ''
+    let stderr = ''
+    const child = spawn('git', args, { cwd })
+    const bound = setTimeout(() => child.kill('SIGKILL'), 120_000)
+    const done = (status: number | null, out: string): void => {
+      clearTimeout(bound)
+      resolve({ ok: status === 0, status, out: out.trim() })
+    }
+    child.stdout.on('data', (chunk: Buffer) => {
+      stdout += chunk.toString('utf8')
+    })
+    child.stderr.on('data', (chunk: Buffer) => {
+      stderr += chunk.toString('utf8')
+    })
+    child.on('error', (cause: Error) => done(null, `${stdout}${stderr}${cause.message}`))
+    child.on('close', (code: number | null) => done(code, `${stdout}${stderr}`))
+  })
 }
 
 /** The branch the run is building on, as the check-in must name it. */
-function currentBranch(cwd: string): string {
-  const named = git(['rev-parse', '--abbrev-ref', 'HEAD'], cwd)
+async function currentBranch(cwd: string): Promise<string> {
+  const named = await git(['rev-parse', '--abbrev-ref', 'HEAD'], cwd)
   if (named.ok && named.out !== '' && named.out !== 'HEAD') return named.out
-  const detached = git(['rev-parse', '--short', 'HEAD'], cwd)
+  const detached = await git(['rev-parse', '--short', 'HEAD'], cwd)
   return detached.ok && detached.out !== '' ? `detached at ${detached.out}` : 'an unnamed branch'
 }
 
 /** Never origin: local main is the freshest truth on the machine that runs this. */
-export function localDefaultBranch(cwd: string): string {
+export async function localDefaultBranch(cwd: string): Promise<string> {
   for (const name of ['main', 'master']) {
-    if (git(['rev-parse', '--verify', '--quiet', `refs/heads/${name}`], cwd).ok) return name
+    if ((await git(['rev-parse', '--verify', '--quiet', `refs/heads/${name}`], cwd)).ok) return name
   }
   throw new Error(
     `build: no local default branch in ${cwd} — neither a local "main" nor a local "master" ` +
@@ -163,12 +185,12 @@ export function localDefaultBranch(cwd: string): string {
  * run: work that never reached the branch must not be reviewed or reported
  * as done.
  */
-function commit(cwd: string, message: string): void {
-  const staged = git(['add', '-A'], cwd)
+async function commit(cwd: string, message: string): Promise<void> {
+  const staged = await git(['add', '-A'], cwd)
   if (!staged.ok) throw new Error(`build: git add failed: ${staged.out}`)
-  const anything = git(['diff', '--cached', '--quiet'], cwd)
+  const anything = await git(['diff', '--cached', '--quiet'], cwd)
   if (anything.ok) return
-  const done = git(['commit', '-m', message], cwd)
+  const done = await git(['commit', '-m', message], cwd)
   if (!done.ok) throw new Error(`build: git commit failed: ${done.out}`)
 }
 
@@ -184,8 +206,8 @@ type MergeCheck =
  * forbidden to touch. A branch that cannot be tested is still a branch the
  * gate approved, so failure here is reported, never fatal.
  */
-function mergeCheck(cwd: string, target: string): MergeCheck {
-  const tried = git(['merge-tree', '--write-tree', '--name-only', target, 'HEAD'], cwd)
+async function mergeCheck(cwd: string, target: string): Promise<MergeCheck> {
+  const tried = await git(['merge-tree', '--write-tree', '--name-only', target, 'HEAD'], cwd)
   if (tried.status === 0) return { result: 'clean' }
   if (tried.status === 1) {
     const files: string[] = []
@@ -907,7 +929,7 @@ export default workflow({
     // Resolved before any node runs: a repository with no local default
     // branch has no diff target, and discovering that later would waste the
     // planner.
-    const target = localDefaultBranch(ctx.cwd)
+    const target = await localDefaultBranch(ctx.cwd)
     const intent = ctx.inputs.intent
 
     // The planner takes only the kickoff input: a root, so declaring
@@ -955,7 +977,7 @@ export default workflow({
       if (sinceSpecCheckIn === REVIEWS_PER_CHECK_IN) {
         specCorrections.push(
           await ctx.ask({
-            reason: specCheckInPrompt(currentBranch(ctx.cwd), round),
+            reason: specCheckInPrompt(await currentBranch(ctx.cwd), round),
             artifacts: {
               intent,
               spec,
@@ -980,7 +1002,7 @@ export default workflow({
       reads: [intent, spec],
       model: CODE_MODEL
     })
-    commit(ctx.cwd, 'build: builder')
+    await commit(ctx.cwd, 'build: builder')
 
     // Every fixer is a new session reading the branch, never a revision of
     // the agent that wrote the code it repairs.
@@ -1007,7 +1029,7 @@ export default workflow({
       reviews.push(review.outputs.review)
       // A review's repro tests are findings made runnable: they land on the
       // branch like any actor's work. A review that added none commits nothing.
-      commit(ctx.cwd, `build: review ${round}`)
+      await commit(ctx.cwd, `build: review ${round}`)
       const { verdict } = review.verdict as { verdict: string; reason: string }
       // Approval ends the interior loop, not the run: nothing has yet judged
       // the branch against what was agreed.
@@ -1022,7 +1044,7 @@ export default workflow({
       if (sinceCheckIn === REVIEWS_PER_CHECK_IN) {
         corrections.push(
           await ctx.ask({
-            reason: checkInPrompt(currentBranch(ctx.cwd), round),
+            reason: checkInPrompt(await currentBranch(ctx.cwd), round),
             artifacts: {
               intent,
               spec,
@@ -1039,7 +1061,7 @@ export default workflow({
         reads: [intent, spec, ...reviews],
         model: CODE_MODEL
       })
-      commit(ctx.cwd, `build: fixer ${round}`)
+      await commit(ctx.cwd, `build: fixer ${round}`)
     }
 
     // The gate keeps corrections of its own: interior rulings were scoped to
@@ -1079,7 +1101,7 @@ export default workflow({
       commentReports.push(police.outputs.report)
       // Landed before the verdict judges the tree, so the fixes already read
       // as part of the branch. A round that changed nothing commits nothing.
-      commit(ctx.cwd, `build: comment police ${round}`)
+      await commit(ctx.cwd, `build: comment police ${round}`)
 
       const gate = await ctx.node(`gate-verdict-${round}`, {
         prompt: gateVerdictPrompt(target, intent, gateCorrections),
@@ -1097,7 +1119,7 @@ export default workflow({
           // while every comment report documents edits still on this one.
           coverageReport: alignment.outputs.report,
           commentReports: [...commentReports],
-          merge: mergeCheck(ctx.cwd, target)
+          merge: await mergeCheck(ctx.cwd, target)
         }
       }
 
@@ -1105,7 +1127,7 @@ export default workflow({
       if (sinceGateCheckIn === REVIEWS_PER_CHECK_IN) {
         gateCorrections.push(
           await ctx.ask({
-            reason: gateCheckInPrompt(currentBranch(ctx.cwd), round),
+            reason: gateCheckInPrompt(await currentBranch(ctx.cwd), round),
             artifacts: {
               intent,
               ...Object.fromEntries(
@@ -1133,7 +1155,7 @@ export default workflow({
         reads: [intent, spec, ...coverageReports, ...commentReports],
         model: CODE_MODEL
       })
-      commit(ctx.cwd, `build: gate fixer ${round}`)
+      await commit(ctx.cwd, `build: gate fixer ${round}`)
     }
   }
 })

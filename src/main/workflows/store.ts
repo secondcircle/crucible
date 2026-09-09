@@ -1,4 +1,5 @@
 import { mkdirSync, readdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
+import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { TranscriptItem } from '../../shared/agent/port'
 import type { RunRecord, WorkflowRunId } from '../../shared/workflows/run'
@@ -19,7 +20,8 @@ export interface RunStore {
   /** The run's artifact directory, created on first ask. */
   artifactDir(runId: WorkflowRunId): string
   writeTranscript(runId: WorkflowRunId, nodeId: string, items: readonly TranscriptItem[]): void
-  readTranscript(runId: WorkflowRunId, nodeId: string): readonly TranscriptItem[]
+  /** Read off the loop: a long node's transcript is megabytes of JSON. */
+  readTranscript(runId: WorkflowRunId, nodeId: string): Promise<readonly TranscriptItem[]>
 }
 
 export function createRunStore(
@@ -103,9 +105,9 @@ export function createRunStore(
       writeJsonAtomic(join(dir, `${transcriptName(nodeId)}.json`), items)
     },
 
-    readTranscript(runId: WorkflowRunId, nodeId: string): readonly TranscriptItem[] {
+    async readTranscript(runId: WorkflowRunId, nodeId: string): Promise<readonly TranscriptItem[]> {
       try {
-        const raw = readFileSync(
+        const raw = await readFile(
           join(runDir(runId), 'transcripts', `${transcriptName(nodeId)}.json`),
           'utf8'
         )

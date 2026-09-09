@@ -1,3 +1,4 @@
+import { statSync } from 'node:fs'
 import { homedir } from 'node:os'
 import type {
   AuthEvent,
@@ -91,7 +92,7 @@ import {
   type StoredMessage
 } from './sdk-transcript.ts'
 import { markTurnContext } from './turn-context.ts'
-import { sumUsage, type StoredUsage } from './usage.ts'
+import { createUsageCache, sumUsage, type StoredUsage } from './usage.ts'
 
 // Imported dynamically because the SDK is ESM-only, so the CommonJS main
 // bundle cannot `require` it and a fake-flavor launch never loads it.
@@ -1047,6 +1048,11 @@ export function createSdkAdapter({
     emit({ type: 'usage', sessionId, ...next })
   }
 
+  // Keyed on the conversation file's revision, so the Usage pane's sweep over
+  // every session of the workspace parses a file that has not moved once, not
+  // once per refresh.
+  const usageCache = createUsageCache(fileRevision)
+
   /** π's per-message usage over a whole conversation, every branch of it. */
   function usageOf(manager: SessionManager): SessionUsage | undefined {
     return sumUsage(
@@ -1460,14 +1466,13 @@ export function createSdkAdapter({
     async sessionUsage(request: UsageRequest): Promise<SessionUsage | undefined> {
       const bound = sessions.get(request.sessionId)
       if (bound !== undefined) return usageOf(bound.session.sessionManager)
-      if (request.token === undefined) return undefined
+      const token = request.token
+      if (token === undefined) return undefined
       const pi = await sdk()
       try {
-        return usageOf(
-          pi.SessionManager.open(
-            request.token,
-            sessionDir(request.workspacePath),
-            request.workspacePath
+        return usageCache.of(token, () =>
+          usageOf(
+            pi.SessionManager.open(token, sessionDir(request.workspacePath), request.workspacePath)
           )
         )
       } catch {
@@ -1629,6 +1634,21 @@ export function createSdkAdapter({
         dropShares(bound)
       }
     }
+  }
+}
+
+/**
+ * What π's own `getFileRevision` keys on: a conversation file that still has
+ * this identity, length and moment holds the same conversation. `undefined`
+ * where the file cannot be stat'ed, which is a file nothing may be remembered
+ * about.
+ */
+function fileRevision(path: string): string | undefined {
+  try {
+    const stamp = statSync(path)
+    return `${stamp.dev}:${stamp.ino}:${stamp.size}:${stamp.mtimeMs}`
+  } catch {
+    return undefined
   }
 }
 

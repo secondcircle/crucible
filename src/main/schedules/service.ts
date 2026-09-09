@@ -22,9 +22,19 @@ export function createLiveScheduleService({
   changes
 }: LiveScheduleOptions): MainScheduleService {
   const listeners = new Set<ScheduleListener>()
+  // The scheduler announces a change after every evaluation, and it evaluates
+  // every 30 seconds whether or not anything moved. An identical snapshot
+  // tells a window nothing and costs it a whole re-render, so it is not sent.
+  // The seam's contract is unchanged: a window still learns the whole state,
+  // and a window that has just opened asks for it rather than waiting.
+  let sent: string | undefined
 
   changes.subscribe(() => {
-    const event = { type: 'schedules', snapshot: scheduler.snapshot() } as const
+    const snapshot = scheduler.snapshot()
+    const serialized = JSON.stringify(snapshot)
+    if (serialized === sent) return
+    sent = serialized
+    const event = { type: 'schedules', snapshot } as const
     for (const listener of [...listeners]) listener(event)
   })
 

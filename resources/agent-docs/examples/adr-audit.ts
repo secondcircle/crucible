@@ -1,4 +1,4 @@
-import { spawnSync } from 'node:child_process'
+import { spawn } from 'node:child_process'
 import { workflow, type OutputSpec, type PlannedNode } from 'crucible:workflow'
 
 const DOCUMENT_MODEL = 'anthropic/claude-fable-5:high'
@@ -119,20 +119,42 @@ const REPORT: OutputSpec = {
   desc: 'the run judged in one document, for the human who reads the branch'
 }
 
-function git(args: string[], cwd: string): { ok: boolean; out: string } {
-  const ran = spawnSync('git', args, { cwd, encoding: 'utf8', timeout: 120_000 })
-  return { ok: ran.status === 0, out: `${ran.stdout ?? ''}${ran.stderr ?? ''}`.trim() }
+/**
+ * Spawned and awaited, never spawnSync: run() executes on the app's main
+ * thread, and a synchronous child process holds the window for as long as the
+ * command takes — `git add -A` alone is a quarter of a second in a large
+ * repository, and this workflow commits after every phase.
+ */
+function git(args: string[], cwd: string): Promise<{ ok: boolean; out: string }> {
+  return new Promise((resolve) => {
+    let stdout = ''
+    let stderr = ''
+    const child = spawn('git', args, { cwd })
+    const bound = setTimeout(() => child.kill('SIGKILL'), 120_000)
+    const done = (ok: boolean, out: string): void => {
+      clearTimeout(bound)
+      resolve({ ok, out: out.trim() })
+    }
+    child.stdout.on('data', (chunk: Buffer) => {
+      stdout += chunk.toString('utf8')
+    })
+    child.stderr.on('data', (chunk: Buffer) => {
+      stderr += chunk.toString('utf8')
+    })
+    child.on('error', (cause: Error) => done(false, `${stdout}${stderr}${cause.message}`))
+    child.on('close', (code: number | null) => done(code === 0, `${stdout}${stderr}`))
+  })
 }
 
 /**
  * An untouched worktree is a legitimate no-op, but a refused commit fails the
  * run: work that never reached the branch must not be reported as done.
  */
-function commit(cwd: string, message: string): void {
-  const staged = git(['add', '-A'], cwd)
+async function commit(cwd: string, message: string): Promise<void> {
+  const staged = await git(['add', '-A'], cwd)
   if (!staged.ok) throw new Error(`adr-audit: git add failed: ${staged.out}`)
-  if (git(['diff', '--cached', '--quiet'], cwd).ok) return
-  const done = git(['commit', '-m', message], cwd)
+  if ((await git(['diff', '--cached', '--quiet'], cwd)).ok) return
+  const done = await git(['commit', '-m', message], cwd)
   if (!done.ok) throw new Error(`adr-audit: git commit failed: ${done.out}`)
 }
 
@@ -345,7 +367,7 @@ export default workflow({
       verdict: AUDIT_VERDICT,
       model: DOCUMENT_MODEL
     })
-    commit(ctx.cwd, 'adr-audit: audit')
+    await commit(ctx.cwd, 'adr-audit: audit')
 
     // The citation ban holds whatever the audit decided, so this edge is
     // ordering alone: one worktree, and commits that tell the run in order.
@@ -356,7 +378,7 @@ export default workflow({
       verdict: SWEEP_VERDICT,
       model: DOCUMENT_MODEL
     })
-    commit(ctx.cwd, 'adr-audit: sweep')
+    await commit(ctx.cwd, 'adr-audit: sweep')
 
     const report = await ctx.node('report', {
       prompt: reportPrompt(audit.outputs.findings, sweep.outputs.findings),

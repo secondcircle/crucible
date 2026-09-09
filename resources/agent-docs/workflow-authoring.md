@@ -57,6 +57,37 @@ export default workflow({
   whatever the orchestration needs. Its return value lands on the run
   record as `outputs`.
 
+### run() executes on the window's thread
+
+Crucible is one process: the workflow body, the scheduler and the window's
+message loop share a thread. Anything synchronous in `run()` holds the window
+for its whole duration, and nothing bounds it — no timeout in the engine can
+interrupt code that never yields.
+
+So: `spawn` and await it, never `spawnSync` or `execFileSync`; `node:fs/promises`,
+not `readFileSync` of anything an agent may have grown. `git add -A` alone is
+26 ms in a small repository and 200 ms in a large one, and a workflow that
+commits after every phase pays it every time. A synchronous `npm test` in a
+`run()` body freezes the window for the length of the test suite.
+
+```ts
+import { spawn } from 'node:child_process'
+
+function git(args: string[], cwd: string): Promise<{ ok: boolean; out: string }> {
+  return new Promise((resolve) => {
+    let out = ''
+    const child = spawn('git', args, { cwd })
+    child.stdout.on('data', (chunk: Buffer) => { out += chunk.toString('utf8') })
+    child.stderr.on('data', (chunk: Buffer) => { out += chunk.toString('utf8') })
+    child.on('close', (code) => resolve({ ok: code === 0, out: out.trim() }))
+  })
+}
+```
+
+The shipped `adr-audit` and `build` examples use exactly this helper. The same
+rule holds for `plan(inputs)` and for a node's `check(outputs)`: both are
+called synchronously by the engine, on the same thread.
+
 ## Firing on a schedule
 
 A workflow in `<workspace>/.crucible/workflows/` may declare a schedule.
@@ -64,16 +95,23 @@ While Crucible is running, the scheduler fires it for that workspace — no
 session, no orchestrator, no inputs:
 
 ```ts
+import { execFile } from 'node:child_process'
+import { promisify } from 'node:util'
+
+const run = promisify(execFile)
+
 export default workflow({
   description: 'label and prioritize untriaged issues',
   inputs: {},
   schedule: {
     cron: '*/5 * * * *',
-    check: ({ workspacePath }) =>
-      execFileSync('gh', ['issue', 'list', '--label', 'untriaged', '--json', 'number'], {
-        cwd: workspacePath,
-        encoding: 'utf8'
-      }).trim() !== '[]'
+    // Awaited, never execFileSync: a check runs on the window's own thread.
+    check: async ({ workspacePath }) => {
+      const listed = await run('gh', ['issue', 'list', '--label', 'untriaged', '--json', 'number'], {
+        cwd: workspacePath
+      })
+      return listed.stdout.trim() !== '[]'
+    }
   },
   run: async (ctx) => { /* … */ }
 })
@@ -90,7 +128,12 @@ export default workflow({
   Day one it is boolean only: nothing it computed reaches the run, which
   re-queries whatever it needs. A check that throws, rejects or takes longer
   than 30 seconds puts the schedule in a warning state on the schedule board;
-  it never fires and never lights the chip.
+  it never fires and never lights the chip. **The check runs on the window's
+  thread**, on a timer, whether or not anyone is looking: do the work
+  asynchronously and await it. A synchronous `gh issue list` in a check is
+  400 ms of frozen window every time the schedule comes due, and the 30-second
+  bound cannot interrupt it — a timeout can only fire while the check has
+  given the thread back.
 
 What a scheduled fire is: `git fetch --prune origin`, then a run branched from
 the trunk tip, in a worktree of its own, with no inputs and no orchestrator. A
