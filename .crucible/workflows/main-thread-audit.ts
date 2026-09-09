@@ -14,8 +14,9 @@ import { workflow, type OutputSpec, type PlannedNode } from 'crucible:workflow'
 // Four auditors in parallel, each over one slice of the main process, then
 // one fixer with all four findings in hand, a gate, and a report. The
 // auditors only read; the fixer is the one node that edits. Everything this
-// file itself does in `run()` executes in the app's main process, which is
-// exactly the thread under audit, so it spawns and never spawnSyncs.
+// file itself does in `run()` executes in a workflow host, not the thread
+// under audit — but a blocked host is deaf to the engine and dies mid-call
+// on a cancel, so it spawns and never spawnSyncs.
 
 const AREAS = {
   'sdk-host': `\
@@ -37,12 +38,12 @@ The workflow engine and everything that fires on its own: \`src/main/workflows/\
 (engine, loader, service, store, worktree, select-service, channel),
 \`src/main/schedules/\`, \`src/main/monitors/\`, and the shared pieces they
 lean on under \`src/shared/workflows/\` and \`src/shared/monitors/\`. Two
-facts to hold in mind. First, a workflow file's \`run()\` body executes in
-the main process, as does a schedule's \`check\`, so any synchronous call an
-author puts there holds the window; the workflow files in
-\`.crucible/workflows/\` and \`~/.crucible/workflows/\` are the evidence of
-what authors actually do, and the authoring doc that shapes them is
-\`resources/agent-docs/workflow-authoring.md\`. Second, every node of every
+facts to hold in mind. First, a workflow file's own code — \`run()\`,
+\`plan()\`, a node's \`check\`, a schedule's \`check\` — executes in a
+workflow host, a utility process per file, so an author's synchronous call
+cannot hold the window; what CAN hold it is \`src/main/workflows/host/\` and
+the engine's own side of that wire, plus anything the engine does per
+message. Second, every node of every
 run is a full SDK session in this same process, so N concurrent nodes are N
 agents' worth of whatever the SDK does synchronously. The scheduler's
 per-minute evaluation, the monitor loop, run record persistence and the

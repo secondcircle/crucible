@@ -131,11 +131,11 @@ const VERDICT = {
 }
 
 /**
- * Spawned and awaited, never spawnSync: run() executes on the app's main
- * thread, and a synchronous child process holds the window for as long as the
- * command takes — `git add -A` alone is a quarter of a second in a large
- * repository, and this workflow commits after every phase. The build gate
- * below already got this right; the git calls did not.
+ * Spawned and awaited, never spawnSync: run() executes in a workflow host,
+ * and a synchronous child process holds that host entirely for as long as the
+ * command takes — deaf to the engine, and killed mid-call by a cancel. This
+ * workflow commits after every phase, so it pays that every time. The build
+ * gate below already got this right; the git calls did not.
  */
 function git(
   args: string[],

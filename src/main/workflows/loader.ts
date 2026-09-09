@@ -1,15 +1,18 @@
-import { readdirSync } from 'node:fs'
+import { createHash } from 'node:crypto'
+import { readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { createJiti, type Jiti } from 'jiti'
-import type { WorkflowDef } from './authoring'
+import { createWorkflowHost, type SpawnHost, type WorkflowHost, type WorkflowManifest } from './host/host'
 
 // Workflows resolve like Commands, minus the built-in rung: two origins,
 // workspace over user, and a file in a folder is enrollment. Crucible ships
 // no workflows of its own — only example files beside the agent docs, which
-// this loader never reads. The files are
-// TypeScript, loaded through jiti so a workflow works from any folder with
-// no build step and no node_modules of its own; the `crucible:workflow`
-// import every file uses is aliased to the shipped authoring module.
+// this loader never reads.
+//
+// The files are TypeScript, and this process never executes them: a workflow
+// host does, one process per file, so a file's top-level code, its `run()`
+// and its checks hold that host and nothing else. What comes back here is a
+// manifest — the declarations, minus the functions — and a way to open a
+// fresh host for the run.
 
 export type WorkflowOrigin = 'user' | 'workspace'
 
@@ -19,20 +22,22 @@ export interface WorkflowRoots {
 }
 
 export interface LoadedWorkflow {
-  /** The file name, which is the workflow's name; `description` is the def's. */
+  /** The file name, which is the workflow's name; `description` is the manifest's. */
   readonly name: string
   readonly origin: WorkflowOrigin
   readonly path: string
-  readonly def: WorkflowDef
+  readonly manifest: WorkflowManifest
+  /** A fresh host with this file loaded. The caller kills it. */
+  open(): WorkflowHost
 }
 
 export interface WorkflowLoader {
   /**
    * Every winner of the origin ladder, loaded, sorted by name. Given an
-   * origin, only the winners from that origin are loaded at all: loading a
-   * file transforms it and runs its module body, so a caller that will
-   * discard an origin should never ask for it. The scheduler asks every 30
-   * seconds and wants workspace files only.
+   * origin, only the winners from that origin are read at all: reading a
+   * manifest starts a host and runs the file's module body in it, so a
+   * caller that will discard an origin should never ask for it. The
+   * scheduler asks every 30 seconds and wants workspace files only.
    */
   list(workspacePath: string, origin?: WorkflowOrigin): Promise<readonly LoadedWorkflow[]>
   /** The ladder's winner for one name. Unknown names and broken files throw. */
@@ -43,6 +48,8 @@ export interface WorkflowLoaderOptions {
   readonly roots: WorkflowRoots
   /** Absolute path of the shipped authoring module, `crucible:workflow`. */
   readonly authoringModule: string
+  /** Starts a host process for a file. */
+  readonly spawn: SpawnHost
   /** Where a file that cannot load is reported; discovery never crashes. */
   readonly onUnloadable?: (path: string, cause: unknown) => void
 }
@@ -56,20 +63,17 @@ interface Found {
 export function createWorkflowLoader({
   roots,
   authoringModule,
+  spawn,
   onUnloadable
 }: WorkflowLoaderOptions): WorkflowLoader {
-  let loader: Jiti | undefined
+  // A manifest is read by starting a process, so one is kept for as long as
+  // the file it came from has the same bytes; the next listing after an edit
+  // reads it afresh. A run never uses this — it opens a host of its own,
+  // which imports the file again, so a helper the file imports is always
+  // read live by the run even though it cannot move this stamp.
+  const manifests = new Map<string, { readonly stamp: string; readonly manifest: WorkflowManifest }>()
 
-  function jiti(): Jiti {
-    // Module cache off, so a workflow an agent edits mid-session is what the
-    // very next run executes.
-    loader ??= createJiti(__filename, {
-      moduleCache: false,
-      interopDefault: true,
-      alias: { 'crucible:workflow': authoringModule }
-    })
-    return loader
-  }
+  const open = (found: Found): WorkflowHost => createWorkflowHost(spawn, found.path, authoringModule)
 
   /** Workspace beats user: the winner is the last one found. */
   function discover(workspacePath: string): Map<string, Found> {
@@ -86,10 +90,15 @@ export function createWorkflowLoader({
     return winners
   }
 
-  async function load(found: Found): Promise<LoadedWorkflow> {
-    let loaded: unknown
+  async function readManifest(found: Found): Promise<WorkflowManifest> {
+    const stamp = fileStamp(found.path)
+    const kept = manifests.get(found.path)
+    if (kept !== undefined && kept.stamp === stamp) return kept.manifest
+
+    const host = open(found)
+    let manifest: WorkflowManifest
     try {
-      loaded = await jiti().import(found.path, { default: true })
+      manifest = await host.manifest()
     } catch (cause) {
       throw new Error(
         `The workflow "${found.name}" could not be loaded from ${found.path}: ${
@@ -97,22 +106,35 @@ export function createWorkflowLoader({
         }`,
         { cause }
       )
+    } finally {
+      host.kill()
     }
-    return { ...found, def: checkDef(found, loaded) }
+    manifests.set(found.path, { stamp, manifest })
+    return manifest
+  }
+
+  async function load(found: Found): Promise<LoadedWorkflow> {
+    const manifest = await readManifest(found)
+    return { ...found, manifest, open: () => open(found) }
   }
 
   return {
     async list(workspacePath: string, origin?: WorkflowOrigin): Promise<readonly LoadedWorkflow[]> {
+      // Every file at once: each is its own process, and the listing is only
+      // as slow as the slowest of them rather than the sum.
+      const found = [...discover(workspacePath).values()].filter(
+        (candidate) => origin === undefined || candidate.origin === origin
+      )
+      const settled = await Promise.allSettled(found.map(load))
       const listed: LoadedWorkflow[] = []
-      for (const found of discover(workspacePath).values()) {
-        if (origin !== undefined && found.origin !== origin) continue
+      for (const [at, outcome] of settled.entries()) {
+        if (outcome.status === 'fulfilled') {
+          listed.push(outcome.value)
+          continue
+        }
         // A broken file is skipped and reported; it never takes the rest of
         // the catalog down with it.
-        try {
-          listed.push(await load(found))
-        } catch (cause) {
-          onUnloadable?.(found.path, cause)
-        }
+        onUnloadable?.(found[at].path, outcome.reason)
       }
       return listed.sort((left, right) => left.name.localeCompare(right.name))
     },
@@ -132,22 +154,13 @@ export function createWorkflowLoader({
   }
 }
 
-/** The floor a default export must meet before the engine will run it. */
-function checkDef(found: Found, loaded: unknown): WorkflowDef {
-  const def = loaded as Partial<WorkflowDef> | null | undefined
-  if (typeof def !== 'object' || def === null) {
-    throw new Error(`${found.path} does not default-export a workflow definition.`)
+/** What "the same file" means for the manifest kept from the last read. */
+function fileStamp(path: string): string {
+  try {
+    return createHash('sha1').update(readFileSync(path)).digest('hex')
+  } catch {
+    return 'missing'
   }
-  if (typeof def.description !== 'string' || def.description.trim() === '') {
-    throw new Error(`The workflow "${found.name}" has no description (${found.path}).`)
-  }
-  if (typeof def.inputs !== 'object' || def.inputs === null) {
-    throw new Error(`The workflow "${found.name}" declares no inputs record (${found.path}).`)
-  }
-  if (typeof def.run !== 'function') {
-    throw new Error(`The workflow "${found.name}" has no run() (${found.path}).`)
-  }
-  return def as WorkflowDef
 }
 
 // Non-recursive, `*.ts` only, and a missing folder contributes nothing;

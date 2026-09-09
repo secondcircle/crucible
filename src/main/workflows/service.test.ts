@@ -83,10 +83,13 @@ const loader: WorkflowLoader = {
         name: 'adhoc',
         origin: 'workspace',
         path: '/x/adhoc.ts',
-        def: {
+        manifest: {
           description: 'one node running a prompt file',
           inputs: { prompt: 'a task file' },
-          run: async () => {}
+          plans: false
+        },
+        open: () => {
+          throw new Error('not under test')
         }
       }
     ]

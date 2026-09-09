@@ -4,6 +4,7 @@ import type { MainScheduleService } from '../../shared/schedules/service'
 import type { MainWorkflowRunService } from '../../shared/workflows/service'
 import type { Flavor } from '../agent/select-adapter'
 import type { LogSink } from '../log/sink'
+import type { SpawnHost } from '../workflows/host/host'
 import { shippedWorkflowLoader } from '../workflows/select-service'
 import { createScheduler, type Scheduler } from './scheduler'
 import { createLiveScheduleService } from './service'
@@ -23,6 +24,8 @@ export interface ScheduleWiring {
   readonly appPath: string
   /** Crucible's own state directory; the scheduler's state lives under it. */
   readonly stateDir: string
+  /** Starts the process a workflow file's schedule check runs in. */
+  readonly spawnHost: SpawnHost
   /** The workspaces open in the sidebar, read fresh at every evaluation. */
   readonly workspaces: () => readonly string[]
   /** The run seam: what fires a scheduled run, and what the records say. */
@@ -57,7 +60,7 @@ export function selectScheduleService(
     }
   }
 
-  const loader = shippedWorkflowLoader(wiring.appPath, log)
+  const loader = shippedWorkflowLoader(wiring.appPath, log, wiring.spawnHost)
 
   const changeListeners = new Set<() => void>()
   const scheduler = createScheduler({

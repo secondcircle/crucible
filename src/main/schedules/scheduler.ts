@@ -32,8 +32,12 @@ export interface DeclaredSchedule {
   // Whether the workflow declares inputs. A scheduled fire supplies none, so
   // a workflow that declares any is a schedule that can never fire.
   readonly declaresInputs: boolean
-  /** The gate, when one is declared. Truthy fires; falsy leaves no trace. */
-  readonly check?: (ctx: { readonly workspacePath: string }) => boolean | Promise<boolean>
+  // The gate, when one is declared. Truthy fires; falsy leaves no trace. The
+  // signal aborts when the scheduler stops waiting for the answer.
+  readonly check?: (ctx: {
+    readonly workspacePath: string
+    readonly signal?: AbortSignal
+  }) => boolean | Promise<boolean>
 }
 
 export interface ScheduledFire {
@@ -231,14 +235,16 @@ export function createScheduler(options: SchedulerOptions): Scheduler {
   ): Promise<{ readonly fire: boolean } | { readonly error: string }> {
     if (schedule.check === undefined) return { fire: true }
     let bound: ReturnType<typeof setTimeout> | undefined
+    // Told when the wait is over, so whatever is answering can stop.
+    const abandon = new AbortController()
     try {
       const answer = await Promise.race([
-        Promise.resolve(schedule.check({ workspacePath })),
+        Promise.resolve(schedule.check({ workspacePath, signal: abandon.signal })),
         new Promise<never>((_resolve, reject) => {
-          bound = setTimeout(
-            () => reject(new Error(`the check took longer than ${Math.round(checkMs / 1000)}s`)),
-            checkMs
-          )
+          bound = setTimeout(() => {
+            abandon.abort()
+            reject(new Error(`the check took longer than ${Math.round(checkMs / 1000)}s`))
+          }, checkMs)
         })
       ])
       return { fire: Boolean(answer) }
