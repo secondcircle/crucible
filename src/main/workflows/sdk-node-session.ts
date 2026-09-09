@@ -182,6 +182,19 @@ interface NodeSkills {
   readonly cwd: string
 }
 
+/**
+ * The same number `toTranscript` would report, without building the
+ * transcript: it pushes exactly one `tool` item per `toolResult` message,
+ * unconditionally, so counting those messages is the same count. The engine
+ * asks for this on every lull in a node's stream, and a long node's
+ * transcript is megabytes.
+ */
+export function toolCallCount(messages: readonly StoredMessage[]): number {
+  let count = 0
+  for (const message of messages) if (message.role === 'toolResult') count += 1
+  return count
+}
+
 function wrap(session: AgentSession, skills: NodeSkills, cache: CacheWatch): NodeSession {
   const activityListeners = new Set<(now: string | undefined) => void>()
   const inflight = new Map<string, string>()
@@ -277,7 +290,7 @@ function wrap(session: AgentSession, skills: NodeSkills, cache: CacheWatch): Nod
     },
 
     stats(): NodeSessionStats {
-      const toolCalls = transcriptNow().filter((item) => item.kind === 'tool').length
+      const toolCalls = toolCallCount(session.messages as unknown as StoredMessage[])
       let cost: number | undefined
       let contextPercent: number | undefined
       try {
