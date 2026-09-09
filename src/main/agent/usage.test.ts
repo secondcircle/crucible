@@ -3,7 +3,7 @@
 // π reports usage per message and keeps no ledger; this is Crucible's
 // arithmetic, proven without constructing an SDK adapter.
 import { describe, expect, it } from 'vitest'
-import { sumUsage, type StoredUsage } from './usage'
+import { createUsageCache, sumUsage, type StoredUsage } from './usage'
 
 function turn(scale: number): StoredUsage {
   return {
@@ -69,5 +69,76 @@ describe('summing what π reported', () => {
       totalTokens: 0,
       totalCost: 0
     })
+  })
+})
+
+// The Usage pane re-asks for every session in the workspace after every turn,
+// and an unbound session costs a whole file parse to answer. The sum is a
+// pure function of the file, so it is kept against the file's revision.
+describe('the usage cache', () => {
+  it('parses a conversation once while its file stands still', () => {
+    const revisions = new Map([['/s/one.jsonl', 'dev:1:400:100']])
+    const cache = createUsageCache((path) => revisions.get(path))
+    let parses = 0
+    const compute = (): ReturnType<typeof sumUsage> => {
+      parses += 1
+      return sumUsage([turn(1)])
+    }
+
+    const first = cache.of('/s/one.jsonl', compute)
+    const second = cache.of('/s/one.jsonl', compute)
+
+    expect(parses).toBe(1)
+    expect(second).toEqual(first)
+  })
+
+  it('parses it again the moment the file grows', () => {
+    const revisions = new Map([['/s/one.jsonl', 'dev:1:400:100']])
+    const cache = createUsageCache((path) => revisions.get(path))
+    let parses = 0
+    const compute = (): ReturnType<typeof sumUsage> => {
+      parses += 1
+      return sumUsage(Array.from({ length: parses }, () => turn(1)))
+    }
+
+    expect(cache.of('/s/one.jsonl', compute)?.messages).toBe(1)
+    revisions.set('/s/one.jsonl', 'dev:1:800:200')
+
+    expect(cache.of('/s/one.jsonl', compute)?.messages).toBe(2)
+    expect(parses).toBe(2)
+  })
+
+  it('keeps one answer per conversation', () => {
+    const cache = createUsageCache((path) => `rev-of-${path}`)
+    let parses = 0
+    const compute = (): ReturnType<typeof sumUsage> => {
+      parses += 1
+      return sumUsage([turn(parses)])
+    }
+
+    const one = cache.of('/s/one.jsonl', compute)
+    const two = cache.of('/s/two.jsonl', compute)
+
+    expect(parses).toBe(2)
+    expect(cache.of('/s/one.jsonl', compute)).toEqual(one)
+    expect(cache.of('/s/two.jsonl', compute)).toEqual(two)
+    expect(parses).toBe(2)
+  })
+
+  // A file nothing can stat is a file with no revision to key on: answering
+  // from memory there would mean answering for a conversation that may have
+  // been replaced.
+  it('remembers nothing about a file it cannot stat', () => {
+    const cache = createUsageCache(() => undefined)
+    let parses = 0
+    const compute = (): ReturnType<typeof sumUsage> => {
+      parses += 1
+      return sumUsage([turn(1)])
+    }
+
+    cache.of('/s/gone.jsonl', compute)
+    cache.of('/s/gone.jsonl', compute)
+
+    expect(parses).toBe(2)
   })
 })
