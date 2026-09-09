@@ -5,7 +5,7 @@
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import type { IssueBoardAnswer, IssueBoardSnapshot } from '../../shared/workspace/service'
-import type { CommandOutcome, CommandRunner } from './collect-board'
+import type { CommandOutcome, CommandRunner } from './command-runner'
 import { collectIssues, type IssueSeams } from './collect-issues'
 import type { JiraFetch } from './jira-client'
 import type { WorkspaceFileReader } from './workspace-files'

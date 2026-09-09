@@ -45,7 +45,7 @@
   border-color: var(--accent2);
 }
 
-/* The branch board's whole resting surface: two numbers, one click. */
+/* A board's whole resting surface: a count or two, one click. */
 .top .tchip {
   display: flex;
   gap: 7px;

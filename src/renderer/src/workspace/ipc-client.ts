@@ -4,7 +4,6 @@ import type {
   ResearchStatus
 } from '../../../shared/workspace/research'
 import type {
-  BranchBoardAnswer,
   IssueBoardAnswer,
   RunId,
   Unsubscribe,
@@ -40,8 +39,6 @@ export function createWorkspaceClient(): WorkspaceService {
       call<WorktreeCreation>('createWorktree', workspacePath),
     startRun: (directory: string, command: string) => call<RunId>('startRun', directory, command),
     stopRun: (runId: RunId) => call<void>('stopRun', runId),
-    branchBoard: (workspacePath: string) =>
-      call<BranchBoardAnswer>('branchBoard', workspacePath),
     issueBoard: (workspacePath: string) => call<IssueBoardAnswer>('issueBoard', workspacePath),
     openUrl: (url: string) => call<void>('openUrl', url),
 

@@ -3,9 +3,8 @@
 // The flavor an agent-driven check drives: every answer is canned, so what
 // those checks rely on is pinned here.
 import { describe, expect, it } from 'vitest'
-import { boardCounts } from './classify-board'
 import { CANNED_FILES, CANNED_WORKTREE_IDS, createFakeWorkspaceService } from './fake-service'
-import type { BranchBoardSnapshot, WorkspaceEvent } from './service'
+import type { WorkspaceEvent } from './service'
 
 function watched(): {
   service: ReturnType<typeof createFakeWorkspaceService>
@@ -15,11 +14,6 @@ function watched(): {
   const events: WorkspaceEvent[] = []
   service.onEvent((event) => events.push(event))
   return { service, events }
-}
-
-/** The groups the canned rows fall into, in board order and without repeats. */
-function groups(board: BranchBoardSnapshot): readonly string[] {
-  return [...new Set(board.rows.map((row) => row.group))]
 }
 
 async function settled(events: readonly WorkspaceEvent[], within = 2000): Promise<void> {
@@ -88,31 +82,6 @@ describe('the fake workspace service', () => {
     expect(events.at(-1)).toEqual({ type: 'run_ended', runId: 'fake-run-1', exitCode: 1 })
   })
 
-  it('answers both board variants, hosted by default and git-only by path', async () => {
-    const { service } = watched()
-    const hosted = await service.branchBoard('/repos/pi-extensions')
-    const home = await service.branchBoard('/repos/nohost-resume-site')
-    if (hosted.kind !== 'board' || home.kind !== 'board') throw new Error('expected boards')
-
-    expect(hosted.board.host).toEqual({ kind: 'github', reachable: true })
-    expect(hosted.board.repoLabel).toBe('secondcircle/pi-extensions')
-    // All five groups, so every one of them is drivable at no cost.
-    expect(groups(hosted.board)).toEqual([
-      'landed',
-      'inFlight',
-      'waitingOnYou',
-      'localOnly',
-      'stale'
-    ])
-    expect(boardCounts(hosted.board)).toEqual({ landed: 4, needYou: 3 })
-
-    // No host at all on the home variant: nothing host-derived to render.
-    expect(home.board.host).toBeUndefined()
-    expect(home.board.repoLabel).toBe('/repos/nohost-resume-site')
-    expect(home.board.rows.some((row) => row.pr !== undefined)).toBe(false)
-    expect(groups(home.board)).toEqual(['landed', 'inFlight', 'localOnly', 'stale'])
-  })
-
   it('answers every issue-board state a check might want, by a word in the path', async () => {
     const { service } = watched()
     const github = await service.issueBoard('/repos/crucible')
@@ -154,7 +123,7 @@ describe('the fake workspace service', () => {
 
   it('mints the collection time at call time, so the age reads fresh', async () => {
     const { service } = watched()
-    const answer = await service.branchBoard('/repos/pi-extensions')
+    const answer = await service.issueBoard('/repos/pi-extensions')
     if (answer.kind !== 'board') throw new Error('expected a board')
 
     expect(Date.now() - Date.parse(answer.board.collectedAt)).toBeLessThan(2000)

@@ -42,7 +42,6 @@ export function Sidebar({
   needsYou,
   runActivity,
   waiting: waitActivity,
-  boardNeedYou,
   onNewSession,
   onAddWorkspace,
   onActivateWorkspace,
@@ -64,9 +63,6 @@ export function Sidebar({
   // the shell. Absent for a session with none.
   readonly runActivity: Readonly<Record<SessionId, RunActivity>>
   readonly waiting?: Readonly<Record<SessionId, MonitorActivity>>
-  // A different count on the same row: the board's branches and pull requests,
-  // and nothing for a workspace whose board has not answered.
-  readonly boardNeedYou: Readonly<Record<WorkspaceId, number>>
   readonly onNewSession: () => void
   readonly onAddWorkspace: () => void
   readonly onActivateWorkspace: (id: WorkspaceId) => void
@@ -127,7 +123,6 @@ export function Sidebar({
           // The roll-up, so a collapsed or scrolled-past workspace still says
           // how many of its sessions are waiting.
           const asking = own.filter((session) => needsYou.has(session.id)).length
-          const board = boardNeedYou[workspace.id] ?? 0
 
           return (
             <li key={workspace.id}>
@@ -141,20 +136,12 @@ export function Sidebar({
                   <span className="dot" aria-hidden="true" />
                   {workspace.name}
                 </button>
-                {/* Sessions first and filled; the board's count after it and
-                    outlined. Two counts of two different things, told apart
-                    by weight rather than by position alone. */}
                 {asking > 0 ? (
                   <span
                     className="wsn"
                     title={`${asking} ${asking === 1 ? 'session' : 'sessions'} waiting on you in ${workspace.name}`}
                   >
                     {asking}
-                  </span>
-                ) : null}
-                {board > 0 ? (
-                  <span className="n" title={`${board} need you in ${workspace.name}`}>
-                    {board}
                   </span>
                 ) : null}
                 <button

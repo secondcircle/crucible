@@ -14,7 +14,6 @@ import { createScriptedCommands } from './testing/scripted-commands'
 import { createScriptedPort, type ScriptedPort } from './testing/scripted-port'
 import { createScriptedWorkflowRuns } from './testing/scripted-workflow-runs'
 import { createScriptedWorkspace, type ScriptedWorkspace } from './testing/scripted-workspace'
-import { hostedBoard } from './testing/boards'
 import { hostedIssues } from './testing/issues'
 import { sessionRows, sessionsShown } from './testing/sidebar'
 import { settled } from './testing/settled'
@@ -88,7 +87,6 @@ async function shell(): Promise<{ port: ScriptedPort; workspace: ScriptedWorkspa
   })
   port.transcripts.set('s1', [{ kind: 'assistant', markdown: 'the first session speaking' }])
   const workspace = createScriptedWorkspace()
-  workspace.boards.set('/repos/crucible', { kind: 'board', board: hostedBoard() })
   workspace.issues.set('/repos/crucible', { kind: 'board', board: hostedIssues() })
   workspace.files = ['src/renderer/src/Shell.tsx']
   render(
@@ -151,14 +149,8 @@ describe('what an arrival closes', () => {
     expect(screen.queryByRole('dialog', { name: 'Session tree' })).toBeNull()
   })
 
-  it('takes the branch board and the issue board off', async () => {
+  it('takes the issue board off', async () => {
     await shell()
-    await click('Branch board')
-    expect(screen.queryByRole('dialog', { name: 'Branch board' })).not.toBeNull()
-
-    await switchSession()
-    expect(screen.queryByRole('dialog', { name: 'Branch board' })).toBeNull()
-
     await click('Issue board')
     expect(screen.queryByRole('dialog', { name: 'Issue board' })).not.toBeNull()
 

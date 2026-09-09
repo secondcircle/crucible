@@ -1,8 +1,8 @@
 // @vitest-environment node
 //
-// The trunk rule, shared by the branch board and by every scheduled fire —
-// which is why it is tested once, here, rather than twice in two shapes. The
-// runner is the seam: nothing is spawned.
+// The trunk rule every scheduled fire branches from, tested once here rather
+// than in the shape of each caller. The runner is the seam: nothing is
+// spawned.
 import { describe, expect, it } from 'vitest'
 import { findTrunk, refreshRefs, type GitAnswer, type GitRunner } from './trunk'
 
@@ -49,8 +49,7 @@ describe('refreshing the refs', () => {
     expect(scripted.ran).toEqual(['remote get-url origin'])
   })
 
-  // Offline is not a reason to refuse: the refs on hand stand, exactly as the
-  // branch board treats them.
+  // Offline is not a reason to refuse: the refs on hand stand.
   it('tolerates a fetch that fails', async () => {
     const scripted = script([
       [/^remote get-url origin/, ok('git@github.com:secondcircle/crucible.git\n')],

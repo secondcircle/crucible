@@ -154,18 +154,6 @@ describe('opening and closing the board', () => {
 
     expect(rows()).toContain('crucible#128')
   })
-
-  it('replaces the branch board rather than stacking on it', async () => {
-    await shell((workspace) => {
-      workspace.issues.set('/repos/crucible', { kind: 'board', board: hostedIssues() })
-      workspace.boards.set('/repos/crucible', { kind: 'noRepository' })
-    })
-
-    await press('i', { metaKey: true })
-
-    expect(board()).not.toBeNull()
-    expect(screen.queryByRole('dialog', { name: 'Branch board' })).toBeNull()
-  })
 })
 
 describe('a host that could not answer', () => {

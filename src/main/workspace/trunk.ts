@@ -1,11 +1,10 @@
-import { parseTrunkRef } from './board-facts'
+import { parseTrunkRef } from './repository-facts'
 
 // Which branch is the trunk, and how the refs it is judged against are
-// refreshed. The branch board asks so its ahead/behind counts are told
-// against reality; a scheduled run asks so it branches from the trunk tip
-// rather than from whatever this checkout happens to be sitting on. One rule,
-// one module: two answers to "which branch is the trunk" would be two
-// behaviors nobody chose.
+// refreshed. A scheduled run asks so it branches from the trunk tip rather
+// than from whatever this checkout happens to be sitting on. One rule, one
+// module: two answers to "which branch is the trunk" would be two behaviors
+// nobody chose.
 
 /** Enough of a command outcome to decide with; the callers' runners fit it. */
 export interface GitAnswer {

@@ -105,10 +105,6 @@ function stubService(): StubService {
     async stopRun(runId: string) {
       asked.push({ op: 'stopRun', args: [runId] })
     },
-    async branchBoard(workspacePath: string) {
-      asked.push({ op: 'branchBoard', args: [workspacePath] })
-      return { kind: 'noRepository' as const }
-    },
     async issueBoard(workspacePath: string) {
       asked.push({ op: 'issueBoard', args: [workspacePath] })
       return { kind: 'noIssueHost' as const }
@@ -183,15 +179,15 @@ describe('what crosses the workspace channel', () => {
   })
 
   it('carries the board and the link across, each by its own name', async () => {
-    expect(await request({ op: 'branchBoard', args: ['/repos/crucible'] })).toEqual({
+    expect(await request({ op: 'issueBoard', args: ['/repos/crucible'] })).toEqual({
       ok: true,
-      value: { kind: 'noRepository' }
+      value: { kind: 'noIssueHost' }
     })
 
     await request({ op: 'openUrl', args: ['https://github.com/secondcircle/crucible/pull/4'] })
 
     expect(stub.asked).toEqual([
-      { op: 'branchBoard', args: ['/repos/crucible'] },
+      { op: 'issueBoard', args: ['/repos/crucible'] },
       { op: 'openUrl', args: ['https://github.com/secondcircle/crucible/pull/4'] }
     ])
   })

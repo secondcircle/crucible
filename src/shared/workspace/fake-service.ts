@@ -1,4 +1,3 @@
-import { cannedBoard } from './fake-board'
 import { cannedIssues } from './fake-issues'
 import { rankFiles } from './match'
 import {
@@ -8,7 +7,6 @@ import {
   type ResearchStatus
 } from './research'
 import type {
-  BranchBoardAnswer,
   IssueBoardAnswer,
   RunId,
   Unsubscribe,
@@ -183,13 +181,7 @@ export function createFakeWorkspaceService({
       }
     },
 
-    // Both board variants are drivable with no git, no gh and no cost: the
-    // hosted one by default, the git-only one for a marker-word path.
-    async branchBoard(workspacePath: string): Promise<BranchBoardAnswer> {
-      return { kind: 'board', board: cannedBoard(workspacePath, Date.now()) }
-    },
-
-    // The same two shapes the branch board has: a hosted repository by
+    // Drivable with no git, no gh and no cost: a hosted repository by
     // default, and no issue host at all for the marker-word path.
     async issueBoard(workspacePath: string): Promise<IssueBoardAnswer> {
       return cannedIssues(workspacePath, Date.now())

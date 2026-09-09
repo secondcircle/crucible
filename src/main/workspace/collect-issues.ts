@@ -1,8 +1,8 @@
 import { classifyIssues, type IssueFacts } from '../../shared/workspace/classify-issues'
 import { JIRA_ENV_FILE, JIRA_POINTER_FILE } from '../../shared/workspace/jira-setup'
 import type { IssueBoardAnswer } from '../../shared/workspace/service'
-import { isGitHubRemote, parseNameWithOwner } from './board-facts'
-import type { CollectionClock, CommandOutcome, CommandRunner } from './collect-board'
+import { isGitHubRemote, parseNameWithOwner } from './repository-facts'
+import type { CollectionClock, CommandOutcome, CommandRunner } from './command-runner'
 import { collectJiraIssues } from './collect-jira-issues'
 import { openIssuesQuery, parseIssueNumbers, parseIssues } from './issue-facts'
 import type { JiraFetch } from './jira-client'
@@ -57,8 +57,8 @@ export async function collectIssues(
   }
 
   const repository = await run('git', 'rev-parse', '--show-toplevel')
-  // Not a git repository at all: the same normal answer the branch board gives,
-  // and how the renderer learns to show no chip and no board here.
+  // Not a git repository at all: a normal answer, and how the renderer learns
+  // to show no chip and no board here.
   if (!repository.ok) return { kind: 'noIssueHost' }
 
   const origin = await run('git', 'remote', 'get-url', 'origin')

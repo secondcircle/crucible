@@ -1,10 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { WorkspaceId, WorkspaceState } from '../../../shared/agent/port'
-import type {
-  BranchBoardAnswer,
-  IssueBoardAnswer,
-  WorkspaceService
-} from '../../../shared/workspace/service'
+import type { IssueBoardAnswer, WorkspaceService } from '../../../shared/workspace/service'
 
 // Snapshots live only as long as this document does: a board is a fact about a
 // repository as it stands, so a persisted one would be a lie.
@@ -36,12 +32,6 @@ interface Wanted<Answer> {
   readonly ask: (service: WorkspaceService, workspacePath: string) => Promise<Answer>
 }
 
-export function useBranchBoards(
-  wanted: Omit<Wanted<BranchBoardAnswer>, 'ask'>
-): Boards<BranchBoardAnswer> {
-  return useBoards({ ...wanted, ask: askBranches })
-}
-
 export function useIssueBoards(
   wanted: Omit<Wanted<IssueBoardAnswer>, 'ask'>
 ): Boards<IssueBoardAnswer> {
@@ -50,14 +40,11 @@ export function useIssueBoards(
 
 // Module-level, so the hook's effects depend on something stable rather than
 // on a function rebuilt every render.
-const askBranches = (service: WorkspaceService, path: string): Promise<BranchBoardAnswer> =>
-  service.branchBoard(path)
-
 const askIssues = (service: WorkspaceService, path: string): Promise<IssueBoardAnswer> =>
   service.issueBoard(path)
 
-// One collection rhythm for both boards: the active workspace first, then the
-// rest one at a time, on focus and on the poll.
+// One collection rhythm, whatever the board asks: the active workspace first,
+// then the rest one at a time, on focus and on the poll.
 function useBoards<Answer>({
   service,
   workspaces,

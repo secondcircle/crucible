@@ -2,10 +2,9 @@ import { capture } from '../workspace/capture'
 import { findTrunk, NO_TRUNK, refreshRefs, type GitRunner } from '../workspace/trunk'
 
 // Where a scheduled run starts from. No session exists to take a HEAD from,
-// so a clock fire branches from the trunk, fetched fresh — the branch board's
-// rule, shared rather than re-implemented: origin/HEAD, then local `main`,
-// then local `master`, with a failed fetch tolerated and the refs on hand
-// standing.
+// so a clock fire branches from the trunk, fetched fresh: origin/HEAD, then
+// local `main`, then local `master`, with a failed fetch tolerated and the
+// refs on hand standing.
 
 /** The trunk ref a scheduled fire branches from; the engine resolves it. */
 export async function scheduledBase(

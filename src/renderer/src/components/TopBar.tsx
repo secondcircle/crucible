@@ -18,7 +18,6 @@ export function TopBar({
   onOpenUsage,
   onJumpToCacheMiss,
   issues,
-  board,
   schedules,
   update
 }: {
@@ -39,13 +38,6 @@ export function TopBar({
   readonly issues?: {
     readonly open: number
     readonly yours: number
-    readonly onOpen: () => void
-  }
-  // The branch board's whole resting surface: absent until a collection has
-  // answered with a board for this workspace.
-  readonly board?: {
-    readonly landed: number
-    readonly needYou: number
     readonly onOpen: () => void
   }
   // The schedule board's whole resting surface, on the same terms: absent
@@ -93,21 +85,6 @@ export function TopBar({
             {issues.open} issue{issues.open === 1 ? '' : 's'}
           </b>
           {issues.yours > 0 ? <u> · {issues.yours} yours</u> : null}
-        </button>
-      )}
-
-      {/* Lit exactly while something needs you, so it is not permanently on. */}
-      {board === undefined ? null : (
-        <button
-          className={`tchip${board.needYou > 0 ? ' lit' : ''}`}
-          aria-label="Branch board"
-          onClick={board.onOpen}
-        >
-          <span className="g" aria-hidden="true">
-            ⑂
-          </span>{' '}
-          <b>{board.landed} landed</b>
-          {board.needYou > 0 ? <u> · {board.needYou} need you</u> : null}
         </button>
       )}
 

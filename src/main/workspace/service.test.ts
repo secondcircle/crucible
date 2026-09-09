@@ -35,27 +35,6 @@ function gitInit(): void {
   execFileSync('git', ['init', '-q'], { cwd: folder })
 }
 
-/** Runs git in the temp repository, with an identity of its own. */
-function git(...args: readonly string[]): void {
-  execFileSync('git', [...args], {
-    cwd: folder,
-    stdio: 'ignore',
-    env: {
-      ...process.env,
-      GIT_AUTHOR_NAME: 'Temp',
-      GIT_AUTHOR_EMAIL: 'temp@example.com',
-      GIT_COMMITTER_NAME: 'Temp',
-      GIT_COMMITTER_EMAIL: 'temp@example.com'
-    }
-  })
-}
-
-function commit(path: string, message: string): void {
-  write(path, message)
-  git('add', '-A')
-  git('commit', '-q', '-m', message)
-}
-
 /** A HEAD to branch from, with an identity the machine need not have. */
 function gitCommit(): void {
   execFileSync(
@@ -173,74 +152,6 @@ describe('file search outside git', () => {
       'deep.ts',
       'src/deep/nested/file.ts'
     ])
-  })
-})
-
-describe('the branch board of a real repository', () => {
-  beforeEach(() => {
-    git('init', '-q', '-b', 'main')
-    git('config', 'user.email', 'temp@example.com')
-    commit('README.md', 'the first commit')
-    // Branched and left alone: its commits are already in main's history.
-    git('branch', 'already-in-main')
-    git('checkout', '-q', '-b', 'unpushed-work')
-    commit('src/thing.ts', 'work nobody else has')
-  })
-
-  it('reads a git-only board, with no host and no invented pull requests', async () => {
-    const answer = await service.branchBoard(folder)
-    if (answer.kind !== 'board') throw new Error('expected a board')
-
-    expect(answer.board.trunk).toBe('main')
-    expect(answer.board.host).toBeUndefined()
-    expect(answer.board.repoLabel).toBe(folder)
-    expect(answer.board.rows.some((row) => row.pr !== undefined)).toBe(false)
-    // The trunk itself is what everything is measured against, never a row.
-    expect(answer.board.rows.map((row) => row.name).sort()).toEqual([
-      'already-in-main',
-      'unpushed-work'
-    ])
-  })
-
-  it('lands what is in the trunk and files the rest by where it lives', async () => {
-    const answer = await service.branchBoard(folder)
-    if (answer.kind !== 'board') throw new Error('expected a board')
-    const row = (name: string) => answer.board.rows.find((candidate) => candidate.name === name)
-
-    expect(row('already-in-main')).toMatchObject({
-      group: 'landed',
-      drift: { kind: 'counts', ahead: 0, behind: 0 },
-      signal: { kind: 'inTrunkHistory' },
-      yours: true
-    })
-    expect(row('unpushed-work')).toMatchObject({
-      group: 'localOnly',
-      local: true,
-      onOrigin: false,
-      checkedOut: true,
-      subject: 'work nobody else has',
-      drift: { kind: 'counts', ahead: 1, behind: 0 }
-    })
-  })
-
-  it('leaves the working tree exactly as it found it', async () => {
-    write('src/uncommitted.ts')
-    const before = execFileSync('git', ['status', '--porcelain'], { cwd: folder }).toString()
-
-    await service.branchBoard(folder)
-
-    expect(execFileSync('git', ['status', '--porcelain'], { cwd: folder }).toString()).toBe(before)
-    expect(execFileSync('git', ['branch', '--show-current'], { cwd: folder }).toString()).toBe(
-      'unpushed-work\n'
-    )
-  })
-})
-
-describe('a folder with no repository in it', () => {
-  it('answers noRepository, which is an answer rather than a failure', async () => {
-    write('notes.md')
-
-    await expect(service.branchBoard(folder)).resolves.toEqual({ kind: 'noRepository' })
   })
 })
 

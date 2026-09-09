@@ -1,7 +1,6 @@
 import { execFile, spawn } from 'node:child_process'
 import { rankFiles } from '../../shared/workspace/match'
 import type {
-  BranchBoardAnswer,
   IssueBoardAnswer,
   RunId,
   Unsubscribe,
@@ -15,7 +14,7 @@ import type {
   ResearchOutcome,
   ResearchStatus
 } from '../../shared/workspace/research'
-import { collectBoard, type CommandOutcome, type CommandRunner } from './collect-board'
+import type { CommandOutcome, CommandRunner } from './command-runner'
 import { collectIssues } from './collect-issues'
 import { listFiles } from './files'
 import { createResearchOperations } from './research'
@@ -82,9 +81,6 @@ export function createWorkspaceService({
   const runs = new Map<RunId, Run>()
   // One collection per workspace at a time: a second caller joins the first
   // rather than starting a second `gh` stampede.
-  const collecting = new Map<string, Promise<BranchBoardAnswer>>()
-  // The issues have their own hold: they ask the host different questions, and
-  // neither board should wait on the other's answer.
   const collectingIssues = new Map<string, Promise<IssueBoardAnswer>>()
   let minted = 0
 
@@ -177,16 +173,6 @@ export function createWorkspaceService({
 
     async stopRun(runId: RunId): Promise<void> {
       runs.get(runId)?.kill()
-    },
-
-    branchBoard(workspacePath: string): Promise<BranchBoardAnswer> {
-      const joined = collecting.get(workspacePath)
-      if (joined !== undefined) return joined
-      const collection = collectBoard(runner, workspacePath).finally(() => {
-        collecting.delete(workspacePath)
-      })
-      collecting.set(workspacePath, collection)
-      return collection
     },
 
     issueBoard(workspacePath: string): Promise<IssueBoardAnswer> {

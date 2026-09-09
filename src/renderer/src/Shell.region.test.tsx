@@ -13,7 +13,6 @@ import { createScriptedCommands } from './testing/scripted-commands'
 import { createScriptedPort, type ScriptedPort } from './testing/scripted-port'
 import { createScriptedWorkflowRuns } from './testing/scripted-workflow-runs'
 import { createScriptedWorkspace, type ScriptedWorkspace } from './testing/scripted-workspace'
-import { hostedBoard } from './testing/boards'
 import { hostedIssues } from './testing/issues'
 import { settled } from './testing/settled'
 
@@ -87,7 +86,6 @@ async function shell(options: { readonly conversation?: boolean } = {}): Promise
     port.transcripts.set('s1', [{ kind: 'user', text: 'something to lose' }])
   }
   const workspace = createScriptedWorkspace()
-  workspace.boards.set('/repos/crucible', { kind: 'board', board: hostedBoard() })
   workspace.issues.set('/repos/crucible', { kind: 'board', board: hostedIssues() })
   render(
     <Shell
@@ -132,12 +130,6 @@ const OCCUPANTS: readonly {
   readonly role: string
   readonly open: () => Promise<void>
 }[] = [
-  {
-    name: 'the branch board',
-    surface: 'Branch board',
-    role: 'dialog',
-    open: () => click('Branch board')
-  },
   {
     name: 'the issue board',
     surface: 'Issue board',
@@ -224,31 +216,31 @@ describe('where an overlay renders', () => {
 })
 
 describe('one occupant at a time', () => {
-  it('replaces Settings with the branch board, and the board with Settings', async () => {
+  it('replaces Settings with the issue board, and the board with Settings', async () => {
     await shell()
     await click('Settings')
 
-    await click('Branch board')
+    await click('Issue board')
 
     expect(screen.queryByRole('dialog', { name: 'Settings' })).toBeNull()
-    expect(screen.getByRole('dialog', { name: 'Branch board' })).toBeInTheDocument()
+    expect(screen.getByRole('dialog', { name: 'Issue board' })).toBeInTheDocument()
 
     await click('Settings')
 
-    expect(screen.queryByRole('dialog', { name: 'Branch board' })).toBeNull()
+    expect(screen.queryByRole('dialog', { name: 'Issue board' })).toBeNull()
     expect(screen.getByRole('dialog', { name: 'Settings' })).toBeInTheDocument()
   })
 
-  it('replaces the branch board with the session tree', async () => {
+  it('replaces the issue board with the session tree', async () => {
     await shell()
-    await click('Branch board')
+    await click('Issue board')
 
     // The board takes Escape's first press, so the tree's accelerator only
     // starts counting once the region is empty again.
     await press('Escape')
     await doubleEscape()
 
-    expect(screen.queryByRole('dialog', { name: 'Branch board' })).toBeNull()
+    expect(screen.queryByRole('dialog', { name: 'Issue board' })).toBeNull()
     expect(screen.getByRole('dialog', { name: 'Session tree' })).toBeInTheDocument()
   })
 
@@ -279,7 +271,7 @@ describe('one occupant at a time', () => {
 
   it('never renders one overlay underneath another', async () => {
     await shell()
-    await click('Branch board')
+    await click('Issue board')
     await click('Settings')
 
     expect(document.querySelectorAll('.region > *')).toHaveLength(1)
@@ -344,14 +336,14 @@ describe('the sidebar under an open overlay (Q2)', () => {
 
   it('closes the occupant when a removal changes the active session', async () => {
     const { port } = await shell()
-    await click('Branch board')
+    await click('Issue board')
 
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: 'Remove overlay region pass' }))
     })
     await settled()
 
-    expect(screen.queryByRole('dialog', { name: 'Branch board' })).toBeNull()
+    expect(screen.queryByRole('dialog', { name: 'Issue board' })).toBeNull()
     expect(port.calls).toContainEqual({ op: 'removeSession', args: ['s1'] })
   })
 
@@ -399,7 +391,7 @@ describe('the sidebar under an open overlay (Q2)', () => {
     expect(region()).toBeNull()
   })
 
-  // The other side of that rule. ⌘B under a live confirm swaps the occupant
+  // The other side of that rule. ⌘I under a live confirm swaps the occupant
   // beneath it and navigates nowhere, so the confirm is still about the
   // session on screen.
   it('keeps a confirm up when an overlay opens beneath it', async () => {
@@ -410,22 +402,22 @@ describe('the sidebar under an open overlay (Q2)', () => {
     })
     await settled()
 
-    await press('b', { metaKey: true })
+    await press('i', { metaKey: true })
 
-    expect(screen.getByRole('dialog', { name: 'Branch board' })).toBeInTheDocument()
+    expect(screen.getByRole('dialog', { name: 'Issue board' })).toBeInTheDocument()
     expect(screen.getByRole('dialog', { name: 'Reset this session?' })).toBeInTheDocument()
   })
 
   it('leaves the occupant alone when the removal is of another session', async () => {
     await shell()
-    await click('Branch board')
+    await click('Issue board')
 
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: 'Remove composer growth' }))
     })
     await settled()
 
-    expect(screen.getByRole('dialog', { name: 'Branch board' })).toBeInTheDocument()
+    expect(screen.getByRole('dialog', { name: 'Issue board' })).toBeInTheDocument()
   })
 })
 
@@ -442,29 +434,29 @@ describe('the bar row under an open overlay', () => {
 
   it('keeps the cost chip working, landing on Usage', async () => {
     await shell()
-    await click('Branch board')
+    await click('Issue board')
 
     await click('Session cost')
 
-    expect(screen.queryByRole('dialog', { name: 'Branch board' })).toBeNull()
+    expect(screen.queryByRole('dialog', { name: 'Issue board' })).toBeNull()
     expect(screen.getByRole('button', { name: 'Usage' })).toHaveAttribute('aria-current', 'true')
   })
 
   it('still opens the session menu over the region', async () => {
     await shell()
-    await click('Branch board')
+    await click('Issue board')
 
     await click('Session menu')
 
     expect(screen.getByRole('menu')).toBeInTheDocument()
-    expect(screen.getByRole('dialog', { name: 'Branch board' })).toBeInTheDocument()
+    expect(screen.getByRole('dialog', { name: 'Issue board' })).toBeInTheDocument()
   })
 })
 
 describe('Escape precedence', () => {
   it('answers a confirm dialog before the occupant it was raised over', async () => {
     await shell({ conversation: true })
-    await click('Branch board')
+    await click('Issue board')
     await click('Session menu')
     await act(async () => {
       fireEvent.click(screen.getByRole('menuitem', { name: 'Reset session' }))
@@ -473,12 +465,12 @@ describe('Escape precedence', () => {
 
     expect(screen.getByRole('dialog', { name: 'Reset this session?' })).toBeInTheDocument()
     // Stacked above, not instead of: the board is still up behind it.
-    expect(screen.getByRole('dialog', { name: 'Branch board' })).toBeInTheDocument()
+    expect(screen.getByRole('dialog', { name: 'Issue board' })).toBeInTheDocument()
 
     await press('Escape')
 
     expect(screen.queryByRole('dialog', { name: 'Reset this session?' })).toBeNull()
-    expect(screen.getByRole('dialog', { name: 'Branch board' })).toBeInTheDocument()
+    expect(screen.getByRole('dialog', { name: 'Issue board' })).toBeInTheDocument()
 
     await press('Escape')
 
@@ -487,7 +479,7 @@ describe('Escape precedence', () => {
 
   it('never cancels a turn while the region is occupied', async () => {
     const { port } = await shell()
-    await click('Branch board')
+    await click('Issue board')
     await act(async () => {
       await port.prompt('s1', 'go')
     })
@@ -495,7 +487,7 @@ describe('Escape precedence', () => {
 
     await press('Escape')
 
-    expect(screen.queryByRole('dialog', { name: 'Branch board' })).toBeNull()
+    expect(screen.queryByRole('dialog', { name: 'Issue board' })).toBeNull()
     expect(port.calls.map((call) => call.op)).not.toContain('cancel')
 
     // With the region empty again, Escape means stop.

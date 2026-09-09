@@ -21,12 +21,10 @@ import { commandFragment } from '../../shared/commands/template'
 import type { NeedsYouService } from '../../shared/needs-you/service'
 import type { LiveMonitor, MonitorId } from '../../shared/monitors/monitor'
 import type { MonitorService, MonitorsSnapshot } from '../../shared/monitors/service'
-import { boardCounts } from '../../shared/workspace/classify-board'
 import { issueCounts, withSessions } from '../../shared/workspace/classify-issues'
 import type { QuotaService } from '../../shared/quota/service'
 import type { ScheduleService, SchedulesSnapshot } from '../../shared/schedules/service'
 import type {
-  BoardRow,
   IssueBoardAnswer,
   IssueRow,
   RunEvent,
@@ -44,9 +42,8 @@ import type {
   RunsSnapshot,
   WorkflowRunService
 } from '../../shared/workflows/service'
-import { useBranchBoards, useIssueBoards } from './board/use-boards'
+import { useIssueBoards } from './board/use-boards'
 import { BashDrawer, type RunView } from './components/BashDrawer'
-import { BranchBoard } from './components/BranchBoard'
 import { CacheExpiryChoice } from './components/CacheExpiryChoice'
 import { CacheHealthView } from './components/CacheHealthView'
 import { IssueBoard, type IssueSession } from './components/IssueBoard'
@@ -106,7 +103,6 @@ type Popover = 'none' | 'model' | 'thinking' | 'sessionMenu'
 // What occupies the overlay region. Every overlay is one of these, and they
 // all cover the same area.
 type Occupant =
-  | { readonly kind: 'board'; readonly workspaceId: WorkspaceId }
   | { readonly kind: 'issues'; readonly workspaceId: WorkspaceId }
   | { readonly kind: 'schedules'; readonly workspaceId: WorkspaceId }
   | { readonly kind: 'tree' }
@@ -393,8 +389,6 @@ export function Shell({
   const box = useRef<HTMLTextAreaElement>(null)
   // Output can arrive before the id of the run it belongs to does.
   const owners = useRef<Record<RunId, SessionId>>({})
-  /** Where the caret goes once seeded composer text has rendered. */
-  const seedCaret = useRef<number | undefined>(undefined)
   const orphans = useRef<Map<RunId, RunEvent[]>>(new Map())
   const escapes = useRef<number>(0)
 
@@ -603,14 +597,6 @@ export function Shell({
     [snapshot.sessions]
   )
 
-  const { boards, refresh: refreshBoard } = useBranchBoards({
-    service,
-    workspaces: snapshot.workspaces,
-    activeWorkspaceId,
-    working: workingWorkspaces,
-    onFailure: report
-  })
-
   const { boards: issueBoards, refresh: refreshIssues } = useIssueBoards({
     service,
     workspaces: snapshot.workspaces,
@@ -619,20 +605,6 @@ export function Shell({
     onFailure: report
   })
 
-  const boardEntry = activeWorkspaceId === undefined ? undefined : boards[activeWorkspaceId]
-  const boardAnswer = boardEntry?.answer
-  const board = boardAnswer?.kind === 'board' ? boardAnswer.board : undefined
-  // Nothing renders that is not backed by real state: no chip before the first
-  // answer, and none at all for a folder that is not a repository.
-  const counts = board === undefined ? undefined : boardCounts(board)
-  const boardNeedYou = useMemo(() => {
-    const perWorkspace: Record<WorkspaceId, number> = {}
-    for (const [id, entry] of Object.entries(boards)) {
-      if (entry.answer?.kind !== 'board') continue
-      perWorkspace[id] = boardCounts(entry.answer.board).needYou
-    }
-    return perWorkspace
-  }, [boards])
   const issueEntry = activeWorkspaceId === undefined ? undefined : issueBoards[activeWorkspaceId]
   // Sessions started on an issue in this workspace, by the reference they were
   // started on: the board's other way of knowing an issue is picked up.
@@ -680,14 +652,9 @@ export function Shell({
     setLandedOn(activeSessionId)
     if (activeSessionId !== undefined) setMarks(withoutMark(marks, activeSessionId))
   }
-  /** ⌘B does nothing where there is no board to open, and no chip exists. */
-  const boardReachable = activeWorkspaceId !== undefined && boardAnswer?.kind !== 'noRepository'
-  // A workspace that turns out not to be a repository has no board to show, so
-  // the overlay is gone in the frame the answer says so.
-  const boardOpen =
-    occupant?.kind === 'board' && occupant.workspaceId === activeWorkspaceId && boardReachable
-
-  /** ⌘I does nothing where the workspace has no issue host to read. */
+  // ⌘I does nothing where the workspace has no issue host to read. A
+  // workspace that turns out to have none has no board to show, so the
+  // overlay is gone in the frame the answer says so.
   const issuesReachable =
     activeWorkspaceId !== undefined && issueAnswer?.kind !== 'noIssueHost'
   const issuesOpen =
@@ -717,7 +684,6 @@ export function Shell({
   // Emptied in the same render, so a close cannot come back true when the
   // workspace is switched away from and back to. The same for a tree with no
   // session left to draw.
-  if (occupant?.kind === 'board' && !boardOpen) setRegion([])
   if (occupant?.kind === 'issues' && !issuesOpen) setRegion([])
   if (occupant?.kind === 'schedules' && !schedulesOpen) setRegion([])
   if (occupant?.kind === 'tree' && session === undefined) setRegion([])
@@ -725,7 +691,7 @@ export function Shell({
   // A confirm names the session it was raised on, so the render that lands an
   // activation drops it: left up, its copy would read as being about the chat
   // now on screen while its button still acted on the old one. Keyed to the
-  // active session, not the region: ⌘B/⌘I/⌘R only swap the occupant beneath
+  // active session, not the region: ⌘I/⌘R only swap the occupant beneath
   // a confirm, and that confirm is still about the session on screen. A run
   // confirm is about a run and survives any of that.
   if (
@@ -747,7 +713,6 @@ export function Shell({
   // anywhere else dismisses it, so it can only ever be on screen there.
   const choiceShown = choice !== undefined && choice.sessionId === activeSessionId
   const occupied =
-    boardOpen ||
     issuesOpen ||
     schedulesShown ||
     treeShown ||
@@ -1106,16 +1071,6 @@ export function Shell({
     cancelChoice.current = undefined
   }, [question])
 
-  // The caret can only be placed once the draft it belongs to has rendered,
-  // which is why this waits a frame rather than happening at the seeding.
-  useEffect(() => {
-    const caret = seedCaret.current
-    if (caret === undefined) return
-    seedCaret.current = undefined
-    box.current?.focus()
-    box.current?.setSelectionRange(caret, caret)
-  })
-
   // Read again every time the popover opens, so a command an agent wrote a
   // moment ago is in this very list.
   useEffect(() => {
@@ -1342,14 +1297,6 @@ export function Shell({
     return () => document.removeEventListener('keydown', onKeyDown)
   }, [workflowRuns, toggleRuns])
 
-  const openBoard = useCallback((): void => {
-    if (activeWorkspaceId === undefined) return
-    // The overlay is there in the same frame; the collection catches up under
-    // it, and says "Reading branches…" until it does.
-    occupy({ kind: 'board', workspaceId: activeWorkspaceId })
-    refreshBoard(activeWorkspaceId)
-  }, [activeWorkspaceId, refreshBoard, occupy])
-
   const openIssues = useCallback((): void => {
     if (activeWorkspaceId === undefined) return
     occupy({ kind: 'issues', workspaceId: activeWorkspaceId })
@@ -1399,29 +1346,6 @@ export function Shell({
     document.addEventListener('keydown', onKeyDown)
     return () => document.removeEventListener('keydown', onKeyDown)
   }, [occupy])
-
-  // ⌘B is the board's own key, and the affordance is absent rather than
-  // silently broken where there is nothing to open.
-  useEffect(() => {
-    function onKeyDown(pressed: KeyboardEvent): void {
-      if (pressed.key !== 'b' && pressed.key !== 'B') return
-      if (!chordPressed(pressed)) return
-      if (boardOpen) {
-        pressed.preventDefault()
-        closeRegion()
-        return
-      }
-      // Only claim the key where there is a board to open. The shortcut is
-      // global, so someone who learned it in a repository will press it in a
-      // plain folder too, and swallowing it there leaves the app looking
-      // broken rather than looking like it has no board.
-      if (!boardReachable) return
-      pressed.preventDefault()
-      openBoard()
-    }
-    document.addEventListener('keydown', onKeyDown)
-    return () => document.removeEventListener('keydown', onKeyDown)
-  }, [boardOpen, boardReachable, openBoard, closeRegion])
 
   // ⌘I, on exactly the same terms: claimed where there is an issue board to
   // open, and left to the OS where there is not.
@@ -1517,7 +1441,7 @@ export function Shell({
       if (popover !== 'none' || browsingCommands || fileToken !== undefined) return
       // The schedule board is not in this list: Tab steps its selection while
       // it is open, which is the whole of the parked walk's second half.
-      if (boardOpen || issuesOpen || treeOpen || resumeOpen) return
+      if (issuesOpen || treeOpen || resumeOpen) return
       pressed.preventDefault()
       const next = nextAsking(snapshot, asking)
       // Sessions first, in rail order, and every one of them before any run.
@@ -1550,7 +1474,6 @@ export function Shell({
     popover,
     browsingCommands,
     fileToken,
-    boardOpen,
     issuesOpen,
     treeOpen,
     resumeOpen,
@@ -2231,35 +2154,6 @@ export function Shell({
       })
   }
 
-  // Nothing the board can do touches the repository.
-
-  function openPullRequest(row: BoardRow): void {
-    const pr = row.pr
-    if (pr === undefined) return
-    announce(`Opening #${pr.number} in your browser`)
-    void service.openUrl(pr.url).catch(report)
-  }
-
-  function copyBranchName(name: string): void {
-    announce(`Copied ${name}`)
-    void navigator.clipboard?.writeText(name).catch(report)
-  }
-
-  /** Seeds the composer with what was selected. Nothing is sent. */
-  function askAboutBranches(names: readonly string[]): void {
-    const id = activeSessionId
-    if (id === undefined) return
-    closeRegion()
-    const seeded = `${names.join('\n')}\n`
-    setDrafts((current) => {
-      const drafted = current[id] ?? ''
-      // A draft being typed is never destroyed: it stays below the names, the
-      // way a restored queued message does.
-      return { ...current, [id]: drafted === '' ? seeded : `${seeded}\n${drafted}` }
-    })
-    seedCaret.current = seeded.length
-  }
-
   // Nothing the issue board can do writes to the issue host. What it writes is
   // a session of the user's own.
 
@@ -2549,7 +2443,6 @@ export function Shell({
         needsYou={asking}
         runActivity={railRuns}
         waiting={railWaits}
-        boardNeedYou={boardNeedYou}
         onNewSession={newSession}
         onAddWorkspace={addWorkspace}
         onActivateWorkspace={activateWorkspace}
@@ -2598,11 +2491,6 @@ export function Shell({
               issues === undefined
                 ? undefined
                 : { open: issues.open, yours: issues.yours, onOpen: openIssues }
-            }
-            board={
-              counts === undefined
-                ? undefined
-                : { landed: counts.landed, needYou: counts.needYou, onOpen: openBoard }
             }
             schedules={
               scheduleEntry === undefined || scheduleEntry.schedules.length === 0
@@ -2763,22 +2651,6 @@ export function Shell({
             it, so no overlay can reach the sidebar or either bar. */}
         {occupied || question !== undefined || choiceShown ? (
           <div className="region">
-            {boardOpen ? (
-              <BranchBoard
-                board={board}
-                refreshing={boardEntry?.refreshing ?? false}
-                failure={boardEntry?.failure}
-                hasSession={session !== undefined}
-                onRefresh={() => {
-                  if (activeWorkspaceId !== undefined) refreshBoard(activeWorkspaceId)
-                }}
-                onOpenPr={openPullRequest}
-                onCopy={copyBranchName}
-                onAsk={askAboutBranches}
-                onClose={closeRegion}
-              />
-            ) : null}
-
             {issuesOpen ? (
               <IssueBoard
                 answer={issueAnswer}

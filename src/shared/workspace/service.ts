@@ -23,70 +23,12 @@ export type Unsubscribe = () => void
 /** At most 50 paths answer a search, which is what the popover can show. */
 export const FILE_RESULT_LIMIT = 50
 
-// The branch board's vocabulary. "Branch" alone belongs to the session tree,
-// so nothing here is named bare `Branch*` that could be mistaken for it.
-
-export type BranchBoardAnswer =
-  | { readonly kind: 'noRepository' }
-  | { readonly kind: 'board'; readonly board: BranchBoardSnapshot }
-
-export interface BranchBoardSnapshot {
-  /** ISO time collection finished; "refreshed Ns ago" derives from it. */
-  readonly collectedAt: string
-  readonly trunk: string
-  /** "owner/name" where a host answered; the workspace path where none. */
-  readonly repoLabel: string
-  // Absent where the repository has no host at all; unreachable where gh could
-  // not answer, which is why landed then falls back to ancestry.
-  readonly host?: { readonly kind: 'github'; readonly reachable: boolean }
-  readonly rows: readonly BoardRow[]
-}
-
-export type BoardGroupId = 'landed' | 'inFlight' | 'waitingOnYou' | 'localOnly' | 'stale'
-
-export type BoardDrift =
-  | { readonly kind: 'counts'; readonly ahead: number; readonly behind: number }
-  | { readonly kind: 'squashed' }
-  | { readonly kind: 'author'; readonly login: string }
-
-export type BoardSignal =
-  | { readonly kind: 'checksFailed'; readonly count: number }
-  | { readonly kind: 'checksRunning' }
-  | { readonly kind: 'checksPassed' }
-  | { readonly kind: 'changesRequested' }
-  | { readonly kind: 'yourReview' }
-  | { readonly kind: 'assignedToYou' }
-  | { readonly kind: 'merged'; readonly byYou: boolean }
-  | { readonly kind: 'inTrunkHistory' }
-
-export interface BoardRow {
-  readonly group: BoardGroupId
-  /** The branch name, or the PR's head ref for waiting-on-you rows. */
-  readonly name: string
-  /** Tip author is this clone's configured identity. */
-  readonly yours: boolean
-  readonly checkedOut: boolean
-  readonly local: boolean
-  readonly onOrigin: boolean
-  /** Tip commit subject; the PR title for waiting-on-you rows. */
-  readonly subject: string
-  readonly drift: BoardDrift
-  /** ISO of the last commit, or the PR's last update for waiting rows. */
-  readonly touchedAt: string
-  readonly signal?: BoardSignal
-  readonly pr?: {
-    readonly number: number
-    readonly state: 'open' | 'draft' | 'merged'
-    readonly url: string
-  }
-}
-
 // The issue board's vocabulary. An issue is one unit of tracked work on the
 // issue host, whatever that host calls it (CONTEXT.md).
 
 export type IssueBoardAnswer =
   // No repository, or one whose remote no issue host answers for. ⌘I is dead
-  // here, exactly as ⌘B is in a plain folder.
+  // here.
   | { readonly kind: 'noIssueHost' }
   // The host is chosen but its configuration is incomplete. ⌘I opens and the
   // board says which piece is missing and where it goes.
@@ -201,9 +143,6 @@ export interface WorkspaceService {
 
   // Serialized per workspace: a call while one is in flight joins it rather
   // than starting another. A failed collection rejects; nothing is fabricated.
-  branchBoard(workspacePath: string): Promise<BranchBoardAnswer>
-  // Serialized per workspace the same way, and separately: the two boards ask
-  // the host different questions and neither waits on the other.
   issueBoard(workspacePath: string): Promise<IssueBoardAnswer>
   /** Opens an https URL in the OS browser. Main validates the scheme. */
   openUrl(url: string): Promise<void>

@@ -86,17 +86,6 @@
   background: var(--panel);
 }
 
-/* The board's count of branches and pull requests, absent at zero. Outlined,
-   because the filled pill beside it means sessions. */
-.ws .n {
-  font: 10px var(--mono);
-  color: var(--accent2);
-  border: 1px solid var(--line);
-  border-radius: 9px;
-  padding: 0 5px;
-  flex: none;
-}
-
 /* How many sessions in that workspace are waiting on you. Filled, so a
    collapsed or scrolled-past workspace carries the same weight the pips in its
    rows would have. */
@@ -332,8 +321,6 @@
   height: auto;
 }
 
-.ws:hover .n,
-.ws:focus-within .n,
 .ws:hover .wsn,
 .ws:focus-within .wsn {
   visibility: hidden;

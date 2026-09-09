@@ -83,8 +83,6 @@ export async function invoke(service: WorkspaceService, request: unknown): Promi
       return service.startRun(text(0), text(1))
     case 'stopRun':
       return service.stopRun(text(0))
-    case 'branchBoard':
-      return service.branchBoard(text(0))
     case 'issueBoard':
       return service.issueBoard(text(0))
     case 'openUrl':

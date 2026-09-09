@@ -159,12 +159,6 @@ address — keyed by path or URL so re-showing the same one refreshes it in
 place. Per-session, like the panel itself.
 _Avoid_: pane, exhibit slot, window.
 
-**Branch board**:
-The workspace-scoped view of every branch the user owns in that repository,
-grouped by whether the work has landed, and of the host pull requests that
-name the user. It reports; it never deletes or checks out anything.
-_Avoid_: git panel, branch manager, PR dashboard.
-
 **Issue board**:
 The workspace-scoped view of the issues you could pick up in that repository,
 read beside a pane showing one of them in full, and the place work on an issue
@@ -188,13 +182,6 @@ An issue that already has work against it in this workspace — a session
 started from it, or an open pull request naming it. Grouped apart on the
 issue board, never hidden.
 _Avoid_: taken, claimed, in progress.
-
-**Landed**:
-A branch whose work is already in the trunk — either its commits are
-ancestors of the trunk, or the host records its pull request as merged. The
-host's record wins where a host is connected, because a squash merge leaves
-no ancestry for git to find.
-_Avoid_: merged (ambiguous once squashing is in play), stale, dead.
 
 **Session reset**:
 Replacement of a session's conversation with a fresh stock π session while keeping the same sidebar identity.
@@ -252,9 +239,7 @@ looking at it and nothing was working on the user's behalf — marked in the
 sidebar until the user lands on that session, and walked by Tab. A session
 whose own run is working has something working on its behalf, so its turn
 ending is not news; a run that stopped and cannot move without the user is not
-working, and the turn carrying that news marks. The branch board's count of
-branches and pull requests is a separate thing, spoken of as the board's
-need-you count.
+working, and the turn carrying that news marks.
 _Avoid_: unread, alert, attention flag, notification (the OS banner is one
 way a needs-you state is announced, not the state itself).
 

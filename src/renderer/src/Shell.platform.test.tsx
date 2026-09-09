@@ -14,7 +14,6 @@ import { createScriptedCommands } from './testing/scripted-commands'
 import { createScriptedPort, oneSession, type ScriptedPort } from './testing/scripted-port'
 import { createScriptedWorkflowRuns } from './testing/scripted-workflow-runs'
 import { createScriptedWorkspace, type ScriptedWorkspace } from './testing/scripted-workspace'
-import { hostedBoard } from './testing/boards'
 import { hostedIssues } from './testing/issues'
 import { sessionsShown } from './testing/sidebar'
 import { settled } from './testing/settled'
@@ -38,7 +37,6 @@ async function shell(
   const port = createScriptedPort(snapshot)
   port.models = [{ id: 'fake/deterministic', label: 'Fake', thinkingLevels: ['off', 'low'] }]
   const workspace = createScriptedWorkspace()
-  workspace.boards.set('/repos/crucible', { kind: 'board', board: hostedBoard() })
   workspace.issues.set('/repos/crucible', { kind: 'board', board: hostedIssues() })
   render(
     <Shell
@@ -89,24 +87,13 @@ describe('a Windows or Linux launch', () => {
     expect(document.querySelector('.qhint')).toHaveTextContent('queued · click or Alt+↑ to edit')
   })
 
-  it('spells the branch board’s footer the same way, and opens it on Ctrl+B', async () => {
-    runningOn('linux')
-    await shell()
-
-    // The Mac chord is not this platform's chord, and does nothing here.
-    await press('b', { metaKey: true })
-    expect(screen.queryByRole('dialog', { name: 'Branch board' })).toBeNull()
-
-    await press('b', { ctrlKey: true })
-
-    expect(screen.queryByRole('dialog', { name: 'Branch board' })).not.toBeNull()
-    expect(said()).toContain('Ctrl+B close')
-    expect(said()).toContain('Ctrl+C copy branch name')
-  })
-
   it('spells the issue board’s footer the same way, and opens it on Ctrl+I', async () => {
     runningOn('win32')
     await shell()
+
+    // The Mac chord is not this platform's chord, and does nothing here.
+    await press('i', { metaKey: true })
+    expect(screen.queryByRole('dialog', { name: 'Issue board' })).toBeNull()
 
     await press('i', { ctrlKey: true })
     await settled()
@@ -128,13 +115,14 @@ describe('a Mac launch', () => {
 
     expect(document.querySelector('.rshint')).toHaveTextContent('⌘R all runs')
 
-    // Not a Mac chord: no Mac app treats Ctrl+B as one.
-    await press('b', { ctrlKey: true })
-    expect(screen.queryByRole('dialog', { name: 'Branch board' })).toBeNull()
+    // Not a Mac chord: no Mac app treats Ctrl+I as one.
+    await press('i', { ctrlKey: true })
+    expect(screen.queryByRole('dialog', { name: 'Issue board' })).toBeNull()
 
-    await press('b', { metaKey: true })
+    await press('i', { metaKey: true })
+    await settled()
 
-    expect(screen.queryByRole('dialog', { name: 'Branch board' })).not.toBeNull()
-    expect(said()).toContain('⌘B close')
+    expect(screen.queryByRole('dialog', { name: 'Issue board' })).not.toBeNull()
+    expect(said()).toContain('⌘I close')
   })
 })

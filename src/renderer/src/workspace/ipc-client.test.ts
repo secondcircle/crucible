@@ -55,16 +55,16 @@ describe('the workspace client', () => {
   })
 
   it('carries the board and the link across under their own names', async () => {
-    const surface = install(() => ({ ok: true, value: { kind: 'noRepository' } }))
+    const surface = install(() => ({ ok: true, value: { kind: 'noIssueHost' } }))
     const service = createWorkspaceClient()
 
-    await expect(service.branchBoard('/repos/crucible')).resolves.toEqual({
-      kind: 'noRepository'
+    await expect(service.issueBoard('/repos/crucible')).resolves.toEqual({
+      kind: 'noIssueHost'
     })
     await service.openUrl('https://github.com/secondcircle/crucible/pull/4')
 
     expect(surface.requests).toEqual([
-      { op: 'branchBoard', args: ['/repos/crucible'] },
+      { op: 'issueBoard', args: ['/repos/crucible'] },
       { op: 'openUrl', args: ['https://github.com/secondcircle/crucible/pull/4'] }
     ])
   })
