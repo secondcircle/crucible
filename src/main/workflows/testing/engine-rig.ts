@@ -24,9 +24,15 @@ import { createRunStore } from '../store'
 
 const scratch: string[] = []
 
-/** Every temporary directory this rig made, gone. Call it from `afterEach`. */
+// Every temporary directory this rig made, gone. Call it from `afterEach`.
+// Retried, because a test may return before the run it started has wound
+// all the way down: an engine disposed mid-node still commits the worktree,
+// and a git process writing into a directory being removed is an ENOTEMPTY
+// that says nothing about the test.
 export function cleanupScratch(): void {
-  for (const dir of scratch.splice(0)) rmSync(dir, { recursive: true, force: true })
+  for (const dir of scratch.splice(0)) {
+    rmSync(dir, { recursive: true, force: true, maxRetries: 20, retryDelay: 50 })
+  }
 }
 
 export function tempDir(prefix: string): string {
