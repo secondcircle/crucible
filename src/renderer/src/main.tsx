@@ -39,4 +39,24 @@ function mountApp(): void {
   )
 }
 
+// The renderer's own long tasks, said on the console so main's forwarding
+// puts them on the run log beside main's stalls: a frozen window is one or
+// the other, and the log should say which. Attribution is what Chromium
+// offers, which is only the duration; the trace is DevTools' job.
+function watchLongTasks(): void {
+  if (typeof PerformanceObserver === 'undefined') return
+  try {
+    const observer = new PerformanceObserver((list) => {
+      for (const entry of list.getEntries()) {
+        if (entry.duration < 200) continue
+        console.warn(`renderer_long_task ${Math.round(entry.duration)}ms`)
+      }
+    })
+    observer.observe({ entryTypes: ['longtask'] })
+  } catch {
+    // An older Chromium without the entry type: nothing to watch.
+  }
+}
+
+watchLongTasks()
 mountApp()

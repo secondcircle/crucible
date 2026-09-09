@@ -1,3 +1,4 @@
+import { writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import {
   app,
@@ -51,6 +52,7 @@ import { serveWorkspaceChannel, type WorkspaceChannel } from './workspace/channe
 import { selectWorkspaceService } from './workspace/select-service'
 import { serveWorkflowRunChannel, type WorkflowRunChannel } from './workflows/channel'
 import { selectWorkflowRunService } from './workflows/select-service'
+import { inspectorProfiler, startStallWatchdog } from './watchdog/stalls'
 
 // One hour of prompt retention, for every launch and every flavor. π reads
 // this off the environment when it builds a request, and nothing that starts
@@ -96,6 +98,20 @@ log.append({
   packaged: app.isPackaged,
   dev: Boolean(process.env.ELECTRON_RENDERER_URL),
   retention: retention.retention
+})
+
+// The event loop watched from the first moment: a beachball is this process
+// failing to turn its loop, and every stall of a quarter second or more goes
+// on the log as `main_stalled` with the frames that held it. Profiles land
+// beside the log for DevTools. Set `CRUCIBLE_NO_STALL_PROFILE` to measure
+// without the sampling profiler.
+const stallWatchdog = startStallWatchdog({
+  log,
+  profileDir: app.isPackaged ? join(app.getPath('userData'), 'logs') : join(app.getAppPath(), 'logs'),
+  writeProfile: (path, body) => {
+    void writeFile(path, body).catch(() => {})
+  },
+  profiler: process.env.CRUCIBLE_NO_STALL_PROFILE === undefined ? inspectorProfiler() : undefined
 })
 
 log.append({
@@ -470,6 +486,7 @@ app.on('window-all-closed', () => {
 
 app.on('will-quit', () => {
   // Whatever was still running is dropped rather than left running unseen.
+  stallWatchdog.dispose()
   channel?.dispose()
   scheduleChannel?.dispose()
   schedules.service.dispose()
