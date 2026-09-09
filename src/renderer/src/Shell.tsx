@@ -6,6 +6,7 @@ import type {
   HistoryMatch,
   ImageAttachment,
   ModelId,
+  PromptOptions,
   QueuedKind,
   SessionId,
   SessionState,
@@ -1642,7 +1643,7 @@ export function Shell({
   // the echo, the turn. Named by session rather than by what is on screen,
   // because the message that waited for a summary lands in the session that
   // asked for it, active or not.
-  function sendText(id: SessionId, text: string): void {
+  function sendText(id: SessionId, text: string, options?: PromptOptions): void {
     const busy = railNow.current.sessions.find((one) => one.id === id)?.working === true
     expanded(id, text, (delivered) => {
       clearSent(id, text)
@@ -1651,14 +1652,14 @@ export function Shell({
       if (busy) {
         // Nothing is echoed into the transcript: a queued message appears only
         // in the strip, thumbnails and all, until the port says it was
-        // delivered.
+        // delivered. The options stay behind: a live turn's cache is warm.
         void port.steer(id, delivered, images).catch(report)
         return
       }
       // What was sent stands in the transcript at once; the turn it starts
       // arrives as events.
       dispatch({ type: 'sent', sessionId: id, text: delivered, images })
-      void port.prompt(id, delivered, images).catch(report)
+      void port.prompt(id, delivered, images, options).catch(report)
     })
   }
 
@@ -1671,14 +1672,16 @@ export function Shell({
     return held.map((chip) => ({ mimeType: chip.mimeType, data: chip.data }))
   }
 
-  // Door one. The send proceeds exactly as an ordinary send from this moment:
-  // if the session began working while the dialog was up, that is a steering
-  // message, and a live turn's cache is warm.
+  // Door one. The send proceeds exactly as an ordinary send from this moment,
+  // except that the miss it causes is recorded as one the person chose: the
+  // dialog priced it, and the whole point of the strip is the miss nobody
+  // priced. If the session began working while the dialog was up, that is a
+  // steering message, and a live turn's cache is warm.
   function sendAnyway(): void {
     const asked = choice
     if (asked === undefined) return
     setChoice(undefined)
-    sendText(asked.sessionId, asked.text)
+    sendText(asked.sessionId, asked.text, { expiryAcknowledged: true })
   }
 
   // Door two: a jump, so the session keeps its row, its title and its spend,

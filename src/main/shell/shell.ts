@@ -16,6 +16,7 @@ import type {
   ModelInfo,
   PortEvent,
   PortEventListener,
+  PromptOptions,
   ProviderState,
   QueuedEntry,
   QueuedKind,
@@ -118,6 +119,10 @@ interface LiveTurn {
   // Set when this turn carries something nobody echoed, which is then
   // announced right after the turn starts.
   readonly announce?: Announcement
+  // The person was told this turn's first request would re-bill the
+  // conversation and sent anyway. Spent by the first miss the turn reports: a
+  // later one in the same turn is something the choice never mentioned.
+  expiryAcknowledged: boolean
   /** Resolves, with why, when the shell stops treating this turn as live. */
   readonly over: Promise<TurnOutcome>
   settled(outcome: TurnOutcome): void
@@ -270,13 +275,17 @@ export function createShell({
   // The ledger entry a session's miss becomes: the adapter's facts, plus the
   // identity only this shell holds and the retention only the recorder does.
   // No cause is inferred here or anywhere else.
-  function recordMiss(sessionId: SessionId, turnId: TurnId, miss: ObservedCacheMiss): void {
+  function recordMiss(sessionId: SessionId, turn: LiveTurn, miss: ObservedCacheMiss): void {
     if (cache === undefined) return
     const session = store.session(sessionId)
     if (session === undefined) return
     const workspace = store.workspace(session.workspaceId)
+    const { turnId } = turn
+    const acknowledged = turn.expiryAcknowledged
+    turn.expiryAcknowledged = false
     void cache.append({
       at: new Date().toISOString(),
+      ...(acknowledged ? { acknowledged: true } : {}),
       source: {
         kind: 'session',
         sessionId,
@@ -498,7 +507,7 @@ export function createShell({
     return binding
   }
 
-  function mintTurn(announce?: Announcement): LiveTurn {
+  function mintTurn(announce?: Announcement, options?: PromptOptions): LiveTurn {
     turns += 1
     let settled: (outcome: TurnOutcome) => void = () => {}
     const over = new Promise<TurnOutcome>((resolve) => {
@@ -511,6 +520,7 @@ export function createShell({
       dispatched: false,
       cancelled: false,
       announce,
+      expiryAcknowledged: options?.expiryAcknowledged === true,
       over,
       settled
     }
@@ -579,7 +589,8 @@ export function createShell({
     sessionId: SessionId,
     dispatch: (turnId: TurnId, context?: string) => Promise<void>,
     announce?: Announcement,
-    origin: MessageOrigin = 'user'
+    origin: MessageOrigin = 'user',
+    options?: PromptOptions
   ): TurnId {
     requireSession(sessionId)
     // Checked and claimed in the same tick, so nothing can slip between the
@@ -592,7 +603,7 @@ export function createShell({
       refuse('That session is still settling. Try again in a moment.')
     }
 
-    const turn = mintTurn(announce)
+    const turn = mintTurn(announce, options)
     const { turnId } = turn
     live.set(sessionId, turn)
     // Every first message goes through here — a prompt, a shared run, or a
@@ -922,7 +933,7 @@ export function createShell({
     // Recorded before it is forwarded: the ledger is the point, and the
     // renderer's seam is a view of the same entry.
     if (event.type === 'cache_miss') {
-      recordMiss(event.sessionId, event.turnId, event.miss)
+      recordMiss(event.sessionId, turn, event.miss)
       return
     }
 
@@ -1373,10 +1384,15 @@ export function createShell({
     async prompt(
       sessionId: SessionId,
       text: string,
-      images?: readonly ImageAttachment[]
+      images?: readonly ImageAttachment[],
+      options?: PromptOptions
     ): Promise<TurnId> {
-      const started = beginTurn(sessionId, (turnId, context) =>
-        adapter.prompt(sessionId, turnId, text, images, context)
+      const started = beginTurn(
+        sessionId,
+        (turnId, context) => adapter.prompt(sessionId, turnId, text, images, context),
+        undefined,
+        'user',
+        options
       )
       // One user instruction, one turn on the panel's counter: it is what
       // "shown N turns ago" counts.

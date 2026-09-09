@@ -278,9 +278,11 @@ describe('send anyway', () => {
     expect(choice()).toBeNull()
     expect(composer()).toHaveValue('')
     expect(screen.getByRole('log')).toHaveTextContent('the message that was already typed')
+    // The send says what the person knew: the miss it causes was priced on
+    // screen first, so the ledger can keep it off the strip's count.
     expect(port.calls).toContainEqual({
       op: 'prompt',
-      args: ['s1', 'the message that was already typed']
+      args: ['s1', 'the message that was already typed', [], { expiryAcknowledged: true }]
     })
   })
 
@@ -309,7 +311,10 @@ describe('send anyway', () => {
     })
 
     expect(choice()).toBeNull()
-    expect(port.calls).toContainEqual({ op: 'prompt', args: ['s1', 'by mouse this time'] })
+    expect(port.calls).toContainEqual({
+      op: 'prompt',
+      args: ['s1', 'by mouse this time', [], { expiryAcknowledged: true }]
+    })
   })
 })
 

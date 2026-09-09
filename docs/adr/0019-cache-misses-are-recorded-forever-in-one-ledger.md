@@ -15,6 +15,13 @@ miss is judged, no cause is inferred, and the file only grows. Resetting the
 sidebar counter appends a reset line rather than deleting anything, which is
 what makes "since we changed that setting" a query instead of a memory.
 
+The counter and the file answer different questions. The file is the whole
+record; the counter is the alarm, and an alarm for a miss the person chose
+with the price on screen is noise. So a send taken through the cache expiry
+choice's "send anyway" door writes its miss with an `acknowledged` flag, and
+the counter skips flagged lines. That is a fact about the send, carried from
+the gesture itself, never a cause inferred from the numbers.
+
 ## Considered Options
 
 A rolling window, or clearing on read, was rejected: it makes the common

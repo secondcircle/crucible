@@ -167,6 +167,20 @@ describe('what crosses the request channel', () => {
     expect(stub.asked).toEqual([{ op: 'prompt', args: ['session-1', 'hello'] }])
   })
 
+  it('carries an acknowledged expiry through, and only that', async () => {
+    const stub = stubShell({ prompt: 't-1' })
+    serveAgentChannel(stub.shell, stubWindow().window)
+
+    await request('prompt', 'session-1', 'hello', [], { expiryAcknowledged: true, extra: 1 })
+    await request('prompt', 'session-1', 'hello', [], { expiryAcknowledged: 'yes' })
+
+    expect(stub.asked).toEqual([
+      { op: 'prompt', args: ['session-1', 'hello', [], { expiryAcknowledged: true }] },
+      // Anything that is not the one true flag is an ordinary prompt.
+      { op: 'prompt', args: ['session-1', 'hello', []] }
+    ])
+  })
+
   it('answers a refusal with the sentence main wrote, not with an IPC wrapper', async () => {
     const stub = stubShell({ prompt: new Error('That session is already working.') })
     serveAgentChannel(stub.shell, stubWindow().window)

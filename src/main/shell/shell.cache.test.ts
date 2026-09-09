@@ -125,6 +125,32 @@ describe('recording a session\u2019s cache misses', () => {
     })
   })
 
+  it('marks the miss of a send the person chose with the price in front of them', async () => {
+    const sessionId = await withSession()
+
+    await shell.prompt(sessionId, ASKING, undefined, { expiryAcknowledged: true })
+    await settled()
+
+    // Recorded whole, and named for what it was: a choice, not a surprise.
+    expect(written).toHaveLength(1)
+    expect(written[0]).toEqual(expect.objectContaining({ acknowledged: true }))
+    expect(written[0]?.dollarsRebilled).toBe(FAKE_CACHE_MISS.dollarsRebilled)
+  })
+
+  it('marks nothing for an ordinary send, and nothing after the acknowledged turn', async () => {
+    const sessionId = await withSession()
+
+    await shell.prompt(sessionId, ASKING, undefined, { expiryAcknowledged: true })
+    await settled()
+    await shell.prompt(sessionId, ASKING)
+    await settled()
+
+    expect(written).toHaveLength(2)
+    expect(written[0]).toEqual(expect.objectContaining({ acknowledged: true }))
+    // The choice covered one send; the next turn's miss is nobody's choice.
+    expect(written[1]).not.toHaveProperty('acknowledged')
+  })
+
   it('folds the conversation\u2019s totals into the session state', async () => {
     const sessionId = await withSession()
 

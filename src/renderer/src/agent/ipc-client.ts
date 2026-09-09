@@ -7,6 +7,7 @@ import type {
   ModelId,
   ModelInfo,
   PortEventListener,
+  PromptOptions,
   ProviderState,
   QueuedEntry,
   QueuedKind,
@@ -98,10 +99,22 @@ export function createIpcClient(): AgentPort {
     setThinkingLevel: (sessionId: SessionId, level: ThinkingLevel) =>
       call<void>('setThinkingLevel', sessionId, level),
 
-    prompt: (sessionId: SessionId, text: string, images?: readonly ImageAttachment[]) =>
-      images === undefined || images.length === 0
+    prompt: (
+      sessionId: SessionId,
+      text: string,
+      images?: readonly ImageAttachment[],
+      options?: PromptOptions
+    ) => {
+      const attached = images === undefined || images.length === 0 ? undefined : images
+      // The options ride fourth, so a prompt that carries them and no pictures
+      // sends an empty list where the pictures would go.
+      if (options?.expiryAcknowledged === true) {
+        return call<TurnId>('prompt', sessionId, text, attached ?? [], options)
+      }
+      return attached === undefined
         ? call<TurnId>('prompt', sessionId, text)
-        : call<TurnId>('prompt', sessionId, text, images),
+        : call<TurnId>('prompt', sessionId, text, attached)
+    },
     shareBashRun: (sessionId: SessionId, run: BashRunShare) =>
       call<'delivered' | 'dropped'>('shareBashRun', sessionId, run),
     // Nothing optional is sent as an absent argument, exactly as the prompt

@@ -384,9 +384,17 @@ _Avoid_: cache log, miss history, usage ledger.
 **Cache strip**:
 The row at the foot of the sidebar counting misses and dollars re-billed
 since the last reset, with the reset's date. Global, like the quota strip
-below it, and it opens the cache health view.
+below it, and it opens the cache health view. It counts the misses nobody
+saw coming: an acknowledged miss stays off it.
 _Avoid_: cache badge (that is the per-session one in the top bar), cache
 meter, cache counter.
+
+**Acknowledged miss**:
+A cache miss the cache expiry choice priced before the send, and the person
+took "send anyway". Written to the ledger like every miss, flagged
+`acknowledged`, and left out of the cache strip's count, because the strip
+exists to report the miss the person was not told about.
+_Avoid_: expected miss, known miss, ignored miss, suppressed miss.
 
 **Cache expiry choice**:
 The dialog raised when a send would certainly re-bill the whole conversation

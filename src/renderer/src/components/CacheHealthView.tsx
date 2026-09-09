@@ -100,8 +100,9 @@ export function CacheHealthView({
           {failure === undefined ? (
             <p className="cprose">
               Every miss Crucible has ever seen is in the ledger, across every workspace and
-              every run. The counter above runs from your last reset; the file goes back
-              further.
+              every run. The counter above runs from your last reset and counts only the
+              misses you were not warned about: a send you chose after the expiry choice
+              priced it is on file, not on the counter.
             </p>
           ) : (
             <p className="failure" role="alert">

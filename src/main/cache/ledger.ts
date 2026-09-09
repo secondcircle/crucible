@@ -40,6 +40,10 @@ export type CacheMissSource =
 export interface RecordedCacheMiss {
   /** ISO of the moment the paying message completed. */
   readonly at: string
+  // The cache expiry choice named this re-bill before the send and the person
+  // took "send anyway". Still a miss, still evidence, still on the line: what
+  // it is not is a surprise, so the strip leaves it out of its count.
+  readonly acknowledged?: true
   readonly source: CacheMissSource
   readonly provider: string
   readonly model: string
@@ -78,6 +82,7 @@ interface ParsedLine {
   readonly v?: unknown
   readonly type?: unknown
   readonly at?: unknown
+  readonly acknowledged?: unknown
   readonly dollarsRebilled?: unknown
 }
 
@@ -166,9 +171,13 @@ export function createCacheLedger(options: CacheLedgerOptions = {}): CacheLedger
       return
     }
     if (parsed.type !== 'miss') return
+    if (typeof parsed.at === 'string' && earliestMiss === undefined) earliestMiss = parsed.at
+    // The strip exists to say when a miss happened that nobody saw coming.
+    // One the person chose with the price in front of them stays in the
+    // file and off the counter.
+    if (parsed.acknowledged === true) return
     count += 1
     dollars += number(parsed.dollarsRebilled)
-    if (typeof parsed.at === 'string' && earliestMiss === undefined) earliestMiss = parsed.at
   }
 
   /**
@@ -244,6 +253,7 @@ export function createCacheLedger(options: CacheLedgerOptions = {}): CacheLedger
               v: LEDGER_VERSION,
               type: 'miss',
               at: miss.at,
+              ...(miss.acknowledged === true ? { acknowledged: true } : {}),
               source: miss.source,
               provider: miss.provider,
               model: miss.model,

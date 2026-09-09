@@ -170,6 +170,23 @@ describe('the cache ledger', () => {
     )
   })
 
+  it('keeps an acknowledged miss on file and off the counter', async () => {
+    const dir = tempDir()
+    const ledger = createCacheLedger({ dir })
+    await ledger.append(miss({ dollarsRebilled: 0.9, acknowledged: true }))
+    await ledger.append(miss({ dollarsRebilled: 0.3 }))
+
+    // The line is whole: the choice the person made is part of the evidence,
+    // and an agent reading the file can tell the two apart.
+    const written = lines(dir).filter((line) => line.type === 'miss')
+    expect(written).toHaveLength(2)
+    expect(written[0]).toEqual(expect.objectContaining({ acknowledged: true, dollarsRebilled: 0.9 }))
+    expect(written[1]).not.toHaveProperty('acknowledged')
+
+    // The strip counts surprises, and this one was priced before the send.
+    expect(await ledger.read()).toEqual(expect.objectContaining({ count: 1, dollars: 0.3 }))
+  })
+
   it('announces the counter to every listener after each change', async () => {
     const dir = tempDir()
     const ledger = createCacheLedger({ dir })

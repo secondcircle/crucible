@@ -13,6 +13,7 @@ import type {
   PanelTab,
   PortEvent,
   PortEventListener,
+  PromptOptions,
   ProviderState,
   QueuedEntry,
   QueuedKind,
@@ -654,9 +655,15 @@ export function createScriptedPort(initial: Partial<ShellSnapshot> = {}): Script
     prompt(
       sessionId: SessionId,
       text: string,
-      images?: readonly ImageAttachment[]
+      images?: readonly ImageAttachment[],
+      options?: PromptOptions
     ): Promise<TurnId> {
-      calls.push({ op: 'prompt', args: argsOf(sessionId, text, images) })
+      // Recorded as the IPC client sends it, so a test reads the same call.
+      const args =
+        options?.expiryAcknowledged === true
+          ? [sessionId, text, images ?? [], options]
+          : argsOf(sessionId, text, images)
+      calls.push({ op: 'prompt', args })
       const turnId = `t-${(minted += 1)}`
       turns.set(sessionId, turnId)
       // The first accepted message is what ends freshness, exactly as the

@@ -218,6 +218,15 @@ export interface ShellSnapshot {
   readonly activeSessionId?: SessionId
 }
 
+// What the sender already knew when the prompt left. The cache expiry choice
+// is the one surface that tells a person, before the send, that this turn will
+// re-bill the conversation; "send anyway" carries that here so the miss it
+// causes is written down as one the person chose rather than one that caught
+// them.
+export interface PromptOptions {
+  readonly expiryAcknowledged?: boolean
+}
+
 // What a person attached to a message: bytes, never a path, so nothing about
 // where the file sat on disk crosses.
 export interface ImageAttachment {
@@ -572,7 +581,8 @@ export interface AgentPort {
   prompt(
     sessionId: SessionId,
     text: string,
-    images?: readonly ImageAttachment[]
+    images?: readonly ImageAttachment[],
+    options?: PromptOptions
   ): Promise<TurnId>
 
   // `'dropped'` means the live turn stopped before the run reached the

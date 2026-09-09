@@ -5,6 +5,7 @@ import type {
   BashRunShare,
   ImageAttachment,
   PortEvent,
+  PromptOptions,
   QueuedKind,
   SessionWorktree
 } from '../../shared/agent/port'
@@ -161,6 +162,15 @@ async function invoke(shell: Shell, request: unknown): Promise<unknown> {
     return value
   }
 
+  // Only what the renderer could truthfully claim is kept: anything else in
+  // the object is dropped rather than refused.
+  function promptOptions(position: number): PromptOptions | undefined {
+    const value = given[position]
+    if (typeof value !== 'object' || value === null) return undefined
+    const { expiryAcknowledged } = value as { expiryAcknowledged?: unknown }
+    return expiryAcknowledged === true ? { expiryAcknowledged: true } : undefined
+  }
+
   /** The one option a jump takes, and it is not optional. */
   function summarize(position: number): boolean {
     const value = given[position]
@@ -219,6 +229,8 @@ async function invoke(shell: Shell, request: unknown): Promise<unknown> {
       return shell.setLabel(text(0), text(1), label(2))
     case 'prompt': {
       const attached = images(2)
+      const options = promptOptions(3)
+      if (options !== undefined) return shell.prompt(text(0), text(1), attached, options)
       return attached === undefined
         ? shell.prompt(text(0), text(1))
         : shell.prompt(text(0), text(1), attached)
