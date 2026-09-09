@@ -1,5 +1,6 @@
 import { spawn } from 'node:child_process'
-import { readdirSync, readFileSync, type Dirent } from 'node:fs'
+import { readdir, readFile } from 'node:fs/promises'
+import type { Dirent } from 'node:fs'
 import { join, relative, sep } from 'node:path'
 
 // Kept apart from the service so the walk and the ignore rules can be tested
@@ -14,7 +15,7 @@ const WALK_LIMIT = 20_000
 /** Workspace-relative and `/`-separated, whichever of the two paths answers. */
 export async function listFiles(workspacePath: string): Promise<readonly string[]> {
   const tracked = await gitFiles(workspacePath)
-  return tracked ?? walk(workspacePath)
+  return tracked ?? (await walk(workspacePath))
 }
 
 // `-c` untracked, `-o` cached, `--exclude-standard` the ignore rules git itself
@@ -55,10 +56,10 @@ interface IgnoreRule {
   readonly negated: boolean
 }
 
-function readIgnoreRules(folder: string): readonly IgnoreRule[] {
+async function readIgnoreRules(folder: string): Promise<readonly IgnoreRule[]> {
   let text: string
   try {
-    text = readFileSync(join(folder, '.gitignore'), 'utf8')
+    text = await readFile(join(folder, '.gitignore'), 'utf8')
   } catch {
     return []
   }
@@ -109,23 +110,30 @@ function ignored(
   return decision
 }
 
-/** Depth-first in alphabetical order, so the list is the same every time. */
-function walk(workspacePath: string): readonly string[] {
+/**
+ * Depth-first in alphabetical order, so the list is the same every time.
+ *
+ * Every read is awaited rather than synchronous: this is the answer to a
+ * keystroke in an `@file` token, it runs in the main process, and a
+ * 24,000-file workspace took 46-71 ms of held loop per character typed.
+ * Exported so a test can hold it to that without a repository in the way.
+ */
+export async function walk(workspacePath: string): Promise<readonly string[]> {
   const found: string[] = []
 
-  function visit(
+  async function visit(
     folder: string,
     inherited: readonly { readonly folder: string; readonly rules: readonly IgnoreRule[] }[]
-  ): void {
+  ): Promise<void> {
     if (found.length >= WALK_LIMIT) return
     const relativeFolder = toPosix(relative(workspacePath, folder))
-    const own = readIgnoreRules(folder)
+    const own = await readIgnoreRules(folder)
     const rules =
       own.length === 0 ? inherited : [...inherited, { folder: relativeFolder, rules: own }]
 
     let entries: Dirent[]
     try {
-      entries = readdirSync(folder, { withFileTypes: true })
+      entries = await readdir(folder, { withFileTypes: true })
     } catch {
       // A folder that cannot be read is not a folder to guess about.
       return
@@ -139,7 +147,7 @@ function walk(workspacePath: string): readonly string[] {
       // graph.
       if (entry.isDirectory()) {
         if (ignored(rules, path, true)) continue
-        visit(full, rules)
+        await visit(full, rules)
         continue
       }
       if (!entry.isFile()) continue
@@ -148,7 +156,7 @@ function walk(workspacePath: string): readonly string[] {
     }
   }
 
-  visit(workspacePath, [])
+  await visit(workspacePath, [])
   return found
 }
 
