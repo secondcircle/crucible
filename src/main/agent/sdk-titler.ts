@@ -1,6 +1,8 @@
 import type { TranscriptItem } from '../../shared/agent/port'
-import { isWakeMessage } from '../../shared/monitors/wording'
-import { isRunMessage } from '../../shared/workflows/run'
+// Spelled with their extensions so plain Node can load this module for
+// `prove:sdk`: its ESM resolver does no extension guessing.
+import { isWakeMessage } from '../../shared/monitors/wording.ts'
+import { isRunMessage } from '../../shared/workflows/run.ts'
 
 // No SDK type reaches this module, so the shaping and sanitizing stay testable
 // without constructing an SDK adapter.

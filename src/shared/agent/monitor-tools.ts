@@ -6,7 +6,9 @@ import {
   TIMEOUT_DEFAULT_MS,
   numericSeconds,
   type MonitorOwner
-} from '../monitors/monitor'
+  // Spelled with its extension so plain Node can load this module for
+  // `prove:sdk`: its ESM resolver does no extension guessing.
+} from '../monitors/monitor.ts'
 
 // Both adapters and the engine build the three monitor tools from these
 // definitions, so a session agent and a run's node cannot end up meaning

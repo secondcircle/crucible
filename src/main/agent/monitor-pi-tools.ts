@@ -4,7 +4,7 @@ import {
   monitorRequestFrom,
   type BoundMonitorTools,
   type MonitorToolParameter
-} from '../../shared/agent/monitor-tools'
+} from '../../shared/agent/monitor-tools.ts'
 
 // The bound monitor behaviors as π tools. Used by the SDK adapter for a
 // session agent and by the node session factory for a run's node, so the two
