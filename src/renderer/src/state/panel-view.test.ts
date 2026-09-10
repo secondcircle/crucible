@@ -1,6 +1,3 @@
-// The per-session panel view, as the rules that move it: split, collapsed and
-// maximized are one field, so the pairs that must never both be true cannot be
-// written down at all.
 import { describe, expect, it } from 'vitest'
 import type { PanelState, SessionState } from '../../../shared/agent/port'
 import {
@@ -86,7 +83,6 @@ describe('what a session remembers', () => {
       s2: 'collapsed',
       s3: 'maximized'
     })
-    // The record it was handed is never edited.
     expect(held).toEqual({ s1: 'maximized', s2: 'collapsed' })
   })
 })
@@ -118,15 +114,12 @@ describe('a memory for a panel that is gone', () => {
   it('goes with the last tab, however the panel emptied', () => {
     const held: PanelViews = { s1: 'maximized' }
 
-    // A close, an agent's panel_close and a session reset all present the
-    // same way here: the session is still on the rail with no panel at all.
     expect(forgetEmptyPanels(held, [session('s1')])).toEqual({})
     expect(forgetEmptyPanels(held, [session('s1', EMPTY)])).toEqual({})
   })
 
   it('stays for as long as the panel does, whatever else changed', () => {
     const held: PanelViews = { s1: 'maximized' }
-    // What a jump leaves behind: the same tabs, a new conversation under them.
     const jumped = [{ ...session('s1', TABS), title: 'after the jump' }]
 
     expect(forgetEmptyPanels(held, jumped)).toBe(held)

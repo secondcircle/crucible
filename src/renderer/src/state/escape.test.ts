@@ -1,6 +1,3 @@
-// Escape's precedence as a table. Every rung's condition is here, so the
-// document's keydown and the key that comes out of an exhibit guest are held
-// to one ladder rather than to two that agree today.
 import { describe, expect, it } from 'vitest'
 import { escapeRung, type EscapeRung, type EscapeState } from './escape'
 
@@ -89,7 +86,6 @@ describe('a maximized panel', () => {
       window_({ panelMaximized: true, regionOccupied: true, artifactReaderOpen: true })
     ).toBe('closeArtifactReader')
     expect(window_({ panelMaximized: true, confirmOpen: true })).toBe('closeConfirm')
-    // And once the region is empty again, the panel is what comes off.
     expect(window_({ panelMaximized: true })).toBe('unmaximizePanel')
   })
 
@@ -110,7 +106,6 @@ describe('the rungs this work did not touch', () => {
     expect(window_({ turnCancellable: true })).toBe('cancelTurn')
     expect(window_({ regionOccupied: true, turnCancellable: true })).toBe('closeTopOfRegion')
     expect(window_({ summarizeCancellable: true, turnCancellable: true })).toBe('cancelSummarize')
-    // A summarize under an occupied region waits, unless the tree is what is up.
     expect(window_({ summarizeCancellable: true, regionOccupied: true })).toBe('closeTopOfRegion')
     expect(window_({ summarizeCancellable: true, regionOccupied: true, treeOpen: true })).toBe(
       'cancelSummarize'

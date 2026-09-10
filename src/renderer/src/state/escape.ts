@@ -34,9 +34,7 @@ export interface EscapeState {
   /** The run graph over the whole body, which implies a run in the region. */
   readonly graphFullScreen: boolean
   readonly artifactReaderOpen: boolean
-  /** The panel as it is drawn, not as it is remembered. */
   readonly panelMaximized: boolean
-  /** The active session's summarize, and only if it can still be cancelled. */
   readonly summarizeCancellable: boolean
   readonly treeOpen: boolean
   readonly regionOccupied: boolean

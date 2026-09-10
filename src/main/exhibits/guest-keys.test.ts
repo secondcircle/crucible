@@ -1,5 +1,3 @@
-// What crosses out of an exhibit guest, against a fake window: one key, one
-// direction, and the page keeps every press it was given.
 import { describe, expect, it } from 'vitest'
 import type { ExhibitKeyEvent } from '../../shared/exhibits/channels'
 import {
@@ -11,7 +9,6 @@ import {
 } from './guest-keys'
 
 interface FakeHost extends ExhibitKeyHost {
-  /** A guest attaching to the window, as electron announces one. */
   attach(): (input: GuestInput) => void
   readonly announced: readonly ExhibitKeyEvent[]
   destroy(): void

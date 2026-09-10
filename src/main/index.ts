@@ -451,9 +451,6 @@ function openWindow(reason?: 'activate'): void {
   workflowRunChannel = serveWorkflowRunChannel(workflowRuns, window)
   scheduleChannel = serveScheduleChannel(schedules.service, window)
   monitorChannel = serveMonitorChannel(monitors, window)
-  // Escape out of an exhibit guest, which is a webContents of its own: without
-  // this a user who clicked into a shown page could not leave a maximized
-  // panel from the keyboard. Nothing else crosses, and the page keeps the key.
   exhibitKeyChannel = serveExhibitKeyChannel(window)
   // ⌘R is the global runs view (Q15). Taken here, before the menu can spend
   // it on reload; dev reloads keep ⇧⌘R. On non-mac the chord is Ctrl+R.

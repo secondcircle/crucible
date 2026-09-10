@@ -696,8 +696,6 @@ describe('a web tab\u2019s row follows its guest', () => {
   })
 })
 
-// The row is the same row at any width: a maximized panel changes what it is
-// drawn beside, and nothing about what it says or what its controls do.
 describe('the row in a maximized panel', () => {
   async function maximize(): Promise<void> {
     await act(async () => {

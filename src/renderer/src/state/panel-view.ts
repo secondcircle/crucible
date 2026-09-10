@@ -17,7 +17,6 @@ export type PanelView = 'split' | 'collapsed' | 'maximized'
  */
 export type PanelViews = Readonly<Record<SessionId, Exclude<PanelView, 'split'>>>
 
-/** A session nothing is remembered for is split. */
 export function panelViewOf(views: PanelViews, sessionId: SessionId | undefined): PanelView {
   if (sessionId === undefined) return 'split'
   return views[sessionId] ?? 'split'
@@ -66,7 +65,6 @@ export function forgetEmptyPanels(
   return Object.fromEntries(kept) as PanelViews
 }
 
-/** What the panel area shows for one session: the view, or nothing at all. */
 export type PanelPlace = 'none' | 'collapsed' | 'split' | 'maximized'
 
 /**

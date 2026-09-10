@@ -2,9 +2,6 @@ import type { BrowserWindow, Event, Input, WebContents } from 'electron'
 import { EXHIBIT_KEY_EVENT_CHANNEL } from '../../shared/exhibits/channels'
 import { watchExhibitKeys, type GuestKeys } from './guest-keys'
 
-// Plumbing only, exactly as the other channels are: which key crosses is the
-// watcher's rule, and this is the host it reads one window's guests through.
-
 export interface ExhibitKeyChannel {
   dispose(): void
 }

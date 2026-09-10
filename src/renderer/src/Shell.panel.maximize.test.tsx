@@ -1,9 +1,4 @@
 // @vitest-environment jsdom
-//
-// The maximized context panel as a person meets it: the control in the strip,
-// the footprint it takes, what it hides, and every way back out. Driven
-// through the same scripted port as the rest of the panel's tests — the only
-// thing beside it is the seam a key pressed inside a shown page comes out of.
 import { act, fireEvent, render, screen, within } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 import type { PanelTab, SessionState, ShellSnapshot } from '../../shared/agent/port'
@@ -83,7 +78,6 @@ const frame = (): HTMLElement | null => document.querySelector('.exhibit webview
 const tabs = (): HTMLElement[] => screen.queryAllByRole('tab')
 const ops = (port: ScriptedPort): string[] => port.calls.map((call) => call.op)
 
-/** What the panel area is showing, read off the document rather than told. */
 function place(): 'none' | 'collapsed' | 'split' | 'maximized' {
   if (edge() !== null) return 'collapsed'
   const shown = panel()
@@ -121,7 +115,6 @@ async function guestEscape(keys: ScriptedExhibitKeys): Promise<void> {
 
 const box = (): HTMLElement => screen.getByLabelText('Message')
 
-/** A session tree with one branch, for the two tests that need one. */
 const TREE = {
   roots: [
     {
@@ -147,13 +140,11 @@ async function enter(): Promise<void> {
   await settled()
 }
 
-/** A message sent the way a person sends one. */
 async function send(text: string): Promise<void> {
   await type(text)
   await enter()
 }
 
-/** An image on the clipboard, as the browser hands one over. */
 async function paste(name: string): Promise<void> {
   await act(async () => {
     fireEvent(
@@ -177,7 +168,6 @@ async function paste(name: string): Promise<void> {
   })
 }
 
-/** A local run in the session's drawer, output and all. */
 async function runBash(command: string, workspace: ScriptedWorkspace): Promise<void> {
   await send(`!${command}`)
   const runId = workspace.started.at(-1)?.runId
@@ -338,7 +328,6 @@ describe('what maximized looks like', () => {
     expect(screen.queryByRole('button', { name: 'Session menu' })).toBeNull()
     expect(screen.queryByRole('button', { name: 'Session cost' })).toBeNull()
     expect(screen.queryByLabelText('Context usage')).not.toBeVisible()
-    // Nothing of it is relocated into the panel either.
     expect(panel()?.querySelector('.top')).toBeNull()
     expect(panel()?.textContent).not.toContain('ctx')
   })
@@ -356,7 +345,6 @@ describe('what maximized looks like', () => {
     expect(screen.queryByRole('button', { name: 'Send' })).toBeNull()
     expect(document.querySelector('.drawer')).not.toBeVisible()
     expect(document.querySelector('.chat')).not.toBeVisible()
-    // Nothing in there can be tabbed to or read out while it is away.
     const focusable = [...(chat()?.querySelectorAll('button, textarea, [tabindex], a') ?? [])]
     expect(focusable.length).toBeGreaterThan(0)
     for (const node of focusable) expect(node).not.toBeVisible()
@@ -400,7 +388,6 @@ describe('what maximized looks like', () => {
     expect(sessionRows()).toHaveLength(2)
     expect(within(sidebar).getByRole('button', { name: 'Settings' })).toBeVisible()
 
-    // Settings opens over it, a session switch lands, and a workspace switch too.
     await click(within(sidebar).getByRole('button', { name: 'Settings' }))
     expect(screen.getByRole('dialog', { name: 'Settings' })).toBeInTheDocument()
     await escape()
@@ -543,7 +530,6 @@ describe('leaving maximize', () => {
     const { port, workspace } = await shellWith(withTabs([PLAN], 'plan'))
     await runBash('echo hello', workspace)
     await send('what the transcript held')
-    // The turn is under way, so the next message queues behind it.
     expect(port.snapshotNow.sessions[0]?.working).toBe(true)
     await send('the queued one')
     await paste('shot.png')
@@ -756,7 +742,6 @@ describe('gestures that change nothing', () => {
       })
       expect(place()).toBe('split')
     }
-    // Whatever those opened is closed again before the panel is maximized.
     await act(async () => {
       fireEvent.keyDown(document, { key: 'Escape' })
     })
@@ -773,7 +758,6 @@ describe('gestures that change nothing', () => {
     }
 
     await escape()
-    // Only the run view opened by ⌘R was above it; the next press is the panel.
     if (place() === 'maximized') await escape()
     expect(place()).toBe('split')
   })
@@ -911,7 +895,6 @@ describe('per session, and for this launch only', () => {
     )
     await maximize()
 
-    // Away to the other workspace, which activates its own session, and back.
     const sidebar = screen.getByLabelText('Workspaces and sessions')
     await click(within(sidebar).getByRole('button', { name: 'pi-extensions' }))
     expect(place()).toBe('none')
@@ -920,7 +903,6 @@ describe('per session, and for this launch only', () => {
     expect(port.snapshotNow.activeSessionId).toBe('s1')
     expect(place()).toBe('maximized')
 
-    // And out through an overlay and back.
     await act(async () => {
       fireEvent.keyDown(document, { key: 'r', metaKey: true })
     })
@@ -943,7 +925,6 @@ describe('per session, and for this launch only', () => {
     })
     expect(place()).toBe('split')
 
-    // The id is reused by nothing, but a stale memory would show here.
     await act(async () => {
       port.update((snapshot) => ({ ...snapshot, activeSessionId: 's1' }))
     })
@@ -955,8 +936,6 @@ describe('per session, and for this launch only', () => {
     await maximize()
     expect(place()).toBe('maximized')
 
-    // The document again, over the same port and the same snapshot: nothing
-    // was written anywhere for it to read back.
     const again = render(
       <Shell port={port} workspace={createScriptedWorkspace()} commands={createScriptedCommands()} />
     )
@@ -985,8 +964,6 @@ describe('an empty panel', () => {
     const { port } = await shellWith(withTabs([PLAN], 'plan'))
     await maximize()
 
-    // panel_close, as main folds it: the session keeps its place on the rail
-    // and loses its panel.
     await act(async () => {
       port.update((snapshot) => ({
         ...snapshot,
@@ -1013,8 +990,6 @@ describe('an empty panel', () => {
     await send('something to reset away')
     await maximize()
 
-    // A reset clears the session's tabs, as main's does: a fresh conversation
-    // never inherits a ghost panel.
     await act(async () => {
       port.resetSession('s1')
     })

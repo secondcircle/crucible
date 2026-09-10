@@ -4,22 +4,18 @@ import type { ExhibitKeyEvent } from '../../shared/exhibits/channels'
 // never reaches the window's document. Exactly one key is carried across, and
 // it is carried rather than taken: the page keeps the press as well.
 
-/** As much of a key press as the rule reads. */
 export interface GuestInput {
   readonly type: string
   readonly key: string
 }
 
-/** As much of an exhibit guest as this watcher touches. */
 export interface GuestKeys {
   onInput(hear: (input: GuestInput) => void): void
 }
 
-/** The window whose guests these are, as the watcher sees it. */
 export interface ExhibitKeyHost {
   /** Called once per guest attached, for as long as the window lives. */
   onGuestAttached(hear: (guest: GuestKeys) => void): void
-  /** Announced to the window's own document. */
   announce(event: ExhibitKeyEvent): void
   /** Whether the window has gone; nothing is announced after it has. */
   gone(): boolean

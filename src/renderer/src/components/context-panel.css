@@ -27,9 +27,6 @@
   min-height: 0;
 }
 
-/* Maximized: the panel is the whole of the body row, because the hidden chat
-   column takes no space beside it. The strip keeps the bar row it already sat
-   in, so nothing about the panel's chrome changes but its width. */
 .ctx.max {
   flex: 1 1 auto;
 }
@@ -135,7 +132,6 @@
   color: var(--ink);
 }
 
-/* The tools' on-state, as the mock has it. */
 .stool.on {
   color: var(--accent2);
 }

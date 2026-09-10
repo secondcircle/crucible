@@ -137,11 +137,6 @@ describe('following the stream', () => {
   })
 })
 
-// The column the transcript is in is put away while the context panel is
-// maximized: hidden, not unmounted, so what the reader left in it survives.
-// The one thing a hidden box does not keep for itself is where the reader was
-// in it — a `display: none` element has no scrolling box at all — so the
-// transcript parks that and puts it back.
 describe('a column that is put away', () => {
   const LONG: readonly ViewItem[] = Array.from({ length: 40 }, (_, at) => ({
     kind: 'assistant' as const,
@@ -158,7 +153,6 @@ describe('a column that is put away', () => {
     return scroller as HTMLElement
   }
 
-  /** Where the reader scrolled to, as the browser reports it back. */
   function scrollTo(scroller: HTMLElement, offset: number): void {
     scroller.scrollTop = offset
     fireEvent.scroll(scroller)
@@ -203,7 +197,6 @@ describe('a column that is put away', () => {
 
     view.rerender(<Transcript items={LONG} sessionId="s1" shown={false} />)
     hide(scroller)
-    // The stream keeps arriving while the column is hidden.
     for (const at of [1, 2, 3]) {
       view.rerender(
         <Transcript
@@ -225,8 +218,6 @@ describe('a column that is put away', () => {
     const scroller = measure()
     scrollTo(scroller, 2200)
 
-    // Switching session is unaffected by any of this: an arrival starts at the
-    // bottom, as it does today.
     view.rerender(<Transcript items={LONG} sessionId="s2" shown />)
 
     expect(scroller.scrollTop).toBe(8000)
@@ -237,8 +228,6 @@ describe('a column that is put away', () => {
     const scroller = measure()
     scrollTo(scroller, 2200)
 
-    // The run view's transcript is never put away under a maximized panel, and
-    // no existing caller passes the prop at all.
     expect(scroller.scrollTop).toBe(2200)
   })
 })

@@ -314,10 +314,6 @@ export function Shell({
   // conversation the output can be shared into. Arriving somewhere else shows
   // that session's drawer, which for a new session is none, and stops nothing.
   const [runs, setRuns] = useState<Readonly<Record<SessionId, RunView>>>({})
-  // How each session's context panel is shown — split, collapsed or maximized,
-  // one value because they are exclusive — and the width the split is drawn
-  // at, one value for the window. Both are this document's memory and neither
-  // outlives it.
   const [panelViews, setPanelViews] = useState<PanelViews>({})
   const [panelWidth, setPanelWidth] = useState<number | undefined>(undefined)
   // Whether each workspace is a git working tree, as the workspace service
@@ -477,9 +473,6 @@ export function Shell({
   // re-runs this render before anything is painted.)
   const shownViews = forgetEmptyPanels(panelViews, snapshot.sessions)
   if (shownViews !== panelViews) setPanelViews(shownViews)
-  // What the panel area shows, memory and snapshot read together: the one
-  // value the render and the Escape ladder both go by. A session with no tabs
-  // has no panel, whatever is remembered for it.
   const place = panelPlace(panel, panelViewOf(shownViews, activeSessionId))
   // Closed unless the caret is in a token the service has already answered for.
   const shownFiles = fileToken !== undefined && files?.of === fileToken ? files.paths : undefined
@@ -1220,15 +1213,10 @@ export function Shell({
   const takeEscapeRung = useCallback(
     (rung: EscapeRung): void => {
       switch (rung) {
-        // The login dialog sits above the Settings card it was launched from,
-        // so it closes first and lands back on Providers.
         case 'closeLogin':
           closeLogin()
           return
 
-        // The cache expiry choice is an answer owed to a send. During the
-        // summary it is the wait's own way out instead, and stopping is what
-        // Escape means there.
         case 'answerExpiryChoice': {
           if (choice === undefined) return
           const running = jumpOf(jumps, choice.sessionId)
@@ -1301,8 +1289,6 @@ export function Shell({
           return
         }
 
-        // The region's topmost surface, whichever it is — which unwinds an
-        // opened run back onto the overview it was opened from.
         case 'closeTopOfRegion':
           closeTopOfRegion()
           return
@@ -2561,10 +2547,6 @@ export function Shell({
           column, the divider and the context panel. The sidebar is outside
           this box, which is why no overlay can reach it. */}
       <div className="body">
-        {/* Put away, not taken apart: hiding drops the column out of the flex
-            row so the maximized panel fills the body, and leaves everything in
-            it mounted with whatever the reader left in it — the draft and its
-            caret, the chains they opened, the drawer's output. */}
         <main className="main" style={place === 'maximized' ? CHAT_AWAY : undefined}>
           <TopBar
             session={session}

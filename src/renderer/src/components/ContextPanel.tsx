@@ -155,9 +155,6 @@ export function ContextPanel({
 
   return (
     <>
-      {/* A hit area wider than the line it draws, so the drag is catchable.
-          There is no divider at all while the panel is maximized: nothing is
-          beside it to divide, and it cannot be resized. */}
       {layout.kind === 'split' ? (
         <div
           className="divider"
@@ -172,9 +169,6 @@ export function ContextPanel({
       <aside
         className={maximized ? 'ctx max' : 'ctx'}
         aria-label="Context panel"
-        // The maximized panel takes the whole row, so it is given no width at
-        // all: the one the divider was dragged to is the split's and waits
-        // there, untouched, for the panel to come back to it.
         style={
           layout.kind === 'split'
             ? { width: layout.width === undefined ? DEFAULT_PANEL_WIDTH : `${layout.width}px` }

@@ -6,7 +6,6 @@ import type { ExhibitKeysService } from '../../../shared/exhibits/service'
 // Escape in the page and the document hears exactly what main would say.
 
 export interface ScriptedExhibitKeys extends ExhibitKeysService {
-  /** A guest page's Escape, as main would announce it. */
   pressEscape(): void
 }
 
