@@ -41,23 +41,36 @@ interface LiveExhibit {
   readonly navigated?: string
 }
 
+/**
+ * How the panel is being drawn. A width and a resize belong to the split and
+ * exist nowhere else, so a maximized panel cannot be handed one or resized,
+ * and there is no second copy of the width to restore from.
+ */
+export type PanelLayout =
+  | {
+      readonly kind: 'split'
+      /** Pixels once the divider has been dragged; the default until then. */
+      readonly width?: number
+      readonly onResize: (width: number) => void
+    }
+  | { readonly kind: 'maximized' }
+
 export function ContextPanel({
   panel,
   sessionId,
-  width,
+  layout,
   port,
   onCopyLocation,
-  onResize,
-  onCollapse
+  onCollapse,
+  onToggleMaximize
 }: {
   readonly panel: PanelState
   readonly sessionId: SessionId
-  /** Pixels once the divider has been dragged; the default until then. */
-  readonly width?: number
+  readonly layout: PanelLayout
   readonly port: AgentPort
   readonly onCopyLocation: (location: string) => void
-  readonly onResize: (width: number) => void
   readonly onCollapse: () => void
+  readonly onToggleMaximize: () => void
 }): React.JSX.Element {
   const active = panel.tabs.find((tab) => tab.id === panel.activeTabId)
   // Set for as long as a drag is under way, so a panel that goes away
@@ -100,7 +113,7 @@ export function ContextPanel({
     setHeld({ of: mount, refreshes: live.refreshes, navigated: url })
   }
 
-  function startDrag(pressed: React.MouseEvent): void {
+  function startDrag(pressed: React.MouseEvent, onResize: (width: number) => void): void {
     if (endDrag.current !== undefined) return
     // Without this the press begins a native selection drag, which is what
     // takes the col-resize cursor away and highlights text while resizing.
@@ -138,22 +151,35 @@ export function ContextPanel({
     window.addEventListener('mouseup', onUp)
   }
 
+  const maximized = layout.kind === 'maximized'
+
   return (
     <>
-      {/* A hit area wider than the line it draws, so the drag is catchable. */}
-      <div
-        className="divider"
-        role="separator"
-        aria-label="Resize context panel"
-        aria-orientation="vertical"
-        ref={divider}
-        onMouseDown={startDrag}
-      />
+      {/* A hit area wider than the line it draws, so the drag is catchable.
+          There is no divider at all while the panel is maximized: nothing is
+          beside it to divide, and it cannot be resized. */}
+      {layout.kind === 'split' ? (
+        <div
+          className="divider"
+          role="separator"
+          aria-label="Resize context panel"
+          aria-orientation="vertical"
+          ref={divider}
+          onMouseDown={(pressed) => startDrag(pressed, layout.onResize)}
+        />
+      ) : null}
 
       <aside
-        className="ctx"
+        className={maximized ? 'ctx max' : 'ctx'}
         aria-label="Context panel"
-        style={{ width: width === undefined ? DEFAULT_PANEL_WIDTH : `${width}px` }}
+        // The maximized panel takes the whole row, so it is given no width at
+        // all: the one the divider was dragged to is the split's and waits
+        // there, untouched, for the panel to come back to it.
+        style={
+          layout.kind === 'split'
+            ? { width: layout.width === undefined ? DEFAULT_PANEL_WIDTH : `${layout.width}px` }
+            : undefined
+        }
       >
         <div className="tabstrip" role="tablist" aria-label="Context panel tabs">
           {panel.tabs.map((tab) => (
@@ -189,7 +215,17 @@ export function ContextPanel({
               </button>
             </div>
           ))}
+          {/* The tools, at the right end of the strip and in this order. The
+              maximize control's name is what says which way it goes: the glyph
+              is the same either way, as the mock has it. */}
           <div className="strip-tools">
+            <button
+              className={maximized ? 'stool on' : 'stool'}
+              aria-label={maximized ? 'Exit maximize' : 'Maximize context panel'}
+              onClick={onToggleMaximize}
+            >
+              ⤢
+            </button>
             <button className="stool" aria-label="Collapse context panel" onClick={onCollapse}>
               ⇥
             </button>

@@ -86,8 +86,9 @@ async function open(): Promise<void> {
   await escape()
 }
 
-// The tree cannot be opened mid-turn any more — Esc means stop while a
-// session works — so a turn that the tree has to survive is started under it.
+// The tree cannot be opened mid-turn any more — with nothing full screen over
+// the session, Esc means stop while it works — so a turn that the tree has to
+// survive is started under it.
 async function working(port: ScriptedPort): Promise<void> {
   await act(async () => {
     await port.prompt('s1', 'go')
@@ -152,8 +153,9 @@ describe('opening and closing the tree', () => {
     expect(port.calls.map((call) => call.op)).toContain('cancel')
   })
 
-  // Deliberately no test that the tree opens mid-turn: while a session works
-  // Esc means stop, so the accelerator cannot fire and nothing else opens the
+  // Deliberately no test that the tree opens mid-turn: with nothing full
+  // screen over it — no maximized panel, no run graph — Esc means stop while a
+  // session works, so the accelerator cannot fire and nothing else opens the
   // tree. The capability was removed with the top-bar button, not lost.
 
   it('closes the model picker before it closes itself', async () => {

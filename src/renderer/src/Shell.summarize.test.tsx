@@ -186,8 +186,9 @@ describe('a busy state belongs to one session', () => {
     expect(port.calls).toContainEqual({ op: 'jump', args: ['s2', 'n2', { summarize: false }] })
 
     // And the session that is paying still says so when the user comes back.
-    // In the composer's slot, not the tree: with a summarize in flight Escape
-    // means stop, so the accelerator never gets its second press.
+    // In the composer's slot, not the tree: with a summarize in flight and
+    // nothing full screen over the session, Escape means stop, so the
+    // accelerator never gets its second press.
     await switchTo(0)
     expect(line()).toContain('Summarizing the branch you are leaving…')
   })

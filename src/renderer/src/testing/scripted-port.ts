@@ -416,8 +416,13 @@ export function createScriptedPort(initial: Partial<ShellSnapshot> = {}): Script
       calls.push({ op: 'resetSession', args: [id] })
       port.transcripts.set(id, [])
       // The identity keeps its worktree and gets its choice back, exactly as
-      // main resets one.
-      changeSession(id, (session) => ({ ...session, usage: undefined, fresh: true }))
+      // main resets one — and a fresh conversation never inherits a ghost
+      // panel, so the tabs go with the old one.
+      changeSession(id, (session) => {
+        const reset: SessionState = { ...session, usage: undefined, fresh: true }
+        delete (reset as { panel?: PanelState }).panel
+        return reset
+      })
       emitState()
       return Promise.resolve()
     },

@@ -350,7 +350,7 @@ describe('the refresh control', () => {
         [...(tools?.querySelectorAll('button') ?? [])].map((found) =>
           found.getAttribute('aria-label')
         )
-      ).toEqual(['Collapse context panel'])
+      ).toEqual(['Maximize context panel', 'Collapse context panel'])
       cleanup()
     }
   })
@@ -693,5 +693,91 @@ describe('a web tab\u2019s row follows its guest', () => {
 
     expect(guest()?.getAttribute('src')).toBe('http://localhost:5241/extras')
     expect(shown()).toBe('http://localhost:5241/extras')
+  })
+})
+
+// The row is the same row at any width: a maximized panel changes what it is
+// drawn beside, and nothing about what it says or what its controls do.
+describe('the row in a maximized panel', () => {
+  async function maximize(): Promise<void> {
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Maximize context panel' }))
+    })
+  }
+
+  it('sits between the strip and the exhibit, still one of it', async () => {
+    await shellWith(withTabs([BRIEF, MOCK, DEV_SERVER], 'addons'))
+
+    await maximize()
+
+    const children = [...(screen.getByLabelText('Context panel').children as unknown as Element[])]
+    expect(children.map((child) => child.className)).toEqual(['tabstrip', 'where', 'exhibit'])
+    expect(document.querySelectorAll('.ctx .where')).toHaveLength(1)
+    expect(shown()).toBe(BRIEF_PATH)
+  })
+
+  it('draws the location in the same two parts, the filename last to give way', async () => {
+    await shellWith(withTabs([BRIEF], 'addons'))
+
+    await maximize()
+
+    expect(location().querySelector('.head')?.textContent).toBe(
+      '/repos/crucible/.crucible/worktrees/run-47c8/.crucible/align/'
+    )
+    expect(location().querySelector('.tail')?.textContent).toBe('260828-addons.md')
+  })
+
+  it('copies the whole location, and says so in the row', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    await shellWith(withTabs([BRIEF], 'addons'))
+    await maximize()
+
+    act(() => {
+      fireEvent.click(location())
+    })
+
+    expect(copied).toEqual([BRIEF_PATH])
+    expect(location().querySelector('.copied')).toHaveTextContent('copied')
+
+    await act(async () => {
+      vi.advanceTimersByTime(1000)
+    })
+    expect(location().querySelector('.copied')).toBeNull()
+    vi.useRealTimers()
+  })
+
+  it('re-reads a markdown file on \u27f3, under the same tab', async () => {
+    const port = await shellWith(withTabs([BRIEF], 'addons'))
+    await maximize()
+    expect(reads(port)).toBe(1)
+
+    port.exhibits.set('addons', '# Alignment \u2014 Add-ons\n\nRevised while you read it.')
+    await act(async () => {
+      fireEvent.click(refresh())
+    })
+    await settled()
+
+    expect(reads(port)).toBe(2)
+    expect(document.querySelector('.exhibit .markdown')).toHaveTextContent(
+      'Revised while you read it.'
+    )
+    expect(screen.getAllByRole('tab')).toHaveLength(1)
+  })
+
+  it('reloads a guest in place, and follows it where it goes', async () => {
+    await shellWith(withTabs([DEV_SERVER], 'extras'))
+    await maximize()
+    const mounted = guest()
+    const reloads = reloadable()
+
+    await navigate('http://localhost:5241/extras/confirm')
+    expect(shown()).toBe('http://localhost:5241/extras/confirm')
+
+    await act(async () => {
+      fireEvent.click(refresh())
+    })
+
+    expect(reloads).toEqual(['reload'])
+    expect(guest()).toBe(mounted)
   })
 })

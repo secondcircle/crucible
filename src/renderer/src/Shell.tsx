@@ -16,6 +16,7 @@ import type {
   WorkspaceId
 } from '../../shared/agent/port'
 import type { AppUpdateService, AppVersionState } from '../../shared/app-update/service'
+import type { ExhibitKeysService } from '../../shared/exhibits/service'
 import type { CacheService } from '../../shared/cache/service'
 import type { CommandInfo, CommandService } from '../../shared/commands/service'
 import { commandFragment } from '../../shared/commands/template'
@@ -92,6 +93,15 @@ import {
   withoutMark,
   type Marks
 } from './state/needs-you'
+import { escapeRung, type EscapeRung, type EscapeState } from './state/escape'
+import {
+  forgetEmptyPanels,
+  panelPlace,
+  panelViewOf,
+  withPanelView,
+  withShownTab,
+  type PanelViews
+} from './state/panel-view'
 import { knownEmpty, NOTHING_YET, reduce } from './state/shell-state'
 import './shell.css'
 
@@ -141,6 +151,11 @@ type Question =
 /** Two Escapes this far apart are the tree's accelerator. */
 const DOUBLE_ESCAPE_MS = 500
 
+// The chat column while the context panel is maximized. `display: none` takes
+// it out of the flex row, out of the tab order and out of the accessibility
+// tree, and leaves every component in it mounted with its state.
+const CHAT_AWAY: React.CSSProperties = { display: 'none' }
+
 /** A confirmation, not an error: it says what just happened and goes away. */
 const TOAST_MS = 3200
 
@@ -161,6 +176,7 @@ export function Shell({
   workflowRuns,
   schedules: scheduleService,
   monitors: monitorService,
+  exhibitKeys,
   instance
 }: {
   readonly port: AgentPort
@@ -194,6 +210,11 @@ export function Shell({
   // state, observed through its own seam, and the tools that set one live
   // with the agent. Without this service no chip and no ⏳ render at all.
   readonly monitors?: MonitorService
+  // Keys that came out of an exhibit guest, which is a webContents of its own:
+  // a press inside a shown page reaches no listener in this document. Without
+  // it everything works as it does with it, minus Escape leaving a maximized
+  // panel from inside the page.
+  readonly exhibitKeys?: ExhibitKeysService
   // Which state directory this window runs against, as main worked it out at
   // creation. Absent in the installed app, which shows no badge.
   readonly instance?: string
@@ -293,9 +314,11 @@ export function Shell({
   // conversation the output can be shared into. Arriving somewhere else shows
   // that session's drawer, which for a new session is none, and stops nothing.
   const [runs, setRuns] = useState<Readonly<Record<SessionId, RunView>>>({})
-  // The context panel's collapse is per session and its width is one value for
-  // the window. Both are this document's memory and neither outlives it.
-  const [collapsed, setCollapsed] = useState<Readonly<Record<SessionId, boolean>>>({})
+  // How each session's context panel is shown — split, collapsed or maximized,
+  // one value because they are exclusive — and the width the split is drawn
+  // at, one value for the window. Both are this document's memory and neither
+  // outlives it.
+  const [panelViews, setPanelViews] = useState<PanelViews>({})
   const [panelWidth, setPanelWidth] = useState<number | undefined>(undefined)
   // Whether each workspace is a git working tree, as the workspace service
   // answered. Absent until the answer arrives, which is why nothing flashes.
@@ -446,7 +469,18 @@ export function Shell({
   // The visible panel is the active session's and no other's: a background
   // session's tabs wait in that session until the user switches to it.
   const panel = session?.panel
-  const panelCollapsed = activeSessionId !== undefined && collapsed[activeSessionId] === true
+  // A remembered panel view describes a panel that exists, and nothing else. A
+  // session that left the sidebar, one that was reset and one whose last tab
+  // closed all present the same way here — no panel — so one pass over the
+  // snapshot closes all three doors, and the next tab shown in that session
+  // opens the split. (React's adjust-state-on-change: the write during render
+  // re-runs this render before anything is painted.)
+  const shownViews = forgetEmptyPanels(panelViews, snapshot.sessions)
+  if (shownViews !== panelViews) setPanelViews(shownViews)
+  // What the panel area shows, memory and snapshot read together: the one
+  // value the render and the Escape ladder both go by. A session with no tabs
+  // has no panel, whatever is remembered for it.
+  const place = panelPlace(panel, panelViewOf(shownViews, activeSessionId))
   // Closed unless the caret is in a token the service has already answered for.
   const shownFiles = fileToken !== undefined && files?.of === fileToken ? files.paths : undefined
   const run = activeSessionId === undefined ? undefined : runs[activeSessionId]
@@ -915,7 +949,7 @@ export function Shell({
       // A show opens the panel of whichever session it happened in: the active
       // one at once, a background one by the time the user switches to it.
       if (event.type === 'panel_shown') {
-        setCollapsed((current) => ({ ...current, [event.sessionId]: false }))
+        setPanelViews((current) => withShownTab(current, event.sessionId))
       }
       // A cancelled or failed turn spent quota too. The TTL decides whether
       // the ask becomes a fetch.
@@ -1137,149 +1171,195 @@ export function Shell({
   }, [activeSessionId, port, report, occupy])
 
   // Precedence cannot live in the components, which each know only one of the
-  // things Escape can close. Esc closes the topmost thing that is up and
-  // stops there.
+  // things Escape can close. It cannot live in the keydown handler either: a
+  // key pressed inside an exhibit guest never reaches this document's keydown,
+  // and it has to read the same ladder rather than a second copy of it. So the
+  // decision is a pure function of what is up, and what stays here is the
+  // state it reads and what each rung does.
+  const escapeState: EscapeState = useMemo(
+    () => ({
+      loginOpen: liveLogin !== undefined,
+      expiryChoiceOpen: choice !== undefined,
+      confirmOpen: question !== undefined,
+      popoverOpen: popover !== 'none',
+      commandPopoverOpen: browsingCommands,
+      filePopoverOpen: fileToken !== undefined,
+      graphFullScreen: graphFullScreen && openRunId !== undefined,
+      artifactReaderOpen: openArtifactPath !== undefined,
+      // The panel as it is drawn, never as it is remembered: a maximize left
+      // over for a panel that is not on screen cannot trap an Escape.
+      panelMaximized: place === 'maximized',
+      // Only the active session's: a background session's summarize is
+      // untouchable from here.
+      summarizeCancellable:
+        activeSessionId !== undefined && activeJump !== undefined && jumpCancellable(activeJump),
+      treeOpen,
+      regionOccupied: region.length > 0,
+      turnCancellable: activeSessionId !== undefined && working
+    }),
+    [
+      liveLogin,
+      choice,
+      question,
+      popover,
+      browsingCommands,
+      fileToken,
+      graphFullScreen,
+      openRunId,
+      openArtifactPath,
+      place,
+      activeSessionId,
+      activeJump,
+      treeOpen,
+      region,
+      working
+    ]
+  )
+
+  /** What each rung does. Which rung is the ladder's answer, never this. */
+  const takeEscapeRung = useCallback(
+    (rung: EscapeRung): void => {
+      switch (rung) {
+        // The login dialog sits above the Settings card it was launched from,
+        // so it closes first and lands back on Providers.
+        case 'closeLogin':
+          closeLogin()
+          return
+
+        // The cache expiry choice is an answer owed to a send. During the
+        // summary it is the wait's own way out instead, and stopping is what
+        // Escape means there.
+        case 'answerExpiryChoice': {
+          if (choice === undefined) return
+          const running = jumpOf(jumps, choice.sessionId)
+          if (choice.summarizing === true && running !== undefined && jumpCancellable(running)) {
+            // Acknowledged in this frame; the port answers `cancelled` after
+            // it, and the leaf has not moved.
+            setJumps((current) =>
+              withJump(current, choice.sessionId, { kind: 'cancelling', ref: running.ref })
+            )
+            void port
+              .cancel(choice.sessionId)
+              .catch((cause: unknown) => report(cause, choice.sessionId))
+            return
+          }
+          // Nothing has been asked of π yet, so there is nothing to stop: the
+          // gesture is retired and the composer has the message, as typed. The
+          // session's stamp moves on, which is what tells a chain still in its
+          // tree read that the summarize is no longer its own.
+          summarizeChain.current[choice.sessionId] =
+            (summarizeChain.current[choice.sessionId] ?? 0) + 1
+          setChoice(undefined)
+          box.current?.focus()
+          return
+        }
+
+        case 'closeConfirm':
+          setQuestion(undefined)
+          return
+
+        case 'closePopover':
+          setPopover('none')
+          return
+
+        case 'closeCommandPopover':
+          setCommandPopoverClosed(true)
+          return
+
+        case 'closeFilePopover':
+          setFileToken(undefined)
+          return
+
+        case 'leaveGraphFullScreen':
+          setGraphFullScreen(false)
+          return
+
+        case 'closeArtifactReader':
+          setOpenArtifactPath(undefined)
+          return
+
+        // The width the split was drawn at is untouched by this: it waits in
+        // `panelWidth` and the panel comes back to it.
+        case 'unmaximizePanel': {
+          if (activeSessionId === undefined) return
+          const showing = activeSessionId
+          setPanelViews((current) => withPanelView(current, showing, 'split'))
+          // Taking a full-screen surface off is never the first press of the
+          // tree's accelerator.
+          escapes.current = 0
+          return
+        }
+
+        case 'cancelSummarize': {
+          if (activeSessionId === undefined || activeJump === undefined) return
+          const cancelling = activeSessionId
+          // Acknowledged in this frame; the port answers `cancelled` after it.
+          setJumps((current) =>
+            withJump(current, cancelling, { kind: 'cancelling', ref: activeJump.ref })
+          )
+          void port.cancel(cancelling).catch((cause: unknown) => report(cause, cancelling))
+          return
+        }
+
+        // The region's topmost surface, whichever it is — which unwinds an
+        // opened run back onto the overview it was opened from.
+        case 'closeTopOfRegion':
+          closeTopOfRegion()
+          return
+
+        case 'cancelTurn':
+          // The accelerator cannot fire off the press that stopped a turn.
+          escapes.current = 0
+          cancel()
+          return
+
+        case 'none':
+          return
+      }
+    },
+    [
+      closeLogin,
+      choice,
+      jumps,
+      port,
+      report,
+      activeSessionId,
+      activeJump,
+      closeTopOfRegion,
+      cancel
+    ]
+  )
+
   useEffect(() => {
     function onKeyDown(pressed: KeyboardEvent): void {
       if (pressed.key !== 'Escape') return
-      // The login dialog sits above the Settings card it was launched from, so
-      // it closes first and lands back on Providers.
-      if (liveLogin !== undefined) {
-        pressed.preventDefault()
-        closeLogin()
+      const rung = escapeRung('window', escapeState)
+      if (rung === 'none') {
+        // Only presses that fell through everything above count towards the
+        // tree's accelerator.
+        const now = Date.now()
+        const second = now - escapes.current <= DOUBLE_ESCAPE_MS
+        escapes.current = second ? 0 : now
+        if (second) openTree()
         return
       }
-      // The cache expiry choice is an answer owed to a send, so it comes off
-      // before anything under it. During the summary it is the wait's own way
-      // out instead, and stopping is what Escape means there.
-      if (choice !== undefined) {
-        pressed.preventDefault()
-        const running = jumpOf(jumps, choice.sessionId)
-        if (choice.summarizing === true && running !== undefined && jumpCancellable(running)) {
-          // Acknowledged in this frame; the port answers `cancelled` after it,
-          // and the leaf has not moved.
-          setJumps((current) =>
-            withJump(current, choice.sessionId, { kind: 'cancelling', ref: running.ref })
-          )
-          void port
-            .cancel(choice.sessionId)
-            .catch((cause: unknown) => report(cause, choice.sessionId))
-          return
-        }
-        // Nothing has been asked of π yet, so there is nothing to stop: the
-        // gesture is retired and the composer has the message, as typed. The
-        // session's stamp moves on, which is what tells a chain still in its
-        // tree read that the summarize is no longer its own.
-        summarizeChain.current[choice.sessionId] =
-          (summarizeChain.current[choice.sessionId] ?? 0) + 1
-        setChoice(undefined)
-        box.current?.focus()
-        return
-      }
-      // A confirm is an answer to a click, not a navigation: it stacks above
-      // whatever is up and comes off first.
-      if (question !== undefined) {
-        pressed.preventDefault()
-        setQuestion(undefined)
-        return
-      }
-      if (popover !== 'none') {
-        pressed.preventDefault()
-        setPopover('none')
-        return
-      }
-      if (browsingCommands) {
-        pressed.preventDefault()
-        setCommandPopoverClosed(true)
-        return
-      }
-      if (fileToken !== undefined) {
-        pressed.preventDefault()
-        setFileToken(undefined)
-        return
-      }
-      // The graph over the whole body covers the reader as well as the
-      // transcript, so it is the first layer to come off.
-      if (graphFullScreen && openRunId !== undefined) {
-        pressed.preventDefault()
-        setGraphFullScreen(false)
-        return
-      }
-      // An artifact is read above the run that lists it, so it comes off
-      // before the region unwinds a surface.
-      if (openArtifactPath !== undefined) {
-        pressed.preventDefault()
-        setOpenArtifactPath(undefined)
-        return
-      }
-      // A summarize is this session's own work and Escape stops it, whether
-      // or not the tree that started it is still on screen. Only the active
-      // session's: a background session's summarize is untouchable from here.
-      // It comes off before the tree and after every other occupant, which is
-      // the order the surfaces themselves are stacked in.
-      if (
-        (region.length === 0 || treeOpen) &&
-        activeSessionId !== undefined &&
-        activeJump !== undefined &&
-        jumpCancellable(activeJump)
-      ) {
-        pressed.preventDefault()
-        const cancelling = activeSessionId
-        // Acknowledged in this frame; the port answers `cancelled` after it.
-        setJumps((current) =>
-          withJump(current, cancelling, { kind: 'cancelling', ref: activeJump.ref })
-        )
-        void port.cancel(cancelling).catch((cause: unknown) => report(cause, cancelling))
-        return
-      }
-      // The region's topmost surface, whichever it is — which unwinds an
-      // opened run back onto the overview it was opened from. While anything
-      // occupies the region Escape never cancels a turn.
-      if (region.length > 0) {
-        pressed.preventDefault()
-        closeTopOfRegion()
-        return
-      }
-      if (activeSessionId !== undefined && working) {
-        pressed.preventDefault()
-        // Escape keeps meaning stop while the session works, so the
-        // accelerator cannot fire mid-turn.
-        escapes.current = 0
-        cancel()
-        return
-      }
-      // Only presses that fell through everything above count towards the
-      // tree's accelerator.
-      const now = Date.now()
-      const second = now - escapes.current <= DOUBLE_ESCAPE_MS
-      escapes.current = second ? 0 : now
-      if (second) openTree()
+      pressed.preventDefault()
+      takeEscapeRung(rung)
     }
     document.addEventListener('keydown', onKeyDown)
     return () => document.removeEventListener('keydown', onKeyDown)
-  }, [
-    question,
-    choice,
-    jumps,
-    popover,
-    fileToken,
-    region,
-    closeTopOfRegion,
-    activeSessionId,
-    activeJump,
-    working,
-    cancel,
-    openTree,
-    liveLogin,
-    closeLogin,
-    browsingCommands,
-    treeOpen,
-    openArtifactPath,
-    graphFullScreen,
-    openRunId,
-    port,
-    report
-  ])
+  }, [escapeState, takeEscapeRung, openTree])
+
+  // An Escape pressed inside a shown page. The guest is a webContents of its
+  // own, so nothing of it reaches the handler above; main watches the guest
+  // and announces the one key that crosses. It reads the same ladder, from
+  // 'exhibit', which can answer nothing but a maximized panel — so a page's
+  // Escape never closes an overlay, never stops a turn and never counts
+  // towards the tree's accelerator.
+  useEffect(() => {
+    if (exhibitKeys === undefined) return
+    return exhibitKeys.onEvent(() => takeEscapeRung(escapeRung('exhibit', escapeState)))
+  }, [exhibitKeys, escapeState, takeEscapeRung])
 
   // ⌘R is the global runs view (Q15). In the running app main intercepts the
   // chord before the menu could spend it on reload and announces it as an
@@ -2481,7 +2561,11 @@ export function Shell({
           column, the divider and the context panel. The sidebar is outside
           this box, which is why no overlay can reach it. */}
       <div className="body">
-        <main className="main">
+        {/* Put away, not taken apart: hiding drops the column out of the flex
+            row so the maximized panel fills the body, and leaves everything in
+            it mounted with whatever the reader left in it — the draft and its
+            caret, the chains they opened, the drawer's output. */}
+        <main className="main" style={place === 'maximized' ? CHAT_AWAY : undefined}>
           <TopBar
             session={session}
             instance={instance}
@@ -2546,6 +2630,7 @@ export function Shell({
                 sessionId={session.id}
                 invocations={shownInvocations}
                 missJump={missJump}
+                shown={place !== 'maximized'}
               />
             )}
 
@@ -2630,22 +2715,46 @@ export function Shell({
 
         {/* Nothing at all when the session has no tabs: the chat is full-width,
             and there is no empty panel and no edge strip to explain. */}
-        {panel === undefined || activeSessionId === undefined ? null : panelCollapsed ? (
+        {place === 'none' || panel === undefined || activeSessionId === undefined ? null : place ===
+          'collapsed' ? (
           <PanelEdge
             count={panel.tabs.length}
-            onOpen={() => setCollapsed((current) => ({ ...current, [activeSessionId]: false }))}
+            onOpen={() =>
+              setPanelViews((current) => withPanelView(current, activeSessionId, 'split'))
+            }
           />
         ) : (
+          // One render site, whichever view the panel is in: the difference is
+          // the layout it is handed, never a branch of its own, because a
+          // second site would unmount the guest and reload the exhibit.
           <ContextPanel
             panel={panel}
             sessionId={activeSessionId}
-            width={panelWidth}
+            layout={
+              place === 'maximized'
+                ? { kind: 'maximized' }
+                : {
+                    kind: 'split',
+                    ...(panelWidth === undefined ? {} : { width: panelWidth }),
+                    onResize: setPanelWidth
+                  }
+            }
             port={port}
             onCopyLocation={(location) =>
               void navigator.clipboard?.writeText(location).catch(report)
             }
-            onResize={setPanelWidth}
-            onCollapse={() => setCollapsed((current) => ({ ...current, [activeSessionId]: true }))}
+            onCollapse={() =>
+              setPanelViews((current) => withPanelView(current, activeSessionId, 'collapsed'))
+            }
+            onToggleMaximize={() =>
+              setPanelViews((current) =>
+                withPanelView(
+                  current,
+                  activeSessionId,
+                  place === 'maximized' ? 'split' : 'maximized'
+                )
+              )
+            }
           />
         )}
 

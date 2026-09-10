@@ -136,3 +136,109 @@ describe('following the stream', () => {
     expect(reads()).toBeGreaterThan(0)
   })
 })
+
+// The column the transcript is in is put away while the context panel is
+// maximized: hidden, not unmounted, so what the reader left in it survives.
+// The one thing a hidden box does not keep for itself is where the reader was
+// in it — a `display: none` element has no scrolling box at all — so the
+// transcript parks that and puts it back.
+describe('a column that is put away', () => {
+  const LONG: readonly ViewItem[] = Array.from({ length: 40 }, (_, at) => ({
+    kind: 'assistant' as const,
+    markdown: `paragraph ${at}`,
+    streaming: false
+  }))
+
+  /** jsdom lays nothing out, so the scroller is given the dimensions a browser would. */
+  function measure(height = 8000): HTMLElement {
+    const scroller = document.querySelector('.chat')
+    if (scroller === null) throw new Error('no transcript scroller')
+    Object.defineProperty(scroller, 'scrollHeight', { configurable: true, get: () => height })
+    Object.defineProperty(scroller, 'clientHeight', { configurable: true, get: () => 600 })
+    return scroller as HTMLElement
+  }
+
+  /** Where the reader scrolled to, as the browser reports it back. */
+  function scrollTo(scroller: HTMLElement, offset: number): void {
+    scroller.scrollTop = offset
+    fireEvent.scroll(scroller)
+  }
+
+  // A browser throws the scrolling box away with the layout box, so the offset
+  // is not there to come back on its own. Without this the test would pass
+  // against code that restores nothing.
+  function hide(scroller: HTMLElement): void {
+    scroller.scrollTop = 0
+  }
+
+  it('puts the reader back where they were reading', () => {
+    const view = render(<Transcript items={LONG} sessionId="s1" shown />)
+    const scroller = measure()
+    scrollTo(scroller, 2200)
+
+    view.rerender(<Transcript items={LONG} sessionId="s1" shown={false} />)
+    hide(scroller)
+    view.rerender(<Transcript items={LONG} sessionId="s1" shown />)
+
+    expect(scroller.scrollTop).toBe(2200)
+  })
+
+  it('leaves a reader who was following the stream at the bottom', () => {
+    const view = render(<Transcript items={LONG} sessionId="s1" shown />)
+    const scroller = measure()
+    // Within a line or two of the end, which still counts as following.
+    scrollTo(scroller, 7400)
+
+    view.rerender(<Transcript items={LONG} sessionId="s1" shown={false} />)
+    hide(scroller)
+    view.rerender(<Transcript items={LONG} sessionId="s1" shown />)
+
+    expect(scroller.scrollTop).toBe(8000)
+  })
+
+  it('lets no delta that lands while it is away move the reader', () => {
+    const view = render(<Transcript items={LONG} sessionId="s1" shown />)
+    const scroller = measure()
+    scrollTo(scroller, 2200)
+
+    view.rerender(<Transcript items={LONG} sessionId="s1" shown={false} />)
+    hide(scroller)
+    // The stream keeps arriving while the column is hidden.
+    for (const at of [1, 2, 3]) {
+      view.rerender(
+        <Transcript
+          items={[...LONG, { kind: 'assistant', markdown: `late ${at}`, streaming: true }]}
+          sessionId="s1"
+          shown={false}
+        />
+      )
+      expect(scroller.scrollTop).toBe(0)
+    }
+
+    view.rerender(<Transcript items={LONG} sessionId="s1" shown />)
+
+    expect(scroller.scrollTop).toBe(2200)
+  })
+
+  it('starts a session at its bottom however the last one was left', () => {
+    const view = render(<Transcript items={LONG} sessionId="s1" shown />)
+    const scroller = measure()
+    scrollTo(scroller, 2200)
+
+    // Switching session is unaffected by any of this: an arrival starts at the
+    // bottom, as it does today.
+    view.rerender(<Transcript items={LONG} sessionId="s2" shown />)
+
+    expect(scroller.scrollTop).toBe(8000)
+  })
+
+  it('is on screen for every caller that says nothing about it', () => {
+    render(<Transcript items={LONG} sessionId="s1" />)
+    const scroller = measure()
+    scrollTo(scroller, 2200)
+
+    // The run view's transcript is never put away under a maximized panel, and
+    // no existing caller passes the prop at all.
+    expect(scroller.scrollTop).toBe(2200)
+  })
+})

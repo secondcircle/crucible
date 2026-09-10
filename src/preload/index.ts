@@ -50,6 +50,10 @@ import {
   type WorkspaceRequest,
   type WorkspaceResult
 } from '../shared/workspace/channels'
+import {
+  EXHIBIT_KEY_EVENT_CHANNEL,
+  type ExhibitKeyEvent
+} from '../shared/exhibits/channels'
 import { INSTANCE_ARGUMENT } from '../shared/instance'
 import type { WorkspaceEvent } from '../shared/workspace/service'
 import {
@@ -180,6 +184,14 @@ contextBridge.exposeInMainWorld('crucible', {
 
     onEvent: (listener: (event: MonitorEvent) => void): (() => void) =>
       forwarder(MONITOR_EVENT_CHANNEL, listener)
+  },
+
+  // Keys out of an exhibit guest. A guest is a webContents of its own, so a
+  // press inside a page never reaches this document; main watches for the one
+  // key the app takes and announces it here.
+  exhibitKeys: {
+    onEvent: (listener: (event: ExhibitKeyEvent) => void): (() => void) =>
+      forwarder(EXHIBIT_KEY_EVENT_CHANNEL, listener)
   },
 
   // The version seam: one question, one event, one restart.

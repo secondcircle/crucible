@@ -30,6 +30,7 @@ import { type CommandChannel, serveCommandChannel } from './commands/channel'
 import { selectCommandService } from './commands/select-service'
 import { createSkillService, userSkillsPath } from './skills/service'
 import { shippedSkillsPath, shippedSystemPrompt } from './shipped'
+import { type ExhibitKeyChannel, serveExhibitKeyChannel } from './exhibits/channel'
 import { forwardRendererOutput } from './log/renderer-output'
 import { createFileSink } from './log/sink'
 import { type NeedsYouChannel, serveNeedsYouChannel } from './needs-you/channel'
@@ -419,6 +420,7 @@ let needsYou: LiveNeedsYouService | undefined
 let workflowRunChannel: WorkflowRunChannel | undefined
 let scheduleChannel: ScheduleChannel | undefined
 let monitorChannel: MonitorChannel | undefined
+let exhibitKeyChannel: ExhibitKeyChannel | undefined
 
 function openWindow(reason?: 'activate'): void {
   const window = createMainWindow({
@@ -449,6 +451,10 @@ function openWindow(reason?: 'activate'): void {
   workflowRunChannel = serveWorkflowRunChannel(workflowRuns, window)
   scheduleChannel = serveScheduleChannel(schedules.service, window)
   monitorChannel = serveMonitorChannel(monitors, window)
+  // Escape out of an exhibit guest, which is a webContents of its own: without
+  // this a user who clicked into a shown page could not leave a maximized
+  // panel from the keyboard. Nothing else crosses, and the page keeps the key.
+  exhibitKeyChannel = serveExhibitKeyChannel(window)
   // ⌘R is the global runs view (Q15). Taken here, before the menu can spend
   // it on reload; dev reloads keep ⇧⌘R. On non-mac the chord is Ctrl+R.
   window.webContents.on('before-input-event', (event, input) => {
@@ -507,6 +513,7 @@ app.on('will-quit', () => {
   workflowRuns.dispose()
   monitorChannel?.dispose()
   monitors.dispose()
+  exhibitKeyChannel?.dispose()
   workspaceChannel?.dispose()
   commandChannel?.dispose()
   appUpdateChannel?.dispose()

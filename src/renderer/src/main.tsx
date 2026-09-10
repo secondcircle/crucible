@@ -4,6 +4,7 @@ import { createIpcClient } from './agent/ipc-client'
 import { createAppUpdateClient } from './app-update/ipc-client'
 import { createCacheClient } from './cache/ipc-client'
 import { createCommandClient } from './commands/ipc-client'
+import { createExhibitKeysClient } from './exhibits/ipc-client'
 import { createNeedsYouClient } from './needs-you/ipc-client'
 import { createQuotaClient } from './quota/ipc-client'
 import { createWorkflowRunClient } from './runs/ipc-client'
@@ -33,6 +34,7 @@ function mountApp(): void {
         workflowRuns={createWorkflowRunClient()}
         schedules={createScheduleClient()}
         monitors={createMonitorClient()}
+        exhibitKeys={createExhibitKeysClient()}
         instance={instanceBadge()}
       />
     </StrictMode>

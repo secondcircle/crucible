@@ -21,7 +21,8 @@ export function Transcript({
   items,
   sessionId,
   invocations,
-  missJump
+  missJump,
+  shown = true
 }: {
   readonly items: readonly ViewItem[]
   /** Switching sessions starts the reader at the bottom of the new one again. */
@@ -32,12 +33,34 @@ export function Transcript({
   // The cache badge's jump, as a counter: the request carries nothing but
   // itself, and two clicks in a row must both move the view.
   readonly missJump?: number
+  /**
+   * Whether the column this transcript is in is on screen. Hidden, it parks
+   * the reader's place and puts it back when the column returns. Defaults to
+   * on screen: the run view's transcript is never put away under it.
+   */
+  readonly shown?: boolean
 }): React.JSX.Element {
   const scroller = useRef<HTMLDivElement>(null)
   const content = useRef<HTMLOListElement>(null)
   const following = useRef(true)
+  // Where the reader is, recorded as they scroll rather than read off the node
+  // when the column goes. By the time any effect could read it the box is
+  // already display:none, and a hidden box answers 0.
+  const parked = useRef(0)
+  // Whether the column is on screen, for the effects below: they are keyed on
+  // what the transcript itself is doing and must not re-run because the column
+  // came or went, so `pin` reads this rather than the prop. Written in the
+  // first layout effect of every commit, ahead of every effect that pins.
+  const onScreen = useRef(shown)
+  useLayoutEffect(() => {
+    onScreen.current = shown
+  })
 
   function pin(): void {
+    // A hidden box has no layout: its scrollHeight is 0, and writing that would
+    // throw the reader's place away for every delta that lands while the column
+    // is put away.
+    if (!onScreen.current) return
     const node = scroller.current
     if (node !== null) node.scrollTop = node.scrollHeight
   }
@@ -46,6 +69,7 @@ export function Transcript({
   // unpinned for a frame first.
   useLayoutEffect(() => {
     following.current = true
+    parked.current = 0
     pin()
   }, [sessionId])
 
@@ -85,9 +109,20 @@ export function Transcript({
     latest.scrollIntoView?.({ block: 'center' })
   }, [missJump])
 
+  // Coming back: the bottom for a reader who was following the stream, their
+  // own place for one who was not. A layout effect, so the return is never
+  // painted at the wrong offset first.
+  useLayoutEffect(() => {
+    const node = scroller.current
+    if (node === null || !shown) return
+    if (following.current) pin()
+    else node.scrollTop = parked.current
+  }, [shown])
+
   function onScroll(): void {
     const node = scroller.current
     if (node === null) return
+    parked.current = node.scrollTop
     // A reader within a line or two of the end still counts as at the end, so
     // a delta landing mid-scroll does not strand them.
     following.current = node.scrollHeight - node.scrollTop - node.clientHeight < 40

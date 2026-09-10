@@ -136,6 +136,9 @@ function pageWithPreload(
           value: { monitors: [] }
         }),
         onEvent: (): (() => void) => () => {}
+      },
+      exhibitKeys: {
+        onEvent: (): (() => void) => () => {}
       }
     },
     configurable: true

@@ -13,6 +13,7 @@ import type {
   ScheduleRequest,
   ScheduleResult
 } from '../../shared/schedules/channels'
+import type { ExhibitKeyEvent } from '../../shared/exhibits/channels'
 import type { WorkspaceRequest, WorkspaceResult } from '../../shared/workspace/channels'
 import type { WorkspaceEvent } from '../../shared/workspace/service'
 import type {
@@ -85,6 +86,12 @@ export interface CrucibleMonitors {
   onEvent(listener: (event: MonitorEvent) => void): () => void
 }
 
+// One way and one member: a key an exhibit guest pressed is announced, and the
+// renderer asks nothing of the guest in return.
+export interface CrucibleExhibitKeys {
+  onEvent(listener: (event: ExhibitKeyEvent) => void): () => void
+}
+
 declare global {
   interface Window {
     crucible?: {
@@ -104,6 +111,7 @@ declare global {
       workflowRuns?: CrucibleWorkflowRuns
       schedules?: CrucibleSchedules
       monitors?: CrucibleMonitors
+      exhibitKeys?: CrucibleExhibitKeys
     }
   }
 }
@@ -204,4 +212,12 @@ export function monitorsBridge(): CrucibleMonitors {
     throw new Error('renderer: window.crucible.monitors is missing — the preload did not load')
   }
   return monitors
+}
+
+export function exhibitKeysBridge(): CrucibleExhibitKeys {
+  const exhibitKeys = window.crucible?.exhibitKeys
+  if (exhibitKeys === undefined) {
+    throw new Error('renderer: window.crucible.exhibitKeys is missing — the preload did not load')
+  }
+  return exhibitKeys
 }
