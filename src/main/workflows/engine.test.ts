@@ -9,8 +9,10 @@ import { afterEach, describe, expect, it } from 'vitest'
 import type { LoadedSkill, SkillService } from '../skills/service'
 import type { PlannedNode, WorkflowDef } from './authoring'
 import { createWorkflowEngine, type WorkflowEngine } from './engine'
+import { createWorkflowLoader } from './loader'
 import type { NodeSessionFactory } from './node-session'
 import { createRunStore } from './store'
+import { AUTHORING_MODULE, forkHost } from './testing/host-fork'
 import {
   cleanupScratch,
   git,
@@ -1150,5 +1152,113 @@ describe('what skills a node is started with', () => {
     await until(() => engine.runs()[0].status === 'complete')
 
     expect(sessions.requests.map((request) => request.skills)).toEqual([[], [], []])
+  })
+})
+
+// The engine over the real host: a workflow file in a process of its own,
+// reached through the loader exactly as a launch reaches it. What is proved
+// here is the wiring the in-process rig cannot: that the engine's cancel is
+// what ends a file the engine can no longer talk to, and that a host dying
+// is a run failing and nothing more.
+describe('the engine over a real workflow host', () => {
+  function realLoader(source: string) {
+    const user = tempDir('crucible-engine-user-')
+    writeFileSync(join(user, 'hosted.ts'), source, 'utf8')
+    return createWorkflowLoader({ roots: { user }, authoringModule: AUTHORING_MODULE, spawn: forkHost })
+  }
+
+  it('cancel ends a workflow file held in a synchronous loop', async () => {
+    const loader = realLoader(`
+      import { workflow } from 'crucible:workflow'
+      export default workflow({
+        description: 'asks, then spins',
+        inputs: {},
+        run: async (ctx) => {
+          await ctx.ask({ reason: 'may I spin?' })
+          for (;;) {}
+        }
+      })
+    `)
+    const { engine, repo, delivered } = rig({}, () => () => {}, { loader })
+    const started = await engine.start(startRequest(repo, 'hosted', {}))
+
+    // Once the ask is parked the file is one answer away from its loop; the
+    // answer sends it in, and the cancel has to end it from outside.
+    await until(() => engine.runs()[0].waiting === true)
+    engine.answer(started.id, 'go ahead')
+    await new Promise((resolve) => setTimeout(resolve, 200))
+    engine.cancel(started.id)
+
+    await until(() => engine.runs()[0].status === 'cancelled')
+    expect(delivered.at(-1)?.text).toContain('cancelled')
+  })
+
+  it('a host that dies fails the run, with what the process said', async () => {
+    const loader = realLoader(`
+      import { workflow } from 'crucible:workflow'
+      export default workflow({
+        description: 'dies',
+        inputs: {},
+        run: async (ctx) => {
+          await ctx.ask({ reason: 'about to go' })
+          console.error('the file blew up')
+          process.exit(9)
+        }
+      })
+    `)
+    const { engine, repo, delivered } = rig({}, () => () => {}, { loader })
+    const started = await engine.start(startRequest(repo, 'hosted', {}))
+
+    await until(() => engine.runs()[0].waiting === true)
+    engine.answer(started.id, 'go')
+
+    await until(() => engine.runs()[0].status === 'failed')
+    expect(engine.runs()[0].error).toMatch(/exited with code 9/)
+    expect(engine.runs()[0].error).toContain('the file blew up')
+    expect(delivered.at(-1)?.text).toContain('failed')
+  })
+
+  // A node's check is the file's own function, so the engine reaches back
+  // across the wire for it and awaits what comes back. The counter lives in
+  // the host's module scope, which is how one process serving one run can
+  // answer differently the second time.
+  it("awaits a node's check in the host and rejects the completion it faults", async () => {
+    const loader = realLoader(`
+      import { workflow } from 'crucible:workflow'
+      let asked = 0
+      export default workflow({
+        description: 'checks its node asynchronously',
+        inputs: {},
+        plan: () => [{ id: 'work' }],
+        run: async (ctx) => {
+          const done = await ctx.node('work', {
+            prompt: 'do the thing',
+            outputs: { report: { file: 'report.md', desc: 'what happened' } },
+            check: async (outputs) => {
+              await new Promise((resolve) => setTimeout(resolve, 10))
+              asked += 1
+              return asked === 1 ? ['the report says nothing about why'] : []
+            }
+          })
+          return { summary: done.summary, checks: asked }
+        }
+      })
+    `)
+    const { engine, repo, sessions } = rig(
+      {},
+      () => (_prompt, tools, turn) => {
+        writeFileSync(outputPath(tools.taskPrompt, 'report.md'), `attempt ${turn}\n`)
+        tools.complete({ summary: `attempt ${turn}` })
+      },
+      { loader }
+    )
+    await engine.start(startRequest(repo, 'hosted', {}))
+
+    await until(() => engine.runs()[0].status === 'complete')
+    expect(
+      sessions.prompts.some((prompt) => prompt.includes('rejected'))
+    ).toBe(true)
+    expect(engine.runs()[0].nodes[0].summary).toBe('attempt 2')
+    expect(engine.runs()[0].outputs).toEqual({ summary: 'attempt 2', checks: 2 })
   })
 })

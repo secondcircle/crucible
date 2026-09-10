@@ -1,7 +1,8 @@
 // @vitest-environment node
 //
 // The example workflows Crucible ships beside the agent docs, loaded through
-// the real jiti loader and the real `crucible:workflow` alias. The app never
+// the real loader — a workflow host per file — and the real `crucible:workflow`
+// alias. The app never
 // loads these files — they exist to be copied into a workflow folder — so a
 // broken example would otherwise only surface in front of the user who copied
 // it. This repo's own `.crucible/workflows/` copies are covered here too,
@@ -15,8 +16,10 @@ import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { shippedExamplesPath, shippedWorkflowLibPath } from '../shipped'
-import type { NodeResult, NodeSpec, RunContext } from './authoring'
+import type { NodeResult, NodeSpec, RunContext, WorkflowDef } from './authoring'
 import { createWorkflowLoader } from './loader'
+import { forkHost } from './testing/host-fork'
+import { loadWorkflowDef } from './testing/load-def'
 
 const APP = join(import.meta.dirname, '..', '..', '..')
 
@@ -35,10 +38,16 @@ function exampleLoader(): ReturnType<typeof createWorkflowLoader> {
   return createWorkflowLoader({
     roots: { user: shippedExamplesPath(APP) },
     authoringModule: shippedWorkflowLibPath(APP),
+    spawn: forkHost,
     onUnloadable: (path, cause) => {
       throw new Error(`${path} did not load: ${String(cause)}`)
     }
   })
+}
+
+/** An example's definition in this process, for driving its run() and plan(). */
+function exampleDef(name: string): Promise<WorkflowDef> {
+  return loadWorkflowDef(join(shippedExamplesPath(APP), `${name}.ts`), shippedWorkflowLibPath(APP))
 }
 
 function git(repo: string, ...args: string[]): string {
@@ -88,8 +97,8 @@ async function driveAdrAudit(
   const headAt: Record<string, string> = {}
   const dirtyAt: Record<string, string> = {}
 
-  const adrAudit = await exampleLoader().resolve(NO_WORKSPACE, 'adr-audit')
-  const outputs = await adrAudit.def.run({
+  const adrAudit = await exampleDef('adr-audit')
+  const outputs = await adrAudit.run({
     inputs: {},
     artifactDir,
     cwd: repo,
@@ -126,13 +135,13 @@ describe('the example workflows Crucible ships', () => {
 
     // The audit is kicked off with nothing at all, so its declaration is what
     // lets `crucible_run` omit inputs for it.
-    expect(listed.find((workflow) => workflow.name === 'adr-audit')?.def.inputs).toEqual({})
+    expect(listed.find((workflow) => workflow.name === 'adr-audit')?.manifest.inputs).toEqual({})
 
     for (const workflow of listed) {
-      expect(workflow.def.description.trim()).not.toBe('')
+      expect(workflow.manifest.description.trim()).not.toBe('')
       // Every input is described, because the description is all an
       // orchestrator has to go on when it fills one in.
-      for (const [name, described] of Object.entries(workflow.def.inputs)) {
+      for (const [name, described] of Object.entries(workflow.manifest.inputs)) {
         expect(described.trim(), `${workflow.name}.${name}`).not.toBe('')
       }
     }
@@ -148,6 +157,7 @@ describe('the example workflows Crucible ships', () => {
     const loader = createWorkflowLoader({
       roots: { user: NO_WORKSPACE },
       authoringModule: shippedWorkflowLibPath(APP),
+      spawn: forkHost,
       onUnloadable: (path, cause) => {
         throw new Error(`${path} did not load: ${String(cause)}`)
       }
@@ -161,10 +171,8 @@ describe('the example workflows Crucible ships', () => {
   })
 
   it('plans a graph from its inputs before anything costs money', async () => {
-    const loader = exampleLoader()
-
-    const adhoc = await loader.resolve(NO_WORKSPACE, 'adhoc')
-    expect(adhoc.def.plan?.({ prompt: '/tmp/task.md' })).toEqual([
+    const adhoc = await exampleDef('adhoc')
+    expect(adhoc.plan?.({ prompt: '/tmp/task.md' })).toEqual([
       {
         id: 'work',
         outputs: {
@@ -178,8 +186,8 @@ describe('the example workflows Crucible ships', () => {
 
     // All three audit nodes are certain to run, so all three are ghosts from
     // kickoff, each already naming the artifact it will write.
-    const audit = await loader.resolve(NO_WORKSPACE, 'adr-audit')
-    expect(audit.def.plan?.({})).toEqual([
+    const audit = await exampleDef('adr-audit')
+    expect(audit.plan?.({})).toEqual([
       {
         id: 'audit',
         model: 'anthropic/claude-fable-5:high',
@@ -216,8 +224,8 @@ describe('the example workflows Crucible ships', () => {
 
     // The plan is what the run view draws as pending ghosts, so its parents
     // have to name nodes the plan itself declares.
-    const build = await loader.resolve(NO_WORKSPACE, 'build')
-    const planned = build.def.plan?.({ intent: '/tmp/intent.md' }) ?? []
+    const build = await exampleDef('build')
+    const planned = build.plan?.({ intent: '/tmp/intent.md' }) ?? []
     expect(planned.length).toBeGreaterThan(0)
     const ids = new Set(planned.map((node) => node.id))
     for (const node of planned) {
@@ -274,8 +282,8 @@ describe('the example workflows Crucible ships', () => {
     writeFileSync(prompt, 'do the thing\n')
 
     const dispatched: NodeSpec[] = []
-    const adhoc = await exampleLoader().resolve(NO_WORKSPACE, 'adhoc')
-    await adhoc.def.run({
+    const adhoc = await exampleDef('adhoc')
+    await adhoc.run({
       inputs: { prompt },
       artifactDir: scratch,
       cwd: scratch,

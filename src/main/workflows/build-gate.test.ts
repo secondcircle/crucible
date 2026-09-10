@@ -16,7 +16,7 @@ import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { shippedExamplesPath, shippedWorkflowLibPath } from '../shipped'
 import type { NodeResult, NodeSpec, RunContext, WorkflowDef } from './authoring'
-import { createWorkflowLoader } from './loader'
+import { loadWorkflowDef } from './testing/load-def'
 
 const APP = join(import.meta.dirname, '..', '..', '..')
 
@@ -201,13 +201,9 @@ function driver(repo: string, script: Script = {}): Driver {
 }
 
 async function buildWorkflow(): Promise<WorkflowDef> {
-  // The example folder stood up as the user root: the loader never reads the
-  // examples in the app, so a test that wants one loads it as its own.
-  const loader = createWorkflowLoader({
-    roots: { user: shippedExamplesPath(APP) },
-    authoringModule: shippedWorkflowLibPath(APP)
-  })
-  return (await loader.resolve('/no/such/workspace', 'build')).def
+  // The example loaded into this process: the test drives its run() against
+  // a scripted context and reads what it asked for.
+  return loadWorkflowDef(join(shippedExamplesPath(APP), 'build.ts'), shippedWorkflowLibPath(APP))
 }
 
 interface Outputs {

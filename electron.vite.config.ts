@@ -6,15 +6,17 @@ export default defineConfig({
     plugins: [externalizeDepsPlugin()],
     build: {
       rollupOptions: {
-        // Three entries out of one build: the app's main process, the
-        // desktop installer npm runs after an install, and the assembler the
-        // installed app forks to lay an update into its own bundle. All three
-        // share the assembler, so they get the same answer to where an app
-        // goes.
+        // Four entries out of one build: the app's main process, the
+        // desktop installer npm runs after an install, the assembler the
+        // installed app forks to lay an update into its own bundle, and the
+        // workflow host the engine forks to run a repository's workflow
+        // code off the main thread. The first three share the assembler, so
+        // they get the same answer to where an app goes.
         input: {
           index: 'src/main/index.ts',
           postinstall: 'src/main/install/postinstall.ts',
-          'assemble-cli': 'src/main/install/assemble-cli.ts'
+          'assemble-cli': 'src/main/install/assemble-cli.ts',
+          'workflow-host': 'src/main/workflows/host/entry.ts'
         }
       }
     }

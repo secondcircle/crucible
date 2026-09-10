@@ -8,9 +8,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { createWorkflowLoader } from '../workflows/loader'
+import { AUTHORING_MODULE as AUTHORING, forkHost } from '../workflows/testing/host-fork'
 import { loaderSchedules } from './source'
-
-const AUTHORING = join(__dirname, '..', '..', '..', 'resources', 'workflow-lib', 'workflow.ts')
 
 const scratch: string[] = []
 
@@ -45,7 +44,9 @@ function workflowFile(folder: string, name: string, extra: string, inputs = '{}'
 }
 
 function reader(user: string) {
-  return loaderSchedules(createWorkflowLoader({ roots: { user }, authoringModule: AUTHORING }))
+  return loaderSchedules(
+    createWorkflowLoader({ roots: { user }, authoringModule: AUTHORING, spawn: forkHost })
+  )
 }
 
 describe('what the scheduler reads', () => {
@@ -67,9 +68,24 @@ describe('what the scheduler reads', () => {
       declaresInputs: false
     })
     expect(declared[0]?.check).toBeTypeOf('function')
-    // The check is the file's own function, called with the workspace path
-    // and nothing else.
+    // The check is the file's own function, run in a host of its own with
+    // the workspace path and nothing else.
     expect(await declared[0]?.check?.({ workspacePath: workspace })).toBe(true)
+  })
+
+  it('a check the scheduler abandons is a process that ends', async () => {
+    const workspace = tempDir()
+    workflowFile(
+      join(workspace, '.crucible', 'workflows'),
+      'stuck',
+      `  schedule: { cron: '0 9 * * *', check: () => new Promise(() => {}) },\n`
+    )
+    const declared = await reader(tempDir())(workspace)
+
+    const abandon = new AbortController()
+    const asking = declared[0]?.check?.({ workspacePath: workspace, signal: abandon.signal })
+    abandon.abort()
+    await expect(asking).rejects.toThrow('the workflow host was stopped')
   })
 
   it('ignores a schedule on a user workflow', async () => {

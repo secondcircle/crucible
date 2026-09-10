@@ -8,9 +8,13 @@ export default defineConfig({
     // with `// @vitest-environment node`.
     environment: 'jsdom',
     // The five-second default measures how saturated the machine is, not
-    // whether a file is right: the suite spawns real processes. A test that
-    // genuinely hangs still fails, twenty seconds later.
-    testTimeout: 20_000,
+    // whether a file is right: the suite spawns real processes — a workflow
+    // host per case in the host, loader and schedule-source suites, each a
+    // Node start plus a TypeScript transform — on top of one worker per
+    // core. A test that genuinely hangs still fails, thirty seconds later,
+    // and a hook twenty.
+    testTimeout: 30_000,
+    hookTimeout: 20_000,
     setupFiles: ['./vitest.setup.ts'],
     // scripts/ is in because the publish workflow's version choice decides
     // what every installed Crucible updates to, and nothing else would catch

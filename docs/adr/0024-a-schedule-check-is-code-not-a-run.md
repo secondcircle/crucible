@@ -3,7 +3,8 @@
 Some schedules fire far more often than their work is needed: every five
 minutes one asks whether untriaged issues exist, and most answers are no.
 We decided the asking is plain TypeScript — an optional check beside the
-cron expression, evaluated by the scheduler in the main process. A falsy
+cron expression, evaluated at fire time in a workflow host the scheduler
+opens for the question and closes after it (ADR 0029). A falsy
 result leaves no trace: no run, no worktree, no agent, no board entry. Only
 a truthy result starts a run, which is then ordinary in every way (ADR
 0023). A check that throws puts its schedule into a warning state on the
@@ -13,8 +14,9 @@ schedule board, last error shown; it never lights the chip.
 
 Cheap polling costs nothing and clutters nothing; the board's Recent group
 holds only runs that did work. The check runs with the app's own privileges
-outside any worktree, like the workflow definitions the engine already
-loads. A broken check is visible only on the board, so a user who never
+outside any worktree, in a process of its own like the rest of the workflow
+file, so a check that hangs is a process the scheduler ends when it stops
+waiting. A broken check is visible only on the board, so a user who never
 opens it can miss a dead schedule.
 
 ## Considered Options

@@ -51,6 +51,7 @@ import { createMainWindow } from './window'
 import { serveWorkspaceChannel, type WorkspaceChannel } from './workspace/channel'
 import { selectWorkspaceService } from './workspace/select-service'
 import { serveWorkflowRunChannel, type WorkflowRunChannel } from './workflows/channel'
+import type { SpawnHost } from './workflows/host/host'
 import { selectWorkflowRunService } from './workflows/select-service'
 import { inspectorProfiler, startStallWatchdog } from './watchdog/stalls'
 
@@ -204,12 +205,23 @@ const monitors = selectMonitorService(
   }
 )
 
+// The process a workflow file runs in: a utility process per file, so nothing
+// a repository's code does synchronously can hold this one. The entry is the
+// fourth thing the main build produces, beside the assembler.
+const spawnHost: SpawnHost = (workflowFile, authoringModule) =>
+  utilityProcess.fork(
+    join(app.getAppPath(), 'out', 'main', 'workflow-host.js'),
+    [workflowFile, authoringModule],
+    { stdio: 'pipe' }
+  )
+
 const workflowRuns = selectWorkflowRunService(
   decideFlavor(process.env.CRUCIBLE_AGENT, app.isPackaged).flavor,
   log,
   {
     appPath: app.getAppPath(),
     stateDir: app.getPath('userData'),
+    spawnHost,
     cache,
     quota,
     ...(cannedWorkspacePath === undefined ? {} : { cannedWorkspacePath }),
@@ -247,6 +259,7 @@ const schedules = selectScheduleService(
   {
     appPath: app.getAppPath(),
     stateDir: app.getPath('userData'),
+    spawnHost,
     workspaces: () => store.state.workspaces.map((workspace) => workspace.path),
     runs: workflowRuns,
     ...(cannedWorkspacePath === undefined ? {} : { cannedWorkspacePath })

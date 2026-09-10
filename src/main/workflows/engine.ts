@@ -21,24 +21,28 @@ import type {
   NodeResult,
   NodeSpec,
   OpenNode,
+  PlannedNode,
   ReviseOptions,
-  RunContext,
-  WorkflowDef
+  RunContext
 } from './authoring'
 import type { CacheRecorder } from '../cache/ledger'
 import { narrowSkills, type SkillService } from '../skills/service'
+import type { WorkflowHost, WorkflowManifest } from './host/host'
 import type { WorkflowLoader } from './loader'
 import type { NodeSession, NodeSessionFactory } from './node-session'
 import type { RunStore } from './store'
 import { checkVerdict } from './verdict'
-import { commitRunWorktree, createRunWorktree } from './worktree'
+import { commitRunWorktree, createRunWorktree, type RunWorktree } from './worktree'
 
-// The engine: executes runs in-process, one seam away from agents. Ported
-// from the legacy runner with the venue machinery deleted — every run works
-// in a worktree of its own, branched from a commit named at kickoff — and
-// the dashboard's answer channel replaced by the orchestrator:
-// every check-in, blocker, stall and completion is delivered as a message to
-// the run's session agent, and answers come back through crucible_answer.
+// The engine: executes runs, one seam away from agents and one away from the
+// workflow's own code. Ported from the legacy runner with the venue machinery
+// deleted — every run works in a worktree of its own, branched from a commit
+// named at kickoff — and the dashboard's answer channel replaced by the
+// orchestrator: every check-in, blocker, stall and completion is delivered as
+// a message to the run's session agent, and answers come back through
+// crucible_answer. The workflow file itself runs in a workflow host, a
+// process of its own; what the engine holds is the host, and the run context
+// it answers the file's calls with.
 
 const DEFAULT_TOOLS = ['read', 'bash', 'edit', 'write', 'grep', 'find', 'ls']
 
@@ -209,6 +213,8 @@ type ReleaseReason = 'run-ended' | 'quitting'
 
 interface Handle {
   readonly run: LiveRun
+  /** The process the workflow's own code runs in; killed when the run stops. */
+  readonly host: WorkflowHost
   desired: 'running' | 'paused' | 'cancelled'
   cancelRequested: boolean
   readonly pauseInterrupts: Set<() => void>
@@ -381,18 +387,18 @@ export function createWorkflowEngine(options: EngineOptions): WorkflowEngine {
     chain: { readonly branch?: string; readonly after?: WorkflowRunId }
   ): Promise<RunRecord> {
     const resolved = await loader.resolve(request.workspacePath, request.workflow)
-    const def = resolved.def
+    const { manifest } = resolved
 
     // Every declared input is a path to an existing file, checked before
     // anything costs money; names the workflow never declared are refused so
     // a typo cannot silently drop an input.
     const inputs: Record<string, string> = { ...request.inputs }
     for (const name of Object.keys(inputs)) {
-      if (!(name in def.inputs)) {
+      if (!(name in manifest.inputs)) {
         throw new Error(`The workflow "${resolved.name}" takes no input named "${name}".`)
       }
     }
-    for (const [name, description] of Object.entries(def.inputs)) {
+    for (const [name, description] of Object.entries(manifest.inputs)) {
       const path = inputs[name]
       if (path === undefined) {
         throw new Error(`The workflow "${resolved.name}" needs "${name}": ${description}`)
@@ -402,23 +408,36 @@ export function createWorkflowEngine(options: EngineOptions): WorkflowEngine {
       }
     }
 
-    // Planning doubles as validation: a throw here fails the kickoff.
-    const planned = def.plan?.(inputs) ?? []
+    // The process the workflow's code runs in, for the plan and then the run.
+    // Anything that fails between here and the run starting kills it: a host
+    // with no run to serve is a leaked process.
+    const host = resolved.open()
+    let planned: readonly PlannedNode[]
+    let id: WorkflowRunId
+    let worktree: RunWorktree
+    let plannedModels: readonly string[]
+    try {
+      // Planning doubles as validation: a throw here fails the kickoff.
+      planned = manifest.plans ? await host.plan(inputs) : []
 
-    const id = mintId()
-    const worktree = await createRunWorktree({
-      workspacePath: request.workspacePath,
-      runId: id,
-      base: request.base,
-      ...(chain.branch === undefined ? {} : { branch: chain.branch })
-    })
+      id = mintId()
+      worktree = await createRunWorktree({
+        workspacePath: request.workspacePath,
+        runId: id,
+        base: request.base,
+        ...(chain.branch === undefined ? {} : { branch: chain.branch })
+      })
+
+      // The rail's forecast names what the run would spend on now; every node
+      // asks again for itself when it starts.
+      plannedModels = await Promise.all(
+        planned.map((plan) => modelFor(plan.model ?? defaultModel, { runId: id, nodeId: plan.id }))
+      )
+    } catch (cause) {
+      host.kill()
+      throw cause
+    }
     const artifactDir = store.artifactDir(id)
-
-    // The rail's forecast names what the run would spend on now; every node
-    // asks again for itself when it starts.
-    const plannedModels = await Promise.all(
-      planned.map((plan) => modelFor(plan.model ?? defaultModel, { runId: id, nodeId: plan.id }))
-    )
 
     const run: LiveRun = {
       id,
@@ -432,7 +451,7 @@ export function createWorkflowEngine(options: EngineOptions): WorkflowEngine {
       branch: worktree.branch,
       baseCommit: worktree.baseCommit,
       inputs,
-      inputDescs: { ...def.inputs },
+      inputDescs: { ...manifest.inputs },
       dir: store.runDir(id),
       nodes: planned.map(
         (plan, at): LiveNode => ({
@@ -458,6 +477,7 @@ export function createWorkflowEngine(options: EngineOptions): WorkflowEngine {
 
     const handle: Handle = {
       run,
+      host,
       desired: 'running',
       cancelRequested: false,
       pauseInterrupts: new Set(),
@@ -472,7 +492,8 @@ export function createWorkflowEngine(options: EngineOptions): WorkflowEngine {
 
     // The run continues on its own; kickoff is over. A crash in the executor
     // is recorded on the run, never thrown at nobody.
-    void execute(handle, def).catch((cause: unknown) => {
+    void execute(handle, manifest).catch((cause: unknown) => {
+      host.kill()
       run.status = 'failed'
       run.error = cause instanceof Error ? cause.message : String(cause)
       run.endedAt = nowIso()
@@ -486,8 +507,8 @@ export function createWorkflowEngine(options: EngineOptions): WorkflowEngine {
   // `replay` is what a resumed run brings: the record already holds nodes a
   // previous life completed, and those are handed back rather than run again.
   // A first run replays nothing, so nothing about it changes.
-  async function execute(handle: Handle, def: WorkflowDef, replay = false): Promise<void> {
-    const { run } = handle
+  async function execute(handle: Handle, manifest: WorkflowManifest, replay = false): Promise<void> {
+    const { run, host } = handle
     const artifacts = store.artifactDir(run.id)
     const cwd = run.worktreePath ?? run.workspacePath
 
@@ -990,7 +1011,7 @@ export function createWorkflowEngine(options: EngineOptions): WorkflowEngine {
         }
       }
 
-      const validate = (): string[] => {
+      const validate = async (): Promise<string[]> => {
         const problems: string[] = []
         for (const [name, path] of Object.entries(outputPaths)) {
           if (!existsSync(path) || statSync(path).size === 0) {
@@ -999,8 +1020,10 @@ export function createWorkflowEngine(options: EngineOptions): WorkflowEngine {
         }
         stampWritten()
         if (spec.check !== undefined) {
+          // The file's own function, run where the file lives; a host that
+          // dies under it rejects, which reads as the check throwing.
           try {
-            problems.push(...spec.check(outputPaths))
+            problems.push(...(await spec.check(outputPaths)))
           } catch (cause) {
             problems.push(
               `deterministic check threw: ${cause instanceof Error ? cause.message : String(cause)}`
@@ -1068,7 +1091,7 @@ export function createWorkflowEngine(options: EngineOptions): WorkflowEngine {
           }
 
           if (completion !== undefined) {
-            const problems = validate()
+            const problems = await validate()
             if (problems.length === 0) {
               node.verdict = completion.verdict
               node.summary = completion.summary
@@ -1286,7 +1309,7 @@ export function createWorkflowEngine(options: EngineOptions): WorkflowEngine {
           track(runNode(id, spec, resolve)).catch(reject)
         }),
       ask,
-      derive: (path, fromNodeId) => {
+      derive: async (path, fromNodeId) => {
         if (!run.nodes.some((candidate) => candidate.id === fromNodeId)) {
           throw new Error(`derive("${path}"): no node "${fromNodeId}" in this run`)
         }
@@ -1306,15 +1329,17 @@ export function createWorkflowEngine(options: EngineOptions): WorkflowEngine {
     // lie in exactly the window a chain acts on.
     let outcome: 'complete' | 'failed' | 'cancelled'
     try {
-      const outputs = await def.run(ctx)
+      const outputs = await host.run(ctx)
       outcome = 'complete'
-      if (outputs !== undefined && outputs !== null) run.outputs = outputs
+      if (outputs !== undefined) run.outputs = outputs
     } catch (cause) {
       outcome = handle.cancelRequested ? 'cancelled' : 'failed'
       if (!handle.cancelRequested) {
         run.error = cause instanceof Error ? cause.message : String(cause)
       }
     }
+    // The file has said its last, however it ended; its process goes with it.
+    host.kill()
 
     await releaseLiveNodes(handle, 'run-ended')
     rejectWaiters(handle, 'the run ended')
@@ -1327,7 +1352,7 @@ export function createWorkflowEngine(options: EngineOptions): WorkflowEngine {
     // — unless the workflow said it commits for itself. Never merged, never
     // pushed: bringing the work back is the orchestrator's judgment.
     let committed = false
-    if (def.commit !== false && run.worktreePath !== undefined) {
+    if (manifest.commit !== false && run.worktreePath !== undefined) {
       try {
         const landed = await commitRunWorktree(
           run.worktreePath,
@@ -1498,6 +1523,7 @@ export function createWorkflowEngine(options: EngineOptions): WorkflowEngine {
 
       const handle: Handle = {
         run,
+        host: resolved.open(),
         desired: 'running',
         cancelRequested: false,
         pauseInterrupts: new Set(),
@@ -1510,7 +1536,8 @@ export function createWorkflowEngine(options: EngineOptions): WorkflowEngine {
       save(run)
       log?.({ event: 'run_resumed', runId, workflow: run.workflow, branch: run.branch })
 
-      void execute(handle, resolved.def, true).catch((cause: unknown) => {
+      void execute(handle, resolved.manifest, true).catch((cause: unknown) => {
+        handle.host.kill()
         run.status = 'failed'
         run.error = cause instanceof Error ? cause.message : String(cause)
         run.endedAt = nowIso()
@@ -1531,6 +1558,10 @@ export function createWorkflowEngine(options: EngineOptions): WorkflowEngine {
     handle.cancelRequested = true
     rejectWaiters(handle, 'the run was cancelled')
     void releaseLiveNodes(handle, 'run-ended')
+    // The workflow's code is stopped where it stands, whatever it is doing:
+    // a file that catches every rejection, or one held in a synchronous
+    // call, would otherwise outlive the run it belongs to.
+    handle.host.kill()
   }
 
   return {
@@ -1624,6 +1655,7 @@ export function createWorkflowEngine(options: EngineOptions): WorkflowEngine {
         handle.desired = 'cancelled'
         rejectWaiters(handle, 'Crucible is quitting')
         void releaseLiveNodes(handle, 'quitting')
+        handle.host.kill()
       }
     }
   }
