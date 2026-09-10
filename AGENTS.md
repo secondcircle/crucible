@@ -107,9 +107,3 @@ then does it offer the "Update ready · Restart" pill in the top bar and the
 same restart on the version strip at the foot of the sidebar. Restarting is
 always the human's click, never automatic — a restart mid-turn drops that
 turn.
-
-Agents never touch the installed app or its state: don't launch it, don't
-install or reinstall it, don't read or write its userData, and never click its
-restart pill for the human. Testing happens through `npm run dev`
-(agent-driven) or `npm run dev:sdk` (for the human) in whatever checkout holds
-the code under test.
