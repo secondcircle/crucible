@@ -90,6 +90,7 @@ export function selectAdapter(
             ...(monitors === undefined ? {} : { monitors }),
             skills: sdk.skills(),
             systemPrompt: sdk.systemPrompt(),
+            log,
             ...(sdk.openExternal === undefined ? {} : { openExternal: sdk.openExternal })
           })
         : createFakeAdapter({

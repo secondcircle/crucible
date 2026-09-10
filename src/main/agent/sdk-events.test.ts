@@ -440,6 +440,50 @@ describe('failures', () => {
     })
   })
 
+  it('hands the raw failure text to the detail callback, which the sentence never carries', () => {
+    const details: string[] = []
+    const mapper = createEventMapper(undefined, createQueuedImages(), (detail) =>
+      details.push(detail)
+    )
+
+    const raw =
+      "Cannot find module '/Applications/Crucible.app/.../pi-ai/dist/api/anthropic-messages.js' " +
+      "imported from '/Applications/Crucible.app/.../anthropic-messages.lazy.js'"
+    const mapped = mapper.map(
+      sdk({ type: 'message_end', message: { role: 'assistant', stopReason: 'error', errorMessage: raw } }),
+      TARGET
+    )
+
+    // Overlong, so the port gets the fallback sentence — but the log callback
+    // still hears every character of the real reason.
+    expect(mapped).toMatchObject({ type: 'turn_error' })
+    expect(details).toEqual([raw])
+
+    mapper.map(
+      sdk({
+        type: 'message_update',
+        assistantMessageEvent: { type: 'error', reason: 'error', error: { errorMessage: 'Overloaded.' } }
+      }),
+      TARGET
+    )
+    expect(details).toEqual([raw, 'Overloaded.'])
+  })
+
+  it('tells the detail callback nothing about an abort', () => {
+    const details: string[] = []
+    const mapper = createEventMapper(undefined, createQueuedImages(), (detail) =>
+      details.push(detail)
+    )
+    mapper.map(
+      sdk({
+        type: 'message_update',
+        assistantMessageEvent: { type: 'error', reason: 'aborted', error: { errorMessage: 'Aborted' } }
+      }),
+      TARGET
+    )
+    expect(details).toEqual([])
+  })
+
   it('says nothing about an abort: cancelled is the adapter\u2019s word to say', () => {
     expect(
       map({

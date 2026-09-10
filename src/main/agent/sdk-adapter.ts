@@ -62,6 +62,7 @@ import { RUN_TOOLS, type RunTools } from '../../shared/agent/run-tools.ts'
 import { bindMonitorTools, type MonitorTools } from '../../shared/agent/monitor-tools.ts'
 import { monitorPiTools } from './monitor-pi-tools.ts'
 import { retentionInForce } from '../cache/retention.ts'
+import type { LogSink } from '../log/sink.ts'
 import { displaySafeMessage } from './adapter-error.ts'
 import {
   billsPrompt,
@@ -170,7 +171,8 @@ export function createSdkAdapter({
   monitors,
   skills,
   systemPrompt,
-  openExternal
+  openExternal,
+  log
 }: {
   // The same model the fake's scripts call and the same model the shell reads:
   // the tools registered below are its three behaviors and nothing more.
@@ -192,6 +194,10 @@ export function createSdkAdapter({
   // Opening the OS browser is main's to do, and it is injected rather than
   // imported so this module still loads under plain Node for `prove:sdk`.
   readonly openExternal?: (url: string) => void
+  // Where a failure's raw text and stack go before `displaySafeMessage`
+  // reduces them to a display-safe sentence: without this record, a structured
+  // or overlong provider error leaves no evidence anywhere.
+  readonly log?: LogSink
 }): ConversationAdapter {
   const agentDir = crucibleAgentDir(homedir())
   const listeners = new Set<AdapterEventListener>()
@@ -713,7 +719,9 @@ export function createSdkAdapter({
   ): Promise<void> {
     const bound = requireBound(sessionId)
     const { session } = bound
-    const mapper = createEventMapper(await skillsForTurn(bound), bound.queuedImages)
+    const mapper = createEventMapper(await skillsForTurn(bound), bound.queuedImages, (detail) =>
+      log?.append({ source: 'main', event: 'turn_failure_detail', sessionId, turnId, detail })
+    )
 
     let cancelled = false
     let abandoned = false
@@ -777,6 +785,14 @@ export function createSdkAdapter({
     try {
       await deliver()
     } catch (cause) {
+      log?.append({
+        source: 'main',
+        event: 'turn_failure_detail',
+        sessionId,
+        turnId,
+        detail: cause instanceof Error ? cause.message : String(cause),
+        stack: cause instanceof Error ? cause.stack : undefined
+      })
       outcome = {
         type: 'turn_error',
         sessionId,
