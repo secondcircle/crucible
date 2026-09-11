@@ -143,21 +143,31 @@ describe('what a working run hushes', () => {
   })
 })
 
+const WALK = railOrder(RAIL.workspaces, RAIL.sessions)
+
 describe('rail order', () => {
   it('is workspace by workspace, top to bottom, as the sidebar lists them', () => {
-    expect(railOrder(RAIL).map((found) => found.id)).toEqual(['s1', 's2', 's3', 's4'])
+    expect(WALK.map((found) => found.id)).toEqual(['s1', 's2', 's3', 's4'])
+  })
+
+  // The sidebar orders its workspaces by use, so the walk follows the order it
+  // is handed rather than the order the snapshot happens to hold.
+  it('follows the workspace order it is given, not the snapshot\u2019s', () => {
+    const reordered = railOrder([...RAIL.workspaces].reverse(), RAIL.sessions)
+
+    expect(reordered.map((found) => found.id)).toEqual(['s3', 's4', 's1', 's2'])
   })
 
   it('takes the topmost asking, whichever workspace it is in', () => {
-    expect(nextAsking(RAIL, new Set(['s4', 's2']))?.id).toBe('s2')
+    expect(nextAsking(WALK, new Set(['s4', 's2']))?.id).toBe('s2')
   })
 
   it('crosses into the next workspace when this one is clear', () => {
-    expect(nextAsking(RAIL, new Set(['s4']))?.id).toBe('s4')
+    expect(nextAsking(WALK, new Set(['s4']))?.id).toBe('s4')
   })
 
   it('finds nothing when nothing is asking', () => {
-    expect(nextAsking(RAIL, new Set())).toBeUndefined()
+    expect(nextAsking(WALK, new Set())).toBeUndefined()
   })
 })
 

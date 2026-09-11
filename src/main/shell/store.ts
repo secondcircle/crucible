@@ -21,6 +21,8 @@ const VERSION = 1
 export interface StoredWorkspace {
   readonly id: WorkspaceId
   readonly path: string
+  /** ISO; absent on a workspace nothing has ever been used in. */
+  readonly lastUsedAt?: string
 }
 
 export interface StoredSession {
@@ -90,6 +92,10 @@ export interface ShellStore {
   updateSession(id: SessionId, patch: Partial<Omit<StoredSession, 'id' | 'workspaceId'>>): void
   removeSession(id: SessionId): void
   activateSession(id: SessionId): void
+  // Records that something was used in this workspace, now. Monotonic: a stamp
+  // never moves backwards, so a clock that steps back cannot move a workspace
+  // up the sidebar. The only writer of `lastUsedAt`.
+  recordUse(id: WorkspaceId): void
   setLastModel(model: ModelId): void
 }
 
@@ -216,6 +222,20 @@ export function createShellStore(
       })
     },
 
+    recordUse(id: WorkspaceId): void {
+      const workspace = state.workspaces.find((candidate) => candidate.id === id)
+      if (workspace === undefined) return
+      const at = new Date().toISOString()
+      const held = workspace.lastUsedAt
+      if (held !== undefined && Date.parse(held) >= Date.parse(at)) return
+      save({
+        ...state,
+        workspaces: state.workspaces.map((candidate) =>
+          candidate.id === id ? { ...candidate, lastUsedAt: at } : candidate
+        )
+      })
+    },
+
     setLastModel(model: ModelId): void {
       save({ ...state, lastModel: model })
     }
@@ -236,7 +256,7 @@ function load(path: string): ShellStoreState {
   const file = parsed as Record<string, unknown>
   if (file.version !== VERSION) return EMPTY
 
-  const workspaces = asArray<StoredWorkspace>(file.workspaces).filter(
+  const found = asArray<StoredWorkspace>(file.workspaces).filter(
     (workspace) => typeof workspace?.id === 'string' && typeof workspace?.path === 'string'
   )
   const sessions = asArray<StoredSession>(file.sessions)
@@ -245,7 +265,7 @@ function load(path: string): ShellStoreState {
         typeof session?.id === 'string' &&
         typeof session?.workspaceId === 'string' &&
         typeof session?.createdAt === 'string' &&
-        workspaces.some((workspace) => workspace.id === session.workspaceId)
+        found.some((workspace) => workspace.id === session.workspaceId)
     )
     // Unreadable panel data, or a flavor this build cannot vouch for, loads as
     // absent: a lost tab is recoverable, a launch that will not start is not.
@@ -282,6 +302,20 @@ function load(path: string): ShellStoreState {
         ...((session as { fresh?: unknown }).fresh === true ? { fresh: true } : {})
       }
     })
+  // `lastUsedAt` is a field an older record simply lacks, so the version is not
+  // bumped over it — an unknown version discards the whole file. Seeded once
+  // from the sessions already on disk, by the same rule the field holds, so the
+  // first launch after the update does not show every workspace as never used.
+  const workspaces: StoredWorkspace[] = found.map((workspace) => {
+    const stored =
+      typeof workspace.lastUsedAt === 'string' ? workspace.lastUsedAt : undefined
+    const lastUsedAt = stored ?? seededUse(workspace.id, sessions)
+    return {
+      id: workspace.id,
+      path: workspace.path,
+      ...(lastUsedAt === undefined ? {} : { lastUsedAt })
+    }
+  })
   const activeSessionByWorkspace =
     typeof file.activeSessionByWorkspace === 'object' && file.activeSessionByWorkspace !== null
       ? (file.activeSessionByWorkspace as Record<WorkspaceId, SessionId>)
@@ -300,6 +334,24 @@ function load(path: string): ShellStoreState {
 
 function asArray<T>(value: unknown): T[] {
   return Array.isArray(value) ? (value as T[]) : []
+}
+
+// The latest activity among a workspace's stored sessions, which is the most a
+// record written before workspaces carried their own stamp can say. A workspace
+// whose sessions were created and never messaged has nothing to seed from and
+// stays never used.
+function seededUse(
+  id: WorkspaceId,
+  sessions: readonly StoredSession[]
+): string | undefined {
+  let latest: string | undefined
+  for (const session of sessions) {
+    if (session.workspaceId !== id) continue
+    const at = session.lastActivityAt
+    if (at === undefined || Number.isNaN(Date.parse(at))) continue
+    if (latest === undefined || Date.parse(at) > Date.parse(latest)) latest = at
+  }
+  return latest
 }
 
 // A patch value of `undefined` takes the field off rather than leaving a hole

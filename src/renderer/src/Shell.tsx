@@ -74,6 +74,9 @@ import { useQuota } from './quota/use-quota'
 import { runActivity } from './runs/activity'
 import { monitorActivity } from './monitors/activity'
 import { useClock } from './clock'
+import { rows, sidebarModel } from './sidebar/model'
+import { memoryFoldedStore, type FoldedStore } from './sidebar/folded-store'
+import { useFolded } from './sidebar/use-folded'
 import { parkedRuns, parkedWalk } from './schedules/board'
 import { useAuth } from './settings/use-auth'
 import {
@@ -89,6 +92,7 @@ import {
   finishedAsking,
   forgetGone,
   nextAsking,
+  railOrder,
   withMark,
   withoutMark,
   type Marks
@@ -177,6 +181,7 @@ export function Shell({
   schedules: scheduleService,
   monitors: monitorService,
   exhibitKeys,
+  folded,
   instance
 }: {
   readonly port: AgentPort
@@ -215,11 +220,17 @@ export function Shell({
   // it everything works as it does with it, minus Escape leaving a maximized
   // panel from inside the page.
   readonly exhibitKeys?: ExhibitKeysService
+  // Where the sidebar's folded workspaces survive a restart. Absent means they
+  // are not remembered at all, which is what a component test wants.
+  readonly folded?: FoldedStore
   // Which state directory this window runs against, as main worked it out at
   // creation. Absent in the installed app, which shows no badge.
   readonly instance?: string
 }): React.JSX.Element {
   const [state, dispatch] = useReducer(reduce, NOTHING_YET)
+  // One store for the life of the window, so folding a workspace does not
+  // reach for storage that changed under it mid-launch.
+  const foldedStore = useMemo(() => folded ?? memoryFoldedStore(), [folded])
   const quotaHold = useQuota(quota)
   const refreshQuota = quotaHold.refresh
   // The counter as main holds it, repainted whenever a miss lands anywhere.
@@ -665,6 +676,30 @@ export function Shell({
   // shown, counted and walked is what the snapshot still holds.
   const asking = useMemo(() => forgetGone(marks, snapshot.sessions), [marks, snapshot.sessions])
   const waitingCount = askingCount(snapshot.sessions, asking)
+  // The sidebar's order, its dots and what Collapse idle must spare, computed
+  // once per render against the idle clock. Once, because the eye and the Tab
+  // walk read the same object: two computations against two clocks could
+  // disagree the moment a workspace crosses the 24-hour line. The clock is
+  // what makes that crossing show without anybody clicking anything.
+  const listNow = useClock(false)
+  const sidebar = useMemo(
+    () =>
+      sidebarModel({
+        snapshot,
+        runs: allRuns,
+        runActivity: railRuns,
+        needsYou: asking,
+        now: listNow
+      }),
+    [snapshot, allRuns, railRuns, asking, listNow]
+  )
+  const folding = useFolded(foldedStore, snapshot.workspaces)
+  // What Tab walks: the sidebar's own order, workspace by workspace. A folded
+  // workspace's sessions are in it exactly as an open one's are.
+  const rail = useMemo(
+    () => railOrder(rows(sidebar.ordered), snapshot.sessions),
+    [sidebar.ordered, snapshot.sessions]
+  )
   // Landing on a session is the whole of what clears its mark, whether the
   // user typed anything there or not. Hovering it and scrolling past it do
   // not: a mark any glance-like signal clears is a mark nobody trusts.
@@ -1510,7 +1545,7 @@ export function Shell({
       // it is open, which is the whole of the parked walk's second half.
       if (issuesOpen || treeOpen || resumeOpen) return
       pressed.preventDefault()
-      const next = nextAsking(snapshot, asking)
+      const next = nextAsking(rail, asking)
       // Sessions first, in rail order, and every one of them before any run.
       if (next !== undefined) {
         // Cleared here rather than on arrival, so the pip is gone in the frame
@@ -1530,7 +1565,7 @@ export function Shell({
     document.addEventListener('keydown', onKeyDown)
     return () => document.removeEventListener('keydown', onKeyDown)
   }, [
-    snapshot,
+    rail,
     asking,
     activateSession,
     liveLogin,
@@ -2509,6 +2544,8 @@ export function Shell({
     >
       <Sidebar
         snapshot={snapshot}
+        model={sidebar}
+        folding={folding}
         needsYou={asking}
         runActivity={railRuns}
         waiting={railWaits}

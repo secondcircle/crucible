@@ -437,3 +437,106 @@ describe('sessions', () => {
     })
   })
 })
+
+describe('when a workspace was last used', () => {
+  it('is absent until something is used in it, adding it included', () => {
+    const store = createShellStore(file)
+    const workspace = store.addWorkspace('/repos/crucible')
+    store.addSession({ workspaceId: workspace.id, createdAt: 'now' })
+    store.activateWorkspace(workspace.id)
+
+    expect(store.workspace(workspace.id)?.lastUsedAt).toBeUndefined()
+    expect(createShellStore(file).workspace(workspace.id)?.lastUsedAt).toBeUndefined()
+  })
+
+  it('is stamped by recordUse and survives a relaunch', () => {
+    const store = createShellStore(file)
+    const workspace = store.addWorkspace('/repos/crucible')
+
+    store.recordUse(workspace.id)
+
+    const stamped = store.workspace(workspace.id)?.lastUsedAt
+    expect(stamped).toBeDefined()
+    expect(createShellStore(file).workspace(workspace.id)?.lastUsedAt).toBe(stamped)
+  })
+
+  it('never moves backwards', () => {
+    const written = join(directory, 'shell-state.json')
+    writeFileSync(
+      written,
+      JSON.stringify({
+        version: 1,
+        workspaces: [{ id: 'w', path: '/repos/crucible', lastUsedAt: '2099-01-01T00:00:00.000Z' }],
+        sessions: [],
+        activeSessionByWorkspace: {}
+      })
+    )
+    const store = createShellStore(written)
+
+    store.recordUse('w')
+
+    expect(store.workspace('w')?.lastUsedAt).toBe('2099-01-01T00:00:00.000Z')
+  })
+
+  it('leaves a workspace that is gone alone rather than minting one', () => {
+    const store = createShellStore(file)
+
+    store.recordUse('never-was')
+
+    expect(store.state.workspaces).toEqual([])
+  })
+
+  it('stands where it was after the session it came from is forgotten', () => {
+    const store = createShellStore(file)
+    const workspace = store.addWorkspace('/repos/crucible')
+    const session = store.addSession({ workspaceId: workspace.id, createdAt: 'now' })
+    store.recordUse(workspace.id)
+    const stamped = store.workspace(workspace.id)?.lastUsedAt
+
+    store.removeSession(session.id)
+
+    expect(store.workspace(workspace.id)?.lastUsedAt).toBe(stamped)
+  })
+
+  it('is seeded once from the sessions of a record that has none', () => {
+    const written = join(directory, 'shell-state.json')
+    writeFileSync(
+      written,
+      JSON.stringify({
+        version: 1,
+        workspaces: [
+          { id: 'w1', path: '/repos/crucible' },
+          { id: 'w2', path: '/repos/camping' }
+        ],
+        sessions: [
+          { id: 's1', workspaceId: 'w1', createdAt: 'then', lastActivityAt: '2026-09-01T10:00:00.000Z' },
+          { id: 's2', workspaceId: 'w1', createdAt: 'then', lastActivityAt: '2026-09-06T10:00:00.000Z' },
+          { id: 's3', workspaceId: 'w2', createdAt: 'then' }
+        ],
+        activeSessionByWorkspace: {}
+      })
+    )
+
+    const store = createShellStore(written)
+
+    expect(store.workspace('w1')?.lastUsedAt).toBe('2026-09-06T10:00:00.000Z')
+    expect(store.workspace('w2')?.lastUsedAt).toBeUndefined()
+  })
+
+  it('leaves a stamp already on the record alone', () => {
+    const written = join(directory, 'shell-state.json')
+    writeFileSync(
+      written,
+      JSON.stringify({
+        version: 1,
+        workspaces: [{ id: 'w1', path: '/repos/crucible', lastUsedAt: '2026-09-08T09:00:00.000Z' }],
+        sessions: [
+          { id: 's1', workspaceId: 'w1', createdAt: 'then', lastActivityAt: '2026-09-01T10:00:00.000Z' }
+        ],
+        activeSessionByWorkspace: {}
+      })
+    )
+
+    expect(createShellStore(written).workspace('w1')?.lastUsedAt).toBe('2026-09-08T09:00:00.000Z')
+  })
+})

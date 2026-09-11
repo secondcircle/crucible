@@ -246,7 +246,8 @@ export function createShell({
       workspaces: store.state.workspaces.map((workspace) => ({
         id: workspace.id,
         name: basename(workspace.path),
-        path: workspace.path
+        path: workspace.path,
+        ...(workspace.lastUsedAt === undefined ? {} : { lastUsedAt: workspace.lastUsedAt })
       })),
       activeWorkspaceId: store.state.activeWorkspaceId,
       sessions,
@@ -319,9 +320,16 @@ export function createShell({
     })
   }
 
+  // The one place session activity is recorded, and so the one place a
+  // workspace is recorded as used: a message sent, a turn ending, a
+  // conversation resumed. Creating a session, activating one and adding a
+  // workspace do not come through here, which is what keeps looking from ever
+  // counting as use.
   function touch(id: SessionId): void {
-    if (store.session(id) === undefined) return
+    const session = store.session(id)
+    if (session === undefined) return
     store.updateSession(id, { lastActivityAt: new Date().toISOString() })
+    store.recordUse(session.workspaceId)
   }
 
   // A live pass is reading a conversation about to be replaced, so whatever it
