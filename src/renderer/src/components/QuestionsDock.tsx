@@ -1,5 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
-import type { QuestionId, QuestionLine, QuestionReply } from '../../../shared/agent/port'
+import type {
+  QuestionId,
+  QuestionLine,
+  QuestionReply,
+  SessionId
+} from '../../../shared/agent/port'
 import { keyLabel } from '../keys'
 import { briefAge } from '../labels'
 import './questions-dock.css'
@@ -18,11 +23,16 @@ function heldSaid(held: number): string {
 }
 
 export function QuestionsDock({
+  sessionId,
   line,
   now,
   boxRef,
   onReply
 }: {
+  // Whose line is on show. The dock stays mounted across a session switch, so
+  // this is the only way it can tell one session's next question from
+  // another session's first.
+  readonly sessionId: SessionId
   /** Never empty: an absent line renders no dock at all. */
   readonly line: QuestionLine
   readonly now: number
@@ -35,7 +45,10 @@ export function QuestionsDock({
   // ahead of this one both leave the words where they were typed.
   const [drafts, setDrafts] = useState<Readonly<Record<QuestionId, string>>>({})
   const [emptyFor, setEmptyFor] = useState<QuestionId | undefined>(undefined)
-  const showing = useRef<QuestionId | undefined>(undefined)
+  // Which session's which question the dock last showed. The session belongs
+  // in here because a switch changes the question too, and arriving at a
+  // session is not the same event as answering one.
+  const showing = useRef<{ sessionId: SessionId; questionId: QuestionId } | undefined>(undefined)
 
   const question = line.open[0]
   const next = line.open[1]
@@ -44,13 +57,16 @@ export function QuestionsDock({
 
   // The next question arrives with its box focused. Only the next one: the
   // first must not take the caret out of the composer mid-sentence, and ⌘⇧A
-  // is how the user asks for it.
+  // is how the user asks for it. A session switch is a first question too,
+  // even though the dock never unmounted — the user landed on a session, they
+  // did not answer anything.
   useEffect(() => {
     const before = showing.current
-    showing.current = question.id
-    if (before === undefined || before === question.id) return
+    showing.current = { sessionId, questionId: question.id }
+    if (before === undefined || before.sessionId !== sessionId) return
+    if (before.questionId === question.id) return
     boxRef.current?.focus()
-  }, [question.id, boxRef])
+  }, [sessionId, question.id, boxRef])
 
   function reply(questionId: QuestionId, said: QuestionReply): void {
     setDrafts((held) => {

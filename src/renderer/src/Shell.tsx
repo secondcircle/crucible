@@ -2768,8 +2768,9 @@ export function Shell({
 
           {/* Pinned here, between the transcript and the composer, so a
               question can never scroll out of sight. */}
-          {line === undefined ? null : (
+          {line === undefined || session === undefined ? null : (
             <QuestionsDock
+              sessionId={session.id}
               line={line}
               now={questionNow}
               boxRef={answerBox}

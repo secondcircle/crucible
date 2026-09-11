@@ -152,7 +152,7 @@
   color: var(--faint);
 }
 
-.qcard .qanswer .btns {
+.qcard .qanswer .qbtns {
   display: flex;
   flex-direction: column;
   gap: 6px;
