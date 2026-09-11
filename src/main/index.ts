@@ -44,6 +44,7 @@ import { selectQuotaService } from './quota/select-service'
 import { panelFixtures } from './panel/fixtures'
 import { createPanelModel } from './panel/model'
 import { storePanelPersistence } from './panel/store-persistence'
+import { createQuestionsModel } from './questions/model'
 import { seedWorkspacePath } from './shell/seed-workspace'
 import { createShell } from './shell/shell'
 import { createShellStore } from './shell/store'
@@ -151,6 +152,11 @@ const cannedWorkspacePath = ((): string | undefined => {
 // One context panel for the launch, persisting inside the same store: the
 // adapter's three tools and the shell's snapshots read the same tabs.
 const panel = createPanelModel({ persistence: storePanelPersistence(store) })
+
+// One line of questions per session, for the launch and no longer: a question
+// nobody answered before the quit is re-asked by the agent when it is next
+// prompted, so there is nothing here to persist.
+const questions = createQuestionsModel()
 
 // The cache ledger, before anything that could observe a miss: one file per
 // installation, directly under Crucible's own state directory, flavor-scoped
@@ -292,7 +298,8 @@ const { adapter, flavor } = selectAdapter(
   },
   app.isPackaged,
   workflowRuns.tools,
-  monitors.tools
+  monitors.tools,
+  questions
 )
 
 // One flavor decision governs every seam, so a fake-flavor launch reads no
@@ -373,6 +380,7 @@ const shell = withLogging(
     adapter,
     flavor,
     panel,
+    questions,
     pickFolder,
     seedWorkspacePath: seededWorkspace,
     // Fresh run status at the start of every user turn, whatever interruption

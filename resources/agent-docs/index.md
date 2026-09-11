@@ -22,3 +22,6 @@ matches what you were asked about.
   gets one.
 - `align-flow.md` — read this when the user asks how alignment works, what
   an align issue is, or how aligned work becomes a workflow run.
+- `research.md` — read this when the user asks about web research or
+  firecrawl: whether sessions or workflow nodes can reach the internet, how
+  the tool is connected, and what a workflow has to do to use it.

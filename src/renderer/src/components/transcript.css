@@ -214,6 +214,13 @@
   border-left-color: var(--faint);
 }
 
+/* A question is amber, the same amber the dock answers it in. Only a settled
+   one: running, stopped and failed each have something of their own to say.
+*/
+.tool.ask.ok .toolhead {
+  border-left-color: var(--warn);
+}
+
 .toolname {
   color: var(--ink);
   flex: none;

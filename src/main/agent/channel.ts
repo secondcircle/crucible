@@ -6,6 +6,7 @@ import type {
   ImageAttachment,
   PortEvent,
   PromptOptions,
+  QuestionReply,
   QueuedKind,
   SessionWorktree
 } from '../../shared/agent/port'
@@ -171,6 +172,22 @@ async function invoke(shell: Shell, request: unknown): Promise<unknown> {
     return expiryAcknowledged === true ? { expiryAcknowledged: true } : undefined
   }
 
+  // One of the three words the user can say about a question, and nothing
+  // else: an answer with no text is not an answer, so it never arrives here.
+  function questionReply(position: number): QuestionReply {
+    const value = given[position]
+    const { kind, text: said } = (typeof value === 'object' && value !== null ? value : {}) as {
+      kind?: unknown
+      text?: unknown
+    }
+    if (kind === 'dismissed') return { kind: 'dismissed' }
+    if (kind === 'recommendation') return { kind: 'recommendation' }
+    if (kind === 'answered' && typeof said === 'string' && said.trim() !== '') {
+      return { kind: 'answered', text: said }
+    }
+    throw new Error(`${op} needs an answer, a taken recommendation or a dismissal.`)
+  }
+
   /** The one option a jump takes, and it is not optional. */
   function summarize(position: number): boolean {
     const value = given[position]
@@ -253,6 +270,8 @@ async function invoke(shell: Shell, request: unknown): Promise<unknown> {
     }
     case 'dequeue':
       return shell.dequeue(text(0), kind(1), text(2))
+    case 'replyToQuestion':
+      return shell.replyToQuestion(text(0), text(1), questionReply(2))
     case 'activateTab':
       return shell.activateTab(text(0), text(1))
     case 'closeTab':

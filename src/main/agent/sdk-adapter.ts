@@ -60,8 +60,11 @@ import { TITLE_MODEL } from '../../shared/agent/known-models.ts'
 import { PANEL_TOOLS, type PanelTools } from '../../shared/agent/panel-tools.ts'
 import { RUN_TOOLS, type RunTools } from '../../shared/agent/run-tools.ts'
 import { bindMonitorTools, type MonitorTools } from '../../shared/agent/monitor-tools.ts'
+import { bindAskTool, type AskTools } from '../../shared/agent/ask-tool.ts'
 import { monitorPiTools } from './monitor-pi-tools.ts'
+import { askPiTool } from './ask-pi-tool.ts'
 import { retentionInForce } from '../cache/retention.ts'
+import type { LogSink } from '../log/sink.ts'
 import { displaySafeMessage } from './adapter-error.ts'
 import {
   billsPrompt,
@@ -168,9 +171,11 @@ export function createSdkAdapter({
   panel,
   runs,
   monitors,
+  ask,
   skills,
   systemPrompt,
-  openExternal
+  openExternal,
+  log
 }: {
   // The same model the fake's scripts call and the same model the shell reads:
   // the tools registered below are its three behaviors and nothing more.
@@ -183,6 +188,10 @@ export function createSdkAdapter({
   // its working directory. Absent — as in `prove:sdk` — means no monitor
   // tools are mounted.
   readonly monitors?: MonitorTools
+  // The ask behavior, bound to this session: its questions reach that
+  // session's dock and no other. Absent — as in `prove:sdk` — means the
+  // agent cannot ask at all.
+  readonly ask?: AskTools
   // Crucible's three skill origins, resolved through π's own loader. Absent —
   // as in `prove:sdk` — means no folder is read and no skill is offered.
   readonly skills?: SkillService
@@ -192,6 +201,10 @@ export function createSdkAdapter({
   // Opening the OS browser is main's to do, and it is injected rather than
   // imported so this module still loads under plain Node for `prove:sdk`.
   readonly openExternal?: (url: string) => void
+  // Where a failure's raw text and stack go before `displaySafeMessage`
+  // reduces them to a display-safe sentence: without this record, a structured
+  // or overlong provider error leaves no evidence anywhere.
+  readonly log?: LogSink
 }): ConversationAdapter {
   const agentDir = crucibleAgentDir(homedir())
   const listeners = new Set<AdapterEventListener>()
@@ -490,6 +503,13 @@ export function createSdkAdapter({
     )
   }
 
+  // The ask behavior as one tool, bound to the session whose dock its
+  // questions belong in.
+  function askCustomTools(sessionId: SessionId): ToolDefinition[] {
+    if (ask === undefined) return []
+    return [askPiTool(bindAskTool(ask, sessionId))]
+  }
+
   async function open(
     sessionId: SessionId,
     workspacePath: string,
@@ -509,7 +529,8 @@ export function createSdkAdapter({
       customTools: [
         ...panelCustomTools(sessionId, workspacePath),
         ...runCustomTools(sessionId, workspacePath),
-        ...monitorCustomTools(sessionId, workspacePath)
+        ...monitorCustomTools(sessionId, workspacePath),
+        ...askCustomTools(sessionId)
       ]
     }
 
@@ -713,7 +734,9 @@ export function createSdkAdapter({
   ): Promise<void> {
     const bound = requireBound(sessionId)
     const { session } = bound
-    const mapper = createEventMapper(await skillsForTurn(bound), bound.queuedImages)
+    const mapper = createEventMapper(await skillsForTurn(bound), bound.queuedImages, (detail) =>
+      log?.append({ source: 'main', event: 'turn_failure_detail', sessionId, turnId, detail })
+    )
 
     let cancelled = false
     let abandoned = false
@@ -777,6 +800,14 @@ export function createSdkAdapter({
     try {
       await deliver()
     } catch (cause) {
+      log?.append({
+        source: 'main',
+        event: 'turn_failure_detail',
+        sessionId,
+        turnId,
+        detail: cause instanceof Error ? cause.message : String(cause),
+        stack: cause instanceof Error ? cause.stack : undefined
+      })
       outcome = {
         type: 'turn_error',
         sessionId,

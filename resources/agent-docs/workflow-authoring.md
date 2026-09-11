@@ -211,9 +211,16 @@ repository — node outputs land there, never in the worktree.
   - `tools` — built-in tool names; defaults to
     read/bash/edit/write/grep/find/ls.
   - `skills` — skill names this node may use. Omitted means every skill the
-    run's worktree offers, which is the default and usually right; an empty
-    list means none at all, for a node that wants a lean context. A name
-    matching no skill is ignored.
+    run's worktree offers — workspace, user and built-in, so the shipped
+    `firecrawl` skill included — which is the default and usually right; an
+    empty list means none at all, for a node that wants a lean context. A
+    name matching no skill is ignored.
+
+A node's `bash` runs on this machine, in the worktree, with the app's PATH.
+Whatever is installed here — `git`, `gh`, `firecrawl` — a node can run, and
+no spec declares it. A tool that has to be connected (firecrawl is, under
+Settings → Research) is connected once per machine, and that reaches runs
+too; `research.md` beside this file has the details.
   - `check(outputs)` — deterministic lint over the output paths; returned
     problems go back into the same agent session as a rejection. Runs in
     your host, and may return a promise.

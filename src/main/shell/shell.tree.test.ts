@@ -11,14 +11,19 @@ import { createFakeAdapter } from '../../shared/agent/fake-adapter'
 import type { PortEvent, SessionId } from '../../shared/agent/port'
 import { createPanelModel, type PanelModel } from '../panel/model'
 import { storePanelPersistence } from '../panel/store-persistence'
+import { createQuestionsModel, type QuestionsModel } from '../questions/model'
 import { createShell, type Shell } from './shell'
 import { createShellStore, type ShellStore } from './store'
 
 // The shell's panel is the app's: one model over the same store file, so what
 // a panel test asserts here is what a launch does.
-function over(path: string): { store: ShellStore; panel: PanelModel } {
+function over(path: string): { store: ShellStore; panel: PanelModel; questions: QuestionsModel } {
   const store = createShellStore(path)
-  return { store, panel: createPanelModel({ persistence: storePanelPersistence(store) }) }
+  return {
+    store,
+    panel: createPanelModel({ persistence: storePanelPersistence(store) }),
+    questions: createQuestionsModel()
+  }
 }
 
 const WORKSPACE = '/repos/crucible'

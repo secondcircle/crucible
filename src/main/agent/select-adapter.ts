@@ -1,5 +1,6 @@
 import type { ConversationAdapter } from '../../shared/agent/adapter'
 import { createFakeAdapter, type FakePanel } from '../../shared/agent/fake-adapter'
+import type { AskTools } from '../../shared/agent/ask-tool'
 import type { MonitorTools } from '../../shared/agent/monitor-tools'
 import type { RunTools } from '../../shared/agent/run-tools'
 import type { LogSink } from '../log/sink'
@@ -74,7 +75,10 @@ export function selectAdapter(
   runs?: RunTools,
   // The monitor tools ride beside them, for the same reason: one model behind
   // both flavors, and only the process behind a check differs.
-  monitors?: MonitorTools
+  monitors?: MonitorTools,
+  // And the ask tool beside those: the fake raises questions from a prompt so
+  // the dock is drivable with no model at all.
+  ask?: AskTools
 ): SelectedAdapter {
   const { flavor, requested, reason } = decideFlavor(process.env.CRUCIBLE_AGENT, packaged)
 
@@ -88,14 +92,17 @@ export function selectAdapter(
             panel: panel.tools,
             ...(runs === undefined ? {} : { runs }),
             ...(monitors === undefined ? {} : { monitors }),
+            ...(ask === undefined ? {} : { ask }),
             skills: sdk.skills(),
             systemPrompt: sdk.systemPrompt(),
+            log,
             ...(sdk.openExternal === undefined ? {} : { openExternal: sdk.openExternal })
           })
         : createFakeAdapter({
             panel,
             ...(runs === undefined ? {} : { runs }),
-            ...(monitors === undefined ? {} : { monitors })
+            ...(monitors === undefined ? {} : { monitors }),
+            ...(ask === undefined ? {} : { ask })
           })
   }
 }

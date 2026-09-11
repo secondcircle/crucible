@@ -14,9 +14,6 @@ export type Marks = ReadonlySet<SessionId>
 /**
  * Whether a turn that just finished leaves its session asking.
  *
- * Looking is per window, not per session: a turn that ends while Crucible is
- * behind another app was not watched, whichever session was on screen.
- *
  * The verdict is taken once and never revisited, because a run that stops later
  * speaks to its orchestrator and that turn's own ending marks.
  */
@@ -29,12 +26,34 @@ export function finishedAsking(
     readonly runs: readonly RunRecord[]
   }
 ): boolean {
-  const unwatched = !world.windowFocused || finished.sessionId !== world.activeSessionId
-  if (!unwatched) return false
+  if (watched(finished.sessionId, world)) return false
   // An error is the session's own news and no run will ever deliver it, so a
   // working run does not hush one.
   if (finished.outcome === 'errored') return true
   return !world.runs.some((run) => run.sessionId === finished.sessionId && runIsWorking(run))
+}
+
+/**
+ * Whether a question just asked leaves its session asking.
+ *
+ * An open question needs the user whatever the agent goes on doing, so
+ * nothing hushes it but their already being there: no run speaks for a
+ * question, and the agent that asked is not waiting on itself.
+ */
+export function questionAsking(
+  sessionId: SessionId,
+  world: { readonly activeSessionId?: SessionId; readonly windowFocused: boolean }
+): boolean {
+  return !watched(sessionId, world)
+}
+
+// Looking is per window, not per session: what happens while Crucible is
+// behind another app was not watched, whichever session was on screen.
+function watched(
+  sessionId: SessionId,
+  world: { readonly activeSessionId?: SessionId; readonly windowFocused: boolean }
+): boolean {
+  return world.windowFocused && sessionId === world.activeSessionId
 }
 
 // The sidebar's own order: workspaces top to bottom, and within each the

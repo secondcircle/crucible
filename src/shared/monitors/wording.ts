@@ -10,7 +10,9 @@ import {
   type MonitorTiming,
   type WakeFacts,
   type WakeReason
-} from './monitor'
+  // Spelled with its extension so plain Node can load this module for
+  // `prove:sdk`: its ESM resolver does no extension guessing.
+} from './monitor.ts'
 
 export const WAKE_MESSAGE_PREFIX = '⏳ Crucible monitor'
 

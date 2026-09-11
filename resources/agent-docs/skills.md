@@ -101,8 +101,11 @@ The agents inside a workflow run get skills too. A node's project-local origin
 is the run's own worktree, so a skill the run's branch adds is visible to the
 nodes that follow it.
 
-By default a node is offered every skill the worktree resolves. A node spec
-may narrow that:
+By default a node is offered every skill the worktree resolves, through the
+same three origins a session uses: the worktree's `.crucible/skills/`, the
+user's, and the built-ins shipped with Crucible. So a shipped skill such as
+`firecrawl` is in front of every node unless the spec says otherwise. A node
+spec may narrow that:
 
 ```ts
 await ctx.node('review', {

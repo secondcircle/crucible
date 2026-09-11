@@ -13,7 +13,9 @@ import type {
 import type { PanelToolName, PanelTools } from './panel-tools'
 import { isRunMessage } from '../workflows/run'
 import { bindMonitorTools, type MonitorTools } from './monitor-tools'
+import { ASK_TOOL, bindAskTool, type AskRequest, type AskTools } from './ask-tool'
 import { isWakeMessage, monitorCallSummary } from '../monitors/wording'
+import { isAnswerBatch } from '../questions/wording'
 import type { RunTools } from './run-tools'
 import type {
   AuthMethod,
@@ -328,6 +330,56 @@ const MONITOR_STOPPED_DELTAS: readonly string[] = [
   'Stopped watching that; no wake is coming for it. (Scripted: no cost.)'
 ]
 
+const QUESTIONS_ASKED_DELTAS: readonly string[] = [
+  'Those are in your questions dock. I am carrying on with the parts that do not depend on ',
+  'them, and I will pick the rest up when every one of them is answered or dismissed. ',
+  '(Scripted: nothing was sent anywhere.)'
+]
+
+const QUESTIONS_ANSWERED_DELTAS: readonly string[] = [
+  'Thanks — that settles it. Carrying on with your answers in hand. ',
+  '(Scripted: nothing was sent anywhere.)'
+]
+
+// The questions the fake asks, in the order it asks them: the dock's counter,
+// its “up next” line and the held-answer header are all reachable by typing
+// “ask me 3” at it, with no model and no cost.
+const CANNED_QUESTIONS: readonly AskRequest[] = [
+  {
+    question:
+      'OpenAI’s meter has no reset instant. Show a countdown from the billing period, or no ' +
+      'countdown at all?',
+    context:
+      'Every quota meter today shows “resets in 3h 12m”. OpenAI only reports the billing ' +
+      'period’s start and end, which is the calendar month rather than a rolling window. The ' +
+      'spend meter already shows no countdown for exactly this reason, so there is precedent ' +
+      'for a meter without one.',
+    recommendation:
+      'No countdown, same as the spend meter. A month-end countdown adds a number nobody acts on.'
+  },
+  {
+    question: 'Where should the OpenAI API key come from?',
+    context:
+      'OpenAI has no OAuth sign-in like Anthropic’s; the usage endpoint needs an admin API ' +
+      'key. Crucible has nowhere today to store a provider secret.',
+    recommendation: 'Read OPENAI_ADMIN_KEY from the environment for now.'
+  },
+  {
+    question: 'Should the merge gate block on a missing changelog entry?',
+    context:
+      'The build workflow’s gate checks coverage, scope and comments. The repo’s CONTRIBUTING ' +
+      'asks for a changelog line per change, but nothing enforces it today.',
+    recommendation: 'Block. A gate that reports but never blocks teaches nobody.'
+  },
+  {
+    question: 'Keep the --legacy flag or drop it in this release?',
+    context:
+      'The flag has one caller left in the repo and no documentation. Dropping it is a ' +
+      'breaking change for anyone scripting the CLI; keeping it means carrying the branch.',
+    recommendation: 'Drop it, and say so in the release notes.'
+  }
+]
+
 const REPLY_DELTAS: readonly string[] = [
   'The fake adapter answers every prompt with this same scripted turn.',
   ' Nothing was sent anywhere and nothing was paid for it.\n\n',
@@ -556,7 +608,8 @@ export function createFakeAdapter({
   pauseMs = DEFAULT_PAUSE_MS,
   panel,
   runs,
-  monitors
+  monitors,
+  ask
 }: {
   /** Zero runs the script on microtasks. */
   readonly pauseMs?: number
@@ -568,6 +621,9 @@ export function createFakeAdapter({
   // instead of by a model, so every chip, detail and wake is reachable with
   // no paid call.
   readonly monitors?: MonitorTools
+  // And the ask behavior beside them, so the questions dock is drivable
+  // without a model: “ask me 2” puts two questions in it.
+  readonly ask?: AskTools
 } = {}): ConversationAdapter {
   const listeners = new Set<AdapterEventListener>()
   const conversations = new Map<string, Conversation>()
@@ -889,13 +945,39 @@ export function createFakeAdapter({
     }
   }
 
-  /** Whichever scripted turn claims the prompt: monitors first, then runs. */
+  // The scripted asker. “ask me” puts one question in the dock, “ask me 3”
+  // three, and the answer batch — recognized by its own wording, as a run's
+  // messages and a wake are — is answered rather than asked about again.
+  function askScript(sessionId: SessionId, text: string): ScriptedToolTurn | undefined {
+    if (ask === undefined) return undefined
+    if (isAnswerBatch(text)) return { calls: [], closing: QUESTIONS_ANSWERED_DELTAS }
+
+    const asked = /^\s*ask me\b\s*(\d+)?/i.exec(text)
+    if (asked === null) return undefined
+    const wanted = asked[1] === undefined ? 1 : Number(asked[1])
+    const count = Math.min(Math.max(1, wanted), CANNED_QUESTIONS.length)
+    const bind = bindAskTool(ask, sessionId)
+    return {
+      calls: CANNED_QUESTIONS.slice(0, count).map((request) => ({
+        name: ASK_TOOL,
+        summary: request.question,
+        answer: () => bind.ask(request)
+      })),
+      closing: QUESTIONS_ASKED_DELTAS
+    }
+  }
+
+  /** Whichever scripted turn claims the prompt: questions, monitors, runs. */
   function toolScript(
     bound: Bound,
     sessionId: SessionId,
     text: string
   ): ScriptedToolTurn | undefined {
-    return monitorScript(bound, sessionId, text) ?? runScript(bound, sessionId, text)
+    return (
+      askScript(sessionId, text) ??
+      monitorScript(bound, sessionId, text) ??
+      runScript(bound, sessionId, text)
+    )
   }
 
   // Checked in this order so that `close the panel` is never taken for the

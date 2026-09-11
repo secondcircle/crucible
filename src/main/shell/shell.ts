@@ -18,6 +18,8 @@ import type {
   PortEventListener,
   PromptOptions,
   ProviderState,
+  QuestionId,
+  QuestionReply,
   QueuedEntry,
   QueuedKind,
   QueueState,
@@ -41,18 +43,23 @@ import type { Flavor } from '../agent/select-adapter'
 import type { CacheRecorder } from '../cache/ledger'
 import { retentionInForce } from '../cache/retention'
 import type { PanelModel } from '../panel/model'
+import type { QuestionsModel } from '../questions/model'
 import type { ShellStore, StoredSession } from './store'
 
 // Turn guards and ordering live here rather than in the UI or an adapter, so
 // they hold whoever is behind the port.
 export interface Shell extends AgentPort {
   // A message from Crucible to a session's agent — a run's report, a
-  // monitor's wake — on one road rather than one road each: queued as a
-  // follow-up while the session works, delivered when it fully stops, the next
-  // prompt when it is idle. Never lost: a stop that hands the queue back
-  // re-queues it rather than restoring it to the composer, and the queued
-  // strip cannot dequeue it. Refuses an unknown session.
-  deliver(sessionId: SessionId, message: SystemMessage): Promise<void>
+  // monitor's wake — on one road rather than one road each: queued while the
+  // session works, delivered at that kind's own boundary, the next prompt
+  // when it is idle. Never lost: a stop that hands the queue back re-queues
+  // it rather than restoring it to the composer, and the queued strip cannot
+  // dequeue it. Refuses an unknown session.
+  //
+  // A follow-up unless the caller says otherwise, which is the road news
+  // takes; an answer batch steers, because the agent asked for it and is
+  // still working on what it asked about.
+  deliver(sessionId: SessionId, message: SystemMessage, kind?: QueuedKind): Promise<void>
   // Drops live turns but keeps bindings, so the document that comes back after
   // a reload can prompt immediately.
   dispose(): void
@@ -66,6 +73,10 @@ export interface ShellOptions {
   // The same model the adapter's panel tools call, so panel state crosses the
   // port from here and from nowhere else.
   readonly panel: PanelModel
+  // The same model the adapter's ask tool calls, on the same terms: the line
+  // crosses the port from here, and the answer batch it hands back takes the
+  // road below.
+  readonly questions: QuestionsModel
   /** `null` means the user cancelled the picker. */
   readonly pickFolder: () => Promise<string | null>
   // Lets an agent-driven check reach a chattable state without an OS dialog.
@@ -147,6 +158,7 @@ export function createShell({
   adapter,
   flavor,
   panel,
+  questions,
   pickFolder,
   seedWorkspacePath,
   turnContext,
@@ -209,6 +221,7 @@ export function createShell({
       // Folded exactly as the queue is, and absent when the session has no
       // tabs, which is what makes the region vanish rather than stand empty.
       const tabs = panel.state(session.id)
+      const line = questions.line(session.id)
       return {
         id: session.id,
         workspaceId: session.workspaceId,
@@ -238,7 +251,8 @@ export function createShell({
         // fact about the conversation, not about its token count.
         ...(reported?.cachedPrefix === undefined ? {} : { cachedPrefix: reported.cachedPrefix }),
         ...(queued(queue) ? { queue } : {}),
-        ...(tabs === undefined ? {} : { panel: tabs })
+        ...(tabs === undefined ? {} : { panel: tabs }),
+        ...(line === undefined ? {} : { questions: line })
       }
     })
 
@@ -806,7 +820,9 @@ export function createShell({
     const again = (): void => {
       if (disposed || removing.has(sessionId) || store.session(sessionId) === undefined) return
       for (const message of messages) {
-        void deliverSystem(sessionId, message).catch(() => {
+        // Handed back as a follow-up whatever queue it came from: what it was
+        // steering is over, and the next turn is where it belongs now.
+        void deliverSystem(sessionId, message, 'followUp').catch(() => {
           // The session went away under it, which is the one case where a
           // message of Crucible's own has nobody left to reach.
         })
@@ -816,15 +832,12 @@ export function createShell({
     else void turn.over.then(again)
   }
 
-  async function deliverSystem(sessionId: SessionId, message: SystemMessage): Promise<void> {
-    await queueMessage(
-      sessionId,
-      'followUp',
-      message.text,
-      undefined,
-      'system',
-      message.card
-    )
+  async function deliverSystem(
+    sessionId: SessionId,
+    message: SystemMessage,
+    kind: QueuedKind
+  ): Promise<void> {
+    await queueMessage(sessionId, kind, message.text, undefined, 'system', message.card)
   }
 
   // A turn is live from the moment its prompt is accepted, seconds before its
@@ -974,6 +987,14 @@ export function createShell({
     if (shownTabId !== undefined) emit({ type: 'panel_shown', sessionId, tabId: shownTabId })
   })
 
+  // The line, on the same terms: the snapshot carrying the question goes out
+  // before the announcement that names it.
+  questions.onChange(({ sessionId, askedId }) => {
+    if (store.session(sessionId) === undefined) return
+    emitState()
+    if (askedId !== undefined) emit({ type: 'question_asked', sessionId, questionId: askedId })
+  })
+
   // Seeded exactly as a picked folder would be, so it also becomes active.
   if (seedWorkspacePath !== undefined) store.addWorkspace(seedWorkspacePath)
 
@@ -1023,6 +1044,9 @@ export function createShell({
         // The panel record leaves with the session record below; this is the
         // memory of it.
         panel.forget(session.id)
+        // Its open questions go with the agent that asked them: no batch is
+        // ever composed from a line whose session is gone.
+        questions.forget(session.id)
         onSessionEnded?.(session.id)
       }
       store.removeWorkspace(id)
@@ -1100,6 +1124,7 @@ export function createShell({
       // Removing a session forgets its tabs with it: the persisted copy went
       // out with the session record.
       panel.forget(id)
+      questions.forget(id)
       onSessionEnded?.(id)
       emitState()
     },
@@ -1139,6 +1164,9 @@ export function createShell({
         // A fresh conversation never inherits a ghost panel, so the tabs and
         // the turn counter go with the old one.
         panel.reset(id)
+        // Nor a question the replaced conversation asked: the agent that
+        // would have read the answer is gone.
+        questions.forget(id)
         emitState()
       })
     },
@@ -1431,8 +1459,12 @@ export function createShell({
       await queueMessage(sessionId, 'followUp', text, images)
     },
 
-    async deliver(sessionId: SessionId, message: SystemMessage): Promise<void> {
-      await deliverSystem(sessionId, message)
+    async deliver(
+      sessionId: SessionId,
+      message: SystemMessage,
+      kind: QueuedKind = 'followUp'
+    ): Promise<void> {
+      await deliverSystem(sessionId, message, kind)
     },
 
     async dequeue(
@@ -1449,6 +1481,20 @@ export function createShell({
       if (bindings.get(sessionId) === undefined) return undefined
       await ensureBound(sessionId)
       return adapter.dequeue(sessionId, kind, text)
+    },
+
+    // Nothing crosses to the agent until the line is empty, and then the whole
+    // line does, in one message: a steering message while it works, the next
+    // prompt when it has stopped.
+    async replyToQuestion(
+      sessionId: SessionId,
+      questionId: QuestionId,
+      reply: QuestionReply
+    ): Promise<void> {
+      if (store.session(sessionId) === undefined) return
+      const batch = questions.reply(sessionId, questionId, reply)
+      if (batch === undefined) return
+      await deliverSystem(sessionId, batch, 'steering')
     },
 
     // Nothing is pushed at the agent: it learns of the user's own panel actions

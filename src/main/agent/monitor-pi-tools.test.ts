@@ -5,7 +5,8 @@ import {
   type BoundMonitorTools,
   type MonitorRequest
 } from '../../shared/agent/monitor-tools'
-import { monitorPiTools, parametersSchema } from './monitor-pi-tools'
+import { monitorPiTools } from './monitor-pi-tools'
+import { parametersSchema } from './pi-tools'
 
 function boundSpy(): BoundMonitorTools & { readonly calls: unknown[][] } {
   const calls: unknown[][] = []

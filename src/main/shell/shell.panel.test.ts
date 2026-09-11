@@ -10,6 +10,7 @@ import { createFakeAdapter } from '../../shared/agent/fake-adapter'
 import type { PortEvent, SessionId, ShellSnapshot } from '../../shared/agent/port'
 import { createPanelModel, type PanelModel } from '../panel/model'
 import { storePanelPersistence } from '../panel/store-persistence'
+import { createQuestionsModel } from '../questions/model'
 import { createShell, type Shell } from './shell'
 import { createShellStore } from './store'
 
@@ -28,6 +29,7 @@ function build(pauseMs = 0): void {
   shell = createShell({
     store,
     panel,
+    questions: createQuestionsModel(),
     adapter: createFakeAdapter({ pauseMs }),
     flavor: 'fake',
     pickFolder: async () => workspace

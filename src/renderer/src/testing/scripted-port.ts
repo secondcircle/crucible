@@ -15,6 +15,10 @@ import type {
   PortEventListener,
   PromptOptions,
   ProviderState,
+  Question,
+  QuestionId,
+  QuestionLine,
+  QuestionReply,
   QueuedEntry,
   QueuedKind,
   QueuedMessage,
@@ -25,6 +29,7 @@ import type {
   SessionUsage,
   SessionWorktree,
   ShellSnapshot,
+  SystemCard,
   TabId,
   ThinkingLevel,
   TranscriptItem,
@@ -32,6 +37,7 @@ import type {
   TurnId,
   WorkspaceId
 } from '../../../shared/agent/port'
+import { composeAnswerBatch, type AnsweredQuestion } from '../../../shared/questions/wording'
 
 // Answers operations the way main does but streams nothing by itself, so a
 // component test is about rendering rather than about timing.
@@ -101,6 +107,11 @@ export interface ScriptedPort extends AgentPort {
   // `state` event goes out, and `panel_shown` follows it.
   showTab(sessionId: SessionId, tab: PanelTab): void
   panelOf(sessionId: SessionId): PanelState | undefined
+
+  // A question the way main announces one: the line lands in the snapshot,
+  // the `state` event goes out, and `question_asked` follows it.
+  askQuestion(sessionId: SessionId, question: Question): void
+  questionsOf(sessionId: SessionId): QuestionLine | undefined
 
   /** What `listProviders` answers with; a test may change it between calls. */
   providers: readonly ProviderState[]
@@ -227,6 +238,16 @@ export function createScriptedPort(initial: Partial<ShellSnapshot> = {}): Script
     })
   }
 
+  // Absent rather than empty, exactly as main folds it: an empty line is no
+  // line at all, which is what makes the dock vanish.
+  function setLine(sessionId: SessionId, line: QuestionLine): void {
+    changeSession(sessionId, (session) => {
+      const rest: SessionState = { ...session }
+      delete (rest as { questions?: QuestionLine }).questions
+      return line.open.length === 0 ? rest : { ...rest, questions: line }
+    })
+  }
+
   function setQueue(sessionId: SessionId, state: QueueState): void {
     // Absent rather than empty, exactly as main reports it.
     const empty = state.steering.length + state.followUp.length === 0
@@ -241,7 +262,10 @@ export function createScriptedPort(initial: Partial<ShellSnapshot> = {}): Script
     sessionId: SessionId,
     kind: QueuedKind,
     text: string,
-    images?: readonly ImageAttachment[]
+    images?: readonly ImageAttachment[],
+    // Present only for a message Crucible sent itself, which is what makes it
+    // a card in the transcript and Crucible's own row in the queued strip.
+    card?: SystemCard
   ): Promise<void> {
     const carried = images === undefined || images.length === 0 ? {} : { images }
     if (!turns.has(sessionId)) {
@@ -251,11 +275,18 @@ export function createScriptedPort(initial: Partial<ShellSnapshot> = {}): Script
       turns.set(sessionId, turnId)
       changeSession(sessionId, (session) => ({ ...session, working: true, fresh: false }))
       emit({ type: 'turn_started', sessionId, turnId })
-      emit({ type: 'user_message', sessionId, turnId, text, ...carried })
+      emit({
+        type: 'user_message',
+        sessionId,
+        turnId,
+        text,
+        ...carried,
+        ...(card === undefined ? {} : { card })
+      })
       emitState()
       return Promise.resolve()
     }
-    const entry: QueuedEntry = { text, ...carried }
+    const entry: QueuedEntry = { text, ...carried, ...(card === undefined ? {} : { origin: 'system' as const }) }
     const current = queueOf(sessionId)
     setQueue(
       sessionId,
@@ -279,7 +310,9 @@ export function createScriptedPort(initial: Partial<ShellSnapshot> = {}): Script
       : { cancelled: false, editorText: port.jumpText }
   }
 
-  let held: ((outcome: 'delivered' | 'dropped') => void) | undefined
+  let heldShare: ((outcome: 'delivered' | 'dropped') => void) | undefined
+  /** Replies waiting for the line to empty, exactly as main holds them. */
+  const held: AnsweredQuestion[] = []
   const heldJumps: {
     resolve: (outcome: { cancelled: boolean; editorText?: string }) => void
     reject: (cause: Error) => void
@@ -568,13 +601,13 @@ export function createScriptedPort(initial: Partial<ShellSnapshot> = {}): Script
       calls.push({ op: 'shareBashRun', args: [sessionId, run] })
       if (port.holdShare !== true) return Promise.resolve(port.shareOutcome)
       return new Promise((resolve) => {
-        held = resolve
+        heldShare = resolve
       })
     },
 
     settleShare(outcome): void {
-      const settle = held
-      held = undefined
+      const settle = heldShare
+      heldShare = undefined
       settle?.(outcome)
     },
 
@@ -769,6 +802,40 @@ export function createScriptedPort(initial: Partial<ShellSnapshot> = {}): Script
     },
 
     panelOf,
+
+    askQuestion(sessionId: SessionId, question: Question): void {
+      const line = port.questionsOf(sessionId) ?? { open: [], held: 0 }
+      setLine(sessionId, { open: [...line.open, question], held: line.held })
+      emitState()
+      emit({ type: 'question_asked', sessionId, questionId: question.id })
+    },
+
+    questionsOf: (sessionId) =>
+      snapshot.sessions.find((candidate) => candidate.id === sessionId)?.questions,
+
+    // Main's own rule, so a test drives the whole loop: the reply is held
+    // beside the others, and only the one that empties the line sends the
+    // batch — as a steering message, or as the next prompt when nothing is
+    // working.
+    replyToQuestion(
+      sessionId: SessionId,
+      questionId: QuestionId,
+      reply: QuestionReply
+    ): Promise<void> {
+      calls.push({ op: 'replyToQuestion', args: [sessionId, questionId, reply] })
+      const line = port.questionsOf(sessionId)
+      const answered = line?.open.find((question) => question.id === questionId)
+      if (line === undefined || answered === undefined) return Promise.resolve()
+      const open = line.open.filter((question) => question.id !== questionId)
+      held.push({ question: answered, reply })
+      setLine(sessionId, { open, held: line.held + 1 })
+      emitState()
+      if (open.length > 0) return Promise.resolve()
+      const batch = composeAnswerBatch([...held])
+      held.length = 0
+      const carried = batch.card
+      return queue(sessionId, 'steering', batch.text, undefined, carried)
+    },
 
     cancel(sessionId: SessionId): Promise<void> {
       calls.push({ op: 'cancel', args: [sessionId] })

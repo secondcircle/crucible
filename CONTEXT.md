@@ -488,6 +488,29 @@ and nothing else; the dot and the counts stay on the row.
 _Avoid_: minimize all, collapse all (it never folds an in-use workspace),
 focus mode.
 
+**Question**:
+One ask a session agent puts to the user through its ask tool, without
+ending its turn: the question in one sentence, the context needed to decide
+it cold, and the agent's recommendation. One per tool call; several open at
+once form the line. Session agents only: a workflow node raises a blocker
+instead.
+_Avoid_: query, clarification, prompt (the composer's word), blocker (a
+run's word).
+
+**Questions dock**:
+The band pinned between the transcript and the composer, as wide as the
+composer box, showing one open question at a time and whole: question,
+context, recommendation, a four-row answer box, Take recommendation, Send
+and ✕. Gone when no question is open.
+_Avoid_: question panel, ask card, question drawer, questions strip.
+
+**Answer batch**:
+The one message the agent receives once the line is empty, carrying every
+question with its answer or its dismissal. A steering message while the agent
+works, the next prompt if it has stopped; nothing reaches the agent before
+the line empties.
+_Avoid_: reply, response, per-question answer.
+
 **Monitor chip**:
 One live monitor in the strip above the chat, beside the run chips under its
 own "Waiting on" label: the description, the check's last output, time waited,

@@ -15,6 +15,7 @@ import { createFakeAdapter } from '../../shared/agent/fake-adapter'
 import type { SessionId } from '../../shared/agent/port'
 import { createPanelModel, type PanelModel } from '../panel/model'
 import { storePanelPersistence } from '../panel/store-persistence'
+import { createQuestionsModel } from '../questions/model'
 import { createShell, type Shell } from './shell'
 import { createShellStore, type StoredSession } from './store'
 
@@ -58,6 +59,7 @@ function build(): void {
   shell = createShell({
     store,
     panel,
+    questions: createQuestionsModel(),
     adapter: recording(inner, record),
     flavor: 'fake',
     pickFolder: async () => directory

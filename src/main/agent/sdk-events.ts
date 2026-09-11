@@ -6,6 +6,7 @@ import type { QueuedEntry, SessionId, TurnId } from '../../shared/agent/port'
 // Spelled with its extension so plain Node can load this module: its ESM
 // resolver does no extension guessing.
 import { SKILL_TOOL } from '../../shared/agent/skill-tool.ts'
+import { ASK_TOOL, askCallSummary } from '../../shared/agent/ask-tool.ts'
 import { monitorCallSummary } from '../../shared/monitors/wording.ts'
 import { displaySafeMessage } from './adapter-error.ts'
 import { createQueuedImages, type QueuedImages } from './queued-images.ts'
@@ -53,6 +54,9 @@ export function displayToolCall(
   inForce?: SkillsInForce
 ): DisplayedCall {
   if (name === 'crucible_monitor') return { name, summary: monitorCallSummary(args) }
+  // The question itself, because that is what the row is about and the dock
+  // is where it is answered.
+  if (name === ASK_TOOL) return { name, summary: askCallSummary(args) }
   const summary = summarizeToolArgs(args)
   if (inForce === undefined || name !== 'read') return { name, summary }
 
@@ -140,7 +144,11 @@ const SUMMARY_LIMIT = 160
 // session's memory of the pictures π's text-only queue cannot carry.
 export function createEventMapper(
   inForce?: SkillsInForce,
-  queued: QueuedImages = createQueuedImages()
+  queued: QueuedImages = createQueuedImages(),
+  // The raw failure text, before `displaySafeMessage` reduces it to a sentence
+  // or swallows it: what crosses the port stays display-safe, and this is how
+  // the run log still learns what actually went wrong.
+  onErrorDetail?: (detail: string) => void
 ): EventMapper {
   // Tool output arrives as a growing snapshot rather than as chunks, so only
   // the part past this count is forwarded.
@@ -237,31 +245,36 @@ export function createEventMapper(
             case 'error':
               // An abort is not a failure: the adapter that asked for it says
               // so itself, and says it once.
-              return event.assistantMessageEvent.reason === 'aborted'
-                ? undefined
-                : {
-                    type: 'turn_error',
-                    sessionId,
-                    turnId,
-                    message: displaySafeMessage(
-                      event.assistantMessageEvent.error.errorMessage
-                    )
-                  }
+              if (event.assistantMessageEvent.reason === 'aborted') return undefined
+              if (typeof event.assistantMessageEvent.error.errorMessage === 'string') {
+                onErrorDetail?.(event.assistantMessageEvent.error.errorMessage)
+              }
+              return {
+                type: 'turn_error',
+                sessionId,
+                turnId,
+                message: displaySafeMessage(event.assistantMessageEvent.error.errorMessage)
+              }
             default:
               return undefined
           }
 
         // A failed request is folded into the final message rather than raised
         // as an error, so without this a paid failure reads as an empty turn.
-        case 'message_end':
-          return event.message.role === 'assistant' && event.message.stopReason === 'error'
-            ? {
-                type: 'turn_error',
-                sessionId,
-                turnId,
-                message: displaySafeMessage(event.message.errorMessage)
-              }
-            : undefined
+        case 'message_end': {
+          if (event.message.role !== 'assistant' || event.message.stopReason !== 'error') {
+            return undefined
+          }
+          if (typeof event.message.errorMessage === 'string') {
+            onErrorDetail?.(event.message.errorMessage)
+          }
+          return {
+            type: 'turn_error',
+            sessionId,
+            turnId,
+            message: displaySafeMessage(event.message.errorMessage)
+          }
+        }
 
         case 'tool_execution_start': {
           forwarded.set(event.toolCallId, 0)

@@ -6,7 +6,10 @@ import {
   TIMEOUT_DEFAULT_MS,
   numericSeconds,
   type MonitorOwner
-} from '../monitors/monitor'
+  // Spelled with its extension so plain Node can load this module for
+  // `prove:sdk`: its ESM resolver does no extension guessing.
+} from '../monitors/monitor.ts'
+import type { ToolParameter } from './tool-parameter.ts'
 
 // Both adapters and the engine build the three monitor tools from these
 // definitions, so a session agent and a run's node cannot end up meaning
@@ -16,23 +19,12 @@ import {
 
 export type MonitorToolName = 'crucible_monitor' | 'crucible_monitors' | 'crucible_monitor_stop'
 
-export type ToolParameterKind = 'string' | 'number'
-
-export interface MonitorToolParameter {
-  readonly name: string
-  readonly description: string
-  /** Absent means required. */
-  readonly optional?: boolean
-  /** Absent means string. */
-  readonly kind?: ToolParameterKind
-}
-
 export interface MonitorToolDefinition {
   readonly name: MonitorToolName
   /** Human-readable, for a tool row. */
   readonly label: string
   readonly description: string
-  readonly parameters: readonly MonitorToolParameter[]
+  readonly parameters: readonly ToolParameter[]
 }
 
 const INTERVAL_DEFAULT_SECONDS = Math.round(INTERVAL_DEFAULT_MS / 1000)

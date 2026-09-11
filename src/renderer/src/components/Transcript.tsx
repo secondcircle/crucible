@@ -10,6 +10,7 @@ import {
   type ToolChain,
   type ToolItem
 } from '../state/tool-chains'
+import { ASK_TOOL } from '../../../shared/agent/ask-tool'
 import { seamFacts } from '../cache/format'
 import { Markdown } from './Markdown'
 import './cache-strip.css'
@@ -432,7 +433,9 @@ const Call = memo(function Call({ call }: { readonly call: ToolItem }): React.JS
   const said = running ? 'running' : ok === undefined ? 'stopped' : ok ? 'done' : 'error'
 
   return (
-    <div className={`tool ${state}`}>
+    // A question is amber here as it is in the dock, so the history shows the
+    // ask for what it was. State still wins: a call that failed stays red.
+    <div className={`tool ${state}${name === ASK_TOOL ? ' ask' : ''}`}>
       <button
         className="toolhead"
         aria-expanded={running ? undefined : open}

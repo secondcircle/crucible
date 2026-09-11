@@ -121,6 +121,41 @@ export interface PanelState {
   readonly activeTabId: TabId
 }
 
+export type QuestionId = string
+
+// One ask a session agent put to the user through its ask tool, exactly as
+// the questions dock shows it. Three parts, because a question the user
+// cannot decide cold is no use to them.
+export interface Question {
+  readonly id: QuestionId
+  /** One sentence, phrased to be answered without following the work. */
+  readonly question: string
+  /** What the user needs to decide this one thing, and no more than that. */
+  readonly context: string
+  /** The agent's course of action; Take recommendation sends it verbatim. */
+  readonly recommendation: string
+  /** ISO of the tool call, which the card's age counts from. */
+  readonly askedAt: string
+}
+
+// A session's line of questions. Absent from a session state entirely when
+// nothing is open, which is what makes the dock vanish.
+export interface QuestionLine {
+  /** Oldest first, and never empty: an empty line is an absent one. */
+  readonly open: readonly Question[]
+  // Answered or dismissed already and waiting for the line to empty, which is
+  // what the dock header counts.
+  readonly held: number
+}
+
+// The user's word on one question. Taking the recommendation carries no text
+// of its own — the recommendation is already on the question — so the two can
+// never disagree about what was sent.
+export type QuestionReply =
+  | { readonly kind: 'answered'; readonly text: string }
+  | { readonly kind: 'recommendation' }
+  | { readonly kind: 'dismissed' }
+
 // Where a session works when it is not in its workspace's checkout. Crucible
 // creates worktrees and never deletes them.
 export interface SessionWorktree {
@@ -173,6 +208,9 @@ export interface SessionState {
   readonly cachedPrefix?: CachedPrefix
   /** Absent when nothing is queued. */
   readonly queue?: QueueState
+  // The questions this session's agent has open, folded in exactly as the
+  // queue is. Absent when none is, which is what makes the dock vanish.
+  readonly questions?: QuestionLine
   // The context panel's tabs, folded in exactly as the queue is. Absent when
   // the session has no tabs, which is what makes the region vanish.
   readonly panel?: PanelState
@@ -460,6 +498,15 @@ export type PortEvent =
   // Follows the `state` event carrying the show, so a listener already holds
   // the snapshot this names. A user's own switch or close says nothing.
   | { readonly type: 'panel_shown'; readonly sessionId: SessionId; readonly tabId: TabId }
+  // A question the agent just asked, on the same terms: the `state` event
+  // before it already carried the question this names. Announced so a
+  // surface can mark the session at the moment of the ask; answering and
+  // dismissing say nothing, because the snapshot carries those.
+  | {
+      readonly type: 'question_asked'
+      readonly sessionId: SessionId
+      readonly questionId: QuestionId
+    }
   // One completed assistant message re-billed prompt tokens the previous turn
   // had already paid to cache. Announced per miss; a turn may pay for more
   // than one.
@@ -614,6 +661,16 @@ export interface AgentPort {
     kind: QueuedKind,
     text: string
   ): Promise<QueuedEntry | undefined>
+
+  // The user's answer, their Take recommendation or their ✕. Nothing reaches
+  // the agent until this empties the session's line, and then everything does
+  // at once. An id that names no open question is a harmless no-op: the
+  // session may have been reset while the click was in flight.
+  replyToQuestion(
+    sessionId: SessionId,
+    questionId: QuestionId,
+    reply: QuestionReply
+  ): Promise<void>
 
   /** User clicked a tab. Unknown ids are a harmless no-op. */
   activateTab(sessionId: SessionId, tabId: TabId): Promise<void>
