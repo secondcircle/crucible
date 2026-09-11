@@ -130,12 +130,13 @@ export function withLogging(shell: Shell, log: LogSink, adapter: string): Shell 
     ),
     deliver: op(
       'deliver',
-      (sessionId, message) => shell.deliver(sessionId, message),
-      (sessionId, message: SystemMessage) => [
+      (sessionId, message, kind) => shell.deliver(sessionId, message, kind),
+      (sessionId, message: SystemMessage, kind) => [
         sessionId,
         message.card === undefined
           ? { text: message.text }
-          : { text: message.text, card: message.card.title }
+          : { text: message.text, card: message.card.title },
+        kind ?? 'followUp'
       ]
     ),
     dequeue: op(
@@ -145,6 +146,10 @@ export function withLogging(shell: Shell, log: LogSink, adapter: string): Shell 
       // The answer carries the pictures that left the queue, and those are the
       // one thing a log line must not repeat.
       (removed) => (removed === undefined ? removed : describeEntry(removed))
+    ),
+
+    replyToQuestion: op('replyToQuestion', (sessionId, questionId, reply) =>
+      shell.replyToQuestion(sessionId, questionId, reply)
     ),
 
     activateTab: op('activateTab', (sessionId, tabId) => shell.activateTab(sessionId, tabId)),

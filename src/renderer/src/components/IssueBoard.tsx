@@ -7,7 +7,7 @@ import type {
   IssueRow,
   MissingPiece
 } from '../../../shared/workspace/service'
-import { boardAge, issueAge, relativeTime } from '../labels'
+import { briefAge, issueAge, relativeTime } from '../labels'
 import { chordPressed, keyLabel } from '../keys'
 import { Markdown } from './Markdown'
 import './issue-board.css'
@@ -245,7 +245,7 @@ export function IssueBoard({
             <span className="live" aria-hidden="true">
               ●
             </span>{' '}
-            refreshed {boardAge(board.collectedAt, now)} ago
+            refreshed {briefAge(board.collectedAt, now)} ago
           </span>
           <span className="scopeword">
             {scope === 'yours' ? 'yours and unclaimed' : "everyone's"}

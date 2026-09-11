@@ -10,6 +10,7 @@ import { createFakeAdapter, scaleUsage } from '../../shared/agent/fake-adapter'
 import type { PortEvent, SessionId } from '../../shared/agent/port'
 import { createPanelModel } from '../panel/model'
 import { storePanelPersistence } from '../panel/store-persistence'
+import { createQuestionsModel } from '../questions/model'
 import { createShell, type Shell } from './shell'
 import { createShellStore } from './store'
 
@@ -40,6 +41,7 @@ beforeEach(() => {
   shell = createShell({
     store,
     panel: createPanelModel({ persistence: storePanelPersistence(store) }),
+    questions: createQuestionsModel(),
     adapter,
     flavor: 'fake',
     pickFolder: async () => WORKSPACE

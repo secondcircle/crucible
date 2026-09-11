@@ -34,8 +34,11 @@ Everything else, you decide:
   veto at a glance.
 - **Facts** are found, never asked. Go and find them with your own tools.
 
-Expect one round, occasionally two. Format each question like so, numbered
-continuously so the user can point back at one:
+Expect one round, occasionally two. Prefer `crucible_ask` for every question:
+one call per question, all of them together, so the round lands in the user's
+questions dock rather than scrolling away under the next tool chain. Where
+that tool is not available, ask in the message instead, numbered continuously
+so the user can point back at one:
 
 ```
 ❓ **Q1** - **<question title>**: <question body>

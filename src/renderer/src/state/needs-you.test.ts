@@ -11,6 +11,7 @@ import {
   finishedAsking,
   forgetGone,
   nextAsking,
+  questionAsking,
   railOrder,
   withMark,
   withoutMark
@@ -81,6 +82,26 @@ describe('what counts as unwatched', () => {
         { activeSessionId: 's1', windowFocused: false, runs: [] }
       )
     ).toBe(true)
+  })
+})
+
+describe('a question just asked', () => {
+  it('marks a session the user is not on', () => {
+    expect(questionAsking('s2', { activeSessionId: 's1', windowFocused: true })).toBe(true)
+  })
+
+  it('says nothing about the session the user is looking at', () => {
+    expect(questionAsking('s1', { activeSessionId: 's1', windowFocused: true })).toBe(false)
+  })
+
+  it('marks even that one when Crucible is behind another app', () => {
+    expect(questionAsking('s1', { activeSessionId: 's1', windowFocused: false })).toBe(true)
+  })
+
+  // A run working in the session's name answers for a turn that ended; it
+  // answers for nothing the user was asked.
+  it('is hushed by nothing else at all', () => {
+    expect(questionAsking('s2', { windowFocused: true })).toBe(true)
   })
 })
 

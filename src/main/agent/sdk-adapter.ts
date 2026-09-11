@@ -60,7 +60,9 @@ import { TITLE_MODEL } from '../../shared/agent/known-models.ts'
 import { PANEL_TOOLS, type PanelTools } from '../../shared/agent/panel-tools.ts'
 import { RUN_TOOLS, type RunTools } from '../../shared/agent/run-tools.ts'
 import { bindMonitorTools, type MonitorTools } from '../../shared/agent/monitor-tools.ts'
+import { bindAskTool, type AskTools } from '../../shared/agent/ask-tool.ts'
 import { monitorPiTools } from './monitor-pi-tools.ts'
+import { askPiTool } from './ask-pi-tool.ts'
 import { retentionInForce } from '../cache/retention.ts'
 import type { LogSink } from '../log/sink.ts'
 import { displaySafeMessage } from './adapter-error.ts'
@@ -169,6 +171,7 @@ export function createSdkAdapter({
   panel,
   runs,
   monitors,
+  ask,
   skills,
   systemPrompt,
   openExternal,
@@ -185,6 +188,10 @@ export function createSdkAdapter({
   // its working directory. Absent — as in `prove:sdk` — means no monitor
   // tools are mounted.
   readonly monitors?: MonitorTools
+  // The ask behavior, bound to this session: its questions reach that
+  // session's dock and no other. Absent — as in `prove:sdk` — means the
+  // agent cannot ask at all.
+  readonly ask?: AskTools
   // Crucible's three skill origins, resolved through π's own loader. Absent —
   // as in `prove:sdk` — means no folder is read and no skill is offered.
   readonly skills?: SkillService
@@ -496,6 +503,13 @@ export function createSdkAdapter({
     )
   }
 
+  // The ask behavior as one tool, bound to the session whose dock its
+  // questions belong in.
+  function askCustomTools(sessionId: SessionId): ToolDefinition[] {
+    if (ask === undefined) return []
+    return [askPiTool(bindAskTool(ask, sessionId))]
+  }
+
   async function open(
     sessionId: SessionId,
     workspacePath: string,
@@ -515,7 +529,8 @@ export function createSdkAdapter({
       customTools: [
         ...panelCustomTools(sessionId, workspacePath),
         ...runCustomTools(sessionId, workspacePath),
-        ...monitorCustomTools(sessionId, workspacePath)
+        ...monitorCustomTools(sessionId, workspacePath),
+        ...askCustomTools(sessionId)
       ]
     }
 

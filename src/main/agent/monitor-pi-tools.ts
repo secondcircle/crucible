@@ -2,9 +2,9 @@ import type { ToolDefinition } from '@earendil-works/pi-coding-agent'
 import {
   MONITOR_TOOLS,
   monitorRequestFrom,
-  type BoundMonitorTools,
-  type MonitorToolParameter
+  type BoundMonitorTools
 } from '../../shared/agent/monitor-tools.ts'
+import { parametersSchema, said } from './pi-tools.ts'
 
 // The bound monitor behaviors as π tools. Used by the SDK adapter for a
 // session agent and by the node session factory for a run's node, so the two
@@ -18,7 +18,7 @@ export function monitorPiTools(bound: BoundMonitorTools): ToolDefinition[] {
     // A description survives the prompt override: it rides the request's tools
     // parameter, which is why the guidance lives here.
     description: tool.description,
-    parameters: parametersSchema(tool.parameters) as ToolDefinition['parameters'],
+    parameters: parametersSchema(tool.parameters),
     async execute(_callId: string, params: unknown) {
       if (tool.name === 'crucible_monitor') {
         return said(await bound.set(monitorRequestFrom(params)))
@@ -32,23 +32,4 @@ export function monitorPiTools(bound: BoundMonitorTools): ToolDefinition[] {
       return said(await bound.list())
     }
   }))
-}
-
-export function parametersSchema(parameters: readonly MonitorToolParameter[]): unknown {
-  return {
-    type: 'object',
-    required: parameters
-      .filter((parameter) => parameter.optional !== true)
-      .map((parameter) => parameter.name),
-    properties: Object.fromEntries(
-      parameters.map((parameter) => [
-        parameter.name,
-        { type: parameter.kind === 'number' ? 'number' : 'string', description: parameter.description }
-      ])
-    )
-  }
-}
-
-function said(text: string): { content: { type: 'text'; text: string }[]; details: object } {
-  return { content: [{ type: 'text' as const, text }], details: {} }
 }

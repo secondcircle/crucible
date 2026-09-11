@@ -198,6 +198,9 @@ function heard(state: ShellState, event: PortEvent, at: number): ShellState {
   // A shown tab is in the snapshot the `state` event before it carried; the
   // transcript has nothing to say about it.
   if (event.type === 'panel_shown') return state
+  // Nor about a question: the snapshot carries it to the dock, and the
+  // transcript's record of the ask is the tool call itself.
+  if (event.type === 'question_asked') return state
   // A login's questions belong to the settings surface and to no session at
   // all: no transcript changes because someone signed in.
   if (

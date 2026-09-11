@@ -13,6 +13,7 @@ import type { PortEvent, SessionId } from '../../shared/agent/port'
 import type { CacheRecorder, RecordedCacheMiss } from '../cache/ledger'
 import { createPanelModel } from '../panel/model'
 import { storePanelPersistence } from '../panel/store-persistence'
+import { createQuestionsModel } from '../questions/model'
 import { createShell, type Shell } from './shell'
 import { createShellStore, type ShellStore } from './store'
 
@@ -41,6 +42,7 @@ function build(retention: '5m' | '1h' = '5m'): void {
   shell = createShell({
     store,
     panel: createPanelModel({ persistence: storePanelPersistence(store) }),
+    questions: createQuestionsModel(),
     adapter: createFakeAdapter({ pauseMs: 0 }),
     flavor: 'fake',
     pickFolder: async () => WORKSPACE,

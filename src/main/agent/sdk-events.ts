@@ -6,6 +6,7 @@ import type { QueuedEntry, SessionId, TurnId } from '../../shared/agent/port'
 // Spelled with its extension so plain Node can load this module: its ESM
 // resolver does no extension guessing.
 import { SKILL_TOOL } from '../../shared/agent/skill-tool.ts'
+import { ASK_TOOL, askCallSummary } from '../../shared/agent/ask-tool.ts'
 import { monitorCallSummary } from '../../shared/monitors/wording.ts'
 import { displaySafeMessage } from './adapter-error.ts'
 import { createQueuedImages, type QueuedImages } from './queued-images.ts'
@@ -53,6 +54,9 @@ export function displayToolCall(
   inForce?: SkillsInForce
 ): DisplayedCall {
   if (name === 'crucible_monitor') return { name, summary: monitorCallSummary(args) }
+  // The question itself, because that is what the row is about and the dock
+  // is where it is answered.
+  if (name === ASK_TOOL) return { name, summary: askCallSummary(args) }
   const summary = summarizeToolArgs(args)
   if (inForce === undefined || name !== 'read') return { name, summary }
 

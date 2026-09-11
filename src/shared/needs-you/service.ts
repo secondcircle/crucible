@@ -15,14 +15,19 @@ export interface WaitingSession {
   readonly workspace: string
   /** The session's title, which is line two. */
   readonly title: string
+  // The question, when a question is what the session needs the user for.
+  // The banner names it: being called away is worth it for a decision, and
+  // the decision is what they are being called to make.
+  readonly asks?: string
 }
 
 export interface NeedsYouService {
   /** How many sessions are waiting on the user now. Zero clears the badge. */
   waiting(count: number): Promise<void>
   /**
-   * One session finished. At most one banner comes of it, sounding unless a
-   * banner just before it already did.
+   * One session needs the user: its turn finished, or its agent asked. At
+   * most one banner comes of it, sounding unless a banner just before it
+   * already did.
    */
   announce(session: WaitingSession): Promise<void>
 }

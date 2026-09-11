@@ -1,5 +1,6 @@
 import { app, BrowserWindow, Notification } from 'electron'
 import type { SessionId } from '../../shared/agent/port'
+import type { WaitingSession } from '../../shared/needs-you/service'
 import type { Flavor } from '../agent/select-adapter'
 import type { LogSink } from '../log/sink'
 import {
@@ -17,6 +18,20 @@ export type NeedsYouServiceKind = 'quiet' | 'live'
 // not using.
 export function needsYouServiceKind(flavor: Flavor): NeedsYouServiceKind {
   return flavor === 'sdk' ? 'live' : 'quiet'
+}
+
+// What the banner says, which is pure and so provable without an OS. A
+// question names itself: the session is the headline and the question is the
+// body, because the decision is what the user is being called away to make. A
+// finished turn reads as it always has.
+export function bannerWords(session: WaitingSession): {
+  readonly title: string
+  readonly body: string
+} {
+  if (session.asks === undefined) {
+    return { title: `${session.workspace} · finished`, body: session.title }
+  }
+  return { title: `${session.title} · asks`, body: session.asks }
 }
 
 export function selectNeedsYouService(
@@ -58,11 +73,7 @@ function electronDesk(window: BrowserWindow, open: (sessionId: SessionId) => voi
 
     notify(session, sound, onOpen) {
       if (!Notification.isSupported()) return
-      const banner = new Notification({
-        title: `${session.workspace} · finished`,
-        body: session.title,
-        silent: !sound
-      })
+      const banner = new Notification({ ...bannerWords(session), silent: !sound })
       banner.on('click', onOpen)
       banner.show()
     },

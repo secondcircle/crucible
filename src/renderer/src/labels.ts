@@ -51,9 +51,11 @@ export function agoLabel(at: number, now = Date.now()): string {
   return `${Math.floor(hours / 24)} d ago`
 }
 
-/** How long ago a board was collected: `40s`, `3m`, `2h`. */
-export function boardAge(collectedAt: string, now = Date.now()): string {
-  const at = new Date(collectedAt).getTime()
+// How long ago, in the shorthand a small slot has room for: `40s`, `3m`,
+// `2h`. What an issue board says it was refreshed, and what a question card
+// says it has been waiting.
+export function briefAge(iso: string, now = Date.now()): string {
+  const at = new Date(iso).getTime()
   if (Number.isNaN(at)) return ''
   const seconds = Math.max(0, Math.round((now - at) / 1000))
   if (seconds < 60) return `${seconds}s`

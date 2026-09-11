@@ -7,6 +7,9 @@ import type {
   ImageAttachment,
   ModelId,
   PromptOptions,
+  QuestionId,
+  QuestionLine,
+  QuestionReply,
   QueuedKind,
   SessionId,
   SessionState,
@@ -52,6 +55,7 @@ import { IssueBoard, type IssueSession } from './components/IssueBoard'
 import { type Attachment, Composer, useElapsedSeconds } from './components/Composer'
 import { ConfirmDialog } from './components/ConfirmDialog'
 import { ContextPanel, PanelEdge } from './components/ContextPanel'
+import { QuestionsDock } from './components/QuestionsDock'
 import { entriesOf, QueuedStrip } from './components/QueuedStrip'
 import { ResumeOverlay } from './components/ResumeOverlay'
 import { SessionTree } from './components/SessionTree'
@@ -89,6 +93,7 @@ import {
   finishedAsking,
   forgetGone,
   nextAsking,
+  questionAsking,
   withMark,
   withoutMark,
   type Marks
@@ -140,7 +145,7 @@ interface Choice {
   readonly summarizing?: boolean
 }
 
-type Question =
+type Confirm =
   | { readonly kind: 'reset'; readonly sessionId: SessionId }
   | { readonly kind: 'thinking'; readonly sessionId: SessionId; readonly level: ThinkingLevel }
   // Stopping a run confirms first wherever it is offered — the Needs-you row
@@ -266,7 +271,7 @@ export function Shell({
       .finally(() => setCheckingForUpdate(false))
   }, [appUpdate])
   const [popover, setPopover] = useState<Popover>('none')
-  const [question, setQuestion] = useState<Question | undefined>(undefined)
+  const [confirm, setConfirm] = useState<Confirm | undefined>(undefined)
   // The cache expiry choice. Per session like everything else here: what one
   // session asked about puts nothing on another session's screen.
   const [choice, setChoice] = useState<Choice | undefined>(undefined)
@@ -352,6 +357,12 @@ export function Shell({
   // The same trick for the port's subscription, which is set up once and must
   // not be torn down and rebuilt every time the sidebar changes.
   const railNow = useRef<ShellSnapshot>(NOTHING_YET.snapshot)
+  // The sessions as of the last `state` event rather than the last render,
+  // because a question is announced in the same batch as the snapshot
+  // carrying it and has to be found in the newer record. The rail's own copy
+  // stays a render behind on purpose: an arrival is spotted by comparing the
+  // two.
+  const askedNow = useRef<readonly SessionState[]>([])
   /** Whether a login flow is running, which is what the sheet stays open for. */
   const loginNow = useRef(false)
   // Whether this window has focus, which is what "not looking" is measured
@@ -381,6 +392,10 @@ export function Shell({
   )
   const [openMonitorId, setOpenMonitorId] = useState<MonitorId | undefined>(undefined)
   const [stopping, setStopping] = useState<ReadonlySet<MonitorId>>(new Set())
+  // Questions the user has just answered or dismissed, so the card leaves in
+  // the frame the button was clicked in rather than a round trip later. Held
+  // only until the snapshot agrees.
+  const [replied, setReplied] = useState<ReadonlySet<QuestionId>>(new Set())
   // A ref, not the state above: the needs-you verdict is taken inside an event,
   // and written where the snapshot arrives rather than in an effect so a turn
   // ending in the same batch is judged on the newer record.
@@ -407,6 +422,8 @@ export function Shell({
   const [graphFullScreen, setGraphFullScreen] = useState(false)
   // Restoring a queued message puts the caret back where the words are.
   const box = useRef<HTMLTextAreaElement>(null)
+  /** The open question's answer box, which ⌘⇧A puts the caret in. */
+  const answerBox = useRef<HTMLTextAreaElement>(null)
   // Output can arrive before the id of the run it belongs to does.
   const owners = useRef<Record<RunId, SessionId>>({})
   const orphans = useRef<Map<RunId, RunEvent[]>>(new Map())
@@ -433,7 +450,7 @@ export function Shell({
   const session = snapshot.sessions.find((candidate) => candidate.id === activeSessionId)
   const view = activeSessionId === undefined ? undefined : views[activeSessionId]
   const items = view?.items ?? []
-  // Known to hold nothing, which is what lets a guard skip its question.
+  // Known to hold nothing, which is what lets a guard skip its confirmation.
   const emptyConversation = knownEmpty(view)
   const flipInFlight = activeSessionId !== undefined && flipping.includes(activeSessionId)
   // This session's jump and no other's: what session A is summarizing puts
@@ -514,8 +531,33 @@ export function Shell({
       sessionRuns.some((run) => currentNode(run)?.waitingOn !== undefined)
   )
 
+  // The open questions of the session on screen, with the ones just answered
+  // already gone. Absent when nothing is open, which is what makes the dock
+  // vanish; a question answered optimistically counts as held, so the header
+  // says what is waiting the moment the button is clicked.
+  const line: QuestionLine | undefined = useMemo(() => {
+    const held = session?.questions
+    if (held === undefined) return undefined
+    const open = held.open.filter((question) => !replied.has(question.id))
+    if (open.length === 0) return undefined
+    return { open, held: held.held + (held.open.length - open.length) }
+  }, [session?.questions, replied])
+  // The slow clock: a card says how many minutes it has waited, and nothing
+  // on it counts seconds.
+  const questionNow = useClock(false)
+
   if (openMonitorId !== undefined && !sessionMonitors.some((one) => one.id === openMonitorId)) {
     setOpenMonitorId(undefined)
+  }
+  // The optimistic hide lasts only until the snapshot agrees, exactly as a
+  // stopped monitor's does: a reply that failed puts the card back.
+  if (replied.size > 0) {
+    const open = new Set(
+      snapshot.sessions.flatMap((one) => (one.questions?.open ?? []).map((asked) => asked.id))
+    )
+    if ([...replied].some((id) => !open.has(id))) {
+      setReplied(new Set([...replied].filter((id) => open.has(id))))
+    }
   }
   // The optimistic hide is remembered only until the snapshot agrees, so a stop
   // that failed puts the chip back rather than hiding it forever.
@@ -569,6 +611,25 @@ export function Shell({
     setOpenMonitorId((open) => (open === monitorId ? undefined : monitorId))
   }, [])
 
+  // The card leaves and the next arrives in the frame the button was clicked
+  // in, before the port has answered; a reply that failed puts the card back.
+  const replyToQuestion = useCallback(
+    (questionId: QuestionId, reply: QuestionReply): void => {
+      const sessionId = railNow.current.activeSessionId
+      if (sessionId === undefined) return
+      setReplied((held) => new Set([...held, questionId]))
+      void port.replyToQuestion(sessionId, questionId, reply).catch((cause: unknown) => {
+        setReplied((held) => {
+          const still = new Set(held)
+          still.delete(questionId)
+          return still
+        })
+        report(cause, sessionId)
+      })
+    },
+    [port, report]
+  )
+
   const stopMonitor = useCallback(
     (monitorId: MonitorId): void => {
       if (monitorService === undefined) return
@@ -608,6 +669,36 @@ export function Shell({
       if (done === undefined || where === undefined) return
       void needsYouService
         .announce({ sessionId, workspace: where.name, title: done.title ?? UNTITLED })
+        .catch(() => {})
+    },
+    [needsYouService]
+  )
+
+  // An open question is a needs-you from the moment it is asked, whatever the
+  // agent goes on doing. The rule is the needs-you module's; this applies it
+  // and names the question in the banner, because what the user is being
+  // called for is the question rather than the fact of one.
+  const asked = useCallback(
+    (sessionId: SessionId, questionId: QuestionId): void => {
+      const rail = railNow.current
+      const world = {
+        ...(rail.activeSessionId === undefined ? {} : { activeSessionId: rail.activeSessionId }),
+        windowFocused: windowFocused.current
+      }
+      if (!questionAsking(sessionId, world)) return
+      setMarks((current) => withMark(current, sessionId))
+      if (needsYouService === undefined) return
+      const asking = askedNow.current.find((candidate) => candidate.id === sessionId)
+      const where = rail.workspaces.find((candidate) => candidate.id === asking?.workspaceId)
+      const question = asking?.questions?.open.find((one) => one.id === questionId)
+      if (asking === undefined || where === undefined || question === undefined) return
+      void needsYouService
+        .announce({
+          sessionId,
+          workspace: where.name,
+          title: asking.title ?? UNTITLED,
+          asks: question.question
+        })
         .catch(() => {})
     },
     [needsYouService]
@@ -723,11 +814,11 @@ export function Shell({
   // a confirm, and that confirm is still about the session on screen. A run
   // confirm is about a run and survives any of that.
   if (
-    question !== undefined &&
-    question.kind !== 'cancelRun' &&
-    question.sessionId !== activeSessionId
+    confirm !== undefined &&
+    confirm.kind !== 'cancelRun' &&
+    confirm.sessionId !== activeSessionId
   ) {
-    setQuestion(undefined)
+    setConfirm(undefined)
   }
 
   // What the region actually renders. Nothing is backed by less than real
@@ -808,7 +899,7 @@ export function Shell({
       // Escape press for a dialog nobody can see.
       setRegion([])
       setOpenArtifactPath(undefined)
-      setQuestion(undefined)
+      setConfirm(undefined)
       // A choice raised on one session says nothing about the one being
       // arrived at. The draft it was raised over is untouched, and the next
       // send in that session asks again. A summarize it started goes on: the
@@ -898,6 +989,10 @@ export function Shell({
       ) {
         arrive(event.snapshot.activeSessionId)
       }
+      if (event.type === 'state') askedNow.current = event.snapshot.sessions
+      // A question is a needs-you the moment it is asked, and the snapshot
+      // above already carries it.
+      if (event.type === 'question_asked') asked(event.sessionId, event.questionId)
       // A Tab landing on a parked run is an arrival at that run, not at a
       // session: the workspace switch it needed wipes the region on its way
       // through, and the board it was opening goes back up here.
@@ -974,7 +1069,7 @@ export function Shell({
       .then((listed) => dispatch({ type: 'models', models: listed }))
       .catch(report)
     return stop
-  }, [port, report, restore, restoreChips, refreshQuota, finished, arrive])
+  }, [port, report, restore, restoreChips, refreshQuota, finished, asked, arrive])
 
   useEffect(() => {
     sessionsNow.current = snapshot.sessions
@@ -1094,10 +1189,10 @@ export function Shell({
   // backdrop, Decline, an arrival — means the run keeps working, and the
   // button that raised it hears so. One place, so no closer has to remember.
   useEffect(() => {
-    if (question?.kind === 'cancelRun') return
+    if (confirm?.kind === 'cancelRun') return
     cancelChoice.current?.('kept')
     cancelChoice.current = undefined
-  }, [question])
+  }, [confirm])
 
   // Read again every time the popover opens, so a command an agent wrote a
   // moment ago is in this very list.
@@ -1173,7 +1268,7 @@ export function Shell({
     () => ({
       loginOpen: liveLogin !== undefined,
       expiryChoiceOpen: choice !== undefined,
-      confirmOpen: question !== undefined,
+      confirmOpen: confirm !== undefined,
       popoverOpen: popover !== 'none',
       commandPopoverOpen: browsingCommands,
       filePopoverOpen: fileToken !== undefined,
@@ -1193,7 +1288,7 @@ export function Shell({
     [
       liveLogin,
       choice,
-      question,
+      confirm,
       popover,
       browsingCommands,
       fileToken,
@@ -1243,7 +1338,7 @@ export function Shell({
         }
 
         case 'closeConfirm':
-          setQuestion(undefined)
+          setConfirm(undefined)
           return
 
         case 'closePopover':
@@ -1414,6 +1509,24 @@ export function Shell({
     return () => document.removeEventListener('keydown', onKeyDown)
   }, [occupy])
 
+  // ⌘⇧A puts the caret in the open question's answer box, which is the one
+  // thing the dock's header names. Nothing to answer, nothing to claim.
+  useEffect(() => {
+    function onKeyDown(pressed: KeyboardEvent): void {
+      if (pressed.key.toLowerCase() !== 'a' || !pressed.shiftKey || pressed.altKey) return
+      if (!chordPressed(pressed)) return
+      if (line === undefined) return
+      // Every surface that covers the chat column owns the keyboard while it
+      // is up: the box under it is not reachable by eye either.
+      if (liveLogin !== undefined || confirm !== undefined || choice !== undefined) return
+      if (occupied || place === 'maximized') return
+      pressed.preventDefault()
+      answerBox.current?.focus()
+    }
+    document.addEventListener('keydown', onKeyDown)
+    return () => document.removeEventListener('keydown', onKeyDown)
+  }, [line, liveLogin, confirm, choice, occupied, place])
+
   // ⌘I, on exactly the same terms: claimed where there is an issue board to
   // open, and left to the OS where there is not.
   useEffect(() => {
@@ -1442,7 +1555,7 @@ export function Shell({
       // A modal surface owns the keyboard while it is up — the cache expiry
       // choice included, or Shift-Tab would break the cache it is asking
       // about, from behind it.
-      if (liveLogin !== undefined || question !== undefined || choice !== undefined) return
+      if (liveLogin !== undefined || confirm !== undefined || choice !== undefined) return
       if (settingsOpen || cacheOpen || resumeOpen) return
       // A ring model the adapter did not list is skipped; with none listed the
       // key is left exactly as it was, no toast and no error.
@@ -1481,7 +1594,7 @@ export function Shell({
     report,
     liveLogin,
     settingsOpen,
-    question,
+    confirm,
     choice,
     cacheOpen,
     resumeOpen
@@ -1503,7 +1616,7 @@ export function Shell({
       // Shift-Tab is the model ring and stays exactly as it was.
       if (pressed.shiftKey || pressed.metaKey || pressed.ctrlKey || pressed.altKey) return
       if (pressed.defaultPrevented) return
-      if (liveLogin !== undefined || question !== undefined || choice !== undefined) return
+      if (liveLogin !== undefined || confirm !== undefined || choice !== undefined) return
       if (settingsOpen || cacheOpen) return
       if (popover !== 'none' || browsingCommands || fileToken !== undefined) return
       // The schedule board is not in this list: Tab steps its selection while
@@ -1535,7 +1648,7 @@ export function Shell({
     activateSession,
     liveLogin,
     settingsOpen,
-    question,
+    confirm,
     choice,
     cacheOpen,
     popover,
@@ -1988,12 +2101,12 @@ export function Shell({
     if (id === undefined) return
     setPopover('none')
     // A conversation still being fetched shows no items but is not empty, so
-    // only a known-empty one skips the question.
+    // only a known-empty one skips the confirmation.
     if (emptyConversation) {
       applyReset(id)
       return
     }
-    setQuestion({ kind: 'reset', sessionId: id })
+    setConfirm({ kind: 'reset', sessionId: id })
   }
 
   function applyReset(id: SessionId): void {
@@ -2026,7 +2139,7 @@ export function Shell({
     }
     // Changing the level mid-conversation invalidates the session's prompt
     // cache, which costs the user money, so it is asked about first.
-    setQuestion({ kind: 'thinking', sessionId, level })
+    setConfirm({ kind: 'thinking', sessionId, level })
   }
 
   const search = useCallback(
@@ -2336,7 +2449,7 @@ export function Shell({
         // previous asker is told its run is untouched.
         cancelChoice.current?.('kept')
         cancelChoice.current = resolve
-        setQuestion({ kind: 'cancelRun', runId })
+        setConfirm({ kind: 'cancelRun', runId })
       })
       if (chose === 'kept' || workflowRuns === undefined) return 'kept'
       try {
@@ -2479,19 +2592,19 @@ export function Shell({
     closeRegion()
   }
 
-  function answer(): void {
-    if (question === undefined) return
-    const asked = question
+  function confirmed(): void {
+    if (confirm === undefined) return
+    const asked = confirm
     if (asked.kind === 'cancelRun') {
-      // Answered before the question comes off screen, so the effect below
+      // Answered before the confirm comes off screen, so the effect below
       // does not read it as a decline. Issuing the cancel belongs to the
       // asker, so its outcome reaches the button that raised this.
       cancelChoice.current?.('cancelled')
       cancelChoice.current = undefined
-      setQuestion(undefined)
+      setConfirm(undefined)
       return
     }
-    setQuestion(undefined)
+    setConfirm(undefined)
     if (asked.kind === 'reset') applyReset(asked.sessionId)
     else void port.setThinkingLevel(asked.sessionId, asked.level).catch(report)
   }
@@ -2653,6 +2766,17 @@ export function Shell({
             <BashDrawer run={run} onStop={stopRun} onShare={shareRun} onClose={closeRun} />
           )}
 
+          {/* Pinned here, between the transcript and the composer, so a
+              question can never scroll out of sight. */}
+          {line === undefined ? null : (
+            <QuestionsDock
+              line={line}
+              now={questionNow}
+              boxRef={answerBox}
+              onReply={replyToQuestion}
+            />
+          )}
+
           <Composer
             draft={draft}
             disabled={session === undefined}
@@ -2743,7 +2867,7 @@ export function Shell({
         {/* The overlay region: one host for every overlay. It is here at all
             only while something is in it, and everything in it is anchored to
             it, so no overlay can reach the sidebar or either bar. */}
-        {occupied || question !== undefined || choiceShown ? (
+        {occupied || confirm !== undefined || choiceShown ? (
           <div className="region">
             {issuesOpen ? (
               <IssueBoard
@@ -2892,32 +3016,32 @@ export function Shell({
 
             {/* Last, so a confirm raised over an open occupant stacks above it
                 and is answered before anything else is. */}
-            {question === undefined ? null : question.kind === 'cancelRun' ? (
+            {confirm === undefined ? null : confirm.kind === 'cancelRun' ? (
               <ConfirmDialog
                 title="Cancel this run?"
                 body="Its agents stop where they stand and the run lands in Done as cancelled. The worktree, branch and artifacts all stay."
                 confirmLabel="Cancel the run"
                 cancelLabel="Let it keep working"
-                onConfirm={answer}
-                onCancel={() => setQuestion(undefined)}
+                onConfirm={confirmed}
+                onCancel={() => setConfirm(undefined)}
               />
-            ) : question.kind === 'reset' ? (
+            ) : confirm.kind === 'reset' ? (
               <ConfirmDialog
                 title="Reset this session?"
                 body="The conversation is replaced with a fresh one. This session keeps its place in the sidebar, and the old conversation stays findable through Resume session."
                 confirmLabel="Reset anyway"
                 cancelLabel="Keep the conversation"
-                onConfirm={answer}
-                onCancel={() => setQuestion(undefined)}
+                onConfirm={confirmed}
+                onCancel={() => setConfirm(undefined)}
               />
             ) : (
               <ConfirmDialog
                 title="Invalidate this session's cache?"
-                body={`Changing the thinking level to ${question.level} mid-conversation invalidates this session's prompt cache, so the whole conversation is re-sent at full price on the next message.`}
+                body={`Changing the thinking level to ${confirm.level} mid-conversation invalidates this session's prompt cache, so the whole conversation is re-sent at full price on the next message.`}
                 confirmLabel="Change anyway"
                 cancelLabel="Keep current level"
-                onConfirm={answer}
-                onCancel={() => setQuestion(undefined)}
+                onConfirm={confirmed}
+                onCancel={() => setConfirm(undefined)}
               />
             )}
 

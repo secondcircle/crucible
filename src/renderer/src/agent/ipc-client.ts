@@ -9,6 +9,8 @@ import type {
   PortEventListener,
   PromptOptions,
   ProviderState,
+  QuestionId,
+  QuestionReply,
   QueuedEntry,
   QueuedKind,
   SessionId,
@@ -129,6 +131,9 @@ export function createIpcClient(): AgentPort {
         : call<void>('followUp', sessionId, text, images),
     dequeue: (sessionId: SessionId, kind: QueuedKind, text: string) =>
       call<QueuedEntry | undefined>('dequeue', sessionId, kind, text),
+
+    replyToQuestion: (sessionId: SessionId, questionId: QuestionId, reply: QuestionReply) =>
+      call<void>('replyToQuestion', sessionId, questionId, reply),
 
     activateTab: (sessionId: SessionId, tabId: TabId) =>
       call<void>('activateTab', sessionId, tabId),
