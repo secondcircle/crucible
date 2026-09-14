@@ -26,6 +26,9 @@ const FILES: readonly string[] = [
 /** Outside the working directory, which an agent names as often as a file in it. */
 const INSTALLED = '/Applications/Crucible.app/Contents/Resources/docs/index.md'
 
+/** The directory `oneSession()` puts the session in. */
+const WHERE = '/repos/crucible'
+
 async function shell(
   snapshot: Partial<ShellSnapshot> = oneSession()
 ): Promise<{ port: ScriptedPort; workspace: ScriptedWorkspace }> {
@@ -78,6 +81,15 @@ async function doubleClick(element: HTMLElement): Promise<void> {
 
 const opens = (port: ScriptedPort): readonly unknown[][] =>
   port.calls.filter((call) => call.op === 'openFile').map((call) => [...call.args])
+
+/** A change on disk, announced exactly as main's watcher announces one. */
+async function changed(workspace: ScriptedWorkspace, files: readonly string[]): Promise<void> {
+  workspace.files = files
+  await act(async () => {
+    workspace.filesChanged(WHERE)
+  })
+  await settled()
+}
 
 describe('a path in an agent’s message', () => {
   it('is a link when the file is there, and plain code when it is not', async () => {
@@ -221,6 +233,84 @@ describe('a path in an agent’s message', () => {
     expect(tab?.kind !== 'url' && tab?.path).toBe(
       '/repos/crucible/.crucible/worktrees/run-f5d2/CONTEXT.md'
     )
+  })
+})
+
+// "Clickable when the file exists on disk" is a fact about the disk now, not
+// about the first time a path was mentioned. The agent under this transcript
+// writes and deletes files as its ordinary work, so an answer that outlives
+// the write behind it is wrong within the same turn.
+describe('a path the disk has answered for before', () => {
+  // The everyday order: the agent says what it is about to write, writes it,
+  // and says it wrote it.
+  it('becomes a link once the file is there', async () => {
+    const { port, workspace } = await shell()
+
+    await said(port, 'I will put the plan in `notes/plan.md`.')
+    expect(screen.getByText('notes/plan.md').tagName).toBe('CODE')
+
+    await changed(workspace, [...FILES, 'notes/plan.md'])
+    await said(port, 'Written: `notes/plan.md`.')
+
+    // Both mentions, the one made before the file existed included.
+    expect(screen.getAllByText('notes/plan.md').map((named) => named.tagName)).toEqual([
+      'BUTTON',
+      'BUTTON'
+    ])
+  })
+
+  // The direction the brief rejected by name: "linking paths that do not exist
+  // (a click that fails)". A click on a stale chip reaches main's `opened()`,
+  // which throws `File not found` into a toast.
+  it('stops being one once the file is gone', async () => {
+    const { port, workspace } = await shell()
+
+    await said(port, 'The glossary is `CONTEXT.md`.')
+    expect(link('CONTEXT.md').tagName).toBe('BUTTON')
+
+    await changed(
+      workspace,
+      FILES.filter((path) => path !== 'CONTEXT.md')
+    )
+    await said(port, 'I removed it: `CONTEXT.md` is gone.')
+
+    expect(screen.getAllByText('CONTEXT.md').map((named) => named.tagName)).toEqual([
+      'CODE',
+      'CODE'
+    ])
+  })
+
+  // What the two cases above stand on: main only announces a change under a
+  // directory something is watching, and chat is read with the file tree shut
+  // and no file tab open most of the time this surface is used.
+  it('is watched while the session is up, whatever the sidebar is showing', async () => {
+    const { workspace } = await shell()
+
+    expect(workspace.watching).toEqual([WHERE])
+    expect(document.querySelector('.filetree')).toBeNull()
+  })
+
+  // A change under the directory retires the answers; it does not blank the
+  // chips while they are taken again, and it costs one round trip however
+  // many paths are on screen.
+  it('asks again in one round trip, and stays a link while it asks', async () => {
+    const { port, workspace } = await shell()
+
+    await said(port, 'See `CONTEXT.md`, `package.json` and `Makefile`.')
+    const before = workspace.calls.filter((call) => call.op === 'existingFiles').length
+
+    await act(async () => {
+      workspace.filesChanged(WHERE)
+    })
+    // Before the answers land: the chips are what they were.
+    expect(link('CONTEXT.md').tagName).toBe('BUTTON')
+    await settled()
+
+    const asked = workspace.calls.filter((call) => call.op === 'existingFiles').slice(before)
+    expect(asked).toEqual([
+      { op: 'existingFiles', args: [WHERE, ['CONTEXT.md', 'package.json', 'Makefile']] }
+    ])
+    expect(link('CONTEXT.md').tagName).toBe('BUTTON')
   })
 })
 

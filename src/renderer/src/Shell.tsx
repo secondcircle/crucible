@@ -536,15 +536,15 @@ export function Shell({
   const sidebarFace = faceOf(faces, activeWorkspaceId)
   const shownTab = panel?.tabs.find((tab) => tab.id === panel.activeTabId)
   const shownFilePath = shownTab === undefined || shownTab.kind === 'url' ? undefined : shownTab.path
-  // A file tab follows the disk whichever face the column is on, so the watch
-  // outlives a switch back to the sessions.
-  const watchedDirectory =
-    sessionDirectory !== undefined && (sidebarFace === 'files' || shownFilePath !== undefined)
-      ? sessionDirectory
-      : undefined
+  // The session's directory is watched for as long as the session is up, not
+  // only while the tree or a file tab is showing it. Chat reads the disk too
+  // now: a path an agent names is a link exactly while it is a file, and the
+  // reader who is doing nothing but reading is the one the agent is writing
+  // files for. The tree is still drawn only on its own face — the watch and
+  // the listing are two things.
   const { changes: filesChanged, listing: treeListing } = useWatchedFiles(
     service,
-    watchedDirectory,
+    sessionDirectory,
     sidebarFace === 'files'
   )
   const run = activeSessionId === undefined ? undefined : runs[activeSessionId]
@@ -1706,6 +1706,9 @@ export function Shell({
   const pathLinks = usePathLinks({
     service,
     directory: sessionDirectory,
+    // What takes an answer back: the watcher's count, which is why the watch
+    // above is not conditional on the file tree being up.
+    changes: filesChanged,
     open: openFromMessage,
     keep: keepInPanel
   })

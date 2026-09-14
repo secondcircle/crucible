@@ -651,6 +651,17 @@ describe('a click on a path in a message', () => {
     expect(panel.state(SESSION)?.tabs[0]).toMatchObject({ kind: 'source', line: 7 })
   })
 
+  // The mark belongs to the click, not to the tab: a later click that names no
+  // line — from a message or from the file tree — is not a click on line 42.
+  it('takes the mark off when the next click names no line', async () => {
+    const path = file('port.ts')
+    await panel.open(SESSION, workspace, path, { keep: true, view: { kind: 'source', line: 42 } })
+
+    await panel.open(SESSION, workspace, path, { keep: true, view: SOURCE })
+
+    expect(panel.state(SESSION)?.tabs[0]).not.toHaveProperty('line')
+  })
+
   // Nothing numbers the lines of a rendered document, so the line is what
   // brings a rendered tab to source.
   it('brings a rendered tab to source when a line is named', async () => {

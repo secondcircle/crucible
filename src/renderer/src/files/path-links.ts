@@ -7,9 +7,24 @@ import { namedPath, type NamedPath } from './named-path'
 // path is text until the disk has answered for it, so nothing an agent writes
 // becomes a control on its own say-so.
 //
-// The answers are cached by directory and path together: the same relative
-// path names another file in another worktree, and a session switch must not
+// The answers are held by directory and path together: the same relative path
+// names another file in another worktree, and a session switch must not
 // inherit the answer given for the session before it.
+//
+// And they are held only until the disk moves. "Is this a file" is not a fact
+// about a path, it is a fact about the directory right now, and the agent
+// under this very transcript writes and deletes files as its ordinary work: it
+// says it will write `notes/plan.md`, writes it, and says it wrote it. An
+// answer that outlived the write would leave the second mention dead text for
+// the life of the window, and an answer that outlived a delete would leave a
+// chip whose click fails. So every change under the directory retires the lot.
+//
+// What that reaches is what main's watcher watches: the session's directory,
+// which is where the agent's own writes land. An absolute path somewhere else
+// on disk — an installed document, another checkout — has no watcher of its
+// own and is retired along with the rest whenever the session's directory
+// moves. Watching every folder an agent can name is the alternative, and it is
+// not worth a case nobody has hit.
 
 // What one click opens in the context panel: a file, in the view the click
 // asked for, or a local address. The file tree and a message both click, and
@@ -48,6 +63,7 @@ export const PathLinksContext = createContext<PathLinks>(NONE)
 export function usePathLinks({
   service,
   directory,
+  changes,
   open,
   keep
 }: {
@@ -55,6 +71,11 @@ export function usePathLinks({
   // The session's working directory, worktree included. Without one there is
   // nothing to resolve a relative path against, so nothing is clickable.
   readonly directory: string | undefined
+  // How many times something under that directory has changed, as main's
+  // watcher counts it. Every increment retires the answers taken before it;
+  // the caller owes a watch that runs while chat is being read, not only while
+  // the file tree is.
+  readonly changes: number
   readonly open: (target: ClickTarget) => void
   readonly keep: (target: ClickTarget) => void
 }): PathLinks {
@@ -64,37 +85,69 @@ export function usePathLinks({
   const [answers, setAnswers] = useState<ReadonlyMap<string, boolean>>(new Map())
   const waiting = useRef(new Set<string>())
   const scheduled = useRef(false)
+  // Which disk the answers were taken from: the directory, and how many times
+  // it has changed. A path named by two sessions in two worktrees is two
+  // questions, and a path named before a write and after it is two as well.
+  const stamp = `${directory ?? ''}\n${changes}`
+  // What has been asked since that stamp. Retiring this rather than `answers`
+  // is what keeps a chip from blinking back to text while it is asked again:
+  // the old answer stays on screen for the one round trip the new one takes,
+  // and every path a message names asks in that same round trip.
+  const asked = useRef<{ stamp: string; keys: Set<string> }>({ stamp, keys: new Set() })
 
   return useMemo(() => {
     const keyed = (path: string): string => `${directory ?? ''}\n${path}`
 
-    function land(asked: readonly string[], files: ReadonlySet<string>): void {
+    function land(at: string, paths: readonly string[], files: ReadonlySet<string>): void {
+      // Taken from a disk that has since moved, and already asked again: what
+      // this says about those paths is no longer about anything.
+      if (asked.current.stamp !== at) return
       setAnswers((before) => {
-        const after = new Map(before)
-        for (const path of asked) after.set(keyed(path), files.has(path))
-        return after
+        // The map is replaced only where an answer actually changed: a write
+        // somewhere else under the directory retires every answer, and most of
+        // them come back the same.
+        let after: Map<string, boolean> | undefined
+        for (const path of paths) {
+          const key = keyed(path)
+          const value = files.has(path)
+          if (before.get(key) === value) continue
+          after ??= new Map(before)
+          after.set(key, value)
+        }
+        return after ?? before
       })
     }
 
     function flush(): void {
       scheduled.current = false
       if (directory === undefined) return
-      const asked = [...waiting.current]
+      const asking = [...waiting.current]
       waiting.current.clear()
-      if (asked.length === 0) return
+      if (asking.length === 0) return
+      const at = asked.current.stamp
       void service
-        .existingFiles(directory, asked)
-        .then((found) => land(asked, new Set(found)))
+        .existingFiles(directory, asking)
+        .then((found) => land(at, asking, new Set(found)))
         // A folder that could not be read answers for none of them: they stay
         // text, which is what they were.
-        .catch(() => land(asked, new Set()))
+        .catch(() => land(at, asking, new Set()))
     }
 
     return {
       opens: (path) => directory !== undefined && answers.get(keyed(path)) === true,
       check(path) {
         if (directory === undefined) return
-        if (answers.has(keyed(path)) || waiting.current.has(path)) return
+        // The first ask since the disk moved retires every answer taken from
+        // the disk before it. Here rather than during render because this runs
+        // from an effect, and every path on screen runs it: a path asks again
+        // the moment it is drawn against a disk that has changed.
+        if (asked.current.stamp !== stamp) asked.current = { stamp, keys: new Set() }
+        const key = keyed(path)
+        if (asked.current.keys.has(key)) return
+        // Recorded when it is asked rather than when it answers, so the same
+        // path drawn in ten messages costs one stat and a re-render lands in
+        // no second one.
+        asked.current.keys.add(key)
         // One message names a dozen paths, and every one of them asks in the
         // same commit: they cross together, rather than one round trip each.
         waiting.current.add(path)
@@ -105,7 +158,9 @@ export function usePathLinks({
       open,
       keep
     }
-  }, [service, directory, open, keep, answers])
+    // `stamp` belongs here as much as `answers` does: a new value is a new
+    // hook value, which is how every path on screen is told to ask again.
+  }, [service, directory, stamp, open, keep, answers])
 }
 
 /**

@@ -445,10 +445,14 @@ describe('the file the panel is showing', () => {
     expect(document.querySelector('.exhibit .src')?.textContent).toContain('changed on disk')
   })
 
-  it('watches the session’s directory while the tree or a file tab is up', async () => {
+  // One watch for the session, not one per surface that reads the disk: the
+  // tree, an open file tab and the paths an agent names in chat all follow the
+  // same directory, and the last of those is read with the column on its
+  // other face.
+  it('watches the session’s directory for as long as the session is up', async () => {
     const { workspace } = await shell()
 
-    expect(workspace.watching).toEqual([])
+    expect(workspace.watching).toEqual(['/repos/crucible'])
 
     await pressChord('e')
     expect(workspace.watching).toEqual(['/repos/crucible'])

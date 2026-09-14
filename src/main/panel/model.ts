@@ -317,11 +317,17 @@ export function createPanelModel({
       already.shownAt = now().toISOString()
       already.shownTurn = panel.turn
       if (already.kind === 'binary') already.bytes = sizeOf(resolved)
-      // A named line is the one exception: nothing numbers the lines of a
-      // rendered document, so the line the click asked for brings the tab to
-      // source to show it.
-      if (view.kind === 'source' && view.line !== undefined) {
-        already.line = view.line
+      // The line is the one exception, and it belongs to the click rather than
+      // to the tab: a click that names one marks it, a click that names none
+      // takes the last one's mark off. A file opened once at `:400` and
+      // clicked plainly after — in a message or in the tree — would otherwise
+      // keep highlighting a line nobody asked about.
+      const named = view.kind === 'source' ? view.line : undefined
+      if (named === undefined) delete already.line
+      else {
+        already.line = named
+        // Nothing numbers the lines of a rendered document, so the line the
+        // click asked for brings the tab to source to show it.
         if (already.kind === 'markdown' || already.kind === 'html') {
           already.renders = already.kind
           already.kind = 'source'
