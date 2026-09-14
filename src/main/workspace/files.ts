@@ -23,20 +23,36 @@ export async function listFiles(workspacePath: string): Promise<readonly string[
 // sees each of them. A folder outside a repository reports no changes at all,
 // which is what leaves its rows plain.
 export async function fileTree(directory: string): Promise<FileTree> {
-  const [paths, changed] = await Promise.all([listFiles(directory), gitStatus(directory)])
+  const [paths, status] = await Promise.all([listFiles(directory), gitStatus(directory)])
+  // The listing is what the disk has; git's record of a path the listing does
+  // not name is a file git still remembers and the disk has lost. Coloring
+  // follows the rows, so no folder wears a dot for a row nobody can see.
+  const listed = new Set(paths)
+  const changed = Object.fromEntries(Object.entries(status).filter(([path]) => listed.has(path)))
   return { directory, paths, changed }
 }
 
-// `-c` untracked, `-o` cached, `--exclude-standard` the ignore rules git itself
-// would apply: one command answers exactly what a person expects to see.
+// `-c` cached, `-o` untracked, `--exclude-standard` the ignore rules git itself
+// would apply: what a person expects to see. Minus `--deleted`, because the
+// index keeps a tracked file after it is gone from disk and a listing of the
+// index is not a listing of the folder: the phantom rows error on a click,
+// and an agent deleting and renaming files makes them all day.
 async function gitFiles(workspacePath: string): Promise<readonly string[] | undefined> {
-  const out = await git(['ls-files', '--cached', '--others', '--exclude-standard', '-z'], workspacePath)
+  const [out, missing] = await Promise.all([
+    git(['ls-files', '--cached', '--others', '--exclude-standard', '-z'], workspacePath),
+    git(['ls-files', '--deleted', '-z'], workspacePath)
+  ])
   // Not a repository, or no git at all: the walk answers instead.
   if (out === undefined) return undefined
-  return out
-    .split('\0')
-    .filter((path) => path !== '' && !path.startsWith(`${ALWAYS_SKIPPED}/`))
+  const gone = new Set(split(missing ?? ''))
+  return split(out)
+    .filter((path) => !gone.has(path) && !path.startsWith(`${ALWAYS_SKIPPED}/`))
     .sort()
+}
+
+/** The paths in one `-z` answer; both commands name them from the same cwd. */
+function split(out: string): readonly string[] {
+  return out.split('\0').filter((path) => path !== '')
 }
 
 // Every changed file under the directory, by the same relative path the

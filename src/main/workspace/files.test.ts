@@ -6,7 +6,7 @@
 // main thread, once per keystroke. These pin what it lists, in what order,
 // and that it still yields between reads.
 import { execFileSync } from 'node:child_process'
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -167,5 +167,28 @@ describe('what the file tree lists', () => {
     const tree = await fileTree(root)
 
     expect(tree.paths).toEqual(['kept.ts'])
+    // No row, so no color, and no dot on whatever folder held it.
+    expect(tree.changed).toEqual({})
+  })
+
+  // What an agent renaming a file leaves behind: the old path in the index and
+  // gone from disk, the new one untracked. Only the new one is a file.
+  it('shows a renamed file at its new path alone', async () => {
+    const root = tempRepo({ 'src/old-name.ts': 'body\n' })
+    renameSync(join(root, 'src/old-name.ts'), join(root, 'src/new-name.ts'))
+
+    const tree = await fileTree(root)
+
+    expect(tree.paths).toEqual(['src/new-name.ts'])
+    expect(tree.changed).toEqual({ 'src/new-name.ts': 'untracked' })
+  })
+
+  // The same listing answers the composer's `@file` search, which has no use
+  // for a file that is not there either.
+  it('keeps a deleted file out of the listing the search reads', async () => {
+    const root = tempRepo({ 'kept.ts': '', 'doomed.ts': '' })
+    rmSync(join(root, 'doomed.ts'))
+
+    await expect(listFiles(root)).resolves.toEqual(['kept.ts'])
   })
 })
