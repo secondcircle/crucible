@@ -63,7 +63,7 @@ import { bindMonitorTools, type MonitorTools } from '../../shared/agent/monitor-
 import { bindAskTool, type AskTools } from '../../shared/agent/ask-tool.ts'
 import { monitorPiTools } from './monitor-pi-tools.ts'
 import { askPiTool } from './ask-pi-tool.ts'
-import { shrinkingReadTool } from './shrink-images.ts'
+import { shrinkAttachments, shrinkingReadTool, type Shrink } from './shrink-images.ts'
 import { retentionInForce } from '../cache/retention.ts'
 import type { LogSink } from '../log/sink.ts'
 import { displaySafeMessage } from './adapter-error.ts'
@@ -270,6 +270,13 @@ export function createSdkAdapter({
   function sdk(): Promise<Sdk> {
     sdkModule ??= import('@earendil-works/pi-coding-agent')
     return sdkModule
+  }
+
+  // π's own resizer, for the pictures a person attaches: the same budget the
+  // read tool holds its images to.
+  async function resizer(): Promise<Shrink> {
+    const pi = await sdk()
+    return (bytes, mimeType, limits) => pi.resizeImage(bytes, mimeType, limits)
   }
 
   function runtime(): Promise<ModelRuntime> {
@@ -669,13 +676,12 @@ export function createSdkAdapter({
     text: string,
     images?: readonly ImageAttachment[]
   ): Promise<void> {
-    // Remembered first, because π reports its queue from inside the call
-    // below with nothing awaited in between: by the time the queue event
+    // Shrunk before anything else, so what is remembered is what is sent.
+    const attached = await shrinkAttachments(images, await resizer())
+    // Remembered before the call, because π reports its queue from inside
+    // it with nothing awaited in between: by the time the queue event
     // arrives the pictures have to be here already.
-    const forget = bound.queuedImages.add(kind, text, images)
-    const attached = images === undefined || images.length === 0
-      ? undefined
-      : images.map(toImageContent)
+    const forget = bound.queuedImages.add(kind, text, attached)
     try {
       if (kind === 'steering') await bound.session.steer(text, attached)
       else await bound.session.followUp(text, attached)
@@ -1515,7 +1521,7 @@ export function createSdkAdapter({
       }
     },
 
-    prompt(
+    async prompt(
       sessionId: SessionId,
       turnId: TurnId,
       text: string,
@@ -1524,10 +1530,8 @@ export function createSdkAdapter({
     ): Promise<void> {
       const bound = requireBound(sessionId)
       const { session } = bound
-      const options =
-        images === undefined || images.length === 0
-          ? undefined
-          : { images: images.map(toImageContent) }
+      const attached = await shrinkAttachments(images, await resizer())
+      const options = attached === undefined ? undefined : { images: attached }
       // π stores the message it was sent, so context that must reach the model
       // without entering the conversation anyone reads goes in marked and
       // comes back out through `userTextOf`.
@@ -1824,16 +1828,6 @@ function bashRunMessage(run: BashRunShare): {
 }
 
 let shared = 0
-
-// π's own image shape, built from the port's: base64 bytes and a media type,
-// which is all an attachment ever was.
-function toImageContent(image: ImageAttachment): {
-  type: 'image'
-  data: string
-  mimeType: string
-} {
-  return { type: 'image', data: image.data, mimeType: image.mimeType }
-}
 
 function preview(text: string): string {
   const line = text.replace(/\s+/g, ' ').trim()

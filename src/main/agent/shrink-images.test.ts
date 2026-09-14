@@ -3,6 +3,7 @@ import type { ToolDefinition } from '@earendil-works/pi-coding-agent'
 import {
   IMAGE_LIMITS,
   readToolWithShrunkImages,
+  shrinkAttachments,
   shrinkImage,
   type ImageContent,
   type Shrink,
@@ -72,6 +73,24 @@ describe('shrinking one image', () => {
       throw new Error('no photon')
     }
     expect(await shrinkImage(big, throwing)).toEqual({ image: big })
+  })
+})
+
+describe('shrinking what a person attached', () => {
+  it('keeps nothing as nothing', async () => {
+    expect(await shrinkAttachments(undefined, shrinker(shrunk()))).toBeUndefined()
+    expect(await shrinkAttachments([], shrinker(shrunk()))).toBeUndefined()
+  })
+
+  it('shrinks each over the budget and keeps the rest, in order', async () => {
+    const attached = [
+      { data: big.data, mimeType: 'image/png' },
+      { data: small.data, mimeType: 'image/webp' }
+    ]
+    expect(await shrinkAttachments(attached, shrinker(shrunk()))).toEqual([
+      { type: 'image', data: base64Of(1000), mimeType: 'image/jpeg' },
+      { type: 'image', data: small.data, mimeType: 'image/webp' }
+    ])
   })
 })
 

@@ -128,6 +128,24 @@ export function readToolWithShrunkImages(base: ToolDefinition, shrink: Shrink): 
   } as ToolDefinition
 }
 
+/**
+ * A message's pictures, each brought under the budget. Absent stays absent
+ * and empty stays empty, so a caller's "nothing attached" reads the same
+ * either side.
+ */
+export async function shrinkAttachments(
+  images: readonly { readonly data: string; readonly mimeType: string }[] | undefined,
+  shrink: Shrink
+): Promise<ImageContent[] | undefined> {
+  if (images === undefined || images.length === 0) return undefined
+  const shrunk: ImageContent[] = []
+  for (const image of images) {
+    const { image: after } = await shrinkImage({ type: 'image', ...image }, shrink)
+    shrunk.push(after)
+  }
+  return shrunk
+}
+
 type ReadSdk = Pick<
   typeof import('@earendil-works/pi-coding-agent'),
   'createReadToolDefinition' | 'resizeImage'
