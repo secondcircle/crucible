@@ -14,9 +14,9 @@ import type { FileTree, WorkspaceService } from '../../../shared/workspace/servi
  * the read and the watch running is in neither: not in the listing, which was
  * taken before it existed, and not in an event, which nobody was listening for
  * yet. Nothing ever replaces it. Here the watch is asked for first and the
- * listing taken only once that call has answered — the service resolves it
- * when the watch is running — so everything written before the listing is in
- * it, and everything after it arrives as a change.
+ * listing taken only once that call has answered, so everything written before
+ * the listing is in it, and everything after it arrives as a change — a watch
+ * that was still starting and dropped one says so itself, once.
  *
  * The changes are a count rather than a flag: two changes in a row are two
  * reasons to read again, and a counter cannot go stale.

@@ -41,12 +41,26 @@ interface Watch {
   readonly watcher: FSWatcher
   refs: number
   settling?: ReturnType<typeof setTimeout>
+  /** True once the watch has delivered anything, which is the only proof it runs. */
+  live: boolean
+  /** The window's own timer, dropped with the watch that opened it. */
+  starting?: ReturnType<typeof setTimeout>
 }
 
 // A build writes hundreds of files in a second, and each of them is one event.
 // Long enough to arrive as one change, short enough that watching an agent
 // work still feels live.
 const SETTLE_MS = 120
+
+// A recursive watch is not running when `watch()` returns. macOS arms it on
+// the FSEvents thread and drops everything written before it gets there; where
+// there is no recursive watch to ask the OS for, Node walks the tree itself,
+// which takes as long as the tree is deep. Measured here on a loaded machine,
+// a file written in the same millisecond is lost outright, and the watch wakes
+// tens of milliseconds later — seconds, when the machine is busy enough — with
+// nothing to say about it. Long enough to cover that, short enough that a tree
+// left stale by it corrects itself while the person is still looking at it.
+const STARTING_MS = 2000
 
 /** No more output than a repository's branches or pull requests can fill. */
 const MAX_OUTPUT = 8 * 1024 * 1024
@@ -134,6 +148,14 @@ export function createWorkspaceService({
     for (const listener of [...listeners]) listener(event)
   }
 
+  // One announcement for a burst, whether the burst is the watcher's events or
+  // the one the starting window owes: a settling timer already in flight is
+  // the same change, said twice.
+  function announce(directory: string, held: Watch): void {
+    clearTimeout(held.settling)
+    held.settling = setTimeout(() => emit({ type: 'files_changed', directory }), SETTLE_MS)
+  }
+
   const operations = createResearchOperations({
     processes: research,
     onOutput: (chunk) => emit({ type: 'research_output', chunk })
@@ -148,19 +170,16 @@ export function createWorkspaceService({
       return fileTree(directory)
     },
 
-    // Resolving means the watch is running, and that is the fact the renderer
-    // orders its listing against: a listing taken after this answered holds
-    // everything written before it, and everything written after it arrives
-    // as an event.
+    // Nothing here writes, and nothing waits: the directory is the user's, and
+    // an earlier version that touched its own timestamps to make the watcher
+    // speak moved its ctime — `utimes` does, whatever values it is handed.
     //
-    // Nothing arms it first, and nothing here writes. An earlier version
-    // touched the directory's own timestamps until the watcher answered,
-    // which wrote into the user's repository — `utimes` moves ctime whatever
-    // values it is handed — and held back every event that arrived meanwhile
-    // as the probe's own, losing exactly the changes the watch exists to
-    // catch. Measured on macOS, a file written in the same tick as `watch()`
-    // returns is delivered anyway: 54 runs, none lost, 13 ms at worst, on a
-    // fresh directory, on this repository's tree, and under load.
+    // What is left is to say so. A watch that has not delivered a single event
+    // by the time its starting window is over announces one change, because a
+    // directory nothing happened in and a directory whose events were dropped
+    // look exactly alike from here. That costs a quiet workspace one extra
+    // listing; without it a file written in the window is one the tree never
+    // hears about, and nothing re-lists after.
     async watchFiles(directory: string): Promise<void> {
       const already = watches.get(directory)
       if (already !== undefined) {
@@ -170,14 +189,22 @@ export function createWorkspaceService({
       // A folder that cannot be watched is not a folder to fail over: the tree
       // still lists and still refreshes when something else asks it to.
       const watcher = startWatch(directory, (filename) => {
-        if (insideGit(filename)) return
         const held = watches.get(directory)
         if (held === undefined) return
-        clearTimeout(held.settling)
-        held.settling = setTimeout(() => emit({ type: 'files_changed', directory }), SETTLE_MS)
+        // Anything at all proves the watch is running, .git's own churn included.
+        held.live = true
+        if (insideGit(filename)) return
+        announce(directory, held)
       })
       if (watcher === undefined) return
-      watches.set(directory, { watcher, refs: 1 })
+      const held: Watch = { watcher, refs: 1, live: false }
+      // Registered with no await before it, so a second caller finds the first
+      // watch rather than starting one of its own.
+      watches.set(directory, held)
+      held.starting = setTimeout(() => {
+        if (watches.get(directory) !== held || held.live) return
+        announce(directory, held)
+      }, STARTING_MS)
     },
 
     async unwatchFiles(directory: string): Promise<void> {
@@ -186,6 +213,7 @@ export function createWorkspaceService({
       held.refs -= 1
       if (held.refs > 0) return
       clearTimeout(held.settling)
+      clearTimeout(held.starting)
       held.watcher.close()
       watches.delete(directory)
     },
@@ -319,6 +347,7 @@ export function createWorkspaceService({
       runs.clear()
       for (const held of watches.values()) {
         clearTimeout(held.settling)
+        clearTimeout(held.starting)
         held.watcher.close()
       }
       watches.clear()
