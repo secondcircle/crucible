@@ -31,7 +31,8 @@ export const PANEL_TOOLS: readonly PanelToolDefinition[] = [
       'Reach for this tool whenever a document is pertinent to what the user is doing. Naming a path and waiting to be asked to open it leaves them with nothing to read. Show the file, then say plainly that it is in the panel.\n\n' +
       "The context panel is the user's primary display; they may not notice messages in the chat. Content shown there is what the user relies on to follow the work.\n\n" +
       "The panel's value comes from curation, not accumulation: it should reflect only what is relevant to the current conversation. Stale tabs actively obscure what matters now — close them once they have served their purpose (e.g. a plan that has been accepted).\n\n" +
-      'Ephemeral artifacts (plans, diagrams, reports) belong in a temp directory, not the project tree.',
+      'Ephemeral artifacts (plans, diagrams, reports) belong in a temp directory, not the project tree.\n\n' +
+      "An HTML document you write for the panel sits inside Crucible's dark window, so style it in Crucible's own palette rather than a default light page: background #191419, raised surfaces #241c23 with #3a2e38 borders, code blocks on #120e12, body text #e8dfe2, secondary text #9b8a94, headings and links in the accent #e07a4f (hover #f0a37c), green #7fb069 for ok, #d96a5a for errors, #d9a441 for warnings. Fonts: -apple-system, 'Segoe UI', system-ui, sans-serif for text and ui-monospace, 'SF Mono', Menlo, monospace for code; 8px corner radius. Markdown files need none of this: the panel styles them itself.",
     parameters: [
       { name: 'path', description: 'Path to an .html or .md file, or an http(s) URL, to display' },
       { name: 'title', description: 'Short human-readable tab title' }
