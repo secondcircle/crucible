@@ -411,7 +411,13 @@ function TextExhibit({
   // The tab stays open whatever a failure says: curation is the agent's.
   if (body.kind === 'failure') return <p className="exhibit-failure">{body.message}</p>
   if (tab.kind === 'source') {
-    return <SourceView text={body.text} extension={extensionOf(tab.path)} />
+    return (
+      <SourceView
+        text={body.text}
+        extension={extensionOf(tab.path)}
+        {...(tab.line === undefined ? {} : { line: tab.line })}
+      />
+    )
   }
   return (
     <div className="mdview">

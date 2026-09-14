@@ -154,6 +154,13 @@ export interface WorkspaceService {
   // session's directory, worktree included, exactly as the search does.
   fileTree(directory: string): Promise<FileTree>
 
+  // Which of these paths name a file on disk, answered in the order they were
+  // asked and leaving out everything that is not one: a folder, a path that is
+  // not there, a path that cannot be read. A relative path resolves against
+  // `directory`, the session's own, worktree included; an absolute one is read
+  // where it points. What decides whether a path an agent named is clickable.
+  existingFiles(directory: string, paths: readonly string[]): Promise<readonly string[]>
+
   // Watches a directory for entries appearing, changing and disappearing.
   // Repeated calls for one directory are the same watch; the last unwatch
   // stops it.

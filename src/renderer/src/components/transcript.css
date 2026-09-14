@@ -185,7 +185,11 @@
   margin-bottom: 2px;
 }
 
+/* A div rather than a button, so the path in its summary can be a control of
+   its own; the expand button below covers the row, so clicking anywhere on it
+   still folds the call open. */
 .toolhead {
+  position: relative;
   display: flex;
   gap: 8px;
   align-items: center;
@@ -219,6 +223,24 @@
 */
 .tool.ask.ok .toolhead {
   border-left-color: var(--warn);
+}
+
+/* The row's own target, laid over it rather than wrapped around it. It draws
+   nothing: the row it covers is what a reader sees, and the focus ring it
+   takes traces the row's own edge. */
+.toolexpand {
+  position: absolute;
+  inset: 0;
+  cursor: pointer;
+  background: none;
+  border: none;
+  border-radius: 6px;
+  padding: 0;
+}
+
+/* Above the cover, so the pointer reaches the file rather than the expand. */
+.toolhead .pathlink {
+  position: relative;
 }
 
 .toolname {

@@ -2,6 +2,7 @@ import type {
   AgentPort,
   AuthMethod,
   BashRunShare,
+  FileView,
   HistoryMatch,
   ImageAttachment,
   ModelId,
@@ -135,8 +136,13 @@ export function createIpcClient(): AgentPort {
     replyToQuestion: (sessionId: SessionId, questionId: QuestionId, reply: QuestionReply) =>
       call<void>('replyToQuestion', sessionId, questionId, reply),
 
-    openFile: (sessionId: SessionId, path: string, options: { readonly keep: boolean }) =>
-      call<TabId>('openFile', sessionId, path, options),
+    openFile: (
+      sessionId: SessionId,
+      path: string,
+      options: { readonly keep: boolean; readonly view: FileView }
+    ) => call<TabId>('openFile', sessionId, path, options),
+    openAddress: (sessionId: SessionId, address: string, options: { readonly keep: boolean }) =>
+      call<TabId>('openAddress', sessionId, address, options),
     keepTab: (sessionId: SessionId, tabId: TabId) => call<void>('keepTab', sessionId, tabId),
     setTabSource: (sessionId: SessionId, tabId: TabId, source: boolean) =>
       call<void>('setTabSource', sessionId, tabId, source),

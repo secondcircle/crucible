@@ -243,6 +243,36 @@ describe('watching a directory', () => {
   })
 })
 
+describe('which paths are files', () => {
+  it('answers for the ones that are, against the directory it was given', async () => {
+    write('a.ts')
+    write('src/deep/file.ts')
+    mkdirSync(join(folder, 'src/empty'), { recursive: true })
+
+    const found = await service.existingFiles(folder, [
+      'a.ts',
+      'src/deep/file.ts',
+      join(folder, 'a.ts'),
+      // A folder is not a file, and neither is a path that is not there.
+      'src/empty',
+      'gone.ts'
+    ])
+
+    expect(found).toEqual(['a.ts', 'src/deep/file.ts', join(folder, 'a.ts')])
+  })
+
+  it('reads a file outside the directory where it points', async () => {
+    const outside = mkdtempSync(join(tmpdir(), 'crucible-outside-'))
+    writeFileSync(join(outside, 'index.md'), '# docs')
+
+    expect(await service.existingFiles(folder, [join(outside, 'index.md')])).toEqual([
+      join(outside, 'index.md')
+    ])
+
+    rmSync(outside, { recursive: true, force: true })
+  })
+})
+
 describe('revealing a file', () => {
   it('hands the OS the file itself, resolved against the directory it is in', async () => {
     await service.revealFile(folder, 'src/deep/file.ts')

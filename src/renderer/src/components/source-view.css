@@ -16,6 +16,16 @@
   white-space: pre;
 }
 
+/* The line a `path:42` click asked for. The ground it sits on is a lift off
+   the code ground; the number is what carries at a glance. */
+.exhibit .src .ln.hl {
+  background: var(--code-mark);
+}
+
+.exhibit .src .ln.hl .n {
+  color: var(--accent);
+}
+
 .exhibit .src .n {
   flex: none;
   width: 44px;

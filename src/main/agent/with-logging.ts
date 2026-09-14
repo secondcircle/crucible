@@ -155,6 +155,9 @@ export function withLogging(shell: Shell, log: LogSink, adapter: string): Shell 
     openFile: op('openFile', (sessionId, path, options) =>
       shell.openFile(sessionId, path, options)
     ),
+    openAddress: op('openAddress', (sessionId, address, options) =>
+      shell.openAddress(sessionId, address, options)
+    ),
     keepTab: op('keepTab', (sessionId, tabId) => shell.keepTab(sessionId, tabId)),
     setTabSource: op('setTabSource', (sessionId, tabId, source) =>
       shell.setTabSource(sessionId, tabId, source)

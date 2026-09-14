@@ -9,6 +9,7 @@ import type {
   AuthMethod,
   BashRunShare,
   CachedPrefix,
+  FileView,
   HistoryMatch,
   ImageAttachment,
   MessageOrigin,
@@ -38,6 +39,7 @@ import type {
   Unsubscribe,
   WorkspaceId
 } from '../../shared/agent/port'
+import { isLocalAddress } from '../../shared/agent/local-address'
 import { displaySafeMessage } from '../agent/adapter-error'
 import type { Flavor } from '../agent/select-adapter'
 import type { CacheRecorder } from '../cache/ledger'
@@ -1497,12 +1499,13 @@ export function createShell({
       await deliverSystem(sessionId, batch, 'steering')
     },
 
-    // A click in the file tree, resolved against the session's own directory,
-    // so a worktree session opens the worktree's copy of a file.
+    // A click in the file tree, or on a path an agent named in a message,
+    // resolved against the session's own directory, so a worktree session
+    // opens the worktree's copy of a file.
     async openFile(
       sessionId: SessionId,
       path: string,
-      options: { readonly keep: boolean }
+      options: { readonly keep: boolean; readonly view: FileView }
     ): Promise<TabId> {
       const { directory } = requireSession(sessionId)
       try {
@@ -1510,6 +1513,21 @@ export function createShell({
       } catch (cause) {
         refuse(displaySafeMessage(cause, 'That file could not be opened.'))
       }
+    },
+
+    // The panel is where a local app is looked at; every other address is the
+    // OS browser's. Checked here, where the tab would actually be made, rather
+    // than trusted from the renderer that asked.
+    async openAddress(
+      sessionId: SessionId,
+      address: string,
+      options: { readonly keep: boolean }
+    ): Promise<TabId> {
+      requireSession(sessionId)
+      if (!isLocalAddress(address)) {
+        refuse('Crucible opens local addresses in the panel; the rest go to your browser.')
+      }
+      return panel.openWeb(sessionId, address, options)
     },
 
     // The double-click, landing after the click that opened the tab: that tab

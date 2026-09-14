@@ -106,6 +106,12 @@ import {
 import { faceOf, withFace, type SidebarFace, type SidebarFaces } from './sidebar/face'
 import { filtering, insideTree, toggleFolder, wholePath, type Expanded } from './files/tree'
 import { useWatchedFiles } from './files/use-files'
+import {
+  PathLinksContext,
+  targetKey,
+  usePathLinks,
+  type ClickTarget
+} from './files/path-links'
 import type { FilesFace } from './components/FileTree'
 import { escapeRung, type EscapeRung, type EscapeState } from './state/escape'
 import {
@@ -530,17 +536,17 @@ export function Shell({
   const sidebarFace = faceOf(faces, activeWorkspaceId)
   const shownTab = panel?.tabs.find((tab) => tab.id === panel.activeTabId)
   const shownFilePath = shownTab === undefined || shownTab.kind === 'url' ? undefined : shownTab.path
-  // A file tab follows the disk whichever face the column is on, so the watch
-  // outlives a switch back to the sessions.
-  const watchedDirectory =
-    sessionDirectory !== undefined && (sidebarFace === 'files' || shownFilePath !== undefined)
-      ? sessionDirectory
-      : undefined
-  const { changes: filesChanged, listing: treeListing } = useWatchedFiles(
-    service,
-    watchedDirectory,
-    sidebarFace === 'files'
-  )
+  // The session's directory is watched for as long as the session is up, not
+  // only while the tree or a file tab is showing it. Chat reads the disk too
+  // now: a path an agent names is a link exactly while it is a file, and the
+  // reader who is doing nothing but reading is the one the agent is writing
+  // files for. The tree is still drawn only on its own face — the watch and
+  // the listing are two things.
+  const {
+    changes: filesChanged,
+    epoch: filesEpoch,
+    listing: treeListing
+  } = useWatchedFiles(service, sessionDirectory, sidebarFace === 'files')
   const run = activeSessionId === undefined ? undefined : runs[activeSessionId]
   const allRuns: readonly RunRecord[] = useMemo(() => runsSnapshot?.runs ?? [], [runsSnapshot])
   // Every workspace's runs count, because the rail lists every workspace's
@@ -1622,34 +1628,36 @@ export function Shell({
     return () => document.removeEventListener('keydown', onKeyDown)
   }, [activeWorkspaceId])
 
-  // The open the last click in the tree issued, so the double-click that may
-  // follow it names the tab that click opened rather than the path. The
-  // session is kept with it: a tab id means nothing in another session's panel.
+  // The open the last click issued, so the double-click that may follow it
+  // names the tab that click opened rather than the path. The session is kept
+  // with it: a tab id means nothing in another session's panel.
   const opening = useRef<{
     readonly sessionId: SessionId
-    readonly path: string
+    readonly of: string
     readonly tab: Promise<TabId | undefined>
   }>(undefined)
 
   // Answers the tab, or nothing where the open failed and was reported: a
   // caller waiting on it has one thing to check rather than two.
   const openedInPanel = useCallback(
-    (
-      sessionId: SessionId,
-      path: string,
-      options: { readonly keep: boolean }
-    ): Promise<TabId | undefined> =>
-      port.openFile(sessionId, path, options).catch((cause: unknown) => {
+    (sessionId: SessionId, target: ClickTarget, keep: boolean): Promise<TabId | undefined> => {
+      const opened =
+        target.kind === 'file'
+          ? port.openFile(sessionId, target.path, { keep, view: target.view })
+          : port.openAddress(sessionId, target.address, { keep })
+      return opened.catch((cause: unknown) => {
         report(cause, sessionId)
         return undefined
-      }),
+      })
+    },
     [port, report]
   )
 
-  // A click in the file tree. The tab is the session's, so a window with no
-  // session has nowhere to put one and says so.
-  const openFileFromTree = useCallback(
-    (path: string, options: { readonly keep: boolean }): void => {
+  // A click in the file tree, or on a path or a local address an agent named
+  // in a message. The tab is the session's, so a window with no session has
+  // nowhere to put one and says so.
+  const openInPanel = useCallback(
+    (target: ClickTarget, options: { readonly keep: boolean }): void => {
       const sessionId = railNow.current.activeSessionId
       if (sessionId === undefined) {
         report(new Error('Open a session first — a file opens in that session’s context panel.'))
@@ -1657,7 +1665,11 @@ export function Shell({
       }
       // Remembered so the double-click that may follow keeps this very tab.
       // A double-click is a click and then a second press, never two opens.
-      opening.current = { sessionId, path, tab: openedInPanel(sessionId, path, options) }
+      opening.current = {
+        sessionId,
+        of: targetKey(target),
+        tab: openedInPanel(sessionId, target, options.keep)
+      }
     },
     [report, openedInPanel]
   )
@@ -1665,22 +1677,44 @@ export function Shell({
   // The second press of a double-click. It keeps the tab the click before it
   // opened, which is why it waits for that open rather than opening the path
   // again: one gesture, one outcome, whatever order the disk answers in.
-  const keepFileFromTree = useCallback(
-    (path: string): void => {
+  const keepInPanel = useCallback(
+    (target: ClickTarget): void => {
       const sessionId = railNow.current.activeSessionId
       // The click that came first has already said there is nowhere to put it.
       if (sessionId === undefined) return
       const clicked = opening.current
       const tab =
-        clicked?.path === path && clicked.sessionId === sessionId
+        clicked?.of === targetKey(target) && clicked.sessionId === sessionId
           ? clicked.tab
-          : openedInPanel(sessionId, path, { keep: true })
+          : openedInPanel(sessionId, target, true)
       void tab
         .then((tabId) => (tabId === undefined ? undefined : port.keepTab(sessionId, tabId)))
         .catch((cause: unknown) => report(cause, sessionId))
     },
     [port, report, openedInPanel]
   )
+
+  // A single click on a path in a message previews it, exactly as a single
+  // click in the tree does; the view it opens in is the path's own business.
+  const openFromMessage = useCallback(
+    (target: ClickTarget): void => openInPanel(target, { keep: false }),
+    [openInPanel]
+  )
+
+  // Whether a path an agent named is a file, and what a click on one does.
+  // Resolved against the session's own directory, worktree included.
+  const pathLinks = usePathLinks({
+    service,
+    directory: sessionDirectory,
+    // What takes an answer back. The epoch rather than the count of changes,
+    // because the watch follows the session on screen: while another session
+    // is being read this one's directory moves unwatched, and only the epoch
+    // says so. It is also why the watch above is not conditional on the file
+    // tree being up.
+    epoch: filesEpoch,
+    open: openFromMessage,
+    keep: keepInPanel
+  })
 
   // ⌘I, on exactly the same terms: claimed where there is an issue board to
   // open, and left to the OS where there is not.
@@ -2780,8 +2814,11 @@ export function Shell({
               [activeWorkspaceId]: toggleFolder(current[activeWorkspaceId] ?? EMPTY_FOLDERS, path)
             }))
           },
-          onOpen: openFileFromTree,
-          onKeep: keepFileFromTree,
+          // Everything the tree opens opens as source: browsing a folder is
+          // reading what is in the files.
+          onOpen: (path, options) =>
+            openInPanel({ kind: 'file', path, view: { kind: 'source' } }, options),
+          onKeep: (path) => keepInPanel({ kind: 'file', path, view: { kind: 'source' } }),
           // The whole path, which is what the panel header's copy hands over
           // for the same file.
           onCopyPath: (path) =>
@@ -2930,13 +2967,18 @@ export function Shell({
                 </button>
               </div>
             ) : (
-              <Transcript
-                items={items}
-                sessionId={session.id}
-                invocations={shownInvocations}
-                missJump={missJump}
-                shown={place !== 'maximized'}
-              />
+              // A path an agent named is clickable here and nowhere else: not
+              // in an exhibit, not in an issue's body, not in a run node's
+              // transcript, none of which is this session's chat.
+              <PathLinksContext.Provider value={pathLinks}>
+                <Transcript
+                  items={items}
+                  sessionId={session.id}
+                  invocations={shownInvocations}
+                  missJump={missJump}
+                  shown={place !== 'maximized'}
+                />
+              </PathLinksContext.Provider>
             )}
 
             {toast === undefined || toast.sessionId !== activeSessionId ? null : (

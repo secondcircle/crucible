@@ -10,6 +10,8 @@
   --code-deep: #0d0a0d;
   --user: #2c2230;
   --think-bg: #161018;
+  /* the source line a path:42 click asked for, a lift off the code ground */
+  --code-mark: #1c1520;
   --error-bg: #1d1113;
   /* what an overlay dims the window behind it to */
   --overlay: rgb(15 11 15 / 86%);

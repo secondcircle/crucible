@@ -124,6 +124,9 @@ export type PanelTab =
       // Where the tab's toggle flips to, when this file has a rendered view at
       // all. Absent means source is the only way to read it.
       readonly renders?: 'markdown' | 'html'
+      // The line a `path:42` named, 1-based and highlighted in the view.
+      // Absent when nothing named one.
+      readonly line?: number
     })
   | (PanelTabBase & {
       readonly kind: 'image'
@@ -136,6 +139,14 @@ export type PanelTab =
       readonly path: string
       readonly bytes: number
     })
+
+// How a file opens in the panel: as source — numbered, colored, on the line a
+// `path:42` named — or in the view its kind renders, which is the rendered
+// markdown or HTML `panel_show` gives and source for everything else. A line
+// belongs to source alone: nothing numbers the lines of a rendered document.
+export type FileView =
+  | { readonly kind: 'source'; readonly line?: number }
+  | { readonly kind: 'rendered' }
 
 export interface PanelState {
   /** Show order, oldest first. Never empty: an empty panel is an absent one. */
@@ -698,14 +709,23 @@ export interface AgentPort {
     reply: QuestionReply
   ): Promise<void>
 
-  // A click in the file tree. The path is the session's directory's own,
-  // relative or absolute. `keep: false` is the single click, which reuses the
-  // session's preview tab; `keep: true` opens an ordinary tab straight away,
-  // which is what Enter on a row does. Rejects display-safely when the file
-  // cannot be shown.
+  // A click in the file tree, or on a path an agent named in a message. The
+  // path is the session's directory's own, relative or absolute. `keep: false`
+  // is the single click, which reuses the session's preview tab; `keep: true`
+  // opens an ordinary tab straight away, which is what Enter on a row does.
+  // Rejects display-safely when the file cannot be shown.
   openFile(
     sessionId: SessionId,
     path: string,
+    options: { readonly keep: boolean; readonly view: FileView }
+  ): Promise<TabId>
+
+  // A click on a localhost address an agent named in a message: it opens as a
+  // web tab in the session's panel rather than in the OS browser, on the same
+  // terms a path does. Rejects display-safely for any other address.
+  openAddress(
+    sessionId: SessionId,
+    address: string,
     options: { readonly keep: boolean }
   ): Promise<TabId>
 

@@ -90,6 +90,10 @@ function stubService(): StubService {
       asked.push({ op: 'fileTree', args: [directory] })
       return { directory, paths: ['src/shared/workspace/service.ts'], changed: {} }
     },
+    async existingFiles(directory: string, paths: readonly string[]) {
+      asked.push({ op: 'existingFiles', args: [directory, paths] })
+      return paths.filter((path) => path.endsWith('.ts'))
+    },
     async watchFiles(directory: string) {
       asked.push({ op: 'watchFiles', args: [directory] })
     },
@@ -181,6 +185,24 @@ describe('what crosses the workspace channel', () => {
 
     expect(answer).toEqual({ ok: true, value: ['src/shared/workspace/service.ts'] })
     expect(stub.asked).toEqual([{ op: 'searchFiles', args: ['/repos/crucible', 'port'] }])
+  })
+
+  it('asks which paths are files, and refuses a list that is not one', async () => {
+    const answer = await request({
+      op: 'existingFiles',
+      args: ['/repos/crucible', ['CONTEXT.md', 'src/shared/workspace/service.ts']]
+    })
+
+    expect(answer).toEqual({ ok: true, value: ['src/shared/workspace/service.ts'] })
+    expect(await request({ op: 'existingFiles', args: ['/repos/crucible', [7]] })).toMatchObject({
+      ok: false
+    })
+    expect(stub.asked).toEqual([
+      {
+        op: 'existingFiles',
+        args: ['/repos/crucible', ['CONTEXT.md', 'src/shared/workspace/service.ts']]
+      }
+    ])
   })
 
   it('starts and stops a run by the id the service minted', async () => {

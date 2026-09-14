@@ -321,7 +321,8 @@ describe('a click in the tree', () => {
 
     expect(port.calls).toContainEqual({
       op: 'openFile',
-      args: ['s1', 'AGENTS.md', { keep: false }]
+      // Everything the tree opens opens as source, on no line in particular.
+      args: ['s1', 'AGENTS.md', { keep: false, view: { kind: 'source' } }]
     })
     expect(tabs()).toEqual(['AGENTS.md'])
     expect(previewTabs()).toEqual(['AGENTS.md (preview)'])
@@ -366,9 +367,9 @@ describe('a click in the tree', () => {
     // nothing of its own.
     const opens = port.calls.filter((call) => call.op === 'openFile')
     expect(opens.map((call) => call.args[2])).toEqual([
-      { keep: false },
-      { keep: false },
-      { keep: false }
+      { keep: false, view: { kind: 'source' } },
+      { keep: false, view: { kind: 'source' } },
+      { keep: false, view: { kind: 'source' } }
     ])
     expect(port.calls.filter((call) => call.op === 'keepTab')).toHaveLength(1)
   })
@@ -444,10 +445,14 @@ describe('the file the panel is showing', () => {
     expect(document.querySelector('.exhibit .src')?.textContent).toContain('changed on disk')
   })
 
-  it('watches the session’s directory while the tree or a file tab is up', async () => {
+  // One watch for the session, not one per surface that reads the disk: the
+  // tree, an open file tab and the paths an agent names in chat all follow the
+  // same directory, and the last of those is read with the column on its
+  // other face.
+  it('watches the session’s directory for as long as the session is up', async () => {
     const { workspace } = await shell()
 
-    expect(workspace.watching).toEqual([])
+    expect(workspace.watching).toEqual(['/repos/crucible'])
 
     await pressChord('e')
     expect(workspace.watching).toEqual(['/repos/crucible'])

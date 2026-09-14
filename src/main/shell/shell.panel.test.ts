@@ -138,6 +138,56 @@ describe('where the session works', () => {
   })
 })
 
+describe('a click on what an agent named in a message', () => {
+  it('opens the file on the line the path asked for, as source', async () => {
+    const sessionId = await withSession()
+    exhibit('port.ts', 'one\ntwo\nthree\n')
+
+    await shell.openFile(sessionId, 'port.ts', { keep: true, view: { kind: 'source', line: 2 } })
+
+    expect(sessionOf(await shell.snapshot(), sessionId)?.panel?.tabs[0]).toMatchObject({
+      kind: 'source',
+      line: 2
+    })
+  })
+
+  it('opens a local address as a web tab of that session', async () => {
+    const sessionId = await withSession()
+    const before = events.length
+
+    const tabId = await shell.openAddress(sessionId, 'http://127.0.0.1:5173/app', { keep: true })
+
+    expect(sessionOf(await shell.snapshot(), sessionId)?.panel?.tabs).toEqual([
+      {
+        id: tabId,
+        title: 'app',
+        kind: 'url',
+        shownAt: expect.any(String),
+        address: 'http://127.0.0.1:5173/app'
+      }
+    ])
+    expect(types().slice(before)).toEqual(['state', 'panel_shown'])
+  })
+
+  // The check is here, where the tab would be made, rather than in the
+  // renderer that asked for it.
+  it('refuses every address that is not a local one', async () => {
+    const sessionId = await withSession()
+
+    for (const address of [
+      'https://example.test/',
+      'http://localhost.example.test/',
+      'file:///etc/passwd',
+      'not an address'
+    ]) {
+      await expect(shell.openAddress(sessionId, address, { keep: true })).rejects.toThrow(
+        'Crucible opens local addresses in the panel; the rest go to your browser.'
+      )
+    }
+    expect(sessionOf(await shell.snapshot(), sessionId)?.panel).toBeUndefined()
+  })
+})
+
 describe('what the user does to a tab', () => {
   it('switches and closes through the model, and re-snapshots each time', async () => {
     const sessionId = await withSession()

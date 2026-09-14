@@ -23,6 +23,9 @@ export interface ScriptedWorkspace extends WorkspaceService {
   readonly calls: ReadonlyArray<{ readonly op: string; readonly args: readonly unknown[] }>
   /** What `searchFiles` ranks and answers from, and what the tree lists. */
   files: readonly string[]
+  // Files on disk outside the session's directory, absolute: what an agent
+  // naming an installed document points at. Not listed by the tree.
+  elsewhere: readonly string[]
   /** How git sees those files, for the tree's coloring. */
   changed: Readonly<Record<string, FileStatus>>
   /** The directories being watched right now, in the order they were asked for. */
@@ -106,6 +109,7 @@ export function createScriptedWorkspace(files: readonly string[] = []): Scripted
   const service: ScriptedWorkspace = {
     calls,
     files,
+    elsewhere: [],
     changed: {},
     started,
     openedUrls,
@@ -149,6 +153,20 @@ export function createScriptedWorkspace(files: readonly string[] = []): Scripted
     fileTree(directory: string): Promise<FileTree> {
       calls.push({ op: 'fileTree', args: [directory] })
       return Promise.resolve({ directory, paths: service.files, changed: service.changed })
+    },
+
+    existingFiles(directory: string, paths: readonly string[]): Promise<readonly string[]> {
+      calls.push({ op: 'existingFiles', args: [directory, paths] })
+      const listed = new Set(service.files)
+      const outside = new Set(service.elsewhere)
+      const prefix = `${directory}/`
+      return Promise.resolve(
+        paths.filter((path) =>
+          outside.has(path)
+            ? true
+            : listed.has(path.startsWith(prefix) ? path.slice(prefix.length) : path)
+        )
+      )
     },
 
     watchFiles(directory: string): Promise<void> {
