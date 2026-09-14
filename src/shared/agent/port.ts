@@ -700,13 +700,20 @@ export interface AgentPort {
 
   // A click in the file tree. The path is the session's directory's own,
   // relative or absolute. `keep: false` is the single click, which reuses the
-  // session's preview tab; `keep: true` is the double-click, which makes an
-  // ordinary tab of it. Rejects display-safely when the file cannot be shown.
+  // session's preview tab; `keep: true` opens an ordinary tab straight away,
+  // which is what Enter on a row does. Rejects display-safely when the file
+  // cannot be shown.
   openFile(
     sessionId: SessionId,
     path: string,
     options: { readonly keep: boolean }
   ): Promise<TabId>
+
+  // The double-click: the tab the click before it opened stops being the
+  // preview tab and stays where it is. Naming the tab rather than the path is
+  // what makes the gesture one decision — the click opens, the double-click
+  // keeps that same tab. A tab that is not the preview tab is a no-op.
+  keepTab(sessionId: SessionId, tabId: TabId): Promise<void>
 
   // The tab's source/rendered toggle. Setting `source` shows any text tab as
   // source; clearing it puts a source tab back to the view its kind renders,

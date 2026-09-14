@@ -15,6 +15,7 @@ import type {
   SessionState,
   SessionTree as Tree,
   ShellSnapshot,
+  TabId,
   ThinkingLevel,
   WorkspaceId
 } from '../../shared/agent/port'
@@ -103,7 +104,7 @@ import {
   type Marks
 } from './state/needs-you'
 import { faceOf, withFace, type SidebarFace, type SidebarFaces } from './sidebar/face'
-import { filtering, insideTree, toggleFolder, type Expanded } from './files/tree'
+import { filtering, insideTree, toggleFolder, wholePath, type Expanded } from './files/tree'
 import { useWatchedFiles } from './files/use-files'
 import type { FilesFace } from './components/FileTree'
 import { escapeRung, type EscapeRung, type EscapeState } from './state/escape'
@@ -1621,6 +1622,30 @@ export function Shell({
     return () => document.removeEventListener('keydown', onKeyDown)
   }, [activeWorkspaceId])
 
+  // The open the last click in the tree issued, so the double-click that may
+  // follow it names the tab that click opened rather than the path. The
+  // session is kept with it: a tab id means nothing in another session's panel.
+  const opening = useRef<{
+    readonly sessionId: SessionId
+    readonly path: string
+    readonly tab: Promise<TabId | undefined>
+  }>(undefined)
+
+  // Answers the tab, or nothing where the open failed and was reported: a
+  // caller waiting on it has one thing to check rather than two.
+  const openedInPanel = useCallback(
+    (
+      sessionId: SessionId,
+      path: string,
+      options: { readonly keep: boolean }
+    ): Promise<TabId | undefined> =>
+      port.openFile(sessionId, path, options).catch((cause: unknown) => {
+        report(cause, sessionId)
+        return undefined
+      }),
+    [port, report]
+  )
+
   // A click in the file tree. The tab is the session's, so a window with no
   // session has nowhere to put one and says so.
   const openFileFromTree = useCallback(
@@ -1630,11 +1655,31 @@ export function Shell({
         report(new Error('Open a session first — a file opens in that session’s context panel.'))
         return
       }
-      void port.openFile(sessionId, path, options).catch((cause: unknown) => {
-        report(cause, sessionId)
-      })
+      // Remembered so the double-click that may follow keeps this very tab.
+      // A double-click is a click and then a second press, never two opens.
+      opening.current = { sessionId, path, tab: openedInPanel(sessionId, path, options) }
     },
-    [port, report]
+    [report, openedInPanel]
+  )
+
+  // The second press of a double-click. It keeps the tab the click before it
+  // opened, which is why it waits for that open rather than opening the path
+  // again: one gesture, one outcome, whatever order the disk answers in.
+  const keepFileFromTree = useCallback(
+    (path: string): void => {
+      const sessionId = railNow.current.activeSessionId
+      // The click that came first has already said there is nowhere to put it.
+      if (sessionId === undefined) return
+      const clicked = opening.current
+      const tab =
+        clicked?.path === path && clicked.sessionId === sessionId
+          ? clicked.tab
+          : openedInPanel(sessionId, path, { keep: true })
+      void tab
+        .then((tabId) => (tabId === undefined ? undefined : port.keepTab(sessionId, tabId)))
+        .catch((cause: unknown) => report(cause, sessionId))
+    },
+    [port, report, openedInPanel]
   )
 
   // ⌘I, on exactly the same terms: claimed where there is an issue board to
@@ -2736,7 +2781,11 @@ export function Shell({
             }))
           },
           onOpen: openFileFromTree,
-          onCopyPath: (path) => void navigator.clipboard?.writeText(path).catch(report),
+          onKeep: keepFileFromTree,
+          // The whole path, which is what the panel header's copy hands over
+          // for the same file.
+          onCopyPath: (path) =>
+            void navigator.clipboard?.writeText(wholePath(sessionDirectory, path)).catch(report),
           onReveal: (path) => void service.revealFile(sessionDirectory, path).catch(report),
           onLeave: () => setFaces((current) => withFace(current, activeWorkspaceId, 'sessions'))
         }

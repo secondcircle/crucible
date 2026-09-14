@@ -137,6 +137,7 @@ export function createIpcClient(): AgentPort {
 
     openFile: (sessionId: SessionId, path: string, options: { readonly keep: boolean }) =>
       call<TabId>('openFile', sessionId, path, options),
+    keepTab: (sessionId: SessionId, tabId: TabId) => call<void>('keepTab', sessionId, tabId),
     setTabSource: (sessionId: SessionId, tabId: TabId, source: boolean) =>
       call<void>('setTabSource', sessionId, tabId, source),
     activateTab: (sessionId: SessionId, tabId: TabId) =>

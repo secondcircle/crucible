@@ -541,21 +541,50 @@ describe('the preview tab', () => {
     expect(panel.state(SESSION)?.previewTabId).toBe('third')
   })
 
-  it('is kept by a double-click on the file it is showing', async () => {
-    const path = file('second.ts')
-    await panel.open(SESSION, workspace, path, { keep: false })
-    await panel.open(SESSION, workspace, path, { keep: true })
+  // The double-click as the tree sends it: the click opens the file in the
+  // preview slot, and the press after it keeps that same tab. One decision
+  // about one tab, so the gesture has one outcome whatever the disk does.
+  it('is kept in place by the double-click that follows the click', async () => {
+    await panel.open(SESSION, workspace, file('previewed.ts'), { keep: false })
+    const tabId = await panel.open(SESSION, workspace, file('kept.ts'), { keep: false })
 
+    panel.keep(SESSION, tabId)
+
+    expect(panel.state(SESSION)?.tabs.map((tab) => tab.id)).toEqual(['kept'])
     expect(panel.state(SESSION)?.previewTabId).toBeUndefined()
-    expect(panel.state(SESSION)?.tabs).toHaveLength(1)
+    expect(saved.get(SESSION)?.previewTabId).toBeNull()
   })
 
-  it('leaves it where it is when a double-click opens another file', async () => {
+  it('is untouched by a keep aimed at any other tab', async () => {
+    panel.show(SESSION, workspace, file('plan.md'), 'the plan')
+    await panel.open(SESSION, workspace, file('previewed.ts'), { keep: false })
+
+    panel.keep(SESSION, 'plan')
+
+    expect(panel.state(SESSION)?.previewTabId).toBe('previewed')
+  })
+
+  it('is left where it is by a file opened outright, as Enter opens one', async () => {
     await panel.open(SESSION, workspace, file('previewed.ts'), { keep: false })
     await panel.open(SESSION, workspace, file('kept.ts'), { keep: true })
 
     expect(panel.state(SESSION)?.tabs.map((tab) => tab.id)).toEqual(['previewed', 'kept'])
     expect(panel.state(SESSION)?.previewTabId).toBe('previewed')
+  })
+
+  // Clicks queue behind one another, so the panel is decided by the order the
+  // user clicked in rather than the order the disk answered in. A click that
+  // fails is still one of them and must not take the rest with it.
+  it('lets the clicks behind a failed one through, in order', async () => {
+    const gone = panel.open(SESSION, workspace, 'gone.ts', { keep: false })
+    const first = panel.open(SESSION, workspace, file('first.ts'), { keep: false })
+    const second = panel.open(SESSION, workspace, file('second.ts'), { keep: false })
+
+    await expect(gone).rejects.toThrow(/File not found/)
+    await Promise.all([first, second])
+
+    expect(panel.state(SESSION)?.tabs.map((tab) => tab.id)).toEqual(['second'])
+    expect(panel.state(SESSION)?.previewTabId).toBe('second')
   })
 
   it('is never a tab the agent showed, even when the agent shows it after', async () => {

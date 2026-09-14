@@ -71,13 +71,19 @@ export type PanelChangeListener = (change: PanelChange) => void
 export interface PanelModel extends PanelTools {
   // A click in the file tree, which shows anything a folder holds rather than
   // the three kinds an agent may show. `keep: false` is the single click: it
-  // reuses the session's preview tab, in place. Answers the tab's id.
+  // reuses the session's preview tab, in place. `keep: true` opens an ordinary
+  // tab outright, which is what Enter on a row does. Answers the tab's id, and
+  // applies in the order it was called whatever the disk does.
   open(
     sessionId: SessionId,
     directory: string,
     path: string,
     options: { readonly keep: boolean }
   ): Promise<TabId>
+  // The double-click, which lands after the click that opened the tab: that
+  // tab stops being the preview tab and stays where it is. A tab that is not
+  // the session's preview tab is a no-op, so the gesture is safe to repeat.
+  keep(sessionId: SessionId, tabId: TabId): void
   // The tab's source/rendered toggle. Flipping a tab that has no rendered
   // view, or one that is already shown that way, changes nothing.
   setSource(sessionId: SessionId, tabId: TabId, source: boolean): void
@@ -144,6 +150,22 @@ export function createPanelModel({
 }): PanelModel {
   const panels = new Map<SessionId, Panel>()
   const listeners = new Set<PanelChangeListener>()
+  // One open at a time per session. `open` reads the disk to tell text from
+  // bytes before it touches the panel, so without this two clicks in quick
+  // succession apply in the order the reads answered rather than the order the
+  // user clicked, and what the panel ends up showing is a race.
+  const opening = new Map<SessionId, Promise<unknown>>()
+
+  function inTurn<T>(sessionId: SessionId, work: () => Promise<T>): Promise<T> {
+    const queued = (opening.get(sessionId) ?? Promise.resolve()).then(work, work)
+    // The queue carries order, not outcomes: a click that fails must not take
+    // the clicks behind it with it.
+    opening.set(
+      sessionId,
+      queued.catch(() => undefined)
+    )
+    return queued
+  }
 
   function notify(change: PanelChange): void {
     // A copy, so a listener that unsubscribes while being called does not
@@ -231,6 +253,59 @@ export function createPanelModel({
     return panelOf(sessionId).tabs.find((tab) => tab.id === tabId)
   }
 
+  // What a click in the tree lands on. Off the model's object and whole, so
+  // `open` can queue it: one click's disk read must not overtake the click
+  // before it.
+  async function opened(
+    sessionId: SessionId,
+    directory: string,
+    path: string,
+    { keep }: { readonly keep: boolean }
+  ): Promise<TabId> {
+    const resolved = isAbsolute(path) ? path : resolve(directory, path)
+    if (!onDisk(resolved)) throw new Error(`File not found: ${resolved}`)
+    const kind = await openedKind(resolved)
+
+    const panel = panelOf(sessionId)
+    const already = panel.tabs.find((tab) => tab.path === resolved)
+    const renders = rendersOf(resolved)
+    let shown: Tab
+    if (already !== undefined) {
+      // Landing on a tab that is open leaves how it is being shown alone: a
+      // click in the tree is not an opinion about the agent's rendered view,
+      // or about the toggle the user just used.
+      already.shownAt = now().toISOString()
+      already.shownTurn = panel.turn
+      if (already.kind === 'binary') already.bytes = sizeOf(resolved)
+      shown = already
+      // Asked for as an ordinary tab outright, the file stops being the
+      // preview wherever its tab came from.
+      if (keep && panel.previewTabId === shown.id) panel.previewTabId = null
+    } else {
+      shown = {
+        id: mintId(panel, resolved),
+        title: basename(resolved),
+        path: resolved,
+        kind,
+        shownAt: now().toISOString(),
+        shownTurn: panel.turn,
+        ...(kind === 'binary' ? { bytes: sizeOf(resolved) } : {}),
+        ...(kind === 'source' && renders !== undefined ? { renders } : {})
+      }
+      // The preview tab is one slot: the next single click puts another file
+      // in it, where the eye already is, rather than beside it.
+      const previewAt = panel.tabs.findIndex((tab) => tab.id === panel.previewTabId)
+      if (!keep && previewAt !== -1) panel.tabs.splice(previewAt, 1, shown)
+      else panel.tabs.push(shown)
+      panel.previewTabId = keep ? panel.previewTabId : shown.id
+    }
+    panel.activeTabId = shown.id
+    reseat(panel)
+    persist(sessionId, panel)
+    notify({ sessionId, shownTabId: shown.id })
+    return shown.id
+  }
+
   return {
     show(sessionId: SessionId, workspacePath: string, path: string, title: string): string {
       // A web address is a tab too: it loads live, straight off its server.
@@ -270,54 +345,21 @@ export function createPanelModel({
       return showResult(panel, shown)
     },
 
-    async open(
+    open(
       sessionId: SessionId,
       directory: string,
       path: string,
-      { keep }: { readonly keep: boolean }
+      options: { readonly keep: boolean }
     ): Promise<TabId> {
-      const resolved = isAbsolute(path) ? path : resolve(directory, path)
-      if (!onDisk(resolved)) throw new Error(`File not found: ${resolved}`)
-      const kind = await openedKind(resolved)
+      return inTurn(sessionId, () => opened(sessionId, directory, path, options))
+    },
 
+    keep(sessionId: SessionId, tabId: TabId): void {
       const panel = panelOf(sessionId)
-      const already = panel.tabs.find((tab) => tab.path === resolved)
-      const renders = rendersOf(resolved)
-      let shown: Tab
-      if (already !== undefined) {
-        // Landing on a tab that is open leaves how it is being shown alone: a
-        // click in the tree is not an opinion about the agent's rendered view,
-        // or about the toggle the user just used.
-        already.shownAt = now().toISOString()
-        already.shownTurn = panel.turn
-        if (already.kind === 'binary') already.bytes = sizeOf(resolved)
-        shown = already
-        // A double-click keeps the file it lands on, whether the click before
-        // it opened the tab or the agent did.
-        if (keep && panel.previewTabId === shown.id) panel.previewTabId = null
-      } else {
-        shown = {
-          id: mintId(panel, resolved),
-          title: basename(resolved),
-          path: resolved,
-          kind,
-          shownAt: now().toISOString(),
-          shownTurn: panel.turn,
-          ...(kind === 'binary' ? { bytes: sizeOf(resolved) } : {}),
-          ...(kind === 'source' && renders !== undefined ? { renders } : {})
-        }
-        // The preview tab is one slot: the next single click puts another file
-        // in it, where the eye already is, rather than beside it.
-        const previewAt = panel.tabs.findIndex((tab) => tab.id === panel.previewTabId)
-        if (!keep && previewAt !== -1) panel.tabs.splice(previewAt, 1, shown)
-        else panel.tabs.push(shown)
-        panel.previewTabId = keep ? panel.previewTabId : shown.id
-      }
-      panel.activeTabId = shown.id
-      reseat(panel)
+      if (panel.previewTabId !== tabId) return
+      panel.previewTabId = null
       persist(sessionId, panel)
-      notify({ sessionId, shownTabId: shown.id })
-      return shown.id
+      notify({ sessionId })
     },
 
     list(sessionId: SessionId): string {

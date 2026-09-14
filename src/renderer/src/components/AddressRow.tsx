@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import type { ShownLocation } from './exhibit-location'
 
-const COPIED_MS = 900
+/** How long a copy says so. Shared, so every copy here flashes for as long. */
+export const COPIED_MS = 900
 
 export function AddressRow({
   location,

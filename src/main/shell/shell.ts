@@ -1512,6 +1512,13 @@ export function createShell({
       }
     },
 
+    // The double-click, landing after the click that opened the tab: that tab
+    // is no longer the preview tab.
+    async keepTab(sessionId: SessionId, tabId: TabId): Promise<void> {
+      if (store.session(sessionId) === undefined) return
+      panel.keep(sessionId, tabId)
+    },
+
     async setTabSource(sessionId: SessionId, tabId: TabId, source: boolean): Promise<void> {
       if (store.session(sessionId) === undefined) return
       panel.setSource(sessionId, tabId, source)

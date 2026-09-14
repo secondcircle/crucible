@@ -280,6 +280,8 @@ async function invoke(shell: Shell, request: unknown): Promise<unknown> {
       return shell.replyToQuestion(text(0), text(1), questionReply(2))
     case 'openFile':
       return shell.openFile(text(0), text(1), keep(2))
+    case 'keepTab':
+      return shell.keepTab(text(0), text(1))
     case 'setTabSource':
       return shell.setTabSource(text(0), text(1), given[2] === true)
     case 'activateTab':

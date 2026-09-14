@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { FileTree } from '../../../shared/workspace/service'
-import { fileRows, insideTree, toggleFolder } from './tree'
+import { fileRows, insideTree, toggleFolder, wholePath } from './tree'
 
 const LISTING: FileTree = {
   directory: '/repos/crucible',
@@ -188,6 +188,16 @@ describe('where a file sits in the tree', () => {
   it('answers in the tree’s own separators for a Windows path', () => {
     expect(insideTree('C:\\repos\\crucible', 'C:\\repos\\crucible\\src\\Shell.tsx')).toBe(
       'src/Shell.tsx'
+    )
+  })
+
+  // What the row's copy hands over, which is what the panel header hands over
+  // for the same file: the whole path, spelled the way the root is.
+  it('gives back the whole path it came from', () => {
+    expect(wholePath('/repos/crucible', 'src/Shell.tsx')).toBe('/repos/crucible/src/Shell.tsx')
+    expect(wholePath('/repos/crucible/', 'AGENTS.md')).toBe('/repos/crucible/AGENTS.md')
+    expect(wholePath('C:\\repos\\crucible', 'src/Shell.tsx')).toBe(
+      'C:\\repos\\crucible\\src\\Shell.tsx'
     )
   })
 })

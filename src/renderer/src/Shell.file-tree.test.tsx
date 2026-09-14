@@ -298,9 +298,13 @@ describe('the tree', () => {
 
     await pressChord('e')
     await click(screen.getByRole('button', { name: 'Copy path of AGENTS.md' }))
+    // The copy says so where it happened, in the frame it happened.
+    expect(screen.getByRole('button', { name: 'Copied the path of AGENTS.md' })).not.toBeNull()
     await click(screen.getByRole('button', { name: 'Reveal AGENTS.md' }))
 
-    expect(copied).toEqual(['AGENTS.md'])
+    // The whole path, which is what the panel header's copy hands over for
+    // the same file.
+    expect(copied).toEqual(['/repos/crucible/AGENTS.md'])
     expect(workspace.calls).toContainEqual({
       op: 'revealFile',
       args: ['/repos/crucible', 'AGENTS.md']
@@ -342,6 +346,43 @@ describe('a click in the tree', () => {
     await click(row('package.json'))
 
     expect(tabs()).toEqual(['AGENTS.md', 'package.json'])
+    expect(previewTabs()).toEqual(['package.json (preview)'])
+  })
+
+  // What review-3 found live: the double-click used to send a second open
+  // alongside the click's, and whichever answered first decided the panel.
+  it('sends the double-click as one decision about the tab the click opened', async () => {
+    const { port } = await shell()
+
+    await pressChord('e')
+    await click(row('package.json'))
+    await doubleClick(row('AGENTS.md'))
+
+    // The preview tab was replaced in place and then kept: one tab, where the
+    // previewed file was, and no preview left over.
+    expect(tabs()).toEqual(['AGENTS.md'])
+    expect(previewTabs()).toEqual([])
+    // Three clicks, three previews: the double-click's own press opens
+    // nothing of its own.
+    const opens = port.calls.filter((call) => call.op === 'openFile')
+    expect(opens.map((call) => call.args[2])).toEqual([
+      { keep: false },
+      { keep: false },
+      { keep: false }
+    ])
+    expect(port.calls.filter((call) => call.op === 'keepTab')).toHaveLength(1)
+  })
+
+  it('opens a row outright on Enter, leaving the preview tab alone', async () => {
+    await shell()
+
+    await pressChord('e')
+    await click(row('package.json'))
+    await act(async () => {
+      fireEvent.keyDown(row('AGENTS.md'), { key: 'Enter' })
+    })
+
+    expect(tabs()).toEqual(['package.json', 'AGENTS.md'])
     expect(previewTabs()).toEqual(['package.json (preview)'])
   })
 

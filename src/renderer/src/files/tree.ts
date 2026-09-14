@@ -113,11 +113,22 @@ export function fileRows(tree: FileTree, view: TreeView): readonly FileRow[] {
  * for a file outside the directory the tree lists, which has no row.
  */
 export function insideTree(directory: string, path: string): string | undefined {
-  const root = directory.endsWith('/') || directory.endsWith('\\') ? directory.slice(0, -1) : directory
+  const root = trimmed(directory)
   if (!path.startsWith(root)) return undefined
   const rest = path.slice(root.length)
   if (rest === '' || (rest[0] !== '/' && rest[0] !== '\\')) return undefined
   return rest.slice(1).split('\\').join('/')
+}
+
+/**
+ * The whole path of a row: the tree's root and the row's own, joined the way
+ * the root is spelled. This is what a copy hands over, so the tree's copy and
+ * the panel header's copy say the same thing about the same file.
+ */
+export function wholePath(directory: string, path: string): string {
+  const root = trimmed(directory)
+  const separator = root.includes('\\') && !root.includes('/') ? '\\' : '/'
+  return `${root}${separator}${path.split('/').join(separator)}`
 }
 
 /** Opens a closed folder and closes an open one. */
@@ -125,6 +136,11 @@ export function toggleFolder(expanded: Expanded, path: string): Expanded {
   const next = new Set(expanded)
   if (!next.delete(path)) next.add(path)
   return next
+}
+
+/** A root without its trailing separator, so joining one never doubles it. */
+function trimmed(directory: string): string {
+  return directory.endsWith('/') || directory.endsWith('\\') ? directory.slice(0, -1) : directory
 }
 
 function build(paths: readonly string[]): Folder {

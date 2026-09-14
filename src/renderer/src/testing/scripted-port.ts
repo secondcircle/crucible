@@ -856,6 +856,15 @@ export function createScriptedPort(initial: Partial<ShellSnapshot> = {}): Script
       return Promise.resolve(opened.id)
     },
 
+    keepTab(sessionId: SessionId, tabId: TabId): Promise<void> {
+      calls.push({ op: 'keepTab', args: [sessionId, tabId] })
+      const panel = panelOf(sessionId)
+      if (panel === undefined || panel.previewTabId !== tabId) return Promise.resolve()
+      setPanel(sessionId, panel.tabs, panel.activeTabId, undefined)
+      emitState()
+      return Promise.resolve()
+    },
+
     exhibit(sessionId: SessionId, tabId: TabId): Promise<{ readonly body: string }> {
       calls.push({ op: 'exhibit', args: [sessionId, tabId] })
       if (port.exhibitRefusal !== undefined) {
