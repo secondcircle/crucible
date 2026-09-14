@@ -63,6 +63,7 @@ import { bindMonitorTools, type MonitorTools } from '../../shared/agent/monitor-
 import { bindAskTool, type AskTools } from '../../shared/agent/ask-tool.ts'
 import { monitorPiTools } from './monitor-pi-tools.ts'
 import { askPiTool } from './ask-pi-tool.ts'
+import { shrinkingReadTool } from './shrink-images.ts'
 import { retentionInForce } from '../cache/retention.ts'
 import type { LogSink } from '../log/sink.ts'
 import { displaySafeMessage } from './adapter-error.ts'
@@ -527,6 +528,8 @@ export function createSdkAdapter({
       resourceLoader,
       modelRuntime: await runtime(),
       customTools: [
+        // Named `read`, so it stands in for π's builtin.
+        shrinkingReadTool(pi, workspacePath),
         ...panelCustomTools(sessionId, workspacePath),
         ...runCustomTools(sessionId, workspacePath),
         ...monitorCustomTools(sessionId, workspacePath),

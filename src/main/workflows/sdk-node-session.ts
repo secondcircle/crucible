@@ -7,6 +7,7 @@ import type { CacheMissFacts, TranscriptItem, Unsubscribe } from '../../shared/a
 // Spelled with extensions so plain Node can load this module too.
 import { composeSystemPrompt } from '../agent/system-prompt.ts'
 import { monitorPiTools } from '../agent/monitor-pi-tools.ts'
+import { shrinkingReadTool } from '../agent/shrink-images.ts'
 import {
   scanCacheMisses,
   type CacheMissTrackerOptions,
@@ -71,6 +72,9 @@ export function createSdkNodeSessionFactory({
       const thinkingLevel = (match[3] ?? 'medium') as 'low' | 'medium' | 'high'
 
       const customTools: ToolDefinition[] = [
+        // Named `read`, so it stands in for π's builtin — and only where the
+        // node's list names one, since every custom tool joins the allowlist.
+        ...(request.tools.includes('read') ? [shrinkingReadTool(pi, request.cwd)] : []),
         nodeTool(
           'complete_node',
           'Complete Node',
