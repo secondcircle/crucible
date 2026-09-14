@@ -29,6 +29,9 @@ const INSTALLED = '/Applications/Crucible.app/Contents/Resources/docs/index.md'
 /** The directory `oneSession()` puts the session in. */
 const WHERE = '/repos/crucible'
 
+/** A second session's worktree, so switching sessions moves the watch. */
+const OTHER = '/repos/crucible/.crucible/worktrees/run-x'
+
 async function shell(
   snapshot: Partial<ShellSnapshot> = oneSession()
 ): Promise<{ port: ScriptedPort; workspace: ScriptedWorkspace }> {
@@ -49,6 +52,14 @@ async function said(port: ScriptedPort, markdown: string): Promise<void> {
   await act(async () => {
     port.text('s1', markdown)
     port.endTurn('s1')
+  })
+  await settled()
+}
+
+/** The session on screen, as clicking one in the sidebar makes it. */
+async function shown(port: ScriptedPort, sessionId: string): Promise<void> {
+  await act(async () => {
+    await port.activateSession(sessionId)
   })
   await settled()
 }
@@ -311,6 +322,73 @@ describe('a path the disk has answered for before', () => {
       { op: 'existingFiles', args: [WHERE, ['CONTEXT.md', 'package.json', 'Makefile']] }
     ])
     expect(link('CONTEXT.md').tagName).toBe('BUTTON')
+  })
+})
+
+// The watch follows the session on screen, and the user reads one session
+// while another works: a turn in the session not being shown writes and
+// deletes files nothing is counting. So the answers are held against an epoch
+// that only ever goes forward — a watch that ends moves it as surely as a
+// change does — rather than against a directory and a count that stands still
+// while that directory is unwatched and so returns to the value the stale
+// answers were taken under.
+describe('a path answered for before the session on screen changed', () => {
+  /** Two sessions in one workspace: s1 in the checkout, s2 in a worktree. */
+  async function two(): Promise<{ port: ScriptedPort; workspace: ScriptedWorkspace }> {
+    const one = oneSession()
+    return await shell({
+      ...one,
+      sessions: [
+        ...one.sessions,
+        {
+          id: 's2',
+          workspaceId: 'w1',
+          createdAt: '2026-08-19T15:20:00.000Z',
+          title: 'two',
+          working: false,
+          fresh: false,
+          worktree: { path: OTHER }
+        }
+      ]
+    })
+  }
+
+  it('becomes a link once the file is there', async () => {
+    const { port, workspace } = await two()
+
+    await said(port, 'I will put the plan in `notes/plan.md`.')
+    expect(screen.getByText('notes/plan.md').tagName).toBe('CODE')
+
+    await shown(port, 's2')
+    expect(workspace.watching.at(-1)).toBe(OTHER)
+
+    // s1's turn runs on while s1 is not the session being shown, so nothing
+    // counts this change.
+    await changed(workspace, [...FILES, 'notes/plan.md'])
+
+    await shown(port, 's1')
+    await said(port, 'Written: `notes/plan.md`.')
+
+    expect(screen.getAllByText('notes/plan.md').map((named) => named.tagName)).toEqual([
+      'BUTTON',
+      'BUTTON'
+    ])
+  })
+
+  it('stops being one once the file is gone', async () => {
+    const { port, workspace } = await two()
+
+    await said(port, 'The glossary is `CONTEXT.md`.')
+    expect(link('CONTEXT.md').tagName).toBe('BUTTON')
+
+    await shown(port, 's2')
+    await changed(
+      workspace,
+      FILES.filter((path) => path !== 'CONTEXT.md')
+    )
+    await shown(port, 's1')
+
+    expect(screen.getByText('CONTEXT.md').tagName).toBe('CODE')
   })
 })
 

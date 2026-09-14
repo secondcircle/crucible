@@ -11,18 +11,27 @@ import { namedPath, type NamedPath } from './named-path'
 // names another file in another worktree, and a session switch must not
 // inherit the answer given for the session before it.
 //
-// And they are held only until the disk moves. "Is this a file" is not a fact
-// about a path, it is a fact about the directory right now, and the agent
-// under this very transcript writes and deletes files as its ordinary work: it
-// says it will write `notes/plan.md`, writes it, and says it wrote it. An
-// answer that outlived the write would leave the second mention dead text for
-// the life of the window, and an answer that outlived a delete would leave a
-// chip whose click fails. So every change under the directory retires the lot.
+// And they are held only until the disk may have moved. "Is this a file" is
+// not a fact about a path, it is a fact about the directory right now, and the
+// agent under this very transcript writes and deletes files as its ordinary
+// work: it says it will write `notes/plan.md`, writes it, and says it wrote
+// it. An answer that outlived the write would leave the second mention dead
+// text for the life of the window, and an answer that outlived a delete would
+// leave a chip whose click fails. So every change under the directory retires
+// the lot.
 //
-// What that reaches is what main's watcher watches: the session's directory,
-// which is where the agent's own writes land. An absolute path somewhere else
-// on disk — an installed document, another checkout — has no watcher of its
-// own and is retired along with the rest whenever the session's directory
+// "May have moved" rather than "moved", because the watch follows the session
+// on screen and the user reads another session while this one works. What the
+// answers are held against is therefore an epoch that only ever goes forward:
+// it counts the changes the watcher saw and every watch that ended, since a
+// directory nobody was watching can have moved without anyone counting it. A
+// number that could return to a value it already had could not say that, and
+// answers taken under it would come back after a switch away and back.
+//
+// What the watch reaches is what main's watcher watches: the session's
+// directory, which is where the agent's own writes land. An absolute path
+// somewhere else on disk — an installed document, another checkout — has no
+// watcher of its own and is retired along with the rest whenever the epoch
 // moves. Watching every folder an agent can name is the alternative, and it is
 // not worth a case nobody has hit.
 
@@ -63,7 +72,7 @@ export const PathLinksContext = createContext<PathLinks>(NONE)
 export function usePathLinks({
   service,
   directory,
-  changes,
+  epoch,
   open,
   keep
 }: {
@@ -71,11 +80,13 @@ export function usePathLinks({
   // The session's working directory, worktree included. Without one there is
   // nothing to resolve a relative path against, so nothing is clickable.
   readonly directory: string | undefined
-  // How many times something under that directory has changed, as main's
-  // watcher counts it. Every increment retires the answers taken before it;
-  // the caller owes a watch that runs while chat is being read, not only while
-  // the file tree is.
-  readonly changes: number
+  // When the answers are being taken: a number that goes up whenever the disk
+  // under the watch may have moved, which is every change the watcher
+  // announces and every end of the watch itself. Every increment retires the
+  // answers taken before it. The caller owes a watch that runs while chat is
+  // being read, not only while the file tree is, and a number that never goes
+  // back — `useWatchedFiles` gives both.
+  readonly epoch: number
   readonly open: (target: ClickTarget) => void
   readonly keep: (target: ClickTarget) => void
 }): PathLinks {
@@ -85,10 +96,13 @@ export function usePathLinks({
   const [answers, setAnswers] = useState<ReadonlyMap<string, boolean>>(new Map())
   const waiting = useRef(new Set<string>())
   const scheduled = useRef(false)
-  // Which disk the answers were taken from: the directory, and how many times
-  // it has changed. A path named by two sessions in two worktrees is two
-  // questions, and a path named before a write and after it is two as well.
-  const stamp = `${directory ?? ''}\n${changes}`
+  // When the answers were taken. The directory is no part of this: which disk
+  // an answer is about lives in its key, and this says only how long ago it
+  // was asked. Mixing the two would make a stamp that can come back — a count
+  // of changes stands still for a directory nobody is watching, so the pair
+  // remade after a session switch is the pair the stale answers were taken
+  // under, and a stamp that comes back hands those answers back.
+  const stamp = String(epoch)
   // What has been asked since that stamp. Retiring this rather than `answers`
   // is what keeps a chip from blinking back to text while it is asked again:
   // the old answer stays on screen for the one round trip the new one takes,

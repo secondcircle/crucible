@@ -542,11 +542,11 @@ export function Shell({
   // reader who is doing nothing but reading is the one the agent is writing
   // files for. The tree is still drawn only on its own face — the watch and
   // the listing are two things.
-  const { changes: filesChanged, listing: treeListing } = useWatchedFiles(
-    service,
-    sessionDirectory,
-    sidebarFace === 'files'
-  )
+  const {
+    changes: filesChanged,
+    epoch: filesEpoch,
+    listing: treeListing
+  } = useWatchedFiles(service, sessionDirectory, sidebarFace === 'files')
   const run = activeSessionId === undefined ? undefined : runs[activeSessionId]
   const allRuns: readonly RunRecord[] = useMemo(() => runsSnapshot?.runs ?? [], [runsSnapshot])
   // Every workspace's runs count, because the rail lists every workspace's
@@ -1706,9 +1706,12 @@ export function Shell({
   const pathLinks = usePathLinks({
     service,
     directory: sessionDirectory,
-    // What takes an answer back: the watcher's count, which is why the watch
-    // above is not conditional on the file tree being up.
-    changes: filesChanged,
+    // What takes an answer back. The epoch rather than the count of changes,
+    // because the watch follows the session on screen: while another session
+    // is being read this one's directory moves unwatched, and only the epoch
+    // says so. It is also why the watch above is not conditional on the file
+    // tree being up.
+    epoch: filesEpoch,
     open: openFromMessage,
     keep: keepInPanel
   })
