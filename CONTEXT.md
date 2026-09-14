@@ -159,6 +159,21 @@ address — keyed by path or URL so re-showing the same one refreshes it in
 place. Per-session, like the panel itself.
 _Avoid_: pane, exhibit slot, window.
 
+**File tree**:
+The sidebar column's second face: the folder tree of the active session's
+working directory, swapped in place of the workspace and session list by ⌘E
+and swapped back the same way. Read-only, filtered by typing, colored by git
+status; a click opens a file in the context panel.
+_Avoid_: explorer, file browser, file viewer (that is what the tree plus
+the tab together do, not the tree's name), files panel.
+
+**Preview tab**:
+The one context panel tab a single click in the file tree reuses: the next
+single click replaces its file, a double-click keeps it as an ordinary tab.
+At most one per session, italic in the tab strip, and never a tab the agent
+showed.
+_Avoid_: temporary tab, transient tab, peek.
+
 **Issue board**:
 The workspace-scoped view of the issues you could pick up in that repository,
 read beside a pane showing one of them in full, and the place work on an issue
