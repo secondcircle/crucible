@@ -86,6 +86,19 @@ function stubService(): StubService {
       if (query === 'refuse me') throw new Error('That folder could not be read.')
       return ['src/shared/workspace/service.ts']
     },
+    async fileTree(directory: string) {
+      asked.push({ op: 'fileTree', args: [directory] })
+      return { directory, paths: ['src/shared/workspace/service.ts'], changed: {} }
+    },
+    async watchFiles(directory: string) {
+      asked.push({ op: 'watchFiles', args: [directory] })
+    },
+    async unwatchFiles(directory: string) {
+      asked.push({ op: 'unwatchFiles', args: [directory] })
+    },
+    async revealFile(directory: string, path: string) {
+      asked.push({ op: 'revealFile', args: [directory, path] })
+    },
     async isGitWorkspace(workspacePath: string) {
       asked.push({ op: 'isGitWorkspace', args: [workspacePath] })
       return workspacePath !== '/tmp/not-a-repo'

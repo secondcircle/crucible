@@ -24,6 +24,7 @@ let service: RealWorkspaceService
 let events: WorkspaceEvent[]
 /** Every link the service asked the OS to open, which is all it may do with one. */
 let opened: string[]
+let revealed: string[]
 
 function write(path: string, content = 'x'): void {
   const full = join(folder, path)
@@ -63,7 +64,10 @@ function worktreeScript(body: string, { executable = true } = {}): void {
 
 /** Everything that happened to a run, once it is over. */
 function outcome(runId: string): { output: string; ended: boolean; exitCode?: number } {
-  const mine = events.filter((event) => event.type !== 'research_output' && event.runId === runId)
+  const mine = events.filter(
+    (event) =>
+      (event.type === 'run_output' || event.type === 'run_ended') && event.runId === runId
+  )
   const ended = mine.find((event) => event.type === 'run_ended')
   return {
     output: mine
@@ -88,7 +92,11 @@ async function until(done: () => boolean, within = 5000): Promise<void> {
 beforeEach(() => {
   folder = mkdtempSync(join(tmpdir(), 'crucible-workspace-'))
   opened = []
-  service = createWorkspaceService({ openExternal: (url) => opened.push(url) })
+  revealed = []
+  service = createWorkspaceService({
+    openExternal: (url) => opened.push(url),
+    revealItem: (path) => revealed.push(path)
+  })
   events = []
   service.onEvent((event) => events.push(event))
 })
@@ -152,6 +160,75 @@ describe('file search outside git', () => {
       'deep.ts',
       'src/deep/nested/file.ts'
     ])
+  })
+})
+
+describe('watching a directory', () => {
+  it('announces one change for a burst of writes, and names the directory', async () => {
+    write('src/a.ts')
+    await service.watchFiles(folder)
+
+    write('src/b.ts')
+    write('src/c.ts')
+    // A generous budget: how fast the platform's watcher wakes is its own
+    // business, and a loaded machine can take seconds over it.
+    await until(() => events.some((event) => event.type === 'files_changed'), 20_000)
+    // The settling window is what makes a build one announcement rather than
+    // hundreds; anything later would be a second burst.
+    await new Promise((resolve) => setTimeout(resolve, 250))
+
+    expect(events.filter((event) => event.type === 'files_changed')).toEqual([
+      { type: 'files_changed', directory: folder }
+    ])
+  })
+
+  it('stops announcing once the last watcher of that directory lets go', async () => {
+    // A folder with something in it, watched after it settled: on macOS a
+    // recursive watch of a directory created in the same breath can miss the
+    // writes that follow, and a workspace is never that young.
+    write('already-here.ts')
+    await service.watchFiles(folder)
+    await service.watchFiles(folder)
+
+    await service.unwatchFiles(folder)
+    write('still-watched.ts')
+    await until(() => events.some((event) => event.type === 'files_changed'), 20_000)
+
+    // One write can wake the platform's watcher more than once; the trailing
+    // announcements are let through before the watch is dropped, so what the
+    // assertion sees is the drop and not a straggler.
+    await new Promise((resolve) => setTimeout(resolve, 400))
+    events.length = 0
+    await service.unwatchFiles(folder)
+    write('no-longer.ts')
+    await new Promise((resolve) => setTimeout(resolve, 400))
+
+    expect(events).toEqual([])
+  })
+
+  it('is unmoved by what git does to its own directory', async () => {
+    gitInit()
+    await service.watchFiles(folder)
+
+    // A command that only touches .git: an index lock, a ref, a log line.
+    execFileSync('git', ['config', 'user.name', 'Nobody'], { cwd: folder })
+    await new Promise((resolve) => setTimeout(resolve, 300))
+
+    expect(events).toEqual([])
+  })
+})
+
+describe('revealing a file', () => {
+  it('hands the OS the file itself, resolved against the directory it is in', async () => {
+    await service.revealFile(folder, 'src/deep/file.ts')
+
+    expect(revealed).toEqual([join(folder, 'src/deep/file.ts')])
+  })
+
+  it('takes an absolute path as it stands', async () => {
+    await service.revealFile(folder, join(folder, 'a.ts'))
+
+    expect(revealed).toEqual([join(folder, 'a.ts')])
   })
 })
 

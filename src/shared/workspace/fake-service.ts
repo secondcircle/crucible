@@ -7,6 +7,8 @@ import {
   type ResearchStatus
 } from './research'
 import type {
+  FileStatus,
+  FileTree,
   IssueBoardAnswer,
   RunId,
   Unsubscribe,
@@ -22,8 +24,15 @@ import type {
 // Enough real-looking depth that the popover's filename-bright,
 // directory-dim grammar is exercisable.
 export const CANNED_FILES: readonly string[] = [
+  '.gitignore',
   'AGENTS.md',
   'CONTEXT.md',
+  // A picture and a file that is not text, so the panel's own answers to both
+  // are drivable without a folder being read.
+  'build/icon.png',
+  'build/icon.icns',
+  'fixtures/panel/benchmark.html',
+  'fixtures/panel/build-plan.md',
   'docs/adr/0005-workspace-service-owns-os-facts.md',
   'docs/design/feature-inventory.md',
   'docs/design/mock-a-ember.html',
@@ -42,6 +51,14 @@ export const CANNED_FILES: readonly string[] = [
   'src/shared/agent/port.ts',
   'src/shared/workspace/service.ts'
 ]
+
+// Enough of each state to drive the tree's coloring: a modified file, an
+// untracked one, and the folders above them wearing the dot.
+export const CANNED_FILE_STATUS: Readonly<Record<string, FileStatus>> = {
+  'CONTEXT.md': 'modified',
+  'src/renderer/src/Shell.tsx': 'modified',
+  'docs/design/feature-inventory.md': 'untracked'
+}
 
 // Hex-looking and fixed, so a flip to a worktree lands on a branch name an
 // agent-driven check can read back. Cycled, so two flips differ.
@@ -87,6 +104,8 @@ const DEFAULT_PAUSE_MS = 220
 export interface FakeWorkspaceService extends WorkspaceService {
   /** Every link the fake was asked to open, and opened nothing for. */
   readonly openedUrls: readonly string[]
+  /** Every file the fake was asked to reveal, and revealed nothing for. */
+  readonly revealed: readonly string[]
 }
 
 export function createFakeWorkspaceService({
@@ -95,6 +114,7 @@ export function createFakeWorkspaceService({
   readonly pauseMs?: number
 } = {}): FakeWorkspaceService {
   const openedUrls: string[] = []
+  const revealed: string[] = []
   const listeners = new Set<WorkspaceEventListener>()
   const running = new Map<RunId, { stop(): void }>()
   let minted = 0
@@ -157,9 +177,26 @@ export function createFakeWorkspaceService({
 
   return {
     openedUrls,
+    revealed,
 
     async searchFiles(_directory: string, query: string): Promise<readonly string[]> {
       return rankFiles(CANNED_FILES, query)
+    },
+
+    // The canned list names files this repository really has, so a click in a
+    // fake-flavor tree opens a real file in the panel.
+    async fileTree(directory: string): Promise<FileTree> {
+      return { directory, paths: CANNED_FILES, changed: CANNED_FILE_STATUS }
+    },
+
+    // Nothing on disk is watched, so the canned tree never changes under
+    // anyone.
+    async watchFiles(): Promise<void> {},
+
+    async unwatchFiles(): Promise<void> {},
+
+    async revealFile(directory: string, path: string): Promise<void> {
+      revealed.push(`${directory}/${path}`)
     },
 
     // Every canned workspace is a git one, so the chip is there to drive.

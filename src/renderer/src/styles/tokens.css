@@ -49,6 +49,13 @@
   /* a run graph edge at rest: visible against the pane, quiet beside a card */
   --edge: #4a3c47;
 
+  /* what a source view colors: keyword, string, comment, number, type */
+  --syntax-keyword: #c586c0;
+  --syntax-string: #ce9178;
+  --syntax-comment: #6a9955;
+  --syntax-number: #b5cea8;
+  --syntax-type: #4ec9b0;
+
   --font: -apple-system, 'Segoe UI', system-ui, sans-serif;
   --mono: ui-monospace, 'SF Mono', Menlo, monospace;
 

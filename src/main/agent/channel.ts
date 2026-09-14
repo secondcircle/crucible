@@ -195,6 +195,12 @@ async function invoke(shell: Shell, request: unknown): Promise<unknown> {
     return asked.summarize === true
   }
 
+  /** Anything but a true `keep` is the single click, which is the common one. */
+  function keep(position: number): { readonly keep: boolean } {
+    const asked = (given[position] ?? {}) as { keep?: unknown }
+    return { keep: asked.keep === true }
+  }
+
   switch (op) {
     case 'snapshot':
       return shell.snapshot()
@@ -272,6 +278,10 @@ async function invoke(shell: Shell, request: unknown): Promise<unknown> {
       return shell.dequeue(text(0), kind(1), text(2))
     case 'replyToQuestion':
       return shell.replyToQuestion(text(0), text(1), questionReply(2))
+    case 'openFile':
+      return shell.openFile(text(0), text(1), keep(2))
+    case 'setTabSource':
+      return shell.setTabSource(text(0), text(1), given[2] === true)
     case 'activateTab':
       return shell.activateTab(text(0), text(1))
     case 'closeTab':

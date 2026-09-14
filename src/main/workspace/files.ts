@@ -2,6 +2,7 @@ import { spawn } from 'node:child_process'
 import { readdir, readFile } from 'node:fs/promises'
 import type { Dirent } from 'node:fs'
 import { join, relative, sep } from 'node:path'
+import type { FileStatus, FileTree } from '../../shared/workspace/service'
 
 // Kept apart from the service so the walk and the ignore rules can be tested
 // against a temp folder, with no process or event stream in the way.
@@ -18,34 +19,61 @@ export async function listFiles(workspacePath: string): Promise<readonly string[
   return tracked ?? (await walk(workspacePath))
 }
 
+// What the file tree lists: the same entries the search sees, plus how git
+// sees each of them. A folder outside a repository reports no changes at all,
+// which is what leaves its rows plain.
+export async function fileTree(directory: string): Promise<FileTree> {
+  const [paths, changed] = await Promise.all([listFiles(directory), gitStatus(directory)])
+  return { directory, paths, changed }
+}
+
 // `-c` untracked, `-o` cached, `--exclude-standard` the ignore rules git itself
 // would apply: one command answers exactly what a person expects to see.
-function gitFiles(workspacePath: string): Promise<readonly string[] | undefined> {
+async function gitFiles(workspacePath: string): Promise<readonly string[] | undefined> {
+  const out = await git(['ls-files', '--cached', '--others', '--exclude-standard', '-z'], workspacePath)
+  // Not a repository, or no git at all: the walk answers instead.
+  if (out === undefined) return undefined
+  return out
+    .split('\0')
+    .filter((path) => path !== '' && !path.startsWith(`${ALWAYS_SKIPPED}/`))
+    .sort()
+}
+
+// Every changed file under the directory, by the same relative path the
+// listing uses. Porcelain paths are the repository's, so the directory's own
+// prefix comes off them and anything outside it is not this tree's business.
+async function gitStatus(directory: string): Promise<Readonly<Record<string, FileStatus>>> {
+  const prefix = await git(['rev-parse', '--show-prefix'], directory)
+  if (prefix === undefined) return {}
+  const out = await git(
+    ['status', '--porcelain', '-z', '--untracked-files=all', '--no-renames', '--', '.'],
+    directory
+  )
+  if (out === undefined) return {}
+
+  const under = prefix.trim()
+  const changed: Record<string, FileStatus> = {}
+  for (const record of out.split('\0')) {
+    // `XY path`: two status letters, a space, then the path.
+    if (record.length < 4) continue
+    const path = record.slice(3)
+    if (!path.startsWith(under)) continue
+    changed[path.slice(under.length)] = record.startsWith('?') ? 'untracked' : 'modified'
+  }
+  return changed
+}
+
+/** stdout on a clean exit; `undefined` for no git, no repository, any refusal. */
+function git(args: readonly string[], cwd: string): Promise<string | undefined> {
   return new Promise((resolve) => {
-    const git = spawn(
-      'git',
-      ['ls-files', '--cached', '--others', '--exclude-standard', '-z'],
-      { cwd: workspacePath }
-    )
+    const child = spawn('git', [...args], { cwd })
     let out = ''
-    git.stdout.setEncoding('utf8')
-    git.stdout.on('data', (chunk: string) => {
+    child.stdout.setEncoding('utf8')
+    child.stdout.on('data', (chunk: string) => {
       out += chunk
     })
-    // Not a repository, or no git at all: the walk answers instead.
-    git.on('error', () => resolve(undefined))
-    git.on('close', (code) => {
-      if (code !== 0) {
-        resolve(undefined)
-        return
-      }
-      resolve(
-        out
-          .split('\0')
-          .filter((path) => path !== '' && !path.startsWith(`${ALWAYS_SKIPPED}/`))
-          .sort()
-      )
-    })
+    child.on('error', () => resolve(undefined))
+    child.on('close', (code) => resolve(code === 0 ? out : undefined))
   })
 }
 

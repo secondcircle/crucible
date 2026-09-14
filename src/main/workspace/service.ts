@@ -1,6 +1,9 @@
 import { execFile, spawn } from 'node:child_process'
+import { watch, type FSWatcher } from 'node:fs'
+import { resolve } from 'node:path'
 import { rankFiles } from '../../shared/workspace/match'
 import type {
+  FileTree,
   IssueBoardAnswer,
   RunId,
   Unsubscribe,
@@ -16,7 +19,7 @@ import type {
 } from '../../shared/workspace/research'
 import type { CommandOutcome, CommandRunner } from './command-runner'
 import { collectIssues } from './collect-issues'
-import { listFiles } from './files'
+import { fileTree, listFiles } from './files'
 import { createResearchOperations } from './research'
 import { createResearchProcesses, type ResearchProcesses } from './research-processes'
 import { bashLocation, killTree } from '../platform/exec'
@@ -34,6 +37,17 @@ interface Run {
   readonly kill: () => void
 }
 
+interface Watch {
+  readonly watcher: FSWatcher
+  refs: number
+  settling?: ReturnType<typeof setTimeout>
+}
+
+// A build writes hundreds of files in a second, and each of them is one event.
+// Long enough to arrive as one change, short enough that watching an agent
+// work still feels live.
+const SETTLE_MS = 120
+
 /** No more output than a repository's branches or pull requests can fill. */
 const MAX_OUTPUT = 8 * 1024 * 1024
 
@@ -43,6 +57,31 @@ const COLLECTION_ENV = {
   GIT_TERMINAL_PROMPT: '0',
   GIT_OPTIONAL_LOCKS: '0',
   GH_PROMPT_DISABLED: '1'
+}
+
+// git churns its own directory constantly — an index lock per command — and
+// nothing under it is listed, so its noise is not a change to the tree.
+function insideGit(filename: string | null): boolean {
+  return filename !== null && /^\.git([/\\]|$)/.test(filename)
+}
+
+function startWatch(directory: string, changed: () => void): FSWatcher | undefined {
+  function listen(recursive: boolean): FSWatcher | undefined {
+    try {
+      const watcher = watch(directory, { recursive }, (_event, filename) => {
+        if (!insideGit(filename)) changed()
+      })
+      // A watch that dies takes itself down rather than throwing out of an
+      // event: the tree goes back to refreshing when something asks it to.
+      watcher.on('error', () => watcher.close())
+      return watcher
+    } catch {
+      return undefined
+    }
+  }
+  // Depth is the whole point, but a platform that refuses a recursive watch is
+  // better served by a shallow one than by none.
+  return listen(true) ?? listen(false)
 }
 
 export function spawnRunner(): CommandRunner {
@@ -67,11 +106,14 @@ export function spawnRunner(): CommandRunner {
 
 export function createWorkspaceService({
   openExternal,
+  revealItem,
   runner = spawnRunner(),
   research = createResearchProcesses()
 }: {
   /** The OS browser, which only main may reach. */
   readonly openExternal: (url: string) => void
+  /** The platform's file manager, likewise. */
+  readonly revealItem: (path: string) => void
   readonly runner?: CommandRunner
   // Its own process seam, not the collector's runner: the research calls turn
   // on a distinction that runner throws away, and one of them waits on a person.
@@ -79,6 +121,7 @@ export function createWorkspaceService({
 }): RealWorkspaceService {
   const listeners = new Set<WorkspaceEventListener>()
   const runs = new Map<RunId, Run>()
+  const watches = new Map<string, Watch>()
   // One collection per workspace at a time: a second caller joins the first
   // rather than starting a second `gh` stampede.
   const collectingIssues = new Map<string, Promise<IssueBoardAnswer>>()
@@ -96,6 +139,42 @@ export function createWorkspaceService({
   return {
     async searchFiles(directory: string, query: string): Promise<readonly string[]> {
       return rankFiles(await listFiles(directory), query)
+    },
+
+    fileTree(directory: string): Promise<FileTree> {
+      return fileTree(directory)
+    },
+
+    async watchFiles(directory: string): Promise<void> {
+      const already = watches.get(directory)
+      if (already !== undefined) {
+        already.refs += 1
+        return
+      }
+      // A folder that cannot be watched is not a folder to fail over: the tree
+      // still lists and still refreshes when something else asks it to.
+      const watcher = startWatch(directory, () => {
+        const live = watches.get(directory)
+        if (live === undefined) return
+        clearTimeout(live.settling)
+        live.settling = setTimeout(() => emit({ type: 'files_changed', directory }), SETTLE_MS)
+      })
+      if (watcher === undefined) return
+      watches.set(directory, { watcher, refs: 1 })
+    },
+
+    async unwatchFiles(directory: string): Promise<void> {
+      const held = watches.get(directory)
+      if (held === undefined) return
+      held.refs -= 1
+      if (held.refs > 0) return
+      clearTimeout(held.settling)
+      held.watcher.close()
+      watches.delete(directory)
+    },
+
+    async revealFile(directory: string, path: string): Promise<void> {
+      revealItem(resolve(directory, path))
     },
 
     isGitWorkspace(workspacePath: string): Promise<boolean> {
@@ -221,6 +300,11 @@ export function createWorkspaceService({
     dispose(): void {
       for (const run of runs.values()) run.kill()
       runs.clear()
+      for (const held of watches.values()) {
+        clearTimeout(held.settling)
+        held.watcher.close()
+      }
+      watches.clear()
       operations.dispose()
     }
   }

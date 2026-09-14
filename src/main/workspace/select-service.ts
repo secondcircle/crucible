@@ -15,14 +15,17 @@ export interface SelectedWorkspaceService {
 export function selectWorkspaceService(
   flavor: Flavor,
   log: LogSink,
-  // The OS browser, which only main may reach: the real service opens links
-  // with it and the fake opens nothing at all.
-  openExternal: (url: string) => void
+  // The two OS surfaces only main may reach: the browser a link opens in and
+  // the file manager a row reveals in. The fake opens neither.
+  platform: {
+    readonly openExternal: (url: string) => void
+    readonly revealItem: (path: string) => void
+  }
 ): SelectedWorkspaceService {
   log.append({ source: 'main', event: 'workspace_service_selected', service: flavor })
 
   if (flavor !== 'sdk') return { service: createFakeWorkspaceService(), dispose: () => {} }
 
-  const service = createWorkspaceService({ openExternal })
+  const service = createWorkspaceService(platform)
   return { service, dispose: () => service.dispose() }
 }

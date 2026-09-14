@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type { AgentPort, PanelState, PanelTab, SessionId, TabId } from '../../../shared/agent/port'
+import type { AgentPort, PanelState, PanelTab, SessionId } from '../../../shared/agent/port'
+import { useExhibitBody, type ExhibitBody } from '../panel/use-exhibit-body'
 import { AddressRow } from './AddressRow'
 import { guestSrc, shownLocation } from './exhibit-location'
 import { Markdown } from './Markdown'
+import { lineCount, SourceView } from './SourceView'
 import './context-panel.css'
 
 // Every tab fact comes from the snapshot and every user action goes back
@@ -60,7 +62,9 @@ export function ContextPanel({
   sessionId,
   layout,
   port,
+  changed = 0,
   onCopyLocation,
+  onReveal,
   onCollapse,
   onToggleMaximize
 }: {
@@ -68,7 +72,13 @@ export function ContextPanel({
   readonly sessionId: SessionId
   readonly layout: PanelLayout
   readonly port: AgentPort
+  // How many times the session's directory has changed on disk. The shown
+  // file follows it: a count rather than a flag, so two changes in a row are
+  // two re-reads.
+  readonly changed?: number
   readonly onCopyLocation: (location: string) => void
+  /** The platform's file manager. Absent where there is none to reach. */
+  readonly onReveal?: (path: string) => void
   readonly onCollapse: () => void
   readonly onToggleMaximize: () => void
 }): React.JSX.Element {
@@ -97,16 +107,40 @@ export function ContextPanel({
 
   function refresh(): void {
     if (active === undefined || mount === undefined) return
-    if (active.kind === 'markdown') {
+    if (readsText(active)) {
       setHeld({ ...live, of: mount, refreshes: live.refreshes + 1 })
       return
     }
+    reloadGuest()
+  }
+
+  function reloadGuest(): void {
     const shown = viewRef.current
     // The guest is reloaded and never remounted: a remount would load the
     // address the agent showed rather than the page the guest is showing.
     // Absent under jsdom, where <webview> is an unknown element.
     if (shown !== null && typeof shown.reload === 'function') shown.reload()
   }
+
+  // The file on screen follows the disk: a change under the session's
+  // directory counts as a read of its own, which is what re-fetches the text.
+  // A web address does not follow it — nothing about a folder changing says a
+  // server's page did.
+  const reads = live.refreshes + changed
+  const guestFollows = active !== undefined && (active.kind === 'html' || active.kind === 'image')
+  const reloaded = useRef(changed)
+  useEffect(() => {
+    if (reloaded.current === changed) return
+    reloaded.current = changed
+    if (guestFollows) reloadGuest()
+  })
+
+  const body = useExhibitBody(
+    port,
+    active === undefined || mount === undefined || !readsText(active)
+      ? undefined
+      : { sessionId, tabId: active.id, of: mount, at: reads }
+  )
 
   function navigate(url: string): void {
     if (mount === undefined) return
@@ -181,9 +215,14 @@ export function ContextPanel({
             // own and one cannot sit inside the other.
             <div
               key={tab.id}
-              className={tab.id === panel.activeTabId ? 'tab active' : 'tab'}
+              className={`tab${tab.id === panel.activeTabId ? ' active' : ''}${
+                tab.id === panel.previewTabId ? ' preview' : ''
+              }`}
               role="tab"
               tabIndex={0}
+              // The italic is the eye's version of being the preview tab; the
+              // name is everybody else's.
+              aria-label={tab.id === panel.previewTabId ? `${tab.title} (preview)` : undefined}
               aria-selected={tab.id === panel.activeTabId}
               onClick={() => void port.activateTab(sessionId, tab.id)}
               onKeyDown={(pressed) => {
@@ -192,9 +231,7 @@ export function ContextPanel({
                 void port.activateTab(sessionId, tab.id)
               }}
             >
-              <span className="kind">
-                {tab.kind === 'html' ? 'html' : tab.kind === 'url' ? 'web' : 'md'}
-              </span>
+              <span className="kind">{kindLabel(tab)}</span>
               <span className="ttitle">{tab.title}</span>
               <button
                 className="x"
@@ -229,7 +266,15 @@ export function ContextPanel({
         {active === undefined ? null : (
           <AddressRow
             location={shownLocation(active, live.navigated)}
+            lines={body?.kind === 'body' ? lineCount(body.text) : undefined}
+            source={sourceToggle(active)}
             onCopy={onCopyLocation}
+            onReveal={
+              active.kind === 'url' || onReveal === undefined
+                ? undefined
+                : () => onReveal(active.path)
+            }
+            onToggleSource={(source) => void port.setTabSource(sessionId, active.id, source)}
             onRefresh={refresh}
           />
         )}
@@ -237,8 +282,7 @@ export function ContextPanel({
         <Exhibit
           sessionId={sessionId}
           tab={active}
-          port={port}
-          refreshes={live.refreshes}
+          body={body}
           viewRef={viewRef}
           onNavigate={navigate}
         />
@@ -265,15 +309,14 @@ export function PanelEdge({
 function Exhibit({
   sessionId,
   tab,
-  port,
-  refreshes,
+  body,
   viewRef,
   onNavigate
 }: {
   readonly sessionId: SessionId
   readonly tab: PanelTab | undefined
-  readonly port: AgentPort
-  readonly refreshes: number
+  /** The text, for the tabs that are read as text. Absent until it lands. */
+  readonly body: ExhibitBody | undefined
   readonly viewRef: React.RefObject<ExhibitWebview | null>
   readonly onNavigate: (url: string) => void
 }): React.JSX.Element {
@@ -302,8 +345,10 @@ function Exhibit({
 
   return (
     <div className="exhibit">
-      {tab === undefined ? null : tab.kind === 'markdown' ? (
-        <MarkdownExhibit sessionId={sessionId} tab={tab} port={port} refreshes={refreshes} />
+      {tab === undefined ? null : tab.kind === 'binary' ? (
+        <BinaryExhibit bytes={tab.bytes} />
+      ) : readsText(tab) ? (
+        <TextExhibit tab={tab} body={body} />
       ) : (
         // A guest webContents of its own: full browser fidelity — scripts run,
         // the network loads, links navigate in place — and no preload, no
@@ -323,71 +368,77 @@ function Exhibit({
   )
 }
 
-interface ExhibitRead {
-  readonly of: ExhibitMount
-  readonly at: number
-  readonly answer:
-    | { readonly kind: 'body'; readonly markdown: string }
-    | { readonly kind: 'failure'; readonly message: string }
+/** The tabs whose body is text: what the panel reads through the port. */
+function readsText(tab: PanelTab): tab is Extract<PanelTab, { readonly kind: 'markdown' | 'source' }> {
+  return tab.kind === 'markdown' || tab.kind === 'source'
 }
 
-// A markdown exhibit's body is fetched through the port and never off the disk.
-function MarkdownExhibit({
-  sessionId,
+/** What the tab's badge says, which is the kind in the panel's own words. */
+function kindLabel(tab: PanelTab): string {
+  if (tab.kind === 'url') return 'web'
+  if (tab.kind === 'markdown') return 'md'
+  if (tab.kind === 'html') return 'html'
+  if (tab.kind === 'image') return 'img'
+  if (tab.kind === 'binary') return 'bin'
+  return extensionOf(tab.path) || 'txt'
+}
+
+// What the header's toggle offers, and nothing where there is nothing to
+// flip to: a source tab of a file with no rendered view, an image, a page.
+function sourceToggle(tab: PanelTab): 'source' | 'rendered' | undefined {
+  if (tab.kind === 'markdown' || tab.kind === 'html') return 'rendered'
+  if (tab.kind === 'source' && tab.renders !== undefined) return 'source'
+  return undefined
+}
+
+function extensionOf(path: string): string {
+  const name = path.split(/[/\\]/).at(-1) ?? path
+  const dot = name.lastIndexOf('.')
+  return dot > 0 ? name.slice(dot + 1).toLowerCase() : ''
+}
+
+// One body, two views: the rendered markdown an agent's show gives, and the
+// source a click in the tree gives. Which one is the tab's kind, never a
+// second copy of the same fact.
+function TextExhibit({
   tab,
-  port,
-  refreshes
+  body
 }: {
-  readonly sessionId: SessionId
-  readonly tab: Extract<PanelTab, { readonly kind: 'markdown' }>
-  readonly port: AgentPort
-  readonly refreshes: number
+  readonly tab: Extract<PanelTab, { readonly kind: 'markdown' | 'source' }>
+  readonly body: ExhibitBody | undefined
 }): React.JSX.Element | null {
-  const [read, setRead] = useState<ExhibitRead | undefined>(undefined)
-
-  const tabId: TabId = tab.id
-  // A re-show refreshes the tab in place, and that is what a changed `shownAt`
-  // means for the view: the same tab, fetched again.
-  const of = mountOf(sessionId, tab)
-
-  const showing = useRef(of)
-  useEffect(() => {
-    showing.current = of
-  }, [of])
-
-  useEffect(() => {
-    void port
-      .exhibit(sessionId, tabId)
-      .then(({ body }) => {
-        if (showing.current === of) {
-          setRead(newest({ of, at: refreshes, answer: { kind: 'body', markdown: body } }))
-        }
-      })
-      .catch((cause: unknown) => {
-        const message = cause instanceof Error ? cause.message : String(cause)
-        if (showing.current === of) {
-          setRead(newest({ of, at: refreshes, answer: { kind: 'failure', message } }))
-        }
-      })
-  }, [port, sessionId, tabId, of, refreshes])
-
-  // Nothing of another tab is ever shown under this one's title, and the body
-  // already on screen stays until a newer answer lands: a refresh replaces
-  // content, it never blanks the exhibit first.
-  const shown = read?.of === of ? read.answer : undefined
-  if (shown === undefined) return null
+  if (body === undefined) return null
   // The tab stays open whatever a failure says: curation is the agent's.
-  if (shown.kind === 'failure') return <p className="exhibit-failure">{shown.message}</p>
+  if (body.kind === 'failure') return <p className="exhibit-failure">{body.message}</p>
+  if (tab.kind === 'source') {
+    return <SourceView text={body.text} extension={extensionOf(tab.path)} />
+  }
   return (
     <div className="mdview">
-      <Markdown markdown={shown.markdown} />
+      <Markdown markdown={body.text} />
     </div>
   )
 }
 
-// Two ⟳ clicks put two reads of one file in flight, and the older one may land
-// last. The newest read that has come back wins, never the last to arrive.
-function newest(landed: ExhibitRead): (held: ExhibitRead | undefined) => ExhibitRead {
-  return (held) =>
-    held !== undefined && held.of === landed.of && held.at > landed.at ? held : landed
+// A file that is not text has nothing to show but how big it is, which is the
+// one fact that says why.
+function BinaryExhibit({ bytes }: { readonly bytes: number }): React.JSX.Element {
+  return (
+    <p className="exhibit-failure">
+      Binary file, {byteSize(bytes)}. Crucible shows text, images and pages.
+    </p>
+  )
+}
+
+/** Bytes as a person reads them: whole units up to a point, then one decimal. */
+export function byteSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} bytes`
+  const units = ['KB', 'MB', 'GB', 'TB']
+  let size = bytes / 1024
+  let unit = 0
+  while (size >= 1024 && unit < units.length - 1) {
+    size /= 1024
+    unit += 1
+  }
+  return `${size < 10 ? size.toFixed(1) : Math.round(size)} ${units[unit]}`
 }

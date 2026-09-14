@@ -1,4 +1,6 @@
 import type {
+  FileStatus,
+  FileTree,
   IssueBoardAnswer,
   RunId,
   Unsubscribe,
@@ -19,8 +21,16 @@ import { rankFiles } from '../../../shared/workspace/match'
 // test is about rendering rather than about timing.
 export interface ScriptedWorkspace extends WorkspaceService {
   readonly calls: ReadonlyArray<{ readonly op: string; readonly args: readonly unknown[] }>
-  /** What `searchFiles` ranks and answers from. */
+  /** What `searchFiles` ranks and answers from, and what the tree lists. */
   files: readonly string[]
+  /** How git sees those files, for the tree's coloring. */
+  changed: Readonly<Record<string, FileStatus>>
+  /** The directories being watched right now, in the order they were asked for. */
+  readonly watching: readonly string[]
+  /** A change on disk, exactly as main announces one. */
+  filesChanged(directory: string): void
+  /** Every file this service was asked to reveal, and revealed nothing for. */
+  readonly revealed: readonly string[]
   /** Every run this service was asked to start, oldest first. */
   readonly started: ReadonlyArray<{ readonly runId: RunId; readonly command: string }>
   /** What `isGitWorkspace` answers for any folder. */
@@ -74,6 +84,8 @@ export function createScriptedWorkspace(files: readonly string[] = []): Scripted
   const calls: Array<{ op: string; args: readonly unknown[] }> = []
   const started: Array<{ runId: RunId; command: string }> = []
   const openedUrls: string[] = []
+  const watching: string[] = []
+  const revealed: string[] = []
   let heldIssues: (() => void) | undefined
   const worktrees: Array<(created: WorktreeCreation) => void> = []
   const heldStatus: Array<() => void> = []
@@ -88,8 +100,11 @@ export function createScriptedWorkspace(files: readonly string[] = []): Scripted
   const service: ScriptedWorkspace = {
     calls,
     files,
+    changed: {},
     started,
     openedUrls,
+    watching,
+    revealed,
 
     issues: new Map<string, IssueBoardAnswer>(),
 
@@ -123,6 +138,34 @@ export function createScriptedWorkspace(files: readonly string[] = []): Scripted
     searchFiles(directory: string, query: string): Promise<readonly string[]> {
       calls.push({ op: 'searchFiles', args: [directory, query] })
       return Promise.resolve(rankFiles(service.files, query))
+    },
+
+    fileTree(directory: string): Promise<FileTree> {
+      calls.push({ op: 'fileTree', args: [directory] })
+      return Promise.resolve({ directory, paths: service.files, changed: service.changed })
+    },
+
+    watchFiles(directory: string): Promise<void> {
+      calls.push({ op: 'watchFiles', args: [directory] })
+      watching.push(directory)
+      return Promise.resolve()
+    },
+
+    unwatchFiles(directory: string): Promise<void> {
+      calls.push({ op: 'unwatchFiles', args: [directory] })
+      const at = watching.indexOf(directory)
+      if (at !== -1) watching.splice(at, 1)
+      return Promise.resolve()
+    },
+
+    filesChanged(directory: string): void {
+      emit({ type: 'files_changed', directory })
+    },
+
+    revealFile(directory: string, path: string): Promise<void> {
+      calls.push({ op: 'revealFile', args: [directory, path] })
+      revealed.push(path)
+      return Promise.resolve()
     },
 
     isGitWorkspace(workspacePath: string): Promise<boolean> {

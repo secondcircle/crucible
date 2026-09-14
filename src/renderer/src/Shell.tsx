@@ -102,6 +102,10 @@ import {
   withoutMark,
   type Marks
 } from './state/needs-you'
+import { faceOf, withFace, type SidebarFace, type SidebarFaces } from './sidebar/face'
+import { insideTree, toggleFolder, type Expanded } from './files/tree'
+import { useFileTree, useWatchedDirectory } from './files/use-files'
+import type { FilesFace } from './components/FileTree'
 import { escapeRung, type EscapeRung, type EscapeState } from './state/escape'
 import {
   forgetEmptyPanels,
@@ -167,6 +171,9 @@ const CHAT_AWAY: React.CSSProperties = { display: 'none' }
 
 /** A confirmation, not an error: it says what just happened and goes away. */
 const TOAST_MS = 3200
+
+/** One empty set for every workspace nobody has opened a folder in. */
+const EMPTY_FOLDERS: Expanded = new Set<string>()
 
 const JUMPED =
   'Jumped — the transcript now shows the path to this point; your message is back in the composer.'
@@ -332,6 +339,12 @@ export function Shell({
   const [runs, setRuns] = useState<Readonly<Record<SessionId, RunView>>>({})
   const [panelViews, setPanelViews] = useState<PanelViews>({})
   const [panelWidth, setPanelWidth] = useState<number | undefined>(undefined)
+  // The sidebar column's face, and what the file tree is showing, both per
+  // workspace and both for this launch alone: where you were in one workspace
+  // is a fact about this sitting.
+  const [faces, setFaces] = useState<SidebarFaces>({})
+  const [openFolders, setOpenFolders] = useState<Readonly<Record<WorkspaceId, Expanded>>>({})
+  const [fileFilters, setFileFilters] = useState<Readonly<Record<WorkspaceId, string>>>({})
   // Whether each workspace is a git working tree, as the workspace service
   // answered. Absent until the answer arrives, which is why nothing flashes.
   const [gitWorkspaces, setGitWorkspaces] = useState<Readonly<Record<WorkspaceId, boolean>>>({})
@@ -504,6 +517,24 @@ export function Shell({
   const place = panelPlace(panel, panelViewOf(shownViews, activeSessionId))
   // Closed unless the caret is in a token the service has already answered for.
   const shownFiles = fileToken !== undefined && files?.of === fileToken ? files.paths : undefined
+
+  // Which face the sidebar column is showing, and the tree it draws on the
+  // Files one: the active session's working directory, worktree included.
+  const sidebarFace = faceOf(faces, activeWorkspaceId)
+  const shownTab = panel?.tabs.find((tab) => tab.id === panel.activeTabId)
+  const shownFilePath = shownTab === undefined || shownTab.kind === 'url' ? undefined : shownTab.path
+  // A file tab follows the disk whichever face the column is on, so the watch
+  // outlives a switch back to the sessions.
+  const watchedDirectory =
+    sessionDirectory !== undefined && (sidebarFace === 'files' || shownFilePath !== undefined)
+      ? sessionDirectory
+      : undefined
+  const filesChanged = useWatchedDirectory(service, watchedDirectory)
+  const treeListing = useFileTree(
+    service,
+    sidebarFace === 'files' ? sessionDirectory : undefined,
+    filesChanged
+  )
   const run = activeSessionId === undefined ? undefined : runs[activeSessionId]
   const allRuns: readonly RunRecord[] = useMemo(() => runsSnapshot?.runs ?? [], [runsSnapshot])
   // Every workspace's runs count, because the rail lists every workspace's
@@ -1177,9 +1208,10 @@ export function Shell({
   // only thing that ties a chunk to the session it came from.
   useEffect(() => {
     return service.onEvent((event) => {
-      // The research CLI's own output belongs to the Research section, which
-      // listens for itself; nothing here is a run.
-      if (event.type === 'research_output') return
+      // The research CLI's own output belongs to the Research section and a
+      // change on disk to the file tree, both of which listen for themselves;
+      // nothing here is a run.
+      if (event.type !== 'run_output' && event.type !== 'run_ended') return
       const sessionId = owners.current[event.runId]
       if (sessionId === undefined) {
         // The id has not come back from `startRun` yet; nothing is thrown away.
@@ -1561,6 +1593,44 @@ export function Shell({
     document.addEventListener('keydown', onKeyDown)
     return () => document.removeEventListener('keydown', onKeyDown)
   }, [line, liveLogin, confirm, choice, occupied, place])
+
+  // ⌘E swaps the sidebar column between its two faces, and swaps it back. The
+  // chord is claimed only where there is a folder to show; with no workspace
+  // open it is left to the OS.
+  useEffect(() => {
+    function onKeyDown(pressed: KeyboardEvent): void {
+      if (pressed.key !== 'e' && pressed.key !== 'E') return
+      if (!chordPressed(pressed) || pressed.shiftKey || pressed.altKey) return
+      const workspaceId = activeWorkspaceId
+      if (workspaceId === undefined) return
+      pressed.preventDefault()
+      setFaces((current) =>
+        withFace(
+          current,
+          workspaceId,
+          faceOf(current, workspaceId) === 'files' ? 'sessions' : 'files'
+        )
+      )
+    }
+    document.addEventListener('keydown', onKeyDown)
+    return () => document.removeEventListener('keydown', onKeyDown)
+  }, [activeWorkspaceId])
+
+  // A click in the file tree. The tab is the session's, so a window with no
+  // session has nowhere to put one and says so.
+  const openFileFromTree = useCallback(
+    (path: string, options: { readonly keep: boolean }): void => {
+      const sessionId = railNow.current.activeSessionId
+      if (sessionId === undefined) {
+        report(new Error('Open a session first — a file opens in that session’s context panel.'))
+        return
+      }
+      void port.openFile(sessionId, path, options).catch((cause: unknown) => {
+        report(cause, sessionId)
+      })
+    },
+    [port, report]
+  )
 
   // ⌘I, on exactly the same terms: claimed where there is an issue board to
   // open, and left to the OS where there is not.
@@ -2627,6 +2697,35 @@ export function Shell({
     closeRegion()
   }
 
+  // Everything the Files face draws and every gesture it offers. Absent where
+  // there is no folder to show, and then the column is the sessions alone.
+  const filesFace: FilesFace | undefined =
+    activeWorkspaceId === undefined || sessionDirectory === undefined
+      ? undefined
+      : {
+          name: active?.name ?? sessionDirectory,
+          ...(session?.worktree === undefined
+            ? {}
+            : { worktree: folderName(session.worktree.path) }),
+          ...(treeListing === undefined ? {} : { listing: treeListing }),
+          expanded: openFolders[activeWorkspaceId] ?? EMPTY_FOLDERS,
+          filter: fileFilters[activeWorkspaceId] ?? '',
+          ...(shownFilePath === undefined
+            ? {}
+            : whereInTree(sessionDirectory, shownFilePath)),
+          onFilter: (text) =>
+            setFileFilters((current) => ({ ...current, [activeWorkspaceId]: text })),
+          onToggleFolder: (path) =>
+            setOpenFolders((current) => ({
+              ...current,
+              [activeWorkspaceId]: toggleFolder(current[activeWorkspaceId] ?? EMPTY_FOLDERS, path)
+            })),
+          onOpen: openFileFromTree,
+          onCopyPath: (path) => void navigator.clipboard?.writeText(path).catch(report),
+          onReveal: (path) => void service.revealFile(sessionDirectory, path).catch(report),
+          onLeave: () => setFaces((current) => withFace(current, activeWorkspaceId, 'sessions'))
+        }
+
   function confirmed(): void {
     if (confirm === undefined) return
     const asked = confirm
@@ -2671,6 +2770,16 @@ export function Shell({
         onResume={() => occupy({ kind: 'resume' })}
         onOpenSettings={() => occupy({ kind: 'settings', section: 'providers' })}
         settingsOpen={settingsOpen}
+        files={
+          filesFace === undefined || activeWorkspaceId === undefined
+            ? undefined
+            : {
+                face: sidebarFace,
+                onFace: (face: SidebarFace) =>
+                  setFaces((current) => withFace(current, activeWorkspaceId, face)),
+                tree: filesFace
+              }
+        }
         cache={
           cacheService === undefined
             ? undefined
@@ -2884,8 +2993,14 @@ export function Shell({
                   }
             }
             port={port}
+            changed={filesChanged}
             onCopyLocation={(location) =>
               void navigator.clipboard?.writeText(location).catch(report)
+            }
+            onReveal={
+              sessionDirectory === undefined
+                ? undefined
+                : (path) => void service.revealFile(sessionDirectory, path).catch(report)
             }
             onCollapse={() =>
               setPanelViews((current) => withPanelView(current, activeSessionId, 'collapsed'))
@@ -3131,6 +3246,17 @@ function known(monitors: readonly LiveMonitor[], id: MonitorId): boolean {
 
 function messageOf(cause: unknown): string {
   return cause instanceof Error ? cause.message : String(cause)
+}
+
+/** The current row, where the file on screen is one of the tree's own. */
+function whereInTree(directory: string, path: string): { readonly activePath?: string } {
+  const inside = insideTree(directory, path)
+  return inside === undefined ? {} : { activePath: inside }
+}
+
+/** The last segment of a path: what the root row's worktree mark names. */
+function folderName(path: string): string {
+  return path.split(/[/\\]/).filter((part) => part !== '').at(-1) ?? path
 }
 
 // Pure, because React may replay a state update: what a chunk or an ending

@@ -86,7 +86,10 @@ export interface QueueState {
 
 export type TabId = string
 
-export type ExhibitKind = 'html' | 'markdown' | 'url'
+// What a tab shows. The first three are what an agent may show; the last
+// three are what a click in the file tree can land on, because a folder holds
+// more than documents.
+export type ExhibitKind = 'html' | 'markdown' | 'url' | 'source' | 'image' | 'binary'
 
 interface PanelTabBase {
   readonly id: TabId
@@ -114,11 +117,34 @@ export type PanelTab =
       /** The full http(s) address, scheme included. */
       readonly address: string
     })
+  // Text of any kind, shown as source: numbered lines, colored, as written.
+  | (PanelTabBase & {
+      readonly kind: 'source'
+      readonly path: string
+      // Where the tab's toggle flips to, when this file has a rendered view at
+      // all. Absent means source is the only way to read it.
+      readonly renders?: 'markdown' | 'html'
+    })
+  | (PanelTabBase & {
+      readonly kind: 'image'
+      readonly path: string
+    })
+  // Nothing to show but how big it is, which is why the size is a fact of the
+  // tab rather than something the body could carry.
+  | (PanelTabBase & {
+      readonly kind: 'binary'
+      readonly path: string
+      readonly bytes: number
+    })
 
 export interface PanelState {
   /** Show order, oldest first. Never empty: an empty panel is an absent one. */
   readonly tabs: readonly PanelTab[]
   readonly activeTabId: TabId
+  // The preview tab, when this session has one: the tab a single click in the
+  // file tree reuses. At most one, always one of `tabs`, and never a tab the
+  // agent showed.
+  readonly previewTabId?: TabId
 }
 
 export type QuestionId = string
@@ -671,6 +697,21 @@ export interface AgentPort {
     questionId: QuestionId,
     reply: QuestionReply
   ): Promise<void>
+
+  // A click in the file tree. The path is the session's directory's own,
+  // relative or absolute. `keep: false` is the single click, which reuses the
+  // session's preview tab; `keep: true` is the double-click, which makes an
+  // ordinary tab of it. Rejects display-safely when the file cannot be shown.
+  openFile(
+    sessionId: SessionId,
+    path: string,
+    options: { readonly keep: boolean }
+  ): Promise<TabId>
+
+  // The tab's source/rendered toggle. Setting `source` shows any text tab as
+  // source; clearing it puts a source tab back to the view its kind renders,
+  // and does nothing for a file that has none.
+  setTabSource(sessionId: SessionId, tabId: TabId, source: boolean): Promise<void>
 
   /** User clicked a tab. Unknown ids are a harmless no-op. */
   activateTab(sessionId: SessionId, tabId: TabId): Promise<void>

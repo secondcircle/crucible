@@ -382,19 +382,27 @@ function readTokenFlavor(session: unknown): Flavor | undefined {
   return FLAVORS.includes(tokenFlavor as Flavor) ? (tokenFlavor as Flavor) : undefined
 }
 
-const KINDS: readonly ExhibitKind[] = ['html', 'markdown']
+const KINDS: readonly ExhibitKind[] = ['html', 'markdown', 'source', 'image', 'binary']
 
 function readPanel(value: unknown): StoredPanel | undefined {
   if (typeof value !== 'object' || value === null) return undefined
-  const { tabs, activeTabId, turn } = value as {
+  const { tabs, activeTabId, previewTabId, turn } = value as {
     tabs?: unknown
     activeTabId?: unknown
+    previewTabId?: unknown
     turn?: unknown
   }
   if (!Array.isArray(tabs) || typeof turn !== 'number') return undefined
   if (activeTabId !== null && typeof activeTabId !== 'string') return undefined
   if (!tabs.every(isPanelTab)) return undefined
-  return { tabs: tabs as StoredPanelTab[], activeTabId, turn }
+  return {
+    tabs: tabs as StoredPanelTab[],
+    activeTabId,
+    // A file written before the preview tab existed has none, which is the
+    // same state as a session that never opened one.
+    previewTabId: typeof previewTabId === 'string' ? previewTabId : null,
+    turn
+  }
 }
 
 function isPanelTab(value: unknown): boolean {

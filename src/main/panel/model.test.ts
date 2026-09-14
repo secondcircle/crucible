@@ -401,6 +401,7 @@ describe('persistence and restore', () => {
         }
       ],
       activeTabId: 'plan',
+      previewTabId: null,
       turn: 1
     })
 
@@ -460,7 +461,7 @@ describe('session lifecycle', () => {
     panel.reset(SESSION)
 
     expect(panel.state(SESSION)).toBeUndefined()
-    expect(saved.get(SESSION)).toEqual({ tabs: [], activeTabId: null, turn: 0 })
+    expect(saved.get(SESSION)).toEqual({ tabs: [], activeTabId: null, previewTabId: null, turn: 0 })
     // The counter starts over with the conversation it counted.
     panel.show(SESSION, workspace, file('after.md'), 'after')
     expect(panel.list(SESSION)).toBe(
@@ -477,5 +478,142 @@ describe('session lifecycle', () => {
     // The persisted copy leaves with the session record; nothing here rewrites
     // it on the way out.
     expect(saved.get(SESSION)).toBe(written)
+  })
+})
+
+describe('a click in the file tree', () => {
+  it('opens any text file as source, titled by its name and keyed by its path', async () => {
+    file('src/state/panel-view.ts', 'export const x = 1\n')
+    const id = await panel.open(SESSION, workspace, 'src/state/panel-view.ts', { keep: false })
+
+    expect(id).toBe('panel-view')
+    expect(panel.state(SESSION)).toEqual({
+      tabs: [
+        {
+          id: 'panel-view',
+          title: 'panel-view.ts',
+          kind: 'source',
+          shownAt: expect.any(String),
+          path: join(workspace, 'src/state/panel-view.ts')
+        }
+      ],
+      activeTabId: 'panel-view',
+      previewTabId: 'panel-view'
+    })
+  })
+
+  it('gives a markdown or html file the view its toggle flips to', async () => {
+    await panel.open(SESSION, workspace, file('plan.md'), { keep: false })
+    await panel.open(SESSION, workspace, file('page.html'), { keep: true })
+
+    expect(panel.state(SESSION)?.tabs.map((tab) => [tab.kind, 'renders' in tab && tab.renders])).toEqual([
+      ['source', 'markdown'],
+      ['source', 'html']
+    ])
+  })
+
+  it('shows an image as an image and a file that is not text by its size', async () => {
+    writeFileSync(join(workspace, 'shot.png'), 'not really a png', 'utf8')
+    writeFileSync(join(workspace, 'thing.bin'), Buffer.from([1, 0, 2, 0, 3]))
+
+    await panel.open(SESSION, workspace, 'shot.png', { keep: true })
+    await panel.open(SESSION, workspace, 'thing.bin', { keep: true })
+
+    expect(panel.state(SESSION)?.tabs.map((tab) => tab.kind)).toEqual(['image', 'binary'])
+    const binary = panel.state(SESSION)?.tabs[1]
+    expect(binary?.kind === 'binary' && binary.bytes).toBe(5)
+  })
+
+  it('refuses a file that is not there, naming it', async () => {
+    await expect(panel.open(SESSION, workspace, 'gone.ts', { keep: false })).rejects.toThrow(
+      /File not found/
+    )
+  })
+})
+
+describe('the preview tab', () => {
+  it('is replaced in place by the next single click, and is the only one', async () => {
+    await panel.open(SESSION, workspace, file('first.ts'), { keep: true })
+    await panel.open(SESSION, workspace, file('second.ts'), { keep: false })
+    await panel.open(SESSION, workspace, file('third.ts'), { keep: false })
+
+    expect(panel.state(SESSION)?.tabs.map((tab) => tab.id)).toEqual(['first', 'third'])
+    expect(panel.state(SESSION)?.previewTabId).toBe('third')
+  })
+
+  it('is kept by a double-click on the file it is showing', async () => {
+    const path = file('second.ts')
+    await panel.open(SESSION, workspace, path, { keep: false })
+    await panel.open(SESSION, workspace, path, { keep: true })
+
+    expect(panel.state(SESSION)?.previewTabId).toBeUndefined()
+    expect(panel.state(SESSION)?.tabs).toHaveLength(1)
+  })
+
+  it('leaves it where it is when a double-click opens another file', async () => {
+    await panel.open(SESSION, workspace, file('previewed.ts'), { keep: false })
+    await panel.open(SESSION, workspace, file('kept.ts'), { keep: true })
+
+    expect(panel.state(SESSION)?.tabs.map((tab) => tab.id)).toEqual(['previewed', 'kept'])
+    expect(panel.state(SESSION)?.previewTabId).toBe('previewed')
+  })
+
+  it('is never a tab the agent showed, even when the agent shows it after', async () => {
+    const path = file('plan.md')
+    await panel.open(SESSION, workspace, path, { keep: false })
+    expect(panel.state(SESSION)?.previewTabId).toBe('plan')
+
+    panel.show(SESSION, workspace, path, 'the plan')
+
+    expect(panel.state(SESSION)?.previewTabId).toBeUndefined()
+  })
+
+  it('leaves an open tab showing what it was showing, and lands on it', async () => {
+    const path = file('plan.md')
+    panel.show(SESSION, workspace, path, 'the plan')
+    await panel.open(SESSION, workspace, file('other.ts'), { keep: false })
+
+    await panel.open(SESSION, workspace, path, { keep: false })
+
+    expect(panel.state(SESSION)?.activeTabId).toBe('plan')
+    expect(panel.state(SESSION)?.tabs.find((tab) => tab.id === 'plan')?.kind).toBe('markdown')
+    expect(panel.state(SESSION)?.previewTabId).toBe('other')
+  })
+
+  it('stops being one when its tab closes', async () => {
+    await panel.open(SESSION, workspace, file('previewed.ts'), { keep: false })
+
+    panel.closeTab(SESSION, 'previewed')
+
+    expect(panel.state(SESSION)).toBeUndefined()
+    expect(saved.get(SESSION)?.previewTabId).toBeNull()
+  })
+})
+
+describe('the source and rendered toggle', () => {
+  it('flips a markdown tab to source and back to what it renders', async () => {
+    const path = file('plan.md')
+    panel.show(SESSION, workspace, path, 'the plan')
+
+    panel.setSource(SESSION, 'plan', true)
+    expect(panel.state(SESSION)?.tabs[0]).toMatchObject({ kind: 'source', renders: 'markdown' })
+
+    panel.setSource(SESSION, 'plan', false)
+    expect(panel.state(SESSION)?.tabs[0]?.kind).toBe('markdown')
+  })
+
+  it('does nothing for a file with no rendered view of its own', async () => {
+    await panel.open(SESSION, workspace, file('port.ts'), { keep: true })
+
+    panel.setSource(SESSION, 'port', false)
+
+    expect(panel.state(SESSION)?.tabs[0]?.kind).toBe('source')
+  })
+
+  it('refuses to read a body for what is not text', async () => {
+    writeFileSync(join(workspace, 'shot.png'), 'not really a png', 'utf8')
+    await panel.open(SESSION, workspace, 'shot.png', { keep: true })
+
+    await expect(panel.exhibit(SESSION, 'shot')).rejects.toThrow(/not text/)
   })
 })

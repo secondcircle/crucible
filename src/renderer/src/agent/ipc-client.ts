@@ -135,6 +135,10 @@ export function createIpcClient(): AgentPort {
     replyToQuestion: (sessionId: SessionId, questionId: QuestionId, reply: QuestionReply) =>
       call<void>('replyToQuestion', sessionId, questionId, reply),
 
+    openFile: (sessionId: SessionId, path: string, options: { readonly keep: boolean }) =>
+      call<TabId>('openFile', sessionId, path, options),
+    setTabSource: (sessionId: SessionId, tabId: TabId, source: boolean) =>
+      call<void>('setTabSource', sessionId, tabId, source),
     activateTab: (sessionId: SessionId, tabId: TabId) =>
       call<void>('activateTab', sessionId, tabId),
     closeTab: (sessionId: SessionId, tabId: TabId) => call<void>('closeTab', sessionId, tabId),

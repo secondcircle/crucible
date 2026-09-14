@@ -1,5 +1,8 @@
 import type { SessionId, ShellSnapshot, WorkspaceId } from '../../../shared/agent/port'
 import { useClock } from '../clock'
+import { keyLabel } from '../keys'
+import { FileTree, type FilesFace } from './FileTree'
+import type { SidebarFace } from '../sidebar/face'
 import { hairline, idleWorkspaces, rows, type SidebarModel } from '../sidebar/model'
 import type { Folding } from '../sidebar/use-folded'
 import { waitedFor, type MonitorActivity } from '../monitors/activity'
@@ -62,7 +65,8 @@ export function Sidebar({
   settingsOpen,
   cache,
   quota,
-  version
+  version,
+  files
 }: {
   readonly snapshot: ShellSnapshot
   // The order, the dots and what is in use, all decided above. The workspace
@@ -105,6 +109,14 @@ export function Sidebar({
     readonly onRestart: () => void
     readonly onCheck: () => void
   }
+  // The column's second face and the switch between them. Absent where there
+  // is no folder to show — no workspace at all — and then the column is the
+  // sessions and nothing else.
+  readonly files?: {
+    readonly face: SidebarFace
+    readonly onFace: (face: SidebarFace) => void
+    readonly tree: FilesFace
+  }
 }): React.JSX.Element {
   const { activeWorkspaceId, sessions, activeSessionId } = snapshot
   const now = useClock(
@@ -119,6 +131,8 @@ export function Sidebar({
   // is one fact read here and by the click below rather than a mode to keep.
   const idle = idleWorkspaces(workspaces, folding.folded, model.inUse)
 
+  const showingFiles = files !== undefined && files.face === 'files'
+
   return (
     <nav className="side" aria-label="Workspaces and sessions">
       <div className="brand">
@@ -128,6 +142,37 @@ export function Sidebar({
         CRUCIBLE
       </div>
 
+      {/* The two faces of one column: which is showing, and the switch. The
+          chord is spelled by `keyLabel`, so it reads Ctrl+E off a Mac. */}
+      {files === undefined ? null : (
+        <div className="seg">
+          <button
+            className={showingFiles ? '' : 'on'}
+            aria-pressed={!showingFiles}
+            onClick={() => files.onFace('sessions')}
+          >
+            Sessions
+          </button>
+          <button
+            className={showingFiles ? 'on' : ''}
+            aria-pressed={showingFiles}
+            onClick={() => files.onFace('files')}
+          >
+            Files <kbd>{keyLabel('⌘E')}</kbd>
+          </button>
+        </div>
+      )}
+
+      {showingFiles && files !== undefined ? <FileTree face={files.tree} /> : sessionsFace()}
+    </nav>
+  )
+
+  // The sessions face, whole: the list and every strip under it. Called rather
+  // than rendered as a component of its own, so the rows it draws keep their
+  // identity across a render.
+  function sessionsFace(): React.JSX.Element {
+    return (
+      <>
       <button className="newsession" onClick={onNewSession} disabled={activeWorkspaceId === undefined}>
         New session
       </button>
@@ -370,8 +415,9 @@ export function Sidebar({
           <span aria-hidden="true">⚙</span>
         </button>
       </div>
-    </nav>
-  )
+      </>
+    )
+  }
 }
 
 function rowClass(active: boolean, title?: string): string {

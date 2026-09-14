@@ -1,5 +1,5 @@
 import { existsSync, statSync } from 'node:fs'
-import { readFile } from 'node:fs/promises'
+import { open as openFile, readFile } from 'node:fs/promises'
 import { basename, extname, isAbsolute, resolve } from 'node:path'
 import type { PanelTools } from '../../shared/agent/panel-tools'
 import type {
@@ -25,12 +25,18 @@ export interface StoredPanelTab {
   readonly shownAt: string
   /** The session's turn counter at the latest show. */
   readonly shownTurn: number
+  /** Present for a binary tab alone, which shows its size and no contents. */
+  readonly bytes?: number
+  /** Present for a source tab whose file has a rendered view to flip to. */
+  readonly renders?: 'markdown' | 'html'
 }
 
 export interface StoredPanel {
   /** Show order, oldest first. */
   readonly tabs: readonly StoredPanelTab[]
   readonly activeTabId: TabId | null
+  /** The session's preview tab; `null` when it has none. */
+  readonly previewTabId: TabId | null
   /** Monotonic within the session; drives "shown N turns ago". */
   readonly turn: number
 }
@@ -63,6 +69,18 @@ export interface PanelChange {
 export type PanelChangeListener = (change: PanelChange) => void
 
 export interface PanelModel extends PanelTools {
+  // A click in the file tree, which shows anything a folder holds rather than
+  // the three kinds an agent may show. `keep: false` is the single click: it
+  // reuses the session's preview tab, in place. Answers the tab's id.
+  open(
+    sessionId: SessionId,
+    directory: string,
+    path: string,
+    options: { readonly keep: boolean }
+  ): Promise<TabId>
+  // The tab's source/rendered toggle. Flipping a tab that has no rendered
+  // view, or one that is already shown that way, changes nothing.
+  setSource(sessionId: SessionId, tabId: TabId, source: boolean): void
   /** What crosses the port. Absent when the session has no tabs. */
   state(sessionId: SessionId): PanelState | undefined
   /** The user's click. An unknown id is a silent no-op. */
@@ -87,15 +105,34 @@ interface Tab {
   kind: ExhibitKind
   shownAt: string
   shownTurn: number
+  bytes?: number
+  renders?: 'markdown' | 'html'
 }
 
 interface Panel {
   tabs: Tab[]
   activeTabId: TabId | null
+  previewTabId: TabId | null
   turn: number
 }
 
 const SUPPORTED = '.html, .htm, .md, .markdown, .txt, or an http(s) URL'
+
+/** Shown as an image; everything else that is not text shows its size. */
+const IMAGE_EXTENSIONS = new Set([
+  '.png',
+  '.jpg',
+  '.jpeg',
+  '.gif',
+  '.webp',
+  '.bmp',
+  '.ico',
+  '.avif',
+  '.svg'
+])
+
+/** Enough of a file to tell text from bytes, and little enough to be free. */
+const SNIFF_BYTES = 4096
 
 export function createPanelModel({
   persistence,
@@ -118,6 +155,7 @@ export function createPanelModel({
     return {
       tabs: panel.tabs.map((tab) => ({ ...tab })),
       activeTabId: panel.activeTabId,
+      previewTabId: panel.previewTabId,
       turn: panel.turn
     }
   }
@@ -129,6 +167,9 @@ export function createPanelModel({
   // The active tab is always one of the tabs, and closing the active one falls
   // to the last in show order, which is where the eye already is.
   function reseat(panel: Panel): void {
+    // A preview tab that has left is no longer the preview tab: the field can
+    // only ever name a tab that is open.
+    if (!panel.tabs.some((tab) => tab.id === panel.previewTabId)) panel.previewTabId = null
     if (panel.tabs.some((tab) => tab.id === panel.activeTabId)) return
     panel.activeTabId = panel.tabs.at(-1)?.id ?? null
   }
@@ -143,6 +184,7 @@ export function createPanelModel({
     const panel: Panel = {
       tabs: (loaded?.tabs ?? []).map((tab) => ({ ...tab })),
       activeTabId: loaded?.activeTabId ?? null,
+      previewTabId: loaded?.previewTabId ?? null,
       turn: loaded?.turn ?? 0
     }
     const held = panel.tabs.length
@@ -220,9 +262,62 @@ export function createPanelModel({
         panel.tabs.push(shown)
       }
       panel.activeTabId = shown.id
+      // A tab the agent showed is never the preview tab: the agent curates its
+      // own tabs, and a click elsewhere in the tree must not take one away.
+      if (panel.previewTabId === shown.id) panel.previewTabId = null
       persist(sessionId, panel)
       notify({ sessionId, shownTabId: shown.id })
       return showResult(panel, shown)
+    },
+
+    async open(
+      sessionId: SessionId,
+      directory: string,
+      path: string,
+      { keep }: { readonly keep: boolean }
+    ): Promise<TabId> {
+      const resolved = isAbsolute(path) ? path : resolve(directory, path)
+      if (!onDisk(resolved)) throw new Error(`File not found: ${resolved}`)
+      const kind = await openedKind(resolved)
+
+      const panel = panelOf(sessionId)
+      const already = panel.tabs.find((tab) => tab.path === resolved)
+      const renders = rendersOf(resolved)
+      let shown: Tab
+      if (already !== undefined) {
+        // Landing on a tab that is open leaves how it is being shown alone: a
+        // click in the tree is not an opinion about the agent's rendered view,
+        // or about the toggle the user just used.
+        already.shownAt = now().toISOString()
+        already.shownTurn = panel.turn
+        if (already.kind === 'binary') already.bytes = sizeOf(resolved)
+        shown = already
+        // A double-click keeps the file it lands on, whether the click before
+        // it opened the tab or the agent did.
+        if (keep && panel.previewTabId === shown.id) panel.previewTabId = null
+      } else {
+        shown = {
+          id: mintId(panel, resolved),
+          title: basename(resolved),
+          path: resolved,
+          kind,
+          shownAt: now().toISOString(),
+          shownTurn: panel.turn,
+          ...(kind === 'binary' ? { bytes: sizeOf(resolved) } : {}),
+          ...(kind === 'source' && renders !== undefined ? { renders } : {})
+        }
+        // The preview tab is one slot: the next single click puts another file
+        // in it, where the eye already is, rather than beside it.
+        const previewAt = panel.tabs.findIndex((tab) => tab.id === panel.previewTabId)
+        if (!keep && previewAt !== -1) panel.tabs.splice(previewAt, 1, shown)
+        else panel.tabs.push(shown)
+        panel.previewTabId = keep ? panel.previewTabId : shown.id
+      }
+      panel.activeTabId = shown.id
+      reseat(panel)
+      persist(sessionId, panel)
+      notify({ sessionId, shownTabId: shown.id })
+      return shown.id
     },
 
     list(sessionId: SessionId): string {
@@ -234,6 +329,7 @@ export function createPanelModel({
       if (id === 'all') {
         panel.tabs = []
         panel.activeTabId = null
+        panel.previewTabId = null
         persist(sessionId, panel)
         notify({ sessionId })
         return 'Closed all tabs. The context panel is empty.'
@@ -253,7 +349,29 @@ export function createPanelModel({
       const panel = panelOf(sessionId)
       const activeTabId = panel.activeTabId
       if (panel.tabs.length === 0 || activeTabId === null) return undefined
-      return { tabs: panel.tabs.map(crossing), activeTabId }
+      return {
+        tabs: panel.tabs.map(crossing),
+        activeTabId,
+        ...(panel.previewTabId === null ? {} : { previewTabId: panel.previewTabId })
+      }
+    },
+
+    setSource(sessionId: SessionId, tabId: TabId, source: boolean): void {
+      const panel = panelOf(sessionId)
+      const tab = panel.tabs.find((open) => open.id === tabId)
+      if (tab === undefined) return
+      if (source) {
+        if (tab.kind !== 'markdown' && tab.kind !== 'html') return
+        // The kind it came from is the kind it goes back to, which is what
+        // makes the toggle reversible without a second field to keep in step.
+        tab.renders = tab.kind
+        tab.kind = 'source'
+      } else {
+        if (tab.kind !== 'source' || tab.renders === undefined) return
+        tab.kind = tab.renders
+      }
+      persist(sessionId, panel)
+      notify({ sessionId })
     },
 
     activate(sessionId: SessionId, tabId: TabId): void {
@@ -289,6 +407,9 @@ export function createPanelModel({
       if (tab.kind === 'url') {
         throw new Error('That tab shows a web address; it has no file to read.')
       }
+      if (tab.kind === 'image' || tab.kind === 'binary') {
+        throw new Error('That tab shows a file that is not text; it has no body to read.')
+      }
       try {
         return await readFile(tab.path, 'utf8')
       } catch {
@@ -309,6 +430,7 @@ export function createPanelModel({
       const panel = panelOf(sessionId)
       panel.tabs = []
       panel.activeTabId = null
+      panel.previewTabId = null
       panel.turn = 0
       persist(sessionId, panel)
       notify({ sessionId })
@@ -333,6 +455,18 @@ function crossing(tab: Tab): PanelTab {
   const carried = { id: tab.id, title: tab.title, shownAt: tab.shownAt }
   if (tab.kind === 'url') return { ...carried, kind: 'url', address: tab.path }
   if (tab.kind === 'html') return { ...carried, kind: 'html', path: tab.path }
+  if (tab.kind === 'source') {
+    return {
+      ...carried,
+      kind: 'source',
+      path: tab.path,
+      ...(tab.renders === undefined ? {} : { renders: tab.renders })
+    }
+  }
+  if (tab.kind === 'image') return { ...carried, kind: 'image', path: tab.path }
+  if (tab.kind === 'binary') {
+    return { ...carried, kind: 'binary', path: tab.path, bytes: tab.bytes ?? 0 }
+  }
   return { ...carried, kind: 'markdown', path: tab.path }
 }
 
@@ -341,6 +475,48 @@ function onDisk(path: string): boolean {
     return existsSync(path) && statSync(path).isFile()
   } catch {
     return false
+  }
+}
+
+function sizeOf(path: string): number {
+  try {
+    return statSync(path).size
+  } catch {
+    return 0
+  }
+}
+
+// What a click in the tree lands on. Total, unlike the agent's: a folder holds
+// pictures and object files too, and a viewer that refused them would send the
+// user back to the Finder.
+// Everything opens as source; what has a rendered view carries the toggle to
+// it instead of opening there.
+async function openedKind(path: string): Promise<ExhibitKind> {
+  if (IMAGE_EXTENSIONS.has(extname(path).toLowerCase())) return 'image'
+  return (await looksBinary(path)) ? 'binary' : 'source'
+}
+
+/** The view a source tab's file can be flipped to, when it has one. */
+function rendersOf(path: string): 'markdown' | 'html' | undefined {
+  const extension = extname(path).toLowerCase()
+  if (extension === '.html' || extension === '.htm') return 'html'
+  if (extension === '.md' || extension === '.markdown') return 'markdown'
+  return undefined
+}
+
+// A NUL byte in the head of a file is what every diff tool takes for "not
+// text", and it costs one short read rather than a decode of the whole file.
+async function looksBinary(path: string): Promise<boolean> {
+  let handle
+  try {
+    handle = await openFile(path, 'r')
+    const head = Buffer.alloc(SNIFF_BYTES)
+    const { bytesRead } = await handle.read(head, 0, SNIFF_BYTES, 0)
+    return head.subarray(0, bytesRead).includes(0)
+  } catch {
+    return false
+  } finally {
+    await handle?.close()
   }
 }
 

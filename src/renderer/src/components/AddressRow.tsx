@@ -5,11 +5,23 @@ const COPIED_MS = 900
 
 export function AddressRow({
   location,
+  lines,
+  source,
   onCopy,
+  onReveal,
+  onToggleSource,
   onRefresh
 }: {
   readonly location: ShownLocation
+  /** How many lines the file has. Absent for anything not read as text. */
+  readonly lines?: number
+  // Which of the two views this tab is showing, where it has both. Absent
+  // means there is nothing to flip to and no toggle at all.
+  readonly source?: 'source' | 'rendered'
   readonly onCopy: (whole: string) => void
+  /** Absent for a tab with no file to reveal, and where there is no OS to ask. */
+  readonly onReveal?: () => void
+  readonly onToggleSource: (source: boolean) => void
   readonly onRefresh: () => void
 }): React.JSX.Element {
   const [copied, setCopied] = useState(false)
@@ -39,6 +51,25 @@ export function AddressRow({
         <b className="tail">{location.tail}</b>
         {copied ? <span className="copied">copied</span> : null}
       </button>
+      {lines === undefined ? null : (
+        <span className="lines">
+          {lines} {lines === 1 ? 'line' : 'lines'}
+        </span>
+      )}
+      {source === undefined ? null : (
+        <button
+          className="rowtool"
+          aria-label={source === 'source' ? 'Show rendered' : 'Show source'}
+          onClick={() => onToggleSource(source !== 'source')}
+        >
+          {source === 'source' ? 'rendered' : 'source'}
+        </button>
+      )}
+      {onReveal === undefined ? null : (
+        <button className="rowtool" aria-label="Reveal in file manager" onClick={onReveal}>
+          <span aria-hidden="true">↗</span> reveal
+        </button>
+      )}
       <button
         className="refresh"
         aria-label="Refresh exhibit"

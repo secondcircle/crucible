@@ -15,7 +15,11 @@ export function shownLocation(tab: PanelTab, navigated?: string): ShownLocation 
   return fileLocation(tab.path)
 }
 
-export function guestSrc(tab: Extract<PanelTab, { readonly kind: 'html' | 'url' }>): string {
+// An image loads in a guest for the same reason a page does: the renderer is
+// served over http and may not reach a `file:` URL of its own.
+export function guestSrc(
+  tab: Extract<PanelTab, { readonly kind: 'html' | 'url' | 'image' }>
+): string {
   if (tab.kind === 'url') return tab.address
   // Built by hand because the renderer has no node url module. Segments are
   // encoded so a space or a hash in a directory name survives the trip.

@@ -75,12 +75,21 @@
   background: var(--accent);
 }
 
+/* The preview tab: italic, and that is the whole cue — the next single click
+   in the file tree replaces what is in it. */
+.tab.preview .ttitle {
+  font-style: italic;
+}
+
 .tab .kind {
   font: 10px var(--mono);
   color: var(--faint);
   border: 1px solid var(--line);
   border-radius: 4px;
   padding: 0 4px;
+  /* a source tab's badge is its extension, which can be longer than `md` */
+  max-width: 44px;
+  overflow: hidden;
 }
 
 .tab.active .kind {
@@ -213,6 +222,33 @@
   background: var(--bg);
   padding: 0 6px;
   border-radius: 4px;
+}
+
+/* What the header says about the file beside its path: how many lines it has,
+   then the two controls the row offers for it. */
+.ctx .where .lines {
+  flex: none;
+  font: 10.5px var(--mono);
+  color: var(--faint);
+  white-space: nowrap;
+}
+
+.ctx .where .rowtool {
+  flex: none;
+  height: 22px;
+  padding: 0 6px;
+  border: none;
+  border-radius: 5px;
+  background: none;
+  color: var(--faint);
+  font: 10.5px var(--mono);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.ctx .where .rowtool:hover {
+  color: var(--ink);
+  background: var(--panel);
 }
 
 .ctx .where .refresh {

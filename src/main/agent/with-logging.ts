@@ -152,6 +152,12 @@ export function withLogging(shell: Shell, log: LogSink, adapter: string): Shell 
       shell.replyToQuestion(sessionId, questionId, reply)
     ),
 
+    openFile: op('openFile', (sessionId, path, options) =>
+      shell.openFile(sessionId, path, options)
+    ),
+    setTabSource: op('setTabSource', (sessionId, tabId, source) =>
+      shell.setTabSource(sessionId, tabId, source)
+    ),
     activateTab: op('activateTab', (sessionId, tabId) => shell.activateTab(sessionId, tabId)),
     closeTab: op('closeTab', (sessionId, tabId) => shell.closeTab(sessionId, tabId)),
     exhibit: op(

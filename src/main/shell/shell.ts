@@ -1497,6 +1497,26 @@ export function createShell({
       await deliverSystem(sessionId, batch, 'steering')
     },
 
+    // A click in the file tree, resolved against the session's own directory,
+    // so a worktree session opens the worktree's copy of a file.
+    async openFile(
+      sessionId: SessionId,
+      path: string,
+      options: { readonly keep: boolean }
+    ): Promise<TabId> {
+      const { directory } = requireSession(sessionId)
+      try {
+        return await panel.open(sessionId, directory, path, options)
+      } catch (cause) {
+        refuse(displaySafeMessage(cause, 'That file could not be opened.'))
+      }
+    },
+
+    async setTabSource(sessionId: SessionId, tabId: TabId, source: boolean): Promise<void> {
+      if (store.session(sessionId) === undefined) return
+      panel.setSource(sessionId, tabId, source)
+    },
+
     // Nothing is pushed at the agent: it learns of the user's own panel actions
     // at its next `panel_list` or `panel_show`.
     async activateTab(sessionId: SessionId, tabId: TabId): Promise<void> {

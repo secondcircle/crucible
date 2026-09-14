@@ -85,6 +85,7 @@ describe('what survives a relaunch', () => {
           }
         ],
         activeTabId: 'plan',
+        previewTabId: null,
         turn: 3
       }
     })
@@ -101,6 +102,7 @@ describe('what survives a relaunch', () => {
         }
       ],
       activeTabId: 'plan',
+      previewTabId: null,
       turn: 3
     })
   })
