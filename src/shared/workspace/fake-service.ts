@@ -189,6 +189,16 @@ export function createFakeWorkspaceService({
       return { directory, paths: CANNED_FILES, changed: CANNED_FILE_STATUS }
     },
 
+    // Canned like the tree, and by the same list: a path this fake lists is a
+    // file, named against the directory or in full.
+    async existingFiles(directory: string, paths: readonly string[]): Promise<readonly string[]> {
+      const listed = new Set(CANNED_FILES)
+      const prefix = `${directory}/`
+      return paths.filter((path) =>
+        listed.has(path.startsWith(prefix) ? path.slice(prefix.length) : path)
+      )
+    },
+
     // Nothing on disk is watched, so the canned tree never changes under
     // anyone.
     async watchFiles(): Promise<void> {},

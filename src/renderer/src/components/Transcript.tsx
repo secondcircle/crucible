@@ -1,4 +1,4 @@
-import { memo, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { Fragment, memo, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { ViewItem } from '../state/shell-state'
 import {
   callSummary,
@@ -12,7 +12,10 @@ import {
 } from '../state/tool-chains'
 import { ASK_TOOL } from '../../../shared/agent/ask-tool'
 import { seamFacts } from '../cache/format'
+import { pathPieces } from '../files/named-path'
+import { useNamedPath } from '../files/path-links'
 import { Markdown } from './Markdown'
+import { PathButton } from './PathLink'
 import './cache-strip.css'
 import './transcript.css'
 
@@ -407,9 +410,40 @@ function skillSummary(summary: string): React.JSX.Element {
   const { skill, within } = splitSkillSummary(summary)
   return (
     <>
-      {skill}
-      {within === undefined ? null : <span className="toolunder"> · {within}</span>}
+      <Summary text={skill} />
+      {within === undefined ? null : (
+        <span className="toolunder">
+          {' · '}
+          <Summary text={within} />
+        </span>
+      )}
     </>
+  )
+}
+
+// What a call is summarized by — `read src/foo.ts` — with the file it names
+// clickable. A summary that names no file draws exactly as it is written.
+function Summary({ text }: { readonly text: string }): React.JSX.Element {
+  return (
+    <>
+      {pathPieces(text).map((piece, index) =>
+        piece.kind === 'text' ? (
+          <Fragment key={index}>{piece.text}</Fragment>
+        ) : (
+          <SummaryPath key={index} text={piece.text} />
+        )
+      )}
+    </>
+  )
+}
+
+function SummaryPath({ text }: { readonly text: string }): React.JSX.Element {
+  const named = useNamedPath(text)
+  if (named === undefined) return <>{text}</>
+  return (
+    <PathButton named={named} look="plain">
+      {text}
+    </PathButton>
   )
 }
 
@@ -436,11 +470,20 @@ const Call = memo(function Call({ call }: { readonly call: ToolItem }): React.JS
     // A question is amber here as it is in the dock, so the history shows the
     // ask for what it was. State still wins: a call that failed stays red.
     <div className={`tool ${state}${name === ASK_TOOL ? ' ask' : ''}`}>
-      <button
+      {/* A div rather than a button: the path in the summary is a control of
+          its own, and one button cannot sit inside another. */}
+      <div
         className="toolhead"
+        role="button"
+        tabIndex={0}
         aria-expanded={running ? undefined : open}
         aria-label={`${name} ${summary}`.trim()}
         onClick={() => setOpen(!open)}
+        onKeyDown={(pressed) => {
+          if (pressed.key !== 'Enter' && pressed.key !== ' ') return
+          pressed.preventDefault()
+          setOpen(!open)
+        }}
       >
         {running ? (
           <span className="spin" aria-hidden="true" />
@@ -451,9 +494,11 @@ const Call = memo(function Call({ call }: { readonly call: ToolItem }): React.JS
         {/* The left border is left alone: it already carries call state, and
             an overloaded border would hide a failure. */}
         {name === SKILL_TOOL ? <span className="toolbadge">{SKILL_TOOL}</span> : null}
-        <span className="toolsummary">{name === SKILL_TOOL ? skillSummary(summary) : summary}</span>
+        <span className="toolsummary">
+          {name === SKILL_TOOL ? skillSummary(summary) : <Summary text={summary} />}
+        </span>
         <span className="toolstate">{said}</span>
-      </button>
+      </div>
       {(running || open) && output !== '' ? (
         <pre className="toolout" ref={tail}>
           {output}

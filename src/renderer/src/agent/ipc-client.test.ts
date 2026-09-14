@@ -78,6 +78,22 @@ describe('an operation', () => {
     ])
   })
 
+  it('sends what a click opens, path or address, with how it opens', async () => {
+    const surface = install(() => ({ ok: true, value: 'plan' }))
+    const port = createIpcClient()
+
+    await port.openFile('session-1', 'plan.md', { keep: false, view: { kind: 'rendered' } })
+    await port.openAddress('session-1', 'http://localhost:5173/', { keep: true })
+
+    expect(surface.requests).toEqual([
+      {
+        op: 'openFile',
+        args: ['session-1', 'plan.md', { keep: false, view: { kind: 'rendered' } }]
+      },
+      { op: 'openAddress', args: ['session-1', 'http://localhost:5173/', { keep: true }] }
+    ])
+  })
+
   it('becomes a rejection carrying main\u2019s own sentence when it is refused', async () => {
     install(() => ({ ok: false, message: 'That session is already working.' }))
     const port = createIpcClient()

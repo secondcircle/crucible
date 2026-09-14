@@ -321,7 +321,8 @@ describe('a click in the tree', () => {
 
     expect(port.calls).toContainEqual({
       op: 'openFile',
-      args: ['s1', 'AGENTS.md', { keep: false }]
+      // Everything the tree opens opens as source, on no line in particular.
+      args: ['s1', 'AGENTS.md', { keep: false, view: { kind: 'source' } }]
     })
     expect(tabs()).toEqual(['AGENTS.md'])
     expect(previewTabs()).toEqual(['AGENTS.md (preview)'])
@@ -366,9 +367,9 @@ describe('a click in the tree', () => {
     // nothing of its own.
     const opens = port.calls.filter((call) => call.op === 'openFile')
     expect(opens.map((call) => call.args[2])).toEqual([
-      { keep: false },
-      { keep: false },
-      { keep: false }
+      { keep: false, view: { kind: 'source' } },
+      { keep: false, view: { kind: 'source' } },
+      { keep: false, view: { kind: 'source' } }
     ])
     expect(port.calls.filter((call) => call.op === 'keepTab')).toHaveLength(1)
   })

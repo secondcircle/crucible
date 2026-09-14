@@ -19,7 +19,7 @@ import type {
 } from '../../shared/workspace/research'
 import type { CommandOutcome, CommandRunner } from './command-runner'
 import { collectIssues } from './collect-issues'
-import { fileTree, listFiles } from './files'
+import { existingFiles, fileTree, listFiles } from './files'
 import { createResearchOperations } from './research'
 import { createResearchProcesses, type ResearchProcesses } from './research-processes'
 import { bashLocation, killTree } from '../platform/exec'
@@ -168,6 +168,10 @@ export function createWorkspaceService({
 
     fileTree(directory: string): Promise<FileTree> {
       return fileTree(directory)
+    },
+
+    existingFiles(directory: string, paths: readonly string[]): Promise<readonly string[]> {
+      return existingFiles(directory, paths)
     },
 
     // Nothing here writes, and nothing waits: the directory is the user's, and

@@ -6,7 +6,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import type { SessionId } from '../../shared/agent/port'
+import type { FileView, SessionId } from '../../shared/agent/port'
 import {
   createPanelModel,
   memoryPanelPersistence,
@@ -17,6 +17,9 @@ import {
 } from './model'
 
 const SESSION: SessionId = 's1'
+
+/** What a click in the file tree asks for: everything as source. */
+const SOURCE: FileView = { kind: 'source' }
 
 let workspace: string
 let persistence: PanelPersistence
@@ -484,7 +487,7 @@ describe('session lifecycle', () => {
 describe('a click in the file tree', () => {
   it('opens any text file as source, titled by its name and keyed by its path', async () => {
     file('src/state/panel-view.ts', 'export const x = 1\n')
-    const id = await panel.open(SESSION, workspace, 'src/state/panel-view.ts', { keep: false })
+    const id = await panel.open(SESSION, workspace, 'src/state/panel-view.ts', { keep: false, view: SOURCE })
 
     expect(id).toBe('panel-view')
     expect(panel.state(SESSION)).toEqual({
@@ -503,8 +506,8 @@ describe('a click in the file tree', () => {
   })
 
   it('gives a markdown or html file the view its toggle flips to', async () => {
-    await panel.open(SESSION, workspace, file('plan.md'), { keep: false })
-    await panel.open(SESSION, workspace, file('page.html'), { keep: true })
+    await panel.open(SESSION, workspace, file('plan.md'), { keep: false, view: SOURCE })
+    await panel.open(SESSION, workspace, file('page.html'), { keep: true, view: SOURCE })
 
     expect(panel.state(SESSION)?.tabs.map((tab) => [tab.kind, 'renders' in tab && tab.renders])).toEqual([
       ['source', 'markdown'],
@@ -516,8 +519,8 @@ describe('a click in the file tree', () => {
     writeFileSync(join(workspace, 'shot.png'), 'not really a png', 'utf8')
     writeFileSync(join(workspace, 'thing.bin'), Buffer.from([1, 0, 2, 0, 3]))
 
-    await panel.open(SESSION, workspace, 'shot.png', { keep: true })
-    await panel.open(SESSION, workspace, 'thing.bin', { keep: true })
+    await panel.open(SESSION, workspace, 'shot.png', { keep: true, view: SOURCE })
+    await panel.open(SESSION, workspace, 'thing.bin', { keep: true, view: SOURCE })
 
     expect(panel.state(SESSION)?.tabs.map((tab) => tab.kind)).toEqual(['image', 'binary'])
     const binary = panel.state(SESSION)?.tabs[1]
@@ -525,7 +528,7 @@ describe('a click in the file tree', () => {
   })
 
   it('refuses a file that is not there, naming it', async () => {
-    await expect(panel.open(SESSION, workspace, 'gone.ts', { keep: false })).rejects.toThrow(
+    await expect(panel.open(SESSION, workspace, 'gone.ts', { keep: false, view: SOURCE })).rejects.toThrow(
       /File not found/
     )
   })
@@ -533,9 +536,9 @@ describe('a click in the file tree', () => {
 
 describe('the preview tab', () => {
   it('is replaced in place by the next single click, and is the only one', async () => {
-    await panel.open(SESSION, workspace, file('first.ts'), { keep: true })
-    await panel.open(SESSION, workspace, file('second.ts'), { keep: false })
-    await panel.open(SESSION, workspace, file('third.ts'), { keep: false })
+    await panel.open(SESSION, workspace, file('first.ts'), { keep: true, view: SOURCE })
+    await panel.open(SESSION, workspace, file('second.ts'), { keep: false, view: SOURCE })
+    await panel.open(SESSION, workspace, file('third.ts'), { keep: false, view: SOURCE })
 
     expect(panel.state(SESSION)?.tabs.map((tab) => tab.id)).toEqual(['first', 'third'])
     expect(panel.state(SESSION)?.previewTabId).toBe('third')
@@ -545,8 +548,8 @@ describe('the preview tab', () => {
   // preview slot, and the press after it keeps that same tab. One decision
   // about one tab, so the gesture has one outcome whatever the disk does.
   it('is kept in place by the double-click that follows the click', async () => {
-    await panel.open(SESSION, workspace, file('previewed.ts'), { keep: false })
-    const tabId = await panel.open(SESSION, workspace, file('kept.ts'), { keep: false })
+    await panel.open(SESSION, workspace, file('previewed.ts'), { keep: false, view: SOURCE })
+    const tabId = await panel.open(SESSION, workspace, file('kept.ts'), { keep: false, view: SOURCE })
 
     panel.keep(SESSION, tabId)
 
@@ -557,7 +560,7 @@ describe('the preview tab', () => {
 
   it('is untouched by a keep aimed at any other tab', async () => {
     panel.show(SESSION, workspace, file('plan.md'), 'the plan')
-    await panel.open(SESSION, workspace, file('previewed.ts'), { keep: false })
+    await panel.open(SESSION, workspace, file('previewed.ts'), { keep: false, view: SOURCE })
 
     panel.keep(SESSION, 'plan')
 
@@ -565,8 +568,8 @@ describe('the preview tab', () => {
   })
 
   it('is left where it is by a file opened outright, as Enter opens one', async () => {
-    await panel.open(SESSION, workspace, file('previewed.ts'), { keep: false })
-    await panel.open(SESSION, workspace, file('kept.ts'), { keep: true })
+    await panel.open(SESSION, workspace, file('previewed.ts'), { keep: false, view: SOURCE })
+    await panel.open(SESSION, workspace, file('kept.ts'), { keep: true, view: SOURCE })
 
     expect(panel.state(SESSION)?.tabs.map((tab) => tab.id)).toEqual(['previewed', 'kept'])
     expect(panel.state(SESSION)?.previewTabId).toBe('previewed')
@@ -576,9 +579,9 @@ describe('the preview tab', () => {
   // user clicked in rather than the order the disk answered in. A click that
   // fails is still one of them and must not take the rest with it.
   it('lets the clicks behind a failed one through, in order', async () => {
-    const gone = panel.open(SESSION, workspace, 'gone.ts', { keep: false })
-    const first = panel.open(SESSION, workspace, file('first.ts'), { keep: false })
-    const second = panel.open(SESSION, workspace, file('second.ts'), { keep: false })
+    const gone = panel.open(SESSION, workspace, 'gone.ts', { keep: false, view: SOURCE })
+    const first = panel.open(SESSION, workspace, file('first.ts'), { keep: false, view: SOURCE })
+    const second = panel.open(SESSION, workspace, file('second.ts'), { keep: false, view: SOURCE })
 
     await expect(gone).rejects.toThrow(/File not found/)
     await Promise.all([first, second])
@@ -589,7 +592,7 @@ describe('the preview tab', () => {
 
   it('is never a tab the agent showed, even when the agent shows it after', async () => {
     const path = file('plan.md')
-    await panel.open(SESSION, workspace, path, { keep: false })
+    await panel.open(SESSION, workspace, path, { keep: false, view: SOURCE })
     expect(panel.state(SESSION)?.previewTabId).toBe('plan')
 
     panel.show(SESSION, workspace, path, 'the plan')
@@ -600,9 +603,9 @@ describe('the preview tab', () => {
   it('leaves an open tab showing what it was showing, and lands on it', async () => {
     const path = file('plan.md')
     panel.show(SESSION, workspace, path, 'the plan')
-    await panel.open(SESSION, workspace, file('other.ts'), { keep: false })
+    await panel.open(SESSION, workspace, file('other.ts'), { keep: false, view: SOURCE })
 
-    await panel.open(SESSION, workspace, path, { keep: false })
+    await panel.open(SESSION, workspace, path, { keep: false, view: SOURCE })
 
     expect(panel.state(SESSION)?.activeTabId).toBe('plan')
     expect(panel.state(SESSION)?.tabs.find((tab) => tab.id === 'plan')?.kind).toBe('markdown')
@@ -610,12 +613,81 @@ describe('the preview tab', () => {
   })
 
   it('stops being one when its tab closes', async () => {
-    await panel.open(SESSION, workspace, file('previewed.ts'), { keep: false })
+    await panel.open(SESSION, workspace, file('previewed.ts'), { keep: false, view: SOURCE })
 
     panel.closeTab(SESSION, 'previewed')
 
     expect(panel.state(SESSION)).toBeUndefined()
     expect(saved.get(SESSION)?.previewTabId).toBeNull()
+  })
+})
+
+describe('a click on a path in a message', () => {
+  const RENDERED: FileView = { kind: 'rendered' }
+
+  it('opens markdown and html in the view they render, with the toggle back', async () => {
+    await panel.open(SESSION, workspace, file('plan.md'), { keep: true, view: RENDERED })
+    await panel.open(SESSION, workspace, file('page.html'), { keep: true, view: RENDERED })
+
+    expect(panel.state(SESSION)?.tabs.map((tab) => tab.kind)).toEqual(['markdown', 'html'])
+    panel.setSource(SESSION, 'plan', true)
+    expect(panel.state(SESSION)?.tabs[0]).toMatchObject({ kind: 'source', renders: 'markdown' })
+  })
+
+  it('opens a file with no rendered view of its own as source', async () => {
+    await panel.open(SESSION, workspace, file('port.ts'), { keep: true, view: RENDERED })
+
+    expect(panel.state(SESSION)?.tabs[0]?.kind).toBe('source')
+  })
+
+  it('carries the line a path:42 named, and re-aims it on the next click', async () => {
+    const path = file('port.ts')
+    await panel.open(SESSION, workspace, path, { keep: true, view: { kind: 'source', line: 42 } })
+    expect(panel.state(SESSION)?.tabs[0]).toMatchObject({ kind: 'source', line: 42 })
+
+    await panel.open(SESSION, workspace, path, { keep: true, view: { kind: 'source', line: 7 } })
+
+    expect(panel.state(SESSION)?.tabs).toHaveLength(1)
+    expect(panel.state(SESSION)?.tabs[0]).toMatchObject({ kind: 'source', line: 7 })
+  })
+
+  // Nothing numbers the lines of a rendered document, so the line is what
+  // brings a rendered tab to source.
+  it('brings a rendered tab to source when a line is named', async () => {
+    const path = file('plan.md')
+    panel.show(SESSION, workspace, path, 'the plan')
+
+    await panel.open(SESSION, workspace, path, { keep: true, view: { kind: 'source', line: 3 } })
+
+    expect(panel.state(SESSION)?.tabs[0]).toMatchObject({
+      kind: 'source',
+      renders: 'markdown',
+      line: 3
+    })
+  })
+
+  it('opens a local address as a web tab, in the preview slot', async () => {
+    await panel.open(SESSION, workspace, file('port.ts'), { keep: false, view: SOURCE })
+    const id = await panel.openWeb(SESSION, 'http://localhost:5173/', { keep: false })
+
+    expect(id).toBe('localhost')
+    expect(panel.state(SESSION)?.tabs).toEqual([
+      {
+        id: 'localhost',
+        title: 'localhost',
+        kind: 'url',
+        shownAt: expect.any(String),
+        address: 'http://localhost:5173/'
+      }
+    ])
+    expect(panel.state(SESSION)?.previewTabId).toBe('localhost')
+  })
+
+  it('lands on the tab an address already has', async () => {
+    await panel.openWeb(SESSION, 'http://localhost:5173/', { keep: true })
+    await panel.openWeb(SESSION, 'http://localhost:5173/', { keep: true })
+
+    expect(panel.state(SESSION)?.tabs).toHaveLength(1)
   })
 })
 
@@ -632,7 +704,7 @@ describe('the source and rendered toggle', () => {
   })
 
   it('does nothing for a file with no rendered view of its own', async () => {
-    await panel.open(SESSION, workspace, file('port.ts'), { keep: true })
+    await panel.open(SESSION, workspace, file('port.ts'), { keep: true, view: SOURCE })
 
     panel.setSource(SESSION, 'port', false)
 
@@ -641,7 +713,7 @@ describe('the source and rendered toggle', () => {
 
   it('refuses to read a body for what is not text', async () => {
     writeFileSync(join(workspace, 'shot.png'), 'not really a png', 'utf8')
-    await panel.open(SESSION, workspace, 'shot.png', { keep: true })
+    await panel.open(SESSION, workspace, 'shot.png', { keep: true, view: SOURCE })
 
     await expect(panel.exhibit(SESSION, 'shot')).rejects.toThrow(/not text/)
   })

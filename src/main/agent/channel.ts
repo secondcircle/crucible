@@ -3,6 +3,7 @@ import { EVENT_CHANNEL, REQUEST_CHANNEL, type PortResult } from '../../shared/ag
 import type {
   AuthMethod,
   BashRunShare,
+  FileView,
   ImageAttachment,
   PortEvent,
   PromptOptions,
@@ -201,6 +202,21 @@ async function invoke(shell: Shell, request: unknown): Promise<unknown> {
     return { keep: asked.keep === true }
   }
 
+  // How a file was asked to open. Source unless the renderer said rendered,
+  // and a line only where one was genuinely named: a line number that is not a
+  // whole positive number is no line at all.
+  function view(position: number): FileView {
+    const asked = ((given[position] ?? {}) as { view?: unknown }).view
+    const { kind, line } = (typeof asked === 'object' && asked !== null ? asked : {}) as {
+      kind?: unknown
+      line?: unknown
+    }
+    if (kind === 'rendered') return { kind: 'rendered' }
+    return typeof line === 'number' && Number.isInteger(line) && line > 0
+      ? { kind: 'source', line }
+      : { kind: 'source' }
+  }
+
   switch (op) {
     case 'snapshot':
       return shell.snapshot()
@@ -279,7 +295,9 @@ async function invoke(shell: Shell, request: unknown): Promise<unknown> {
     case 'replyToQuestion':
       return shell.replyToQuestion(text(0), text(1), questionReply(2))
     case 'openFile':
-      return shell.openFile(text(0), text(1), keep(2))
+      return shell.openFile(text(0), text(1), { ...keep(2), view: view(2) })
+    case 'openAddress':
+      return shell.openAddress(text(0), text(1), keep(2))
     case 'keepTab':
       return shell.keepTab(text(0), text(1))
     case 'setTabSource':

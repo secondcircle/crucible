@@ -4,6 +4,7 @@ import { basename, extname, isAbsolute, resolve } from 'node:path'
 import type { PanelTools } from '../../shared/agent/panel-tools'
 import type {
   ExhibitKind,
+  FileView,
   PanelState,
   PanelTab,
   SessionId,
@@ -29,6 +30,8 @@ export interface StoredPanelTab {
   readonly bytes?: number
   /** Present for a source tab whose file has a rendered view to flip to. */
   readonly renders?: 'markdown' | 'html'
+  /** The 1-based line a `path:42` click named, highlighted in the view. */
+  readonly line?: number
 }
 
 export interface StoredPanel {
@@ -78,6 +81,14 @@ export interface PanelModel extends PanelTools {
     sessionId: SessionId,
     directory: string,
     path: string,
+    options: { readonly keep: boolean; readonly view: FileView }
+  ): Promise<TabId>
+  // A click on a localhost address in an agent's message, on the same terms:
+  // a web tab, in the preview slot unless it is asked to be kept. Whether an
+  // address may be opened this way is the caller's rule, not this model's.
+  openWeb(
+    sessionId: SessionId,
+    address: string,
     options: { readonly keep: boolean }
   ): Promise<TabId>
   // The double-click, which lands after the click that opened the tab: that
@@ -113,6 +124,7 @@ interface Tab {
   shownTurn: number
   bytes?: number
   renders?: 'markdown' | 'html'
+  line?: number
 }
 
 interface Panel {
@@ -253,57 +265,108 @@ export function createPanelModel({
     return panelOf(sessionId).tabs.find((tab) => tab.id === tabId)
   }
 
-  // What a click in the tree lands on. Off the model's object and whole, so
-  // `open` can queue it: one click's disk read must not overtake the click
-  // before it.
-  async function opened(
+  // Where a click's tab goes and what that does to the preview slot. Shared by
+  // every click, so a file and a web address land by one rule.
+  function placed(
     sessionId: SessionId,
-    directory: string,
-    path: string,
-    { keep }: { readonly keep: boolean }
-  ): Promise<TabId> {
-    const resolved = isAbsolute(path) ? path : resolve(directory, path)
-    if (!onDisk(resolved)) throw new Error(`File not found: ${resolved}`)
-    const kind = await openedKind(resolved)
-
-    const panel = panelOf(sessionId)
-    const already = panel.tabs.find((tab) => tab.path === resolved)
-    const renders = rendersOf(resolved)
-    let shown: Tab
-    if (already !== undefined) {
-      // Landing on a tab that is open leaves how it is being shown alone: a
-      // click in the tree is not an opinion about the agent's rendered view,
-      // or about the toggle the user just used.
-      already.shownAt = now().toISOString()
-      already.shownTurn = panel.turn
-      if (already.kind === 'binary') already.bytes = sizeOf(resolved)
-      shown = already
-      // Asked for as an ordinary tab outright, the file stops being the
-      // preview wherever its tab came from.
-      if (keep && panel.previewTabId === shown.id) panel.previewTabId = null
-    } else {
-      shown = {
-        id: mintId(panel, resolved),
-        title: basename(resolved),
-        path: resolved,
-        kind,
-        shownAt: now().toISOString(),
-        shownTurn: panel.turn,
-        ...(kind === 'binary' ? { bytes: sizeOf(resolved) } : {}),
-        ...(kind === 'source' && renders !== undefined ? { renders } : {})
-      }
-      // The preview tab is one slot: the next single click puts another file
-      // in it, where the eye already is, rather than beside it.
+    panel: Panel,
+    shown: Tab,
+    { fresh, keep }: { readonly fresh: boolean; readonly keep: boolean }
+  ): TabId {
+    // The preview tab is one slot: the next single click puts another file in
+    // it, where the eye already is, rather than beside it. Asked for as an
+    // ordinary tab outright, what was already open stops being the preview
+    // wherever its tab came from.
+    if (fresh) {
       const previewAt = panel.tabs.findIndex((tab) => tab.id === panel.previewTabId)
       if (!keep && previewAt !== -1) panel.tabs.splice(previewAt, 1, shown)
       else panel.tabs.push(shown)
       panel.previewTabId = keep ? panel.previewTabId : shown.id
-    }
+    } else if (keep && panel.previewTabId === shown.id) panel.previewTabId = null
     panel.activeTabId = shown.id
     reseat(panel)
     persist(sessionId, panel)
     notify({ sessionId, shownTabId: shown.id })
     return shown.id
+  }
+
+  // What a click in the tree, or on a path in a message, lands on. Off the
+  // model's object and whole, so `open` can queue it: one click's disk read
+  // must not overtake the click before it.
+  async function opened(
+    sessionId: SessionId,
+    directory: string,
+    path: string,
+    { keep, view }: { readonly keep: boolean; readonly view: FileView }
+  ): Promise<TabId> {
+    const resolved = isAbsolute(path) ? path : resolve(directory, path)
+    if (!onDisk(resolved)) throw new Error(`File not found: ${resolved}`)
+    const read = await openedKind(resolved)
+    const renders = rendersOf(resolved)
+    // Rendered is asked for by a click in a message; a file with no rendered
+    // view of its own is source either way.
+    const kind: ExhibitKind =
+      view.kind === 'rendered' && read === 'source' && renders !== undefined ? renders : read
+
+    const panel = panelOf(sessionId)
+    const already = panel.tabs.find((tab) => tab.path === resolved)
+    if (already !== undefined) {
+      // Landing on a tab that is open leaves how it is being shown alone: a
+      // click is not an opinion about the agent's rendered view, or about the
+      // toggle the user just used.
+      already.shownAt = now().toISOString()
+      already.shownTurn = panel.turn
+      if (already.kind === 'binary') already.bytes = sizeOf(resolved)
+      // A named line is the one exception: nothing numbers the lines of a
+      // rendered document, so the line the click asked for brings the tab to
+      // source to show it.
+      if (view.kind === 'source' && view.line !== undefined) {
+        already.line = view.line
+        if (already.kind === 'markdown' || already.kind === 'html') {
+          already.renders = already.kind
+          already.kind = 'source'
+        }
+      }
+      return placed(sessionId, panel, already, { fresh: false, keep })
+    }
+
+    const line = view.kind === 'source' ? view.line : undefined
+    const shown: Tab = {
+      id: mintId(panel, resolved),
+      title: basename(resolved),
+      path: resolved,
+      kind,
+      shownAt: now().toISOString(),
+      shownTurn: panel.turn,
+      ...(kind === 'binary' ? { bytes: sizeOf(resolved) } : {}),
+      ...(kind === 'source' && renders !== undefined ? { renders } : {}),
+      ...(kind === 'source' && line !== undefined ? { line } : {})
+    }
+    return placed(sessionId, panel, shown, { fresh: true, keep })
+  }
+
+  /** A click on a localhost address: a web tab, placed like any other click. */
+  function openedWeb(
+    sessionId: SessionId,
+    address: string,
+    { keep }: { readonly keep: boolean }
+  ): TabId {
+    const panel = panelOf(sessionId)
+    const already = panel.tabs.find((tab) => tab.path === address)
+    if (already !== undefined) {
+      already.shownAt = now().toISOString()
+      already.shownTurn = panel.turn
+      return placed(sessionId, panel, already, { fresh: false, keep })
+    }
+    const shown: Tab = {
+      id: mintId(panel, address),
+      title: nameOf(address),
+      path: address,
+      kind: 'url',
+      shownAt: now().toISOString(),
+      shownTurn: panel.turn
+    }
+    return placed(sessionId, panel, shown, { fresh: true, keep })
   }
 
   return {
@@ -349,9 +412,19 @@ export function createPanelModel({
       sessionId: SessionId,
       directory: string,
       path: string,
-      options: { readonly keep: boolean }
+      options: { readonly keep: boolean; readonly view: FileView }
     ): Promise<TabId> {
       return inTurn(sessionId, () => opened(sessionId, directory, path, options))
+    },
+
+    // Queued with the file opens rather than applied at once, so two clicks in
+    // a row land in the order they were made whatever the disk does.
+    openWeb(
+      sessionId: SessionId,
+      address: string,
+      options: { readonly keep: boolean }
+    ): Promise<TabId> {
+      return inTurn(sessionId, async () => openedWeb(sessionId, address, options))
     },
 
     keep(sessionId: SessionId, tabId: TabId): void {
@@ -502,7 +575,8 @@ function crossing(tab: Tab): PanelTab {
       ...carried,
       kind: 'source',
       path: tab.path,
-      ...(tab.renders === undefined ? {} : { renders: tab.renders })
+      ...(tab.renders === undefined ? {} : { renders: tab.renders }),
+      ...(tab.line === undefined ? {} : { line: tab.line })
     }
   }
   if (tab.kind === 'image') return { ...carried, kind: 'image', path: tab.path }

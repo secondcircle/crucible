@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process'
-import { readdir, readFile } from 'node:fs/promises'
+import { readdir, readFile, stat } from 'node:fs/promises'
 import type { Dirent } from 'node:fs'
-import { join, relative, sep } from 'node:path'
+import { isAbsolute, join, relative, resolve, sep } from 'node:path'
 import type { FileStatus, FileTree } from '../../shared/workspace/service'
 
 // Kept apart from the service so the walk and the ignore rules can be tested
@@ -17,6 +17,27 @@ const WALK_LIMIT = 20_000
 export async function listFiles(workspacePath: string): Promise<readonly string[]> {
   const tracked = await gitFiles(workspacePath)
   return tracked ?? (await walk(workspacePath))
+}
+
+// Which of the paths are files, in the order they were asked about. Answered
+// with the path as it was given, because that is what the caller asked with
+// and what it holds its answers by. One stat each, run together: a message
+// full of paths is checked in one round trip.
+export async function existingFiles(
+  directory: string,
+  paths: readonly string[]
+): Promise<readonly string[]> {
+  const checked = await Promise.all(
+    paths.map(async (path) => {
+      try {
+        const found = await stat(isAbsolute(path) ? path : resolve(directory, path))
+        return found.isFile() ? path : undefined
+      } catch {
+        return undefined
+      }
+    })
+  )
+  return checked.filter((path) => path !== undefined)
 }
 
 // What the file tree lists: the same entries the search sees, plus how git

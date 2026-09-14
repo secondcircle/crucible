@@ -157,6 +157,18 @@ describe('the fake workspace service', () => {
     expect(Date.now() - Date.parse(answer.board.collectedAt)).toBeLessThan(2000)
   })
 
+  it('answers which paths are files from the list it lists, and reads no disk', async () => {
+    const { service } = watched()
+
+    expect(
+      await service.existingFiles('/repos/crucible', [
+        'CONTEXT.md',
+        '/repos/crucible/src/shared/agent/port.ts',
+        'notes/nothing.md'
+      ])
+    ).toEqual(['CONTEXT.md', '/repos/crucible/src/shared/agent/port.ts'])
+  })
+
   it('records a link and opens nothing at all', async () => {
     const { service } = watched()
 

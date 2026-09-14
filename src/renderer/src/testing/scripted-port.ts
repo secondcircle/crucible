@@ -5,6 +5,7 @@ import type {
   AuthPromptKind,
   AuthPromptOption,
   BashRunShare,
+  FileView,
   HistoryMatch,
   ImageAttachment,
   ModelId,
@@ -37,6 +38,7 @@ import type {
   TurnId,
   WorkspaceId
 } from '../../../shared/agent/port'
+import { isLocalAddress } from '../../../shared/agent/local-address'
 import { composeAnswerBatch, type AnsweredQuestion } from '../../../shared/questions/wording'
 
 // Answers operations the way main does but streams nothing by itself, so a
@@ -240,6 +242,42 @@ export function createScriptedPort(initial: Partial<ShellSnapshot> = {}): Script
       (candidate) => candidate.id === session?.workspaceId
     )
     return session?.worktree?.path ?? workspace?.path ?? ''
+  }
+
+  // Where a click's tab lands, for a file and for an address alike: the tab
+  // that is already open, refreshed, or a new one in the preview slot —
+  // exactly as main's model places one.
+  function placeTab(
+    sessionId: SessionId,
+    location: string,
+    keep: boolean,
+    mint: (tabs: readonly PanelTab[]) => PanelTab,
+    // What a click does to a tab that is already open. Leaving how it is being
+    // shown alone is the default, exactly as main leaves it.
+    refresh: (tab: PanelTab) => PanelTab = (tab) => ({ ...tab, shownAt: NOW })
+  ): TabId {
+    const panel = panelOf(sessionId)
+    const tabs = [...(panel?.tabs ?? [])]
+    const already = tabs.find((tab) => locationOf(tab) === location)
+    if (already !== undefined) {
+      setPanel(
+        sessionId,
+        tabs.map((tab) => (tab.id === already.id ? refresh(tab) : tab)),
+        already.id,
+        keep && panel?.previewTabId === already.id ? undefined : panel?.previewTabId
+      )
+      emitState()
+      return already.id
+    }
+    const opened = mint(tabs)
+    // The preview tab is one slot: a single click puts the new file where the
+    // old one was, exactly as main's model does.
+    const previewAt = tabs.findIndex((tab) => tab.id === panel?.previewTabId)
+    if (!keep && previewAt !== -1) tabs.splice(previewAt, 1, opened)
+    else tabs.push(opened)
+    setPanel(sessionId, tabs, opened.id, keep ? panel?.previewTabId : opened.id)
+    emitState()
+    return opened.id
   }
 
   // Absent rather than empty, exactly as main folds it: an empty panel is no
@@ -823,37 +861,46 @@ export function createScriptedPort(initial: Partial<ShellSnapshot> = {}): Script
     openFile(
       sessionId: SessionId,
       path: string,
-      options: { readonly keep: boolean }
+      options: { readonly keep: boolean; readonly view: FileView }
     ): Promise<TabId> {
       calls.push({ op: 'openFile', args: [sessionId, path, options] })
       if (port.openFileRefusal !== undefined) {
         return Promise.reject(new Error(port.openFileRefusal))
       }
-      const panel = panelOf(sessionId)
-      const tabs = [...(panel?.tabs ?? [])]
       // Resolved against the session's own directory, as main resolves it, so
       // a tab names the file rather than the click.
       const resolved = path.startsWith('/') ? path : `${directoryOf(sessionId)}/${path}`
-      const already = tabs.find((tab) => tab.kind !== 'url' && tab.path === resolved)
-      if (already !== undefined) {
-        setPanel(
+      return Promise.resolve(
+        placeTab(
           sessionId,
-          tabs.map((tab) => (tab.id === already.id ? { ...tab, shownAt: NOW } : tab)),
-          already.id,
-          options.keep && panel?.previewTabId === already.id ? undefined : panel?.previewTabId
+          resolved,
+          options.keep,
+          (tabs) => openedTab(port, resolved, tabs, options.view),
+          (tab) => onLine(tab, options.view)
         )
-        emitState()
-        return Promise.resolve(already.id)
+      )
+    },
+
+    openAddress(
+      sessionId: SessionId,
+      address: string,
+      options: { readonly keep: boolean }
+    ): Promise<TabId> {
+      calls.push({ op: 'openAddress', args: [sessionId, address, options] })
+      if (!isLocalAddress(address)) {
+        return Promise.reject(
+          new Error('Crucible opens local addresses in the panel; the rest go to your browser.')
+        )
       }
-      const opened = openedTab(port, resolved, tabs)
-      // The preview tab is one slot: a single click puts the new file where
-      // the old one was, exactly as main's model does.
-      const previewAt = tabs.findIndex((tab) => tab.id === panel?.previewTabId)
-      if (!options.keep && previewAt !== -1) tabs.splice(previewAt, 1, opened)
-      else tabs.push(opened)
-      setPanel(sessionId, tabs, opened.id, options.keep ? panel?.previewTabId : opened.id)
-      emitState()
-      return Promise.resolve(opened.id)
+      return Promise.resolve(
+        placeTab(sessionId, address, options.keep, (tabs) => ({
+          id: mintTabId(webTitle(address), tabs),
+          title: webTitle(address),
+          shownAt: NOW,
+          kind: 'url',
+          address
+        }))
+      )
     },
 
     keepTab(sessionId: SessionId, tabId: TabId): Promise<void> {
@@ -1047,11 +1094,13 @@ function flipped(tab: PanelTab, tabId: TabId, source: boolean): PanelTab {
   return { ...rest, kind: renders }
 }
 
-// A tab minted from a path the way main mints one for a click in the file
-// tree: the title is the file's name, the id is that name without its
-// extension and slugged, and the kind follows the extension.
-function openedTab(port: ScriptedPort, path: string, open: readonly PanelTab[]): PanelTab {
-  const title = path.split('/').at(-1) ?? path
+/** Where a tab's exhibit is: the file it names, or the address it loads. */
+function locationOf(tab: PanelTab): string {
+  return tab.kind === 'url' ? tab.address : tab.path
+}
+
+/** The name without its extension, slugged, and unique among the open tabs. */
+function mintTabId(title: string, open: readonly PanelTab[]): TabId {
   const base =
     title
       .replace(/\.[^.]+$/, '')
@@ -1060,8 +1109,40 @@ function openedTab(port: ScriptedPort, path: string, open: readonly PanelTab[]):
       .replace(/^-+|-+$/g, '') || 'tab'
   let id = base
   for (let n = 2; open.some((tab) => tab.id === id); n += 1) id = `${base}-${n}`
-  const carried = { id, title, shownAt: NOW }
+  return id
+}
+
+/** The last piece of the address's path, or its host, as main names one. */
+function webTitle(address: string): string {
+  const url = new URL(address)
+  return url.pathname.split('/').filter((part) => part !== '').at(-1) ?? url.hostname
+}
+
+// A click that named a line brings the tab it lands on to source to show it,
+// exactly as main does; a click that named none says nothing about the view.
+function onLine(tab: PanelTab, view: FileView): PanelTab {
+  const shown = { ...tab, shownAt: NOW }
+  if (view.kind !== 'source' || view.line === undefined) return shown
+  if (shown.kind === 'markdown' || shown.kind === 'html') {
+    return { ...shown, kind: 'source', renders: shown.kind, line: view.line }
+  }
+  return shown.kind === 'source' ? { ...shown, line: view.line } : shown
+}
+
+// A tab minted from a path the way main mints one for a click: the title is
+// the file's name, the id is that name without its extension and slugged, and
+// the kind follows the extension and the view the click asked for.
+function openedTab(
+  port: ScriptedPort,
+  path: string,
+  open: readonly PanelTab[],
+  view: FileView
+): PanelTab {
+  const title = path.split('/').at(-1) ?? path
+  const carried = { id: mintTabId(title, open), title, shownAt: NOW }
   const lower = title.toLowerCase()
+  const line = view.kind === 'source' ? view.line : undefined
+  const onIt = line === undefined ? {} : { line }
   // Named by however much of the path a test cared to write down: nothing
   // here reads a disk, so what is not text is said rather than sniffed.
   const bytes = [...port.binaries].find(([named]) => path.endsWith(named))?.[1]
@@ -1069,15 +1150,19 @@ function openedTab(port: ScriptedPort, path: string, open: readonly PanelTab[]):
   if (IMAGE_EXTENSIONS.some((extension) => lower.endsWith(extension))) {
     return { ...carried, kind: 'image', path }
   }
-  // Everything else opens as source; what has a rendered view carries the
-  // toggle to it, exactly as main mints it.
-  if (lower.endsWith('.md') || lower.endsWith('.markdown')) {
-    return { ...carried, kind: 'source', path, renders: 'markdown' }
+  // A click in the tree opens source and carries the toggle to the rendered
+  // view; a click in a message opens what the file renders, exactly as main
+  // mints it.
+  const renders = lower.endsWith('.md') || lower.endsWith('.markdown')
+    ? 'markdown'
+    : lower.endsWith('.html') || lower.endsWith('.htm')
+      ? 'html'
+      : undefined
+  if (renders !== undefined && view.kind === 'rendered') {
+    return { ...carried, kind: renders, path }
   }
-  if (lower.endsWith('.html') || lower.endsWith('.htm')) {
-    return { ...carried, kind: 'source', path, renders: 'html' }
-  }
-  return { ...carried, kind: 'source', path }
+  if (renders !== undefined) return { ...carried, kind: 'source', path, renders, ...onIt }
+  return { ...carried, kind: 'source', path, ...onIt }
 }
 
 /** A label change the way an adapter applies one: the tree is read back. */

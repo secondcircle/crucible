@@ -185,11 +185,14 @@
   margin-bottom: 2px;
 }
 
+/* A div rather than a button, so the path in its summary can be a control of
+   its own; everything else about it is the row it always was. */
 .toolhead {
   display: flex;
   gap: 8px;
   align-items: center;
   width: 100%;
+  cursor: pointer;
   font: 12px var(--mono);
   color: var(--dim);
   background: var(--code);
