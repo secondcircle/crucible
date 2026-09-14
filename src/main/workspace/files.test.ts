@@ -154,4 +154,18 @@ describe('what the file tree lists', () => {
     expect(tree.paths).toEqual(['a.ts', 'b/c.ts'])
     expect(tree.changed).toEqual({})
   })
+
+  // Review reproduction (review-1): the brief promises "the tree updates when
+  // files appear or disappear", and VS Code's explorer, the ruled coloring
+  // model, lists the disk — a deleted file drops out. `git ls-files --cached`
+  // keeps a tracked file the agent just deleted, so the tree shows a phantom
+  // row, amber-M, that errors with "File not found" when clicked.
+  it('drops a tracked file that was deleted from disk', async () => {
+    const root = tempRepo({ 'kept.ts': '', 'doomed.ts': 'about to go\n' })
+    rmSync(join(root, 'doomed.ts'))
+
+    const tree = await fileTree(root)
+
+    expect(tree.paths).toEqual(['kept.ts'])
+  })
 })
