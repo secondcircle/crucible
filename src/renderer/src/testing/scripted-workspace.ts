@@ -27,6 +27,11 @@ export interface ScriptedWorkspace extends WorkspaceService {
   changed: Readonly<Record<string, FileStatus>>
   /** The directories being watched right now, in the order they were asked for. */
   readonly watching: readonly string[]
+  // Held where a test drives the window main's watch takes to start: set it
+  // before rendering, and no watch answers until the test settles it.
+  holdWatch?: boolean
+  /** Settles every watch waiting to start. */
+  settleWatch(): void
   /** A change on disk, exactly as main announces one. */
   filesChanged(directory: string): void
   /** Every file this service was asked to reveal, and revealed nothing for. */
@@ -87,6 +92,7 @@ export function createScriptedWorkspace(files: readonly string[] = []): Scripted
   const watching: string[] = []
   const revealed: string[] = []
   let heldIssues: (() => void) | undefined
+  const heldWatches: Array<() => void> = []
   const worktrees: Array<(created: WorktreeCreation) => void> = []
   const heldStatus: Array<() => void> = []
   const heldDisconnects: Array<() => void> = []
@@ -148,7 +154,15 @@ export function createScriptedWorkspace(files: readonly string[] = []): Scripted
     watchFiles(directory: string): Promise<void> {
       calls.push({ op: 'watchFiles', args: [directory] })
       watching.push(directory)
-      return Promise.resolve()
+      if (service.holdWatch !== true) return Promise.resolve()
+      return new Promise<void>((resolve) => {
+        heldWatches.push(resolve)
+      })
+    },
+
+    settleWatch(): void {
+      const waiting = heldWatches.splice(0, heldWatches.length)
+      for (const settle of waiting) settle()
     },
 
     unwatchFiles(directory: string): Promise<void> {

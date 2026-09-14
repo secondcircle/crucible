@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { FileTree, WorkspaceService } from '../../../shared/workspace/service'
 
 // The two live facts the file viewer stands on: that something under the
@@ -6,15 +6,33 @@ import type { FileTree, WorkspaceService } from '../../../shared/workspace/servi
 // workspace service; nothing here reads a folder itself.
 
 /**
- * Watches a directory for as long as one is given, and counts the changes it
- * announces. A count rather than a flag: two changes in a row are two reasons
- * to read again, and a counter cannot go stale.
+ * Watches a directory, counts the changes it announces, and reads its listing
+ * in step with the watch.
+ *
+ * In step is the whole point. Started as two independent effects, the listing
+ * is read in the same commit the watch is asked for, so a file written between
+ * the read and the watch running is in neither: not in the listing, which was
+ * taken before it existed, and not in an event, which nobody was listening for
+ * yet. Nothing ever replaces it. Here the watch is asked for first and the
+ * listing taken only once that call has answered — the service resolves it
+ * when the watch is running — so everything written before the listing is in
+ * it, and everything after it arrives as a change.
+ *
+ * The changes are a count rather than a flag: two changes in a row are two
+ * reasons to read again, and a counter cannot go stale.
  */
-export function useWatchedDirectory(
+export function useWatchedFiles(
   service: WorkspaceService,
-  directory: string | undefined
-): number {
+  directory: string | undefined,
+  /** False where the column is on its other face: the watch stays, the tree is not drawn. */
+  listed: boolean
+): { readonly changes: number; readonly listing: FileTree | undefined } {
   const [changes, setChanges] = useState(0)
+  const [listing, setListing] = useState<FileTree | undefined>(undefined)
+  // The watch the listing waits on. A ref rather than state: it is nothing the
+  // tree draws, and the effect that reads it runs after the effect that sets
+  // it, in the same commit, every time either of them runs.
+  const watching = useRef<Promise<void> | undefined>(undefined)
 
   useEffect(() => {
     if (directory === undefined) return
@@ -22,33 +40,23 @@ export function useWatchedDirectory(
       if (event.type !== 'files_changed' || event.directory !== directory) return
       setChanges((seen) => seen + 1)
     })
-    void service.watchFiles(directory).catch(() => {})
+    // A watch that could not be started answers all the same, and the listing
+    // below still happens: a tree that refreshes only when something asks it
+    // to beats no tree.
+    watching.current = service.watchFiles(directory).catch(() => {})
     return () => {
       unsubscribe()
+      watching.current = undefined
       void service.unwatchFiles(directory).catch(() => {})
     }
   }, [service, directory])
 
-  return changes
-}
-
-/**
- * The listing for a directory, read again whenever `changed` moves. Absent
- * until the first answer lands, and absent again the moment the directory
- * changes, so no tree is ever drawn from another folder's listing.
- */
-export function useFileTree(
-  service: WorkspaceService,
-  directory: string | undefined,
-  changed: number
-): FileTree | undefined {
-  const [listing, setListing] = useState<FileTree | undefined>(undefined)
-
   useEffect(() => {
-    if (directory === undefined) return
+    const started = watching.current
+    if (directory === undefined || !listed || started === undefined) return
     let current = true
-    void service
-      .fileTree(directory)
+    void started
+      .then(() => service.fileTree(directory))
       .then((read) => {
         if (current) setListing(read)
       })
@@ -58,9 +66,12 @@ export function useFileTree(
     return () => {
       current = false
     }
-  }, [service, directory, changed])
+  }, [service, directory, listed, changes])
 
   // The listing answers for the folder it named, so a listing left over from
   // another directory is not this tree's and is not shown.
-  return listing !== undefined && listing.directory === directory ? listing : undefined
+  return {
+    changes,
+    listing: listing !== undefined && listing.directory === directory ? listing : undefined
+  }
 }

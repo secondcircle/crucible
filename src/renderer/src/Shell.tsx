@@ -103,8 +103,8 @@ import {
   type Marks
 } from './state/needs-you'
 import { faceOf, withFace, type SidebarFace, type SidebarFaces } from './sidebar/face'
-import { insideTree, toggleFolder, type Expanded } from './files/tree'
-import { useFileTree, useWatchedDirectory } from './files/use-files'
+import { filtering, insideTree, toggleFolder, type Expanded } from './files/tree'
+import { useWatchedFiles } from './files/use-files'
 import type { FilesFace } from './components/FileTree'
 import { escapeRung, type EscapeRung, type EscapeState } from './state/escape'
 import {
@@ -345,6 +345,12 @@ export function Shell({
   const [faces, setFaces] = useState<SidebarFaces>({})
   const [openFolders, setOpenFolders] = useState<Readonly<Record<WorkspaceId, Expanded>>>({})
   const [fileFilters, setFileFilters] = useState<Readonly<Record<WorkspaceId, string>>>({})
+  // Folders closed by hand while a filter is on, where every folder that
+  // matched is open to begin with. Kept apart from the remembered set, and
+  // dropped when the filter changes: arranging a filtered tree is not
+  // arranging the whole one, and clearing the filter must give back the tree
+  // the user left.
+  const [closedInFilter, setClosedInFilter] = useState<Readonly<Record<WorkspaceId, Expanded>>>({})
   // Whether each workspace is a git working tree, as the workspace service
   // answered. Absent until the answer arrives, which is why nothing flashes.
   const [gitWorkspaces, setGitWorkspaces] = useState<Readonly<Record<WorkspaceId, boolean>>>({})
@@ -529,11 +535,10 @@ export function Shell({
     sessionDirectory !== undefined && (sidebarFace === 'files' || shownFilePath !== undefined)
       ? sessionDirectory
       : undefined
-  const filesChanged = useWatchedDirectory(service, watchedDirectory)
-  const treeListing = useFileTree(
+  const { changes: filesChanged, listing: treeListing } = useWatchedFiles(
     service,
-    sidebarFace === 'files' ? sessionDirectory : undefined,
-    filesChanged
+    watchedDirectory,
+    sidebarFace === 'files'
   )
   const run = activeSessionId === undefined ? undefined : runs[activeSessionId]
   const allRuns: readonly RunRecord[] = useMemo(() => runsSnapshot?.runs ?? [], [runsSnapshot])
@@ -2710,16 +2715,26 @@ export function Shell({
           ...(treeListing === undefined ? {} : { listing: treeListing }),
           expanded: openFolders[activeWorkspaceId] ?? EMPTY_FOLDERS,
           filter: fileFilters[activeWorkspaceId] ?? '',
+          collapsed: closedInFilter[activeWorkspaceId] ?? EMPTY_FOLDERS,
           ...(shownFilePath === undefined
             ? {}
             : whereInTree(sessionDirectory, shownFilePath)),
-          onFilter: (text) =>
-            setFileFilters((current) => ({ ...current, [activeWorkspaceId]: text })),
-          onToggleFolder: (path) =>
-            setOpenFolders((current) => ({
+          onFilter: (text) => {
+            setFileFilters((current) => ({ ...current, [activeWorkspaceId]: text }))
+            setClosedInFilter((current) => ({ ...current, [activeWorkspaceId]: EMPTY_FOLDERS }))
+          },
+          // The same gesture answers in whichever tree is on screen, and is
+          // remembered only for that one: the filtered tree's folds go with
+          // the filter, the whole tree's outlive it.
+          onToggleFolder: (path) => {
+            const fold = filtering(fileFilters[activeWorkspaceId] ?? '')
+              ? setClosedInFilter
+              : setOpenFolders
+            fold((current) => ({
               ...current,
               [activeWorkspaceId]: toggleFolder(current[activeWorkspaceId] ?? EMPTY_FOLDERS, path)
-            })),
+            }))
+          },
           onOpen: openFileFromTree,
           onCopyPath: (path) => void navigator.clipboard?.writeText(path).catch(report),
           onReveal: (path) => void service.revealFile(sessionDirectory, path).catch(report),

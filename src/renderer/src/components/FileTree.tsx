@@ -21,6 +21,8 @@ export interface FilesFace {
   readonly listing?: Listing
   readonly expanded: Expanded
   readonly filter: string
+  /** Folders closed by hand under the filter; empty when nothing is filtered. */
+  readonly collapsed: Expanded
   /** The open file, root-relative, drawn as the current row. */
   readonly activePath?: string
   readonly onFilter: (text: string) => void
@@ -34,10 +36,10 @@ export interface FilesFace {
 }
 
 export function FileTree({ face }: { readonly face: FilesFace }): React.JSX.Element {
-  const { listing, expanded, filter } = face
+  const { listing, expanded, filter, collapsed } = face
   const rows = useMemo(
-    () => (listing === undefined ? [] : fileRows(listing, { expanded, filter })),
-    [listing, expanded, filter]
+    () => (listing === undefined ? [] : fileRows(listing, { expanded, filter, collapsed })),
+    [listing, expanded, filter, collapsed]
   )
 
   // The face is swapped in by a chord, so the caret lands where typing does

@@ -7,6 +7,24 @@ import type { FileStatus, FileTree } from '../../../shared/workspace/service'
 /** Which folders are open. Absence is closed, so there is one representation. */
 export type Expanded = ReadonlySet<string>
 
+/** What the tree is showing, and nothing about how it is drawn. */
+export interface TreeView {
+  /** The folders opened in the whole tree, remembered for the workspace. */
+  readonly expanded: Expanded
+  readonly filter: string
+  /**
+   * The folders closed by hand under the current filter, where a match's
+   * ancestors are open to begin with. A set of its own, because under a
+   * filter open is the default and `expanded` answers the other question.
+   */
+  readonly collapsed: Expanded
+}
+
+/** Whether a tree is filtered at all: spaces alone narrow nothing. */
+export function filtering(filter: string): boolean {
+  return filter.trim() !== ''
+}
+
 interface FileRowBase {
   /** Root-relative, `/`-separated: the key, and what a click carries. */
   readonly path: string
@@ -42,12 +60,15 @@ function folder(): Folder {
  * Every row the tree shows, in draw order: folders before files at each level,
  * each group alphabetical. A folder's children are listed when it is open, and
  * a filter opens everything it kept, because a match nobody can see is no
- * answer.
+ * answer — until the user closes one of them, which is the one thing that
+ * closes a folder in a filtered tree.
  */
-export function fileRows(tree: FileTree, view: { readonly expanded: Expanded; readonly filter: string }): readonly FileRow[] {
+export function fileRows(tree: FileTree, view: TreeView): readonly FileRow[] {
+  const filtered = filtering(view.filter)
   const filter = view.filter.trim().toLowerCase()
-  const paths =
-    filter === '' ? tree.paths : tree.paths.filter((path) => path.toLowerCase().includes(filter))
+  const paths = !filtered
+    ? tree.paths
+    : tree.paths.filter((path) => path.toLowerCase().includes(filter))
   const root = build(paths)
   const changedFolders = foldersHolding(Object.keys(tree.changed))
 
@@ -57,9 +78,9 @@ export function fileRows(tree: FileTree, view: { readonly expanded: Expanded; re
       const path = prefix === '' ? name : `${prefix}/${name}`
       const child = at.folders.get(name)
       if (child === undefined) continue
-      // A filtered tree is open by construction; the remembered folders answer
-      // only for the whole one.
-      const expanded = filter !== '' || view.expanded.has(path)
+      // A filtered tree is open by construction, closed only where the user
+      // closed it; the remembered folders answer for the whole tree alone.
+      const expanded = filtered ? !view.collapsed.has(path) : view.expanded.has(path)
       rows.push({
         kind: 'directory',
         path,

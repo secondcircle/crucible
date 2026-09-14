@@ -25,7 +25,9 @@ const FILES: readonly string[] = [
 ]
 
 async function shell(
-  snapshot: Partial<ShellSnapshot> = oneSession()
+  snapshot: Partial<ShellSnapshot> = oneSession(),
+  /** Anything the test wants set on the service before the first render. */
+  arrange: (workspace: ScriptedWorkspace) => void = () => {}
 ): Promise<{ port: ScriptedPort; workspace: ScriptedWorkspace }> {
   const hasSessions = (snapshot.sessions ?? []).length > 0
   runningOn('darwin')
@@ -37,6 +39,7 @@ async function shell(
     'src/state/panel-view.ts': 'modified',
     'docs/design/mock-a-ember.html': 'untracked'
   }
+  arrange(workspace)
   render(<Shell port={port} workspace={workspace} commands={createScriptedCommands()} />)
   if (hasSessions) await sessionsShown()
   await settled()
@@ -53,6 +56,12 @@ const treeRows = (): string[] =>
   screen.queryAllByRole('treeitem').map((row) => row.getAttribute('aria-label') ?? '')
 
 const row = (name: string): HTMLElement => screen.getByRole('treeitem', { name })
+
+async function filterFor(text: string): Promise<void> {
+  await act(async () => {
+    fireEvent.change(screen.getByLabelText('Filter files'), { target: { value: text } })
+  })
+}
 
 const tabs = (): string[] =>
   screen.queryAllByRole('tab').map((tab) => tab.querySelector('.ttitle')?.textContent ?? '')
@@ -162,6 +171,29 @@ describe('the tree', () => {
     expect(document.querySelector('.filetree .troot b')?.textContent).toBe('crucible')
   })
 
+  // The window between asking for a watch and the watch running is the window
+  // an agent writes in. A listing taken inside it holds neither the file nor a
+  // reason to read again, so the tree is wrong until something else asks.
+  it('takes its listing only once the watch is running', async () => {
+    const { workspace } = await shell(oneSession(), (scripted) => {
+      scripted.holdWatch = true
+    })
+
+    await pressChord('e')
+    expect(workspace.watching).toEqual(['/repos/crucible'])
+    expect(workspace.calls.filter((call) => call.op === 'fileTree')).toEqual([])
+
+    // Written while the watch was starting: no event will ever name it.
+    workspace.files = [...FILES, 'src/written-while-starting.ts']
+    await act(async () => {
+      workspace.settleWatch()
+    })
+    await settled()
+
+    await click(row('src (holds changes)'))
+    expect(treeRows()).toContain('written-while-starting.ts')
+  })
+
   it('colors what git changed, and marks the folders holding it', async () => {
     await shell()
 
@@ -218,20 +250,38 @@ describe('the tree', () => {
     expect(treeRows()).not.toContain('design (holds changes)')
   })
 
-  // review-2: the chevron is drawn, the row hovers and the click is taken, so
-  // a folder row under a filter is a control like any other.
+  // The chevron is drawn, the row hovers and the click is taken, so a folder
+  // row under a filter is a control like any other and must answer like one.
   it('answers a folder click while a filter is on', async () => {
     await shell()
 
     await pressChord('e')
-    await act(async () => {
-      fireEvent.change(screen.getByLabelText('Filter files'), { target: { value: 'panel' } })
-    })
+    await filterFor('panel')
     const before = treeRows()
 
     await click(row('src (holds changes)'))
 
     expect(treeRows()).not.toEqual(before)
+    expect(treeRows()).toEqual(['src (holds changes)'])
+    expect(row('src (holds changes)').getAttribute('aria-expanded')).toBe('false')
+
+    await click(row('src (holds changes)'))
+    expect(treeRows()).toEqual(before)
+  })
+
+  it('leaves the tree the filter hid arranged as the user left it', async () => {
+    await shell()
+
+    await pressChord('e')
+    const arranged = treeRows()
+
+    await filterFor('panel')
+    await click(row('src (holds changes)'))
+    await filterFor('')
+
+    // The fold belonged to the filtered tree and went with it: clearing the
+    // filter gives back the tree the user had, not one they never arranged.
+    expect(treeRows()).toEqual(arranged)
   })
 
   it('copies a row’s path and reveals it through the workspace service', async () => {

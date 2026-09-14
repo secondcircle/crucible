@@ -20,7 +20,7 @@ const LISTING: FileTree = {
   }
 }
 
-const closed = { expanded: new Set<string>(), filter: '' }
+const closed = { expanded: new Set<string>(), filter: '', collapsed: new Set<string>() }
 
 function shown(rows: ReturnType<typeof fileRows>): string[] {
   return rows.map((row) => `${'  '.repeat(row.depth)}${row.name}`)
@@ -121,6 +121,46 @@ describe('the filter', () => {
 
   it('answers nothing at all when nothing matches', () => {
     expect(fileRows(LISTING, { ...closed, filter: 'nothing-here' })).toEqual([])
+  })
+
+  it('closes the folder the user closed, and nothing else it opened', () => {
+    const rows = fileRows(LISTING, {
+      ...closed,
+      filter: 'panel',
+      collapsed: new Set(['src/renderer'])
+    })
+
+    expect(shown(rows)).toEqual([
+      'docs',
+      '  adr',
+      '    0008-context-panel.md',
+      'src',
+      '  renderer'
+    ])
+    expect(rows.find((row) => row.name === 'renderer')).toMatchObject({ expanded: false })
+  })
+
+  it('leaves the whole tree arranged as it was: the folds are the filter’s own', () => {
+    const arranged = { ...closed, expanded: new Set(['docs']) }
+
+    // Closed under the filter, and the filter then cleared.
+    const under = fileRows(LISTING, { ...arranged, filter: 'panel', collapsed: new Set(['src']) })
+    expect(shown(under)).toEqual(['docs', '  adr', '    0008-context-panel.md', 'src'])
+    expect(shown(fileRows(LISTING, arranged))).toEqual([
+      'docs',
+      '  adr',
+      '  design',
+      'src',
+      '.gitignore',
+      'AGENTS.md',
+      'package.json'
+    ])
+  })
+
+  it('narrows nothing for spaces alone, which is no filter at all', () => {
+    expect(shown(fileRows(LISTING, { ...closed, filter: '   ' }))).toEqual(
+      shown(fileRows(LISTING, closed))
+    )
   })
 })
 
