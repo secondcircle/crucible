@@ -3,7 +3,7 @@
 // A path an agent names is a way into the file, not a decoration: the disk
 // decides which ones are clickable, and a click lands in the session's context
 // panel exactly as a click in the file tree does.
-import { act, fireEvent, render, screen } from '@testing-library/react'
+import { act, fireEvent, render, screen, within } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 import type { ShellSnapshot } from '../../shared/agent/port'
 import { Shell } from './Shell'
@@ -14,8 +14,10 @@ import { sessionsShown } from './testing/sidebar'
 import { settled } from './testing/settled'
 
 const FILES: readonly string[] = [
+  '.gitignore',
   'AGENTS.md',
   'CONTEXT.md',
+  'Makefile',
   'docs/design/mock-a-ember.html',
   'package.json',
   'src/shared/agent/port.ts'
@@ -97,17 +99,39 @@ describe('a path in an agent’s message', () => {
     expect(screen.queryByRole('button', { name: /CONTEXT\.md/ })).toBeNull()
   })
 
-  it('leaves alone what could never be a file, without asking the disk', async () => {
-    const { port, workspace } = await shell()
+  it('stays a code span when the disk has no such file', async () => {
+    const { port } = await shell()
 
     await said(port, 'That was `8dd033a`, switched with `CRUCIBLE_AGENT=sdk`.')
 
     expect(screen.getByText('8dd033a').tagName).toBe('CODE')
     expect(screen.queryByRole('button', { name: '8dd033a' })).toBeNull()
+    expect(screen.getByText('CRUCIBLE_AGENT=sdk').tagName).toBe('CODE')
+  })
+
+  it('never asks the disk about a code span that could not be a path at all', async () => {
+    const { port, workspace } = await shell()
+
+    await said(port, 'Run `npm run dev`, never `https://example.test/`, and not `docs/adr/`.')
+
     const asked = workspace.calls
       .filter((call) => call.op === 'existingFiles')
       .flatMap((call) => call.args[1] as readonly string[])
     expect(asked).toEqual([])
+  })
+
+  // Nothing in the shape of `Makefile` tells it from `panel_show`, so the disk
+  // is asked about both, and every extension-less file a repository has —
+  // `Makefile`, `.gitignore`, `LICENSE` — opens like any other.
+  it('is a link when the file carries no extension', async () => {
+    const { port } = await shell()
+
+    await said(port, 'The build rules are in `Makefile`, and `.gitignore` hides the rest.')
+
+    expect(link('Makefile').tagName).toBe('BUTTON')
+    await click(link('.gitignore'))
+
+    expect(opens(port)).toEqual([['s1', '.gitignore', { keep: false, view: { kind: 'rendered' } }]])
   })
 
   it('opens the file as the session’s preview tab, and keeps it on a double-click', async () => {
@@ -275,19 +299,23 @@ describe('where a path is not a link', () => {
 })
 
 describe('the path a tool chain row header names', () => {
-  it('opens the file, and does not expand the row', async () => {
-    const { port } = await shell()
-
+  /** One settled `read`, with its chain open so the call's own row shows. */
+  async function readRow(port: ScriptedPort, summary: string): Promise<void> {
     await act(async () => {
       await port.prompt('s1', 'read it')
     })
     await act(async () => {
-      port.toolStarted('s1', 'c1', 'read', 'src/shared/agent/port.ts')
+      port.toolStarted('s1', 'c1', 'read', summary)
       port.toolEnded('s1', 'c1', true, 'export type WorkspaceId = string\n')
       port.endTurn('s1')
     })
     await settled()
     await click(screen.getByRole('button', { name: /^Tool chain/ }))
+  }
+
+  it('opens the file, and does not expand the row', async () => {
+    const { port } = await shell()
+    await readRow(port, 'src/shared/agent/port.ts')
 
     const row = screen.getByRole('button', { name: 'read src/shared/agent/port.ts' })
     await click(link('src/shared/agent/port.ts'))
@@ -299,5 +327,41 @@ describe('the path a tool chain row header names', () => {
     expect(row).toHaveAttribute('aria-expanded', 'false')
     await click(row)
     expect(row).toHaveAttribute('aria-expanded', 'true')
+  })
+
+  // The two targets are two controls side by side, not one inside the other.
+  // Nested, every key that reached the path reached the row as well: Enter on
+  // the path expanded the row, and the row's `preventDefault` cancelled the
+  // button's own activation on the way. jsdom fires no native activation, so
+  // what is asserted here is the shape that decides it — the row is not an
+  // ancestor of the path — and the row staying shut under the key press.
+  it('is a target of its own from the keyboard, and never the row', async () => {
+    const { port } = await shell()
+    await readRow(port, 'src/shared/agent/port.ts')
+
+    const row = screen.getByRole('button', { name: 'read src/shared/agent/port.ts' })
+    const path = link('src/shared/agent/port.ts')
+    expect(row.contains(path)).toBe(false)
+
+    await act(async () => {
+      fireEvent.keyDown(path, { key: 'Enter' })
+      fireEvent.keyDown(path, { key: ' ' })
+    })
+
+    expect(row).toHaveAttribute('aria-expanded', 'false')
+    expect(opens(port)).toEqual([])
+  })
+
+  // What a `read` names is the whole summary, so a file with no extension is
+  // as clickable here as in a message.
+  it('links a file with no extension', async () => {
+    const { port } = await shell()
+    await readRow(port, 'Makefile')
+
+    const row = screen.getByRole('button', { name: 'read Makefile' })
+    await click(within(row.parentElement as HTMLElement).getByRole('button', { name: 'Makefile' }))
+
+    expect(opens(port)).toEqual([['s1', 'Makefile', { keep: false, view: { kind: 'rendered' } }]])
+    expect(row).toHaveAttribute('aria-expanded', 'false')
   })
 })

@@ -26,11 +26,18 @@ describe('what reads as a path', () => {
     expect(namedPath('CONTEXT.md:1')?.path).toBe('CONTEXT.md')
   })
 
-  it('refuses what is not a path at all', () => {
-    // A commit hash, a tool name, a word: no separator and no extension.
-    expect(namedPath('8dd033a')).toBeUndefined()
-    expect(namedPath('panel_show')).toBeUndefined()
-    expect(namedPath('CRUCIBLE_AGENT=sdk')).toBeUndefined()
+  it('takes a name with no extension, because plenty of files have none', () => {
+    // Nothing in the shape of `Makefile` separates it from `panel_show`, so
+    // the disk is the only honest judge and these reach it.
+    expect(namedPath('Makefile')).toEqual({ path: 'Makefile' })
+    expect(namedPath('.gitignore')).toEqual({ path: '.gitignore' })
+    expect(namedPath('LICENSE')).toEqual({ path: 'LICENSE' })
+    // Which is the same reason a commit hash gets as far as a stat: it is a
+    // candidate, and it is the disk that says no.
+    expect(namedPath('8dd033a')).toEqual({ path: '8dd033a' })
+  })
+
+  it('refuses what could not be a path however the disk answered', () => {
     // A command, which is where the whitespace rule earns itself.
     expect(namedPath('npm run dev')).toBeUndefined()
     // A folder however it is spelled.
@@ -63,5 +70,23 @@ describe('a tool chain row header', () => {
 
   it('leaves a summary that names no file entirely alone', () => {
     expect(pathPieces('npm test')).toEqual([{ kind: 'text', text: 'npm test' }])
+  })
+
+  // Every word of every bash command passes through here, so a word taken out
+  // of a line carries the shape rule a whole summary does not: a separator, or
+  // an extension.
+  it('takes no bare word of a command for a path, whatever the disk would say', () => {
+    expect(pathPieces('rm -rf build')).toEqual([{ kind: 'text', text: 'rm -rf build' }])
+    expect(pathPieces('cat Makefile')).toEqual([{ kind: 'text', text: 'cat Makefile' }])
+  })
+
+  // A `read` names one file and the summary is that file, extension or none.
+  it('takes a summary that is one word whole, as a code span is taken', () => {
+    expect(pathPieces('Makefile')).toEqual([
+      { kind: 'path', text: 'Makefile', named: { path: 'Makefile' } }
+    ])
+    expect(pathPieces('CONTEXT.md:12')).toEqual([
+      { kind: 'path', text: 'CONTEXT.md:12', named: { path: 'CONTEXT.md', line: 12 } }
+    ])
   })
 })

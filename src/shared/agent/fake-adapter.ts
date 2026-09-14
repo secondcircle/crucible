@@ -389,7 +389,8 @@ const REPLY_DELTAS: readonly string[] = [
   // The paths are genuinely there in a Crucible checkout, so the click that
   // opens one in the context panel is drivable with no model and no cost.
   '- markdown with `inline code`, a table and a fenced block\n\n' +
-    'The glossary is `CONTEXT.md`, and this port is `src/shared/agent/port.ts:1`.\n\n',
+    'The glossary is `CONTEXT.md`, this port is `src/shared/agent/port.ts:1`, ' +
+    'and the build rules are in `Makefile`.\n\n',
   '| flavor | cost | default |\n| --- | --- | --- |\n',
   '| fake | none | yes |\n| sdk | metered | no |\n\n',
   '```ts\n',

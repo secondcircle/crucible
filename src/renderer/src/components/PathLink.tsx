@@ -26,16 +26,11 @@ function Target({
       type="button"
       className={`pathlink ${look}`}
       title={title}
-      // The row header this may sit in is a control of its own: opening the
-      // file is not expanding the row.
-      onClick={(clicked) => {
-        clicked.stopPropagation()
-        links.open(target)
-      }}
-      onDoubleClick={(clicked) => {
-        clicked.stopPropagation()
-        links.keep(target)
-      }}
+      // Nothing this sits in is a control: the tool chain row header's expand
+      // is a button beside this one, not around it, so neither gesture here
+      // has anything to be taken back from.
+      onClick={() => links.open(target)}
+      onDoubleClick={() => links.keep(target)}
     >
       {children}
     </button>

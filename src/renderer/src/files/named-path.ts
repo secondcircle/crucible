@@ -16,11 +16,11 @@ export interface NamedPath {
 /** `path`, `path:42` or `path:42:7`; the column is read and dropped. */
 const WITH_LINE = /^(.*?):(\d+)(?::\d+)?$/
 
-// Two spellings and no third: a path with a separator in it, or a bare file
-// name carrying an extension. A word without either — `panel_show`, a commit
-// hash like `8dd033a` — is prose, and prose is never a link.
+// What a word has to look like before it is worth a stat: a separator in it,
+// or an extension on the end. Applied to a word plucked out of a longer line
+// and nowhere else — see `pathPieces`.
 const SEPARATED = /[/\\]/
-const NAMED = /[^./\\]\.[A-Za-z0-9]{1,8}$/
+const EXTENDED = /[^./\\]\.[A-Za-z0-9]{1,8}$/
 
 // `https:`, `mailto:`, `javascript:` and anything else with a scheme belong to
 // the web door. Two characters at least, so a Windows drive letter is a path
@@ -31,6 +31,13 @@ const SCHEME = /^[A-Za-z][A-Za-z0-9+.-]+:/
  * The file this text names, or nothing when it cannot be naming one. Text with
  * whitespace in it is not a candidate: a path with a space is rarer than a
  * command with one, and a false link is worse than a missing one.
+ *
+ * Nothing here rules on what a file name looks like. A whole code span or a
+ * whole href is one thing the agent pointed at, so existence is the only
+ * question worth asking about it, and asking is what makes `Makefile`,
+ * `.gitignore` and `LICENSE` open like every other file. A span that names no
+ * file — `panel_show`, a commit hash like `8dd033a` — costs the one stat the
+ * disk answers no to, and stays the code span it was.
  */
 export function namedPath(text: string): NamedPath | undefined {
   if (text === '' || /\s/.test(text)) return undefined
@@ -38,11 +45,23 @@ export function namedPath(text: string): NamedPath | undefined {
   const path = suffix === null ? text : suffix[1]
   const line = suffix === null ? undefined : Number(suffix[2])
   if (path === '' || SCHEME.test(path)) return undefined
-  if (!SEPARATED.test(path) && !NAMED.test(path)) return undefined
   // A trailing separator is a folder however it is spelled, and folders are
   // not links.
   if (/[/\\]$/.test(path)) return undefined
   return line === undefined || line < 1 ? { path } : { path, line }
+}
+
+/**
+ * The file a single word of a longer line names. Stricter than a whole span by
+ * the shape rule above, because the words here are every word of every bash
+ * command a row header summarizes: without it `npm`, `test`, `&&` and `-rf`
+ * each cost a stat, for lines that arrive by the hundred in a working session.
+ */
+function namedWord(word: string): NamedPath | undefined {
+  const named = namedPath(word)
+  if (named === undefined) return undefined
+  if (!SEPARATED.test(named.path) && !EXTENDED.test(named.path)) return undefined
+  return named
 }
 
 // How a click in a message opens what its text named: at the line the text
@@ -63,12 +82,19 @@ export type TextPiece =
  * header is a tool's own summary — `Read src/foo.ts` — rather than prose.
  */
 export function pathPieces(text: string): readonly TextPiece[] {
+  // A summary of one word is not a sentence with a word taken out of it: it is
+  // the whole of what the call names, the way a code span is, so it goes to
+  // the disk on existence alone and `read Makefile` links like `read
+  // src/foo.ts`. Text with whitespace in it never gets this far.
+  const whole = namedPath(text)
+  if (whole !== undefined) return [{ kind: 'path', text, named: whole }]
+
   const pieces: TextPiece[] = []
   let plain = ''
   // The separators are captured so the text can be put back exactly as it was
   // written; each of them is whitespace, which names no path.
   for (const word of text.split(/(\s+)/)) {
-    const named = namedPath(word)
+    const named = namedWord(word)
     if (named === undefined) {
       plain += word
       continue

@@ -27,6 +27,9 @@ export const CANNED_FILES: readonly string[] = [
   '.gitignore',
   'AGENTS.md',
   'CONTEXT.md',
+  // Two files whose names carry no extension, because whether those are
+  // clickable in a message is decided by the disk and by nothing else.
+  'Makefile',
   // A picture and a file that is not text, so the panel's own answers to both
   // are drivable without a folder being read.
   'build/icon.png',

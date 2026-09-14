@@ -470,21 +470,18 @@ const Call = memo(function Call({ call }: { readonly call: ToolItem }): React.JS
     // A question is amber here as it is in the dock, so the history shows the
     // ask for what it was. State still wins: a call that failed stays red.
     <div className={`tool ${state}${name === ASK_TOOL ? ' ask' : ''}`}>
-      {/* A div rather than a button: the path in the summary is a control of
-          its own, and one button cannot sit inside another. */}
-      <div
-        className="toolhead"
-        role="button"
-        tabIndex={0}
-        aria-expanded={running ? undefined : open}
-        aria-label={`${name} ${summary}`.trim()}
-        onClick={() => setOpen(!open)}
-        onKeyDown={(pressed) => {
-          if (pressed.key !== 'Enter' && pressed.key !== ' ') return
-          pressed.preventDefault()
-          setOpen(!open)
-        }}
-      >
+      {/* Two controls, side by side rather than one inside the other: the
+          expand button is laid over the whole row, and the path in the summary
+          sits above it. Nesting them made every key that reached the path
+          reach the row as well. */}
+      <div className="toolhead">
+        <button
+          type="button"
+          className="toolexpand"
+          aria-expanded={running ? undefined : open}
+          aria-label={`${name} ${summary}`.trim()}
+          onClick={() => setOpen(!open)}
+        />
         {running ? (
           <span className="spin" aria-hidden="true" />
         ) : (
