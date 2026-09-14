@@ -11,6 +11,7 @@ import {
   readFileSync,
   realpathSync,
   rmSync,
+  statSync,
   writeFileSync
 } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -204,6 +205,30 @@ describe('watching a directory', () => {
     await new Promise((resolve) => setTimeout(resolve, 400))
 
     expect(events).toEqual([])
+  })
+
+  // review-2: the arming window the watch opens on macOS is the window it
+  // exists to cover, and nothing re-lists after it closes.
+  it('announces a file written while the watch is still arming', async () => {
+    write('already-here.ts')
+    const watching = service.watchFiles(folder)
+    // An agent writing in the milliseconds after ⌘E: the watcher is created,
+    // `live` is still false, so the event is dropped and never replaced.
+    write('written-during-arming.ts')
+    await watching
+    await until(() => events.some((event) => event.type === 'files_changed'), 8000)
+
+    expect(events.filter((event) => event.type === 'files_changed')).toHaveLength(1)
+  })
+
+  // review-2: "Read-only. No edit, no save, no file mutation of any kind."
+  it('leaves the watched directory untouched', async () => {
+    write('already-here.ts')
+    const before = statSync(folder)
+
+    await service.watchFiles(folder)
+
+    expect(statSync(folder).ctimeMs).toBe(before.ctimeMs)
   })
 
   it('is unmoved by what git does to its own directory', async () => {

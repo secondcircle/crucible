@@ -218,6 +218,22 @@ describe('the tree', () => {
     expect(treeRows()).not.toContain('design (holds changes)')
   })
 
+  // review-2: the chevron is drawn, the row hovers and the click is taken, so
+  // a folder row under a filter is a control like any other.
+  it('answers a folder click while a filter is on', async () => {
+    await shell()
+
+    await pressChord('e')
+    await act(async () => {
+      fireEvent.change(screen.getByLabelText('Filter files'), { target: { value: 'panel' } })
+    })
+    const before = treeRows()
+
+    await click(row('src (holds changes)'))
+
+    expect(treeRows()).not.toEqual(before)
+  })
+
   it('copies a row’s path and reveals it through the workspace service', async () => {
     const { workspace } = await shell()
     const copied: string[] = []
