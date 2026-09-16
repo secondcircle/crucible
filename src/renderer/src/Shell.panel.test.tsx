@@ -297,6 +297,78 @@ describe('the exhibit', () => {
     expect(ops(port)).not.toContain('exhibit')
   })
 
+  // Attaching a guest activates the app on macOS, so an agent's show used to
+  // pull the user out of whatever they were in. A guest attaches only while
+  // the window is in front; one already attached stays.
+  describe('while the user is in another app', () => {
+    const away = async (): Promise<void> => {
+      await act(async () => {
+        window.dispatchEvent(new Event('blur'))
+      })
+    }
+    const back = async (): Promise<void> => {
+      await act(async () => {
+        window.dispatchEvent(new Event('focus'))
+      })
+    }
+
+    it('holds a shown page until the window is in front, then loads it', async () => {
+      const port = await shellWith(withTabs([PLAN], 'plan'))
+      await away()
+
+      await act(async () => {
+        port.showTab('s1', BENCHMARK)
+      })
+      await settled()
+
+      expect(frame()).toBeNull()
+      expect(region()).toHaveTextContent('Loads when Crucible is in front.')
+
+      await back()
+
+      expect(frame()?.getAttribute('src')).toBe(BENCHMARK_SRC)
+      expect(region()).not.toHaveTextContent('Loads when Crucible is in front.')
+    })
+
+    it('keeps a page that was already loaded', async () => {
+      await shellWith(withTabs([BENCHMARK], 'benchmark'))
+      const shown = frame()
+      expect(shown).not.toBeNull()
+
+      await away()
+
+      expect(frame()).toBe(shown)
+    })
+
+    it('holds a re-show, which would attach a guest anew', async () => {
+      const port = await shellWith(withTabs([BENCHMARK], 'benchmark'))
+      await away()
+
+      await act(async () => {
+        port.showTab('s1', { ...BENCHMARK, shownAt: '2026-08-19T15:00:00.000Z' })
+      })
+      await settled()
+
+      expect(frame()).toBeNull()
+
+      await back()
+
+      expect(frame()?.getAttribute('src')).toBe(BENCHMARK_SRC)
+    })
+
+    it('still renders markdown, which needs no guest', async () => {
+      const port = await shellWith(withTabs([BENCHMARK], 'benchmark'))
+      await away()
+
+      await act(async () => {
+        port.showTab('s1', PLAN)
+      })
+      await settled()
+
+      expect(screen.getByRole('heading', { name: 'The plan' })).toBeInTheDocument()
+    })
+  })
+
   it('replaces the frame when a re-show refreshes an HTML tab', async () => {
     const port = await shellWith(withTabs([BENCHMARK], 'benchmark'))
     const first = frame()

@@ -407,6 +407,9 @@ export function Shell({
   // `document.hasFocus()`: at mount the window has not been shown yet, and a
   // window nobody has left is a window the user is at.
   const windowFocused = useRef(true)
+  // The same fact as state, for what has to re-render when the user comes
+  // back: the panel, which holds a guest's attach until then.
+  const [inFront, setInFront] = useState(true)
   /** Sessions with a send under way, still waiting on its expansion. */
   const sending = useRef<Set<SessionId>>(new Set())
   // Which press of the summarize door owns each session's summarize state:
@@ -1164,12 +1167,14 @@ export function Shell({
   useEffect(() => {
     function onFocus(): void {
       windowFocused.current = true
+      setInFront(true)
       const looking = railNow.current.activeSessionId
       if (looking === undefined) return
       setMarks((current) => withoutMark(current, looking))
     }
     function onBlur(): void {
       windowFocused.current = false
+      setInFront(false)
     }
     window.addEventListener('focus', onFocus)
     window.addEventListener('blur', onBlur)
@@ -3100,6 +3105,7 @@ export function Shell({
             }
             port={port}
             changed={filesChanged}
+            inFront={inFront}
             onCopyLocation={(location) =>
               void navigator.clipboard?.writeText(location).catch(report)
             }

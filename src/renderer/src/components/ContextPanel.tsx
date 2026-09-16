@@ -63,6 +63,7 @@ export function ContextPanel({
   layout,
   port,
   changed = 0,
+  inFront = true,
   onCopyLocation,
   onReveal,
   onCollapse,
@@ -76,6 +77,11 @@ export function ContextPanel({
   // file follows it: a count rather than a flag, so two changes in a row are
   // two re-reads.
   readonly changed?: number
+  // Whether this window is the one the user is in. A guest attaches only
+  // while it is: attaching one activates the app on macOS (Chromium's doing,
+  // below anything this renderer can reach), which is how an agent's show
+  // used to pull the user out of whatever they were working in.
+  readonly inFront?: boolean
   readonly onCopyLocation: (location: string) => void
   /** The platform's file manager. Absent where there is none to reach. */
   readonly onReveal?: (path: string) => void
@@ -283,6 +289,7 @@ export function ContextPanel({
           sessionId={sessionId}
           tab={active}
           body={body}
+          inFront={inFront}
           viewRef={viewRef}
           onNavigate={navigate}
         />
@@ -310,6 +317,7 @@ function Exhibit({
   sessionId,
   tab,
   body,
+  inFront,
   viewRef,
   onNavigate
 }: {
@@ -317,6 +325,7 @@ function Exhibit({
   readonly tab: PanelTab | undefined
   /** The text, for the tabs that are read as text. Absent until it lands. */
   readonly body: ExhibitBody | undefined
+  readonly inFront: boolean
   readonly viewRef: React.RefObject<ExhibitWebview | null>
   readonly onNavigate: (url: string) => void
 }): React.JSX.Element {
@@ -325,10 +334,20 @@ function Exhibit({
     notify.current = onNavigate
   })
 
+  // The mount the slot holds a guest for. Attaching a guest is what activates
+  // the app on macOS, so a guest attaches only while the window is in front;
+  // once attached it stays whether or not the user leaves, because a reload
+  // and a navigation are silent and only the attach is not. A guest another
+  // mount needs while the user is elsewhere waits, and the note below says so.
+  const [attached, setAttached] = useState<ExhibitMount | undefined>(undefined)
+  const mount = tab === undefined ? undefined : mountOf(sessionId, tab)
+  const attaches = mount !== undefined && (inFront || attached === mount)
+
   const follows = tab?.kind === 'url'
   const mounted = useCallback(
     (guest: HTMLElement | null) => {
       viewRef.current = guest as ExhibitWebview | null
+      setAttached(guest === null ? undefined : mount)
       if (guest === null || !follows) return
       const went = (event: Event): void => {
         const { url } = event as GuestNavigation
@@ -338,9 +357,10 @@ function Exhibit({
       return () => {
         for (const type of GUEST_NAVIGATION) guest.removeEventListener(type, went)
         viewRef.current = null
+        setAttached(undefined)
       }
     },
-    [viewRef, follows]
+    [viewRef, follows, mount]
   )
 
   return (
@@ -349,6 +369,8 @@ function Exhibit({
         <BinaryExhibit bytes={tab.bytes} />
       ) : readsText(tab) ? (
         <TextExhibit tab={tab} body={body} />
+      ) : !attaches ? (
+        <p className="exhibit-failure">Loads when Crucible is in front.</p>
       ) : (
         // A guest webContents of its own: full browser fidelity — scripts run,
         // the network loads, links navigate in place — and no preload, no
@@ -357,7 +379,7 @@ function Exhibit({
         // `shownAt` is in the key so a re-show remounts and reloads; a refresh
         // is not in it, because reloading the guest is not remounting it.
         <webview
-          key={mountOf(sessionId, tab)}
+          key={mount}
           className="frame"
           title={tab.title}
           src={guestSrc(tab)}
