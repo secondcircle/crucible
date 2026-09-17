@@ -615,15 +615,27 @@ export function createShell({
   // agent afterwards and the session is never marked needs-you: it is
   // housekeeping, and the transcript block is the whole of the report.
   function runCompaction(sessionId: SessionId, trigger: CompactionTrigger): void {
-    if (compacting.has(sessionId)) return
+    // Nothing is run twice over one conversation, and the rules are told so:
+    // an ask they hear no answer to is a conversation they never judge again.
+    if (compacting.has(sessionId)) {
+      watch.compacted(sessionId)
+      return
+    }
     const running = adapter
       .compact(sessionId, trigger)
       .then((record) => {
+        // What it left the conversation at is what the rules weigh the next
+        // one against; a compaction that wrote nothing leaves them judging the
+        // conversation as they did before.
+        watch.compacted(sessionId, record?.tokensAfter)
         // An idle compaction is the one that changes what the next send costs,
         // so it is the one the next send is accounted against.
         if (record !== undefined && trigger === 'idle') idleCompacted.add(sessionId)
       })
-      .catch((cause: unknown) => onCompactionFailure(sessionId, cause))
+      .catch((cause: unknown) => {
+        watch.compacted(sessionId)
+        onCompactionFailure(sessionId, cause)
+      })
       .finally(() => {
         compacting.delete(sessionId)
         if (!disposed) emitState()

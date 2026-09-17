@@ -158,7 +158,9 @@ export function createSdkNodeSessionFactory({
       // Assigned once, below, and read late: the compaction hook is built
       // before the session it compacts exists.
       const held: { session?: AgentSession } = {}
-      const live: { trigger: CompactionTrigger } = { trigger: 'threshold' }
+      // What the running compaction was asked for, and what it left behind
+      // when it landed. π calls the hook back, so both are read late.
+      const live: { trigger: CompactionTrigger; landed?: number } = { trigger: 'threshold' }
       const settings = pi.SettingsManager.inMemory()
       // π's own auto-compaction is off here for the same reason it is off in a
       // session: Crucible decides when a loop compacts and writes what the
@@ -200,7 +202,9 @@ export function createSdkNodeSessionFactory({
             sizeOf: pi.estimateTokens,
             contextWindow: () => held.session?.model?.contextWindow,
             failed: onCompactionFailure,
-            settled: () => {}
+            settled: (stored) => {
+              live.landed = stored.record.tokensAfter
+            }
           })
         ]
       })
@@ -236,7 +240,12 @@ export function createSdkNodeSessionFactory({
           settings: compaction,
           begin: (trigger) => {
             live.trigger = trigger
+            live.landed = undefined
           },
+          // Nothing where the compaction wrote nothing: π cancels a compaction
+          // its hook refused without rejecting, so a resolved `compact()` is
+          // not on its own a compaction that happened.
+          landed: () => live.landed,
           entryToMessages: pi.sessionEntryToContextMessages as (
             entry: never
           ) => readonly StoredMessage[],
@@ -278,6 +287,8 @@ export function toolCallCount(messages: readonly StoredMessage[]): number {
 interface NodeCompaction {
   readonly settings: () => CompactionSettings
   readonly begin: (trigger: CompactionTrigger) => void
+  /** What the compaction that just ran left the conversation at, if it ran. */
+  readonly landed: () => number | undefined
   readonly entryToMessages: (entry: never) => readonly StoredMessage[]
   readonly onFailure: (cause: unknown) => void
 }
@@ -317,11 +328,15 @@ export function wrapNodeSession(
     compact: (_id, trigger) => {
       compaction.begin(trigger)
       // Never rejects: the watch is told when a compaction starts, and the
-      // failure is the run log's to carry.
+      // failure is the run log's to carry. It is also told what the compaction
+      // did — the window it left, or nothing where it left none — because that
+      // is what the rules weigh the next one against.
       compacting = (async () => {
         try {
           await session.compact()
+          watch.compacted(NODE, compaction.landed())
         } catch (cause) {
+          watch.compacted(NODE)
           compaction.onFailure(cause)
         }
       })().finally(() => {

@@ -28,6 +28,13 @@ export interface CompactionWatch {
   // Fresh facts: the conversation billed a request. Re-arms its idle timer and
   // compacts at once if its size now calls for it.
   saw(id: string, facts: ConversationFacts): void
+  // The compaction this watch asked for is over: `tokensAfter` is the window it
+  // left the conversation at, and nothing where it did not land — no boundary
+  // to cut at, a model call that failed, a summary that came back empty, a
+  // cancelled wait. Every compaction the watch asks for comes back here, both
+  // ways: the size a compaction produces is what the next one has to beat, and
+  // until this is called nothing fires for that conversation at all.
+  compacted(id: string, tokensAfter?: number): void
   /** The conversation stopped working, which is when a held trigger can act. */
   settled(id: string): void
   /** The conversation is gone: no timer outlives it. */
@@ -62,15 +69,27 @@ export function createCompactionWatch(options: CompactionWatchOptions): Compacti
   const clearTimer =
     options.clearTimer ?? ((handle: unknown): void => clearTimeout(handle as never))
   const watched = new Map<string, Watched>()
-  // The size each conversation's own last compaction left it at. Compacting
-  // takes the recent span as it finds it, so a conversation that is still over
-  // the threshold afterwards gains nothing from a second pass: it would keep
-  // the same span, report the same size and ask again, forever. Nothing fires
-  // on size again until the conversation has grown past what its compaction
-  // produced. `Infinity` is a compaction whose result has not been reported
-  // yet, which nothing can be over.
+  // The size each conversation's own last compaction left it at, which is the
+  // second fact every rule here decides on: what the rules ask is not "is this
+  // conversation big" but "is there enough here for a compaction to take
+  // away", and this is what the last one could not. It is measured rather than
+  // estimated, so a conversation whose words alone exceed the budgets is
+  // judged by what compacting it actually does.
   const compactedTo = new Map<string, number>()
+  // The conversations whose compaction is out. Nothing fires for one while it
+  // is in here: the conversation the held facts describe is being rewritten,
+  // and what that is worth is not known until `compacted` says.
+  const asked = new Set<string>()
   let disposed = false
+
+  /** What this conversation's last compaction produced, for the rules to weigh. */
+  function lastResult(id: string): { compactedTo?: number } {
+    // A compaction still out has produced nothing yet, and nothing is smaller
+    // than a size nobody knows.
+    if (asked.has(id)) return { compactedTo: Number.POSITIVE_INFINITY }
+    const left = compactedTo.get(id)
+    return left === undefined ? {} : { compactedTo: left }
+  }
 
   function disarm(held: Watched | undefined): void {
     if (held?.timer === undefined) return
@@ -79,12 +98,12 @@ export function createCompactionWatch(options: CompactionWatchOptions): Compacti
   }
 
   // Held facts are dropped at the moment a compaction is asked for: the
-  // conversation this describes no longer exists, and nothing may fire again
-  // until its new size is reported.
+  // conversation this describes no longer exists. Nothing fires again until
+  // that compaction has reported what it did and a new size has been seen.
   function fire(id: string, trigger: CompactionTrigger): void {
     disarm(watched.get(id))
     watched.delete(id)
-    compactedTo.set(id, Number.POSITIVE_INFINITY)
+    asked.add(id)
     options.compact(id, trigger)
   }
 
@@ -92,8 +111,10 @@ export function createCompactionWatch(options: CompactionWatchOptions): Compacti
     if (disposed) return
     const held = watched.get(id)
     if (held === undefined || !options.idle(id)) return
-    const grown = held.facts.usedTokens > (compactedTo.get(id) ?? -1)
-    const trigger = grown ? sizeTrigger(options.settings(), held.facts) : undefined
+    const trigger = sizeTrigger(options.settings(), {
+      ...held.facts,
+      ...lastResult(id)
+    })
     if (trigger !== undefined) {
       fire(id, trigger)
       return
@@ -126,6 +147,7 @@ export function createCompactionWatch(options: CompactionWatchOptions): Compacti
           ...(held.facts.contextWindow === undefined
             ? {}
             : { contextWindow: held.facts.contextWindow }),
+          ...lastResult(id),
           retention: options.retention
         },
         now()
@@ -137,14 +159,19 @@ export function createCompactionWatch(options: CompactionWatchOptions): Compacti
   return {
     saw(id: string, facts: ConversationFacts): void {
       if (disposed) return
-      // The first size reported after a compaction is that compaction's own
-      // work, and it is the size the next one has to beat.
-      if (compactedTo.get(id) === Number.POSITIVE_INFINITY) {
-        compactedTo.set(id, facts.usedTokens)
-      }
       disarm(watched.get(id))
       watched.set(id, { facts })
       consider(id)
+    },
+
+    // A compaction that landed is the size the next one has to beat. One that
+    // did not land rewrote nothing, so the conversation is what it was and the
+    // rules judge it as they did before — on the next report, not now, so a
+    // compaction that keeps failing is retried at the pace of the conversation
+    // rather than in a loop.
+    compacted(id: string, tokensAfter?: number): void {
+      if (!asked.delete(id)) return
+      if (tokensAfter !== undefined) compactedTo.set(id, tokensAfter)
     },
 
     settled(id: string): void {
@@ -155,6 +182,7 @@ export function createCompactionWatch(options: CompactionWatchOptions): Compacti
       disarm(watched.get(id))
       watched.delete(id)
       compactedTo.delete(id)
+      asked.delete(id)
     },
 
     dispose(): void {
@@ -162,6 +190,7 @@ export function createCompactionWatch(options: CompactionWatchOptions): Compacti
       for (const held of watched.values()) disarm(held)
       watched.clear()
       compactedTo.clear()
+      asked.clear()
     }
   }
 }

@@ -6,7 +6,9 @@ import {
   idleTrigger,
   sizeTrigger
 } from './trigger'
-import { SMALLEST_WORTH_COMPACTING } from './window'
+import { compactedWindowTokens, SMALLEST_WORTH_COMPACTING } from './window'
+
+const COMPACTED_WINDOW_TOKENS = compactedWindowTokens()
 
 const ON: CompactionSettings = { enabled: true, thresholdK: 200 }
 const OFF: CompactionSettings = { enabled: false, thresholdK: 200 }
@@ -30,12 +32,46 @@ describe('what a conversation’s size calls for', () => {
   })
 
   // The floor is the smallest threshold the field accepts, so a conversation
-  // under it is one nobody could have asked to compact.
+  // under it is one nobody could have asked to compact. It is what a
+  // compaction leaves, doubled: at the lowest threshold anybody can type, a
+  // compaction that meets its budgets lands at half of it.
   it('leaves a conversation too small to gain anything alone', () => {
     const lowest: CompactionSettings = { enabled: true, thresholdK: MIN_THRESHOLD_K }
     expect(thresholdTokens(lowest)).toBe(SMALLEST_WORTH_COMPACTING)
+    expect(SMALLEST_WORTH_COMPACTING).toBe(2 * COMPACTED_WINDOW_TOKENS)
     expect(sizeTrigger(lowest, { usedTokens: SMALLEST_WORTH_COMPACTING - 1 })).toBeUndefined()
     expect(sizeTrigger(lowest, { usedTokens: SMALLEST_WORTH_COMPACTING })).toBe('threshold')
+  })
+
+  // The size alone is half the question. A compaction is a whole-context
+  // request and a broken prefix, so it has to win back a window worth that:
+  // measured against what this conversation's own last compaction produced,
+  // not against the budgets it could not meet.
+  it('waits for growth a compaction could take away, not for the threshold alone', () => {
+    const over = { usedTokens: 210_000, contextWindow: 1_000_000 }
+    expect(sizeTrigger(ON, { ...over, compactedTo: 190_000 })).toBeUndefined()
+    expect(sizeTrigger(ON, { ...over, compactedTo: 106_000 })).toBeUndefined()
+    expect(sizeTrigger(ON, { ...over, compactedTo: 105_000 })).toBe('threshold')
+  })
+
+  // A conversation whose words alone exceed the threshold compacts to more
+  // than the threshold however often it is compacted. Compacting it again on
+  // the next turn buys the window it already has, once a turn, forever.
+  it('leaves a conversation its own compaction could not get under the threshold', () => {
+    const low: CompactionSettings = { enabled: true, thresholdK: MIN_THRESHOLD_K }
+    const landed = SMALLEST_WORTH_COMPACTING + 8_000
+    expect(sizeTrigger(low, { usedTokens: landed + 500, compactedTo: landed })).toBeUndefined()
+    expect(sizeTrigger(low, { usedTokens: 2 * landed, compactedTo: landed })).toBe('threshold')
+  })
+
+  // "Compacts once as a last resort" means once: a conversation its own
+  // compaction left at the edge is one compacting cannot move, and every pass
+  // would cost a full context to buy the same window. Growing back to the edge
+  // from a compaction that did clear it is growth a compaction can take away.
+  it('compacts at the edge once, not on every send after it', () => {
+    const atEdge = { usedTokens: 190_000, contextWindow: 200_000 }
+    expect(sizeTrigger(OFF, { ...atEdge, compactedTo: 186_000 })).toBeUndefined()
+    expect(sizeTrigger(OFF, { ...atEdge, compactedTo: 60_000 })).toBe('windowEdge')
   })
 
   it('says nothing about a window nobody reported', () => {
@@ -100,11 +136,12 @@ describe('the idle rule', () => {
     ).toBe('idle')
   })
 
-  // The floor is the recent span doubled, and on a small model the recent
-  // span is a share of the window rather than 20k of it.
-  it('measures “worth compacting” against the model’s own window', () => {
-    const facts = { lastRequestAt: 0, usedTokens: 20_000, retention: '1h' as const }
-    expect(idleTrigger(ON, facts, 51 * 60 * 1000)).toBeUndefined()
-    expect(idleTrigger(ON, { ...facts, contextWindow: 32_768 }, 51 * 60 * 1000)).toBe('idle')
+  // The idle rule buys a small prefix for the next send. A conversation
+  // already sitting on what its own compaction produced has no smaller prefix
+  // to buy, and the request would cost more than the miss it saves.
+  it('leaves a conversation its last compaction already shrank', () => {
+    const facts = { lastRequestAt: 0, usedTokens: 120_000, retention: '1h' as const }
+    expect(idleTrigger(ON, { ...facts, compactedTo: 110_000 }, 51 * 60 * 1000)).toBeUndefined()
+    expect(idleTrigger(ON, { ...facts, compactedTo: 55_000 }, 51 * 60 * 1000)).toBe('idle')
   })
 })

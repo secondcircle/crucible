@@ -9,14 +9,6 @@
 // conversation.
 export const RECENT_SPAN_TOKENS = 20_000
 
-// Below this a compaction rewrites almost nothing: most of the conversation
-// is the recent span, which a compaction leaves untouched anyway. It is also
-// the floor under the threshold setting — one number, so a threshold the user
-// types is the size their conversations actually compact at. The setting is
-// machine-global and knows no model, so this is the wide-window figure;
-// `smallestWorthCompacting` is the one a conversation is judged by.
-export const SMALLEST_WORTH_COMPACTING = 2 * RECENT_SPAN_TOKENS
-
 /** What the model-written trajectory summary may take. */
 export const SUMMARY_BUDGET_TOKENS = 3_000
 
@@ -52,11 +44,6 @@ export function recentSpanTokens(contextWindow?: number): number {
   return Math.min(RECENT_SPAN_TOKENS, share(contextWindow))
 }
 
-/** The size under which compacting this model's conversation gains nothing. */
-export function smallestWorthCompacting(contextWindow?: number): number {
-  return 2 * recentSpanTokens(contextWindow)
-}
-
 /** How much of this model's window is held back for the reply. */
 export function windowEdgeReserveTokens(contextWindow?: number): number {
   return Math.min(WINDOW_EDGE_RESERVE_TOKENS, share(contextWindow))
@@ -66,6 +53,43 @@ export function windowEdgeReserveTokens(contextWindow?: number): number {
 export function skeletonBudgetTokens(contextWindow?: number): number {
   return Math.min(SKELETON_BUDGET_TOKENS, share(contextWindow))
 }
+
+// What a compaction leaves behind: the recent span it keeps verbatim, the
+// skeleton at its budget and the summary at its. Nothing a compaction does
+// gets a conversation below this, so it is the size the next one has to beat
+// and the size every rule about whether to compact is measured from.
+export function compactedWindowTokens(contextWindow?: number): number {
+  return (
+    recentSpanTokens(contextWindow) + skeletonBudgetTokens(contextWindow) + SUMMARY_BUDGET_TOKENS
+  )
+}
+
+// What a compaction of this conversation would leave it at: the budgets above,
+// or — once it has compacted at least once — what its own last compaction
+// actually produced, which is the honest number where the budgets cannot be
+// met. A conversation whose words alone exceed the skeleton budget compacts to
+// more than the budget, and the skeleton may not drop what the user said.
+function compactionWouldLeave(contextWindow?: number, compactedTo?: number): number {
+  return Math.max(compactedWindowTokens(contextWindow), compactedTo ?? 0)
+}
+
+// The smallest conversation a compaction wins anything worth its model call
+// on: twice what the compaction would leave it at. Compactions are rare and
+// large — each one is a whole-context request and a broken prefix — so one
+// buys at least half the conversation back. Below this the model call costs
+// more than the window it wins, which is the incremental trimming the research
+// rejected, and where the conversation has compacted before it is also what
+// keeps it from buying the same window again on the next turn.
+export function smallestWorthCompacting(contextWindow?: number, compactedTo?: number): number {
+  return 2 * compactionWouldLeave(contextWindow, compactedTo)
+}
+
+// The same figure for a conversation on no particular model, which is what the
+// threshold setting is floored at. The setting is machine-global and knows no
+// model, and one fact rather than two is what keeps the low end of the field
+// from asking for a compaction that lands over the number the user typed: at
+// the minimum, a compaction that hits its budgets leaves half the threshold.
+export const SMALLEST_WORTH_COMPACTING = smallestWorthCompacting()
 
 /** π's estimate, mirrored: conservative, and the same chars/4 everywhere. */
 export function estimateTokens(text: string): number {

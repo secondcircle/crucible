@@ -22,8 +22,10 @@ interface Scripted {
   readonly log: string[]
   /** Reports an assistant message of this size, as a turn's last act does. */
   say(usedTokens: number): void
-  /** Lets the compaction π is running finish. */
-  finishCompaction(): void
+  /** Lets the compaction π is running finish, on the window it wrote. */
+  finishCompaction(tokensAfter?: number): void
+  /** What the last compaction left behind, as the hook reports it. */
+  readonly landed: () => number | undefined
   readonly compactions: () => number
   readonly aborted: () => string[]
 }
@@ -35,6 +37,7 @@ function scripted(): Scripted {
   let usage = { tokens: 1_000, contextWindow: 1_000_000 }
   let compacting: { resolve: () => void; reject: (cause: unknown) => void } | undefined
   let compactions = 0
+  let landed: number | undefined
 
   const session = {
     get isStreaming() {
@@ -91,27 +94,30 @@ function scripted(): Scripted {
       for (const listener of listeners) listener({ type: 'message_end', message })
       for (const listener of listeners) listener({ type: 'agent_end' })
     },
-    finishCompaction() {
+    finishCompaction(tokensAfter?: number) {
+      landed = tokensAfter
       compacting?.resolve()
       compacting = undefined
     },
+    landed: () => landed,
     compactions: () => compactions,
     aborted: () => aborted
   }
 }
 
 function node(
-  session: AgentSession,
+  fake: Scripted,
   onFailure: (cause: unknown) => void = () => {},
   thresholdK = 200
 ): ReturnType<typeof wrapNodeSession> {
   return wrapNodeSession(
-    session,
+    fake.session,
     { skills: [], cwd: '/repos/crucible' },
     {},
     {
       settings: () => ({ enabled: true, thresholdK }),
       begin: () => {},
+      landed: fake.landed,
       entryToMessages: () => [],
       onFailure
     }
@@ -126,7 +132,7 @@ async function settled(): Promise<void> {
 describe('a message that arrives while the node is compacting', () => {
   it('waits for the compaction and is then delivered', async () => {
     const fake = scripted()
-    const session = node(fake.session)
+    const session = node(fake)
 
     // The node is parked on a monitor: nothing is prompting, so the size the
     // last turn reported fires at once.
@@ -150,7 +156,7 @@ describe('a message that arrives while the node is compacting', () => {
   // the engine reads as a turn that ended without completing.
   it('is never refused and thrown away', async () => {
     const fake = scripted()
-    const session = node(fake.session)
+    const session = node(fake)
 
     fake.say(400_000)
     const woken = session.prompt('the wake')
@@ -169,7 +175,7 @@ describe('a compaction the turn’s own size called for', () => {
   // that message is refused, or the turn it started is aborted.
   it('starts after the turn, and the next message waits for it', async () => {
     const fake = scripted()
-    const session = node(fake.session)
+    const session = node(fake)
 
     const first = session.prompt('do the thing')
     fake.say(400_000)
@@ -189,6 +195,33 @@ describe('a compaction the turn’s own size called for', () => {
     ])
     session.dispose()
   })
+
+  // The same two facts a session's rules decide on, through the same watch:
+  // what the conversation holds now, and what its own last compaction left it
+  // at. A node that never reported the second would compact once and never
+  // again — or, worse, once a turn.
+  it('waits for growth a compaction could take away before compacting again', async () => {
+    const fake = scripted()
+    const session = node(fake)
+
+    fake.say(400_000)
+    // The words alone were most of it, so the compaction landed over the
+    // threshold that asked for it.
+    fake.finishCompaction(210_000)
+    await settled()
+    expect(fake.compactions()).toBe(1)
+
+    // Over the threshold, and a turn's growth over what that compaction
+    // produced: another one would buy back a turn.
+    fake.say(230_000)
+    await settled()
+    expect(fake.compactions()).toBe(1)
+
+    fake.say(430_000)
+    await settled()
+    expect(fake.compactions()).toBe(2)
+    session.dispose()
+  })
 })
 
 // The idle rule is a rule about the cache: it spends a compaction at minute
@@ -206,7 +239,7 @@ describe('a node on a provider that reports no prompt cache', () => {
     vi.useFakeTimers()
     const fake = scripted()
     // Far above the conversation: only the idle rule could fire here.
-    const session = node(fake.session, () => {}, 10_000)
+    const session = node(fake, () => {}, 10_000)
 
     fake.say(400_000)
     await vi.advanceTimersByTimeAsync(51 * 60 * 1000)
@@ -220,7 +253,7 @@ describe('a node released mid-compaction', () => {
   it('abandons the compaction rather than holding the next message behind it', async () => {
     const failures: unknown[] = []
     const fake = scripted()
-    const session = node(fake.session, (cause) => failures.push(cause))
+    const session = node(fake, (cause) => failures.push(cause))
 
     fake.say(400_000)
     const woken = session.prompt('the wake')

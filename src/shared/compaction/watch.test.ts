@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest'
-import type { CompactionSettings } from './settings'
+import { MIN_THRESHOLD_K, type CompactionSettings } from './settings'
 import type { CompactionTrigger } from './record'
 import { createCompactionWatch, type CompactionWatch } from './watch'
 
@@ -38,6 +38,9 @@ function timers(): {
 }
 
 const ON: CompactionSettings = { enabled: true, thresholdK: 200 }
+// The lowest the field goes, where a compaction's own result sits closest to
+// the threshold that asked for it.
+const LOW: CompactionSettings = { enabled: true, thresholdK: MIN_THRESHOLD_K }
 
 let clock: ReturnType<typeof timers>
 let fired: { id: string; trigger: CompactionTrigger }[]
@@ -105,26 +108,81 @@ describe('the size rules', () => {
     expect(fired).toHaveLength(1)
   })
 
-  // A compaction takes the recent span as it finds it. One that lands still
-  // over the threshold — a single turn bigger than the setting — would keep
-  // the same span and report the same size on every pass.
-  it('does not compact a conversation its own compaction left over the threshold', () => {
-    watching({ enabled: true, thresholdK: 40 })
-    watch.saw('a', { lastRequestAt: 0, usedTokens: 210_000, contextWindow: 1_000_000 })
+  // A compaction takes the recent span as it finds it, and the skeleton may
+  // not drop what the user said. One that lands still over the threshold — a
+  // conversation whose words alone are bigger than the setting — would keep
+  // the same span and report the same size on every pass. The guard is not
+  // "has it grown": one token of growth is growth, and the turn after a
+  // compaction always has some, so a build that asked that would compact on
+  // every turn from there on, forever.
+  it('does not compact again on the turns after a compaction that landed over the threshold', () => {
+    watching(LOW)
+    watch.saw('a', { lastRequestAt: 0, usedTokens: 300_000, contextWindow: 1_000_000 })
     expect(fired).toHaveLength(1)
 
-    watch.saw('a', { lastRequestAt: 0, usedTokens: 60_000, contextWindow: 1_000_000 })
-    watch.saw('a', { lastRequestAt: 0, usedTokens: 60_000, contextWindow: 1_000_000 })
+    // The compaction's own result, then ordinary turns on top of it.
+    watch.compacted('a', 100_000)
+    watch.saw('a', { lastRequestAt: 1, usedTokens: 100_000, contextWindow: 1_000_000 })
+    watch.saw('a', { lastRequestAt: 2, usedTokens: 101_000, contextWindow: 1_000_000 })
+    watch.saw('a', { lastRequestAt: 3, usedTokens: 118_000, contextWindow: 1_000_000 })
     expect(fired).toHaveLength(1)
   })
 
-  it('compacts again once the conversation has grown past what that left', () => {
-    watching({ enabled: true, thresholdK: 40 })
-    watch.saw('a', { lastRequestAt: 0, usedTokens: 210_000, contextWindow: 1_000_000 })
-    watch.saw('a', { lastRequestAt: 0, usedTokens: 60_000, contextWindow: 1_000_000 })
+  // Nothing was rewritten — there was no boundary to cut at, or the model call
+  // failed — so the conversation is exactly what it was and the rules judge it
+  // as they did before. Remembering a failure as a result would leave a
+  // conversation that could not be compacted once uncompactable for good,
+  // which at the window edge is the dead conversation the last resort exists
+  // to prevent.
+  it('holds nothing against a conversation whose compaction never landed', () => {
+    watching(LOW)
+    watch.saw('a', { lastRequestAt: 0, usedTokens: 300_000, contextWindow: 1_000_000 })
+    expect(fired).toHaveLength(1)
 
-    watch.saw('a', { lastRequestAt: 0, usedTokens: 90_000, contextWindow: 1_000_000 })
+    watch.compacted('a')
+    watch.saw('a', { lastRequestAt: 1, usedTokens: 301_000, contextWindow: 1_000_000 })
     expect(fired).toHaveLength(2)
+  })
+
+  // Between asking for a compaction and hearing what it did, there is no size
+  // to judge: the conversation is being rewritten underneath the facts.
+  it('fires nothing for a conversation whose compaction is still out', () => {
+    watching(LOW)
+    watch.saw('a', { lastRequestAt: 0, usedTokens: 300_000, contextWindow: 1_000_000 })
+
+    watch.saw('a', { lastRequestAt: 1, usedTokens: 300_000, contextWindow: 1_000_000 })
+    watch.settled('a')
+    expect(fired).toHaveLength(1)
+  })
+
+  // Rare and large: the next one waits until there is a whole compacted
+  // window's worth of new conversation for it to take away.
+  it('compacts again once there is as much to take away as the last one left', () => {
+    watching(LOW)
+    watch.saw('a', { lastRequestAt: 0, usedTokens: 300_000, contextWindow: 1_000_000 })
+    watch.compacted('a', 100_000)
+    watch.saw('a', { lastRequestAt: 1, usedTokens: 100_000, contextWindow: 1_000_000 })
+
+    watch.saw('a', { lastRequestAt: 2, usedTokens: 199_000, contextWindow: 1_000_000 })
+    expect(fired).toHaveLength(1)
+
+    watch.saw('a', { lastRequestAt: 3, usedTokens: 200_000, contextWindow: 1_000_000 })
+    expect(fired).toHaveLength(2)
+  })
+
+  // "Compacts once as a last resort" means once. A conversation its own
+  // compaction left at the model's window edge cannot be moved by another
+  // one; every send from there would buy the same window again.
+  it('compacts at the window edge once, not on every send after it', () => {
+    watching({ enabled: false, thresholdK: 200 })
+    watch.saw('a', { lastRequestAt: 0, usedTokens: 190_000, contextWindow: 200_000 })
+    expect(fired).toEqual([{ id: 'a', trigger: 'windowEdge' }])
+
+    // The words alone fill the window: what it wrote is still at the edge.
+    watch.compacted('a', 188_000)
+    watch.saw('a', { lastRequestAt: 1, usedTokens: 188_000, contextWindow: 200_000 })
+    watch.saw('a', { lastRequestAt: 2, usedTokens: 189_000, contextWindow: 200_000 })
+    expect(fired).toHaveLength(1)
   })
 })
 

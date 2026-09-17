@@ -20,9 +20,11 @@ import { createShellStore, type ShellStore } from './store'
 
 const WORKSPACE = '/repos/crucible'
 
-// Big enough that the conversation is worth compacting after one turn: the
-// fake counts a prompt's own characters towards the context.
-const LONG = `a long message ${'x'.repeat(240_000)}`
+// Big enough that the conversation is worth compacting after one turn: past
+// the lowest threshold the field accepts, and past twice what a compaction
+// leaves behind. The fake counts a prompt's own characters towards the
+// context.
+const LONG = `a long message ${'x'.repeat(440_000)}`
 
 /** The prompt the fake adapter scripts a cache miss for. */
 const MISSING = 'show me what a cache miss looks like'
@@ -195,6 +197,45 @@ describe('the threshold trigger', () => {
     const [compacted] = compactions()
     expect(compacted?.record.tokensAfter).toBeGreaterThan(MIN_THRESHOLD_K * 1_000)
     expect(compactions()).toHaveLength(1)
+  })
+
+  // And not on the turns after it either. A conversation whose own compaction
+  // could not get it under the threshold is not one a second pass can help:
+  // it would keep the same recent span, write the same skeleton and land at
+  // the same size. Every repeat is a whole-context request and a prefix
+  // written again from zero, which is the bill the idle rule exists to
+  // prevent, arriving through the other trigger.
+  it('leaves the conversation alone on the turns after a compaction that landed over it', async () => {
+    const sessionId = await grown()
+    await shell.setCompactionSettings({ enabled: true, thresholdK: MIN_THRESHOLD_K })
+    await turn(sessionId, LONG)
+    await settled()
+    expect(compactions()[0]?.record.tokensAfter).toBeGreaterThan(MIN_THRESHOLD_K * 1_000)
+
+    await turn(sessionId, 'one more turn')
+    await turn(sessionId, 'and another')
+
+    expect(compactions()).toHaveLength(1)
+  })
+
+  // A conversation of one turn has no user boundary to cut at, so the
+  // compaction its size asks for writes nothing. Nothing was rewritten, so
+  // nothing is held against it: the turn that gives it a boundary compacts.
+  // Remembering the attempt as a result would leave the conversation
+  // uncompactable for good, and at the window edge that is a session that
+  // errors on every send.
+  it('compacts a conversation whose first attempt had nothing to cut at', async () => {
+    const sessionId = await withSession()
+    await shell.setCompactionSettings({ enabled: true, thresholdK: MIN_THRESHOLD_K })
+    await turn(sessionId, LONG)
+    await settled()
+    expect(compactions()).toEqual([])
+
+    await turn(sessionId, 'a short follow-up')
+    await settled()
+
+    expect(compactions()).toHaveLength(1)
+    expect(compactions()[0]?.record.trigger).toBe('threshold')
   })
 
   it('leaves a conversation under the setting alone', async () => {
