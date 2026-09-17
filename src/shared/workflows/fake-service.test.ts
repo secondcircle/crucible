@@ -252,7 +252,7 @@ describe('the fake workflow run service', () => {
       service.dispose()
     })
 
-    it('resumes on the beat: the cut node re-runs, the run completes and says so', async () => {
+    it('resumes on the beat: the cut node carries on, the run completes and says so', async () => {
       const delivered: string[] = []
       const service = createFakeWorkflowRunService({
         beatMs: 0,
@@ -261,13 +261,16 @@ describe('the fake workflow run service', () => {
 
       const said = await service.tools.resume('s1', '45c8')
       expect(said).toContain('"gate-alignment"')
+      // The same sentence the live service answers with: the node carries
+      // on rather than starting over.
+      expect(said).toContain('continues from its last turn')
 
       await until(() => delivered.some((text) => text.includes('completed')))
       const run = (await service.snapshot()).runs.find((candidate) => candidate.id === '45c8')
       expect(run?.status).toBe('complete')
       expect(run?.error).toBeUndefined()
       expect(run?.nodes.every((node) => node.status === 'complete')).toBe(true)
-      // The node it re-ran wrote what it owed, and kept the money it had
+      // The node it continued wrote what it owed, and kept the money it had
       // already burned.
       const cut = run?.nodes.find((node) => node.id === 'gate-alignment')
       expect(cut?.artifacts[0].writtenAt).toBeDefined()
@@ -275,14 +278,16 @@ describe('the fake workflow run service', () => {
       service.dispose()
     })
 
-    it('refuses a resume with the live service\u2019s own sentence', async () => {
+    it('refuses only what has nothing to resume, in the live service\u2019s words', async () => {
       const service = createFakeWorkflowRunService({ beatMs: 0 })
       await expect(service.tools.resume('s1', 'd3p8')).rejects.toThrow(
         'The run "d3p8" is complete; there is nothing to resume.'
       )
-      await expect(service.resume('b1n7')).rejects.toThrow(
-        'The run "b1n7" is failed; there is nothing to resume.'
-      )
+      // Resume is total over every stop short of completion, so a failed run
+      // goes back to work here as it does in the engine.
+      await service.resume('b1n7')
+      const failed = (await service.snapshot()).runs.find((run) => run.id === 'b1n7')
+      expect(failed?.status).not.toBe('failed')
       service.dispose()
     })
 

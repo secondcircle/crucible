@@ -288,6 +288,30 @@ describe('the exhibit', () => {
     expect(ops(port)).not.toContain('exhibit')
   })
 
+  it('keeps one guest while the exhibit is shown, and none when it is not', async () => {
+    // A guest is a renderer process of its own. One left behind per switch
+    // would be a process left behind per switch, so the count is the claim:
+    // exactly one while the html tab is active, zero while it is not,
+    // however many times the panel is flipped between them.
+    await shellWith(withTabs([PLAN, BENCHMARK], 'benchmark'))
+    const guests = (): number => document.querySelectorAll('.exhibit webview').length
+    expect(guests()).toBe(1)
+
+    for (let flip = 0; flip < 5; flip += 1) {
+      await act(async () => {
+        fireEvent.click(tabs()[0])
+      })
+      await settled()
+      expect(guests()).toBe(0)
+
+      await act(async () => {
+        fireEvent.click(tabs()[1])
+      })
+      await settled()
+      expect(guests()).toBe(1)
+    }
+  })
+
   it('loads a web address live, straight off its server', async () => {
     const port = await shellWith(withTabs([DEV_SERVER], 'localhost'))
 

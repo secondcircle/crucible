@@ -1,10 +1,50 @@
-import type { NodeSpec, PlannedNode, ReviseOptions } from '../../../../resources/workflow-lib/workflow.ts'
+import type {
+  NodeSpec,
+  PlannedNode,
+  ReviseOptions,
+  RunContext
+} from '../../../../resources/workflow-lib/workflow.ts'
 
 // What crosses between the main process and a workflow host: one symmetric
 // request/reply grammar over a message channel, and the plain-data shapes
 // each side speaks in. Nothing here touches Electron or Node's process API,
 // so the same module serves the host entry running under plain Node in a
 // test and under utilityProcess in the app.
+
+/**
+ * What the engine answers a host with. Everything the authoring context has,
+ * except `effect`: the work an effect wraps runs where the workflow's code
+ * does, so the engine offers the two halves it can answer — what this run
+ * already recorded, and what it has just produced — and `effectOver` below
+ * makes `ctx.effect` out of them, in whichever process the file runs in.
+ */
+export interface EngineContext extends Omit<RunContext, 'effect'> {
+  recordedEffect(id: string): Promise<RecordedEffect>
+  recordEffect(id: string, value: unknown): Promise<void>
+}
+
+export type RecordedEffect = { readonly replayed: true; readonly value: unknown } | { readonly replayed: false }
+
+/**
+ * `ctx.effect` built over those two halves: ask, else produce and record.
+ * The value is round-tripped through JSON before it is recorded and before
+ * it is returned, so what a first run hands back is exactly what a resumed
+ * one will.
+ */
+export function effectOver(engine: {
+  recordedEffect(id: string): Promise<RecordedEffect>
+  recordEffect(id: string, value: unknown): Promise<void>
+}): RunContext['effect'] {
+  return async <T>(id: string, produce: () => T | Promise<T>): Promise<T> => {
+    const already = await engine.recordedEffect(id)
+    if (already.replayed) return already.value as T
+    // A produce that returns nothing records null: JSON has no undefined,
+    // and a replay must hand back what the record holds.
+    const kept = JSON.parse(JSON.stringify(await produce()) ?? 'null') as T
+    await engine.recordEffect(id, kept)
+    return kept
+  }
+}
 
 /** What a workflow file declares, minus its functions: readable without running it. */
 export interface WorkflowManifest {
@@ -78,6 +118,11 @@ export type MainRequests = {
   }
   close: { params: { handle: number }; result: undefined }
   ask: { params: { reason: string; artifacts?: Record<string, string> }; result: string }
+  // The two halves of `ctx.effect`, because the work itself runs where the
+  // workflow's code lives: the host asks whether this run already recorded
+  // the id, and posts what it produced when it did not.
+  recordedEffect: { params: { id: string }; result: RecordedEffect }
+  recordEffect: { params: { id: string; value: unknown }; result: undefined }
   derive: { params: { path: string; fromNodeId: string }; result: undefined }
   stage: { params: { workflow: string; inputs: Record<string, string> }; result: string }
 }

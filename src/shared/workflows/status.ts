@@ -2,9 +2,11 @@ import type { SessionId } from '../agent/port'
 import {
   currentNode,
   INTERRUPTED_MESSAGE,
-  interruptedNodes,
   runCost,
   runMessageHeader,
+  stoppedNodes,
+  type ResumeKind,
+  type RunNode,
   type RunRecord,
   type WorkflowRunId
 } from './run'
@@ -32,8 +34,8 @@ export function describeRun(run: RunRecord): string {
       ? `⚑ waiting on an answer: ${run.question.reason.split('\n')[0]}`
       : undefined,
     // The state and the lever in one line, so a listing agent needs nothing
-    // else to act on an interrupted run.
-    run.status === 'interrupted'
+    // else to act on a run that stopped short of finishing.
+    run.status === 'interrupted' || run.status === 'failed' || run.status === 'cancelled'
       ? 'resume with crucible_resume if this work is still wanted'
       : undefined
   ]
@@ -45,17 +47,43 @@ function statusPhrase(run: RunRecord): string {
   return run.status === 'interrupted' ? 'interrupted · app quit' : run.status
 }
 
-// The nodes Resume re-runs, as a sentence fragment naming them: the ones the
-// quit cut down, or — once the run has been resumed and they are ghosts again
-// — whatever is working now.
-function cutNodes(run: RunRecord): string {
-  const cut = interruptedNodes(run)
-  const named = (cut.length > 0 ? cut : run.nodes.filter((node) => node.status === 'running')).map(
-    (node) => `"${node.id}"`
-  )
+/** The nodes a resume puts back to work, as a fragment naming them. */
+function namedNodes(nodes: readonly RunNode[]): string {
+  const named = nodes.map((node) => `"${node.id}"`)
   if (named.length === 0) return 'the node it stopped at'
   if (named.length === 1) return `node ${named[0]}`
   return `nodes ${named.join(', ')}`
+}
+
+/**
+ * What resuming this run would do, as one sentence about its nodes. A node
+ * whose own session is on disk continues from its last turn; one with no
+ * session recorded — a record written before sessions outlived the app —
+ * runs again from its prompt, and so does every node of a clean restart.
+ */
+function resumeSentence(run: RunRecord, kind: ResumeKind): string {
+  const stopped = stoppedNodes(run)
+  const continued =
+    kind === 'clean-restart' ? [] : stopped.filter((node) => node.sessionToken !== undefined)
+  const restarted = stopped.filter((node) => !continued.includes(node))
+  const where = run.worktreePath === undefined ? '' : ` (${run.worktreePath})`
+  const parts: string[] = []
+  if (continued.length > 0) {
+    parts.push(
+      `${namedNodes(continued)} continues from its last turn, in the same session and the same ` +
+        `worktree${where}, so nothing it already spent is spent again`
+    )
+  }
+  if (restarted.length > 0 || continued.length === 0) {
+    parts.push(
+      kind === 'clean-restart'
+        ? `${namedNodes(restarted)} runs again from its prompt, in the same worktree${where}, ` +
+          'as a fresh attempt beside the one that stopped'
+        : `${namedNodes(restarted)} has no session left to continue, so it runs again from its ` +
+          'prompt as a fresh attempt beside the one that stopped'
+    )
+  }
+  return `Resuming: ${parts.join('; ')}.`
 }
 
 /**
@@ -72,9 +100,7 @@ export function interruptionNotice(run: RunRecord): string {
       '',
       INTERRUPTED_MESSAGE,
       '',
-      `Resuming re-runs ${cutNodes(run)} from its beginning, in the same worktree` +
-        `${run.worktreePath === undefined ? '' : ` (${run.worktreePath})`}, reporting back ` +
-        'here as usual. That re-spends what the node had already burned.',
+      `${resumeSentence(run, 'continue')} It reports back here as usual.`,
       '',
       `Resume it with the crucible_resume tool (runId "${run.id}") when the work is still ` +
         'wanted; nothing resumes on its own. Judge that from this conversation, and bring it ' +
@@ -82,11 +108,12 @@ export function interruptionNotice(run: RunRecord): string {
     ].join('\n')
   }
   if (run.status === 'running' || run.status === 'paused') {
+    const working = run.nodes.filter((node) => node.status === 'running')
     return [
       `${header} was interrupted by an app quit and has since been resumed.`,
       '',
-      `It is re-running ${cutNodes(run)} from its beginning, in the same worktree, and reports ` +
-        'back here as it did before.'
+      `It is working on ${namedNodes(working)} in the same worktree, and reports back here as ` +
+        'it did before.'
     ].join('\n')
   }
   // Unreachable in practice: whatever settled the run said so through this
@@ -98,14 +125,20 @@ export function interruptionNotice(run: RunRecord): string {
   ].join('\n')
 }
 
-/** What `crucible_resume` answers with, in both flavors. */
-export function resumeAnswer(run: RunRecord, cut: readonly string[]): string {
-  const where = run.worktreePath === undefined ? '' : ` in ${run.worktreePath}`
+/**
+ * What `crucible_resume` answers with, in both flavors. `before` is the
+ * record as it stood when the resume was asked for: once it is working, what
+ * it stopped on is no longer readable from it.
+ */
+export function resumeAnswer(
+  run: RunRecord,
+  before: RunRecord | undefined,
+  kind: ResumeKind = 'continue'
+): string {
   const what =
-    cut.length === 0
+    before === undefined || stoppedNodes(before).length === 0
       ? `Run ${run.id} of "${run.workflow}" is working again.`
-      : `Run ${run.id} of "${run.workflow}" is resuming: ${cut.map((id) => `"${id}"`).join(', ')} ` +
-        `${cut.length === 1 ? 're-runs' : 're-run'} from the beginning${where}.`
+      : `Run ${run.id} of "${run.workflow}" is resuming. ${resumeSentence(before, kind)}`
   return (
     `${what}\nIt reports back here as messages — check-ins, blockers and completion — as it ` +
     'did before. Ending your turn now is the normal thing to do.'

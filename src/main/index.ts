@@ -55,6 +55,7 @@ import { selectWorkspaceService } from './workspace/select-service'
 import { serveWorkflowRunChannel, type WorkflowRunChannel } from './workflows/channel'
 import type { SpawnHost } from './workflows/host/host'
 import { selectWorkflowRunService } from './workflows/select-service'
+import { watchProcessDeath } from './watchdog/process-death'
 import { inspectorProfiler, startStallWatchdog } from './watchdog/stalls'
 
 // One hour of prompt retention, for every launch and every flavor. π reads
@@ -116,6 +117,11 @@ const stallWatchdog = startStallWatchdog({
   },
   profiler: process.env.CRUCIBLE_NO_STALL_PROFILE === undefined ? inspectorProfiler() : undefined
 })
+
+// Beside it, and on the same log: a renderer or a GPU child that dies takes
+// the window with it and says nothing on its way out. Registered before any
+// window exists, so no webContents is created unwatched.
+watchProcessDeath(app, log)
 
 log.append({
   source: 'main',

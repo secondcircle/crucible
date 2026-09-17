@@ -23,6 +23,11 @@ export type RunStatus =
   | 'failed'
   | 'cancelled'
 
+// The two ways a stopped node goes back to work, in CONTEXT.md's words:
+// Resume continues it from its last turn, a Clean restart runs it again from
+// its prompt with no memory of the attempt that stopped.
+export type ResumeKind = 'continue' | 'clean-restart'
+
 export type RunNodeStatus =
   | 'pending'
   | 'running'
@@ -101,6 +106,22 @@ export interface RunNode {
   // description is a copy of an immutable fact, which is what lets every run
   // surface keep reading `RunRecord` and nothing richer.
   readonly waitingOn?: NodeWait
+  // The node's own agent session, as the thing that opened it names it:
+  // opaque here and everywhere above the engine. What Resume reopens to
+  // continue a node from its last turn. Absent on a node that never opened
+  // one, and on records written before sessions outlived the app.
+  readonly sessionToken?: string
+}
+
+// A result a workflow recorded under a key of its own, so a resumed run is
+// handed it back instead of doing the work again: the answer to a check-in,
+// the output of a command, a commit hash. The value is whatever the workflow
+// produced, as JSON.
+export interface RunEffect {
+  readonly key: string
+  readonly value: unknown
+  /** ISO instant the run first produced it. */
+  readonly at: string
 }
 
 export interface RunRecord {
@@ -137,6 +158,9 @@ export interface RunRecord {
   /** True while somebody owes the run an answer. */
   readonly waiting?: boolean
   readonly nodes: readonly RunNode[]
+  // What this run has recorded besides its nodes, in the order it recorded
+  // them. Replay reads it; nothing else does.
+  readonly effects?: readonly RunEffect[]
   readonly outputs?: Readonly<Record<string, unknown>>
   readonly error?: string
   /** Predecessor run id, for a chained successor. */
@@ -186,11 +210,32 @@ export function dismissRefusal(runId: WorkflowRunId): string {
   return `The run "${runId}" is still working, so there is nothing to dismiss — cancel it instead.`
 }
 
-// Resume is total over the two stopped states and refuses every other one,
-// naming the run and where it stands. A second resume racing the first reads
-// the run as `running` and is refused by this same sentence.
+// Resume is total over every stop short of completion, and refuses the two
+// states with nothing to resume — complete, and already running — naming the
+// run and where it stands. A second resume racing the first reads the run as
+// `running` and is refused by this same sentence.
 export function resumeRefusal(runId: WorkflowRunId, status: RunStatus): string {
   return `The run "${runId}" is ${status}; there is nothing to resume.`
+}
+
+/** Whether Resume has anything to act on: every stop short of completion. */
+export function runCanResume(run: RunRecord): boolean {
+  return run.status !== 'complete' && run.status !== 'running'
+}
+
+// The nodes a resume puts back to work: whatever the run stopped with
+// unfinished, whichever stop it was. A completed node is replayed instead,
+// and a node that never started is simply run.
+export function stoppedNodes(run: RunRecord): readonly RunNode[] {
+  return run.nodes.filter(
+    (node) =>
+      node.status === 'interrupted' ||
+      node.status === 'failed' ||
+      node.status === 'blocked' ||
+      node.status === 'stalled' ||
+      node.status === 'paused' ||
+      node.status === 'running'
+  )
 }
 
 /** Whether a message in a session's transcript is a run talking, not a human. */
@@ -219,12 +264,14 @@ export function currentNode(run: RunRecord): RunNode | undefined {
       node.status === 'running' ||
       node.status === 'blocked' ||
       node.status === 'stalled' ||
-      node.status === 'paused' ||
-      // The node the quit cut down is what an interrupted run is about, so it
-      // is the node every surface names for one.
-      node.status === 'interrupted'
+      node.status === 'paused'
   )
   if (active !== undefined) return active
+  // The node the quit cut down is what an interrupted run is about, so it is
+  // the node every surface names for one — but only while nothing else is
+  // working, because a clean restart leaves that record where it stopped.
+  const cut = run.nodes.find((node) => node.status === 'interrupted')
+  if (cut !== undefined) return cut
   const settled = run.nodes.filter((node) => node.status !== 'pending')
   return settled.at(-1)
 }

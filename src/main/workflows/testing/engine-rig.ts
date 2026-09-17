@@ -8,6 +8,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { ObservedCacheMiss } from '../../../shared/agent/adapter'
 import type { SessionId, TranscriptItem } from '../../../shared/agent/port'
+import type { RunRecord } from '../../../shared/workflows/run'
 import type { CacheRecorder, RecordedCacheMiss } from '../../cache/ledger'
 import type { WorkflowDef } from '../authoring'
 import { createWorkflowEngine, type EngineOptions, type WorkflowEngine } from '../engine'
@@ -20,7 +21,7 @@ import type {
 } from '../node-session'
 import { inProcessHost } from '../host/host'
 import type { LoadedWorkflow, WorkflowLoader } from '../loader'
-import { createRunStore } from '../store'
+import { createRunStore, type RunStore } from '../store'
 
 const scratch: string[] = []
 
@@ -57,6 +58,12 @@ export function tempRepo(): string {
   return repo
 }
 
+// The sessions a rig has handed out, so a relaunch can reopen one exactly as
+// the SDK factory reopens a session file: what it had said, and its task. A
+// token no rig ever minted will not open, which is what an unreadable
+// session looks like.
+const scriptedSessionFiles = new Map<string, { turns: number; taskPrompt: string }>()
+
 /** What a scripted node may do on one prompt. */
 export interface NodeTools {
   readonly complete: (completion: NodeCompletion) => void
@@ -69,6 +76,8 @@ export interface NodeTools {
   // The first prompt of the session, which is the one naming the output
   // paths; later prompts (rejections, blocker answers, shoves) do not.
   readonly taskPrompt: string
+  /** Set when this session was reopened rather than started fresh. */
+  readonly continued: boolean
 }
 
 // A script that returns a promise is a turn still under way, which is how a
@@ -84,7 +93,8 @@ export function outputPath(prompt: string, file: string): string {
 }
 
 export function scriptedSessions(
-  scriptFor: (nodeId: string) => NodeScript
+  scriptFor: (nodeId: string) => NodeScript,
+  options: { readonly keepSessions?: boolean } = {}
 ): NodeSessionFactory & {
   readonly prompts: string[]
   readonly models: string[]
@@ -93,6 +103,10 @@ export function scriptedSessions(
   const prompts: string[] = []
   const models: string[] = []
   const requests: NodeSessionRequest[] = []
+  // Sessions are kept unless a test says otherwise, because the real factory
+  // keeps them: a factory that keeps none is what a record written before
+  // they were kept looks like.
+  const keeping = options.keepSessions !== false
   return {
     prompts,
     models,
@@ -106,12 +120,35 @@ export function scriptedSessions(
       let disposed = false
       let taskPrompt = ''
       const activityListeners = new Set<(now: string | undefined) => void>()
+
+      // A reopened session carries its earlier turns, exactly as π's does:
+      // the stats it reports count them, and the engine must not bill them
+      // to the record a second time.
+      const continued = request.resumeToken !== undefined
+      let token: string | undefined
+      if (continued) {
+        const before = scriptedSessionFiles.get(request.resumeToken ?? '')
+        if (before === undefined) throw new Error('no such session file')
+        turn = before.turns
+        // The task is still in the conversation this session reopened.
+        taskPrompt = before.taskPrompt
+        token = request.resumeToken
+      } else if (keeping) {
+        token = join(request.sessionDir, `${scriptedSessionFiles.size + 1}.jsonl`)
+      }
+      const remember = (): void => {
+        if (token !== undefined) scriptedSessionFiles.set(token, { turns: turn, taskPrompt })
+      }
+      remember()
+
       return {
+        token: () => token,
         async prompt(text: string): Promise<void> {
           if (disposed) return
           prompts.push(`${nodeId}: ${text.split('\n')[0]}`)
           turn += 1
-          if (turn === 1) taskPrompt = text
+          if (taskPrompt === '') taskPrompt = text
+          remember()
           await script(
             text,
             {
@@ -122,7 +159,8 @@ export function scriptedSessions(
                 for (const listener of [...activityListeners]) listener(doing)
               },
               cwd: request.cwd,
-              taskPrompt
+              taskPrompt,
+              continued
             },
             turn
           )
@@ -174,6 +212,8 @@ export interface Rig {
   readonly engine: WorkflowEngine
   readonly repo: string
   readonly stateDir: string
+  /** The store the engine writes through, for tests about what is on disk. */
+  readonly store: RunStore
   readonly delivered: { sessionId: SessionId; text: string }[]
   readonly sessions: ReturnType<typeof scriptedSessions>
   /** Every ledger line the run wrote, in order. */
@@ -190,6 +230,9 @@ export interface RigOptions extends Partial<EngineOptions> {
   // relaunch of the same app over the same records looks like.
   readonly repo?: string
   readonly stateDir?: string
+  // False for a launch whose node sessions leave nothing behind, which is
+  // what a record written before sessions were kept resumes against.
+  readonly keepSessions?: boolean
 }
 
 export function rig(
@@ -201,7 +244,10 @@ export function rig(
   const stateDir = options.stateDir ?? tempDir('crucible-engine-state-')
   const delivered: { sessionId: SessionId; text: string }[] = []
   const recorded: RecordedCacheMiss[] = []
-  const sessions = scriptedSessions(scriptFor)
+  const store = rigStore(stateDir)
+  const sessions = scriptedSessions(scriptFor, {
+    ...(options.keepSessions === undefined ? {} : { keepSessions: options.keepSessions })
+  })
   let refusing = false
   // A stand-in for the ledger: what a run writes is checkable without a file.
   const cache: CacheRecorder = {
@@ -213,7 +259,7 @@ export function rig(
   }
   const engine = createWorkflowEngine({
     loader: loaderOf(defs),
-    store: createRunStore(stateDir),
+    store,
     sessions,
     deliver: (sessionId, text) => {
       if (refusing) throw new Error('no shell is up to carry a run message yet')
@@ -232,6 +278,7 @@ export function rig(
     engine,
     repo,
     stateDir,
+    store,
     delivered,
     sessions,
     recorded,
@@ -250,7 +297,26 @@ export function relaunch(
   scriptFor: (nodeId: string) => NodeScript,
   options: Omit<RigOptions, 'repo' | 'stateDir'> = {}
 ): Rig {
+  // What the quit does before the process goes: the store writes whatever it
+  // was holding. Without it a relaunch would read a record a write behind,
+  // which is a different test — the one about tolerating staleness.
+  before.store.flush()
   return rig(defs, scriptFor, { ...options, repo: before.repo, stateDir: before.stateDir })
+}
+
+/** The run store a rig's engine writes through, with its own write interval. */
+export function rigStore(stateDir: string): RunStore {
+  // Tests assert on what is on disk, so writes are not held back: the
+  // interval is the store's own subject, tested where the store is.
+  return createRunStore(stateDir, undefined, 0)
+}
+
+// What the next launch would read. The store writes off the caller's thread,
+// so a test reading the disk asks for what it is still holding first — which
+// is what the quit does anyway.
+export function recordsOnDisk(rig: Pick<Rig, 'store' | 'stateDir'>): readonly RunRecord[] {
+  rig.store.flush()
+  return createRunStore(rig.stateDir).load()
 }
 
 // The rig's own two keys stripped out, so what is left is engine options and
@@ -259,6 +325,7 @@ function engineOverrides(options: RigOptions): Partial<EngineOptions> {
   const rest: Record<string, unknown> = { ...options }
   delete rest.repo
   delete rest.stateDir
+  delete rest.keepSessions
   return rest as Partial<EngineOptions>
 }
 

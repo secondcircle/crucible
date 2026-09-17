@@ -3,9 +3,10 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import type { NodeResult, OpenNode, RunContext, WorkflowDef } from '../authoring'
+import type { NodeResult, OpenNode, WorkflowDef } from '../authoring'
 import { AUTHORING_MODULE, forkHost } from '../testing/host-fork'
 import { createWorkflowHost, inProcessHost, type WorkflowHost } from './host'
+import type { EngineContext } from './protocol'
 
 // The workflow host in both its shapes. The contract suite runs every case
 // against the real forked process and against the in-process stand-in the
@@ -46,7 +47,9 @@ function inProcess(def: WorkflowDef): WorkflowHost {
 
 // A run context that records what the workflow asked of it and answers with
 // canned results, which is all a host test needs the engine to be.
-function recordingContext(): RunContext & {
+function recordingContext(
+  recorded: Record<string, unknown> = {}
+): EngineContext & {
   readonly calls: string[]
   readonly opened: { revisions: string[]; closed: boolean }
 } {
@@ -94,6 +97,14 @@ function recordingContext(): RunContext & {
       calls.push(`ask ${question.reason}`)
       return 'approved'
     },
+    async recordedEffect(id) {
+      calls.push(`recordedEffect ${id}`)
+      return id in recorded ? { replayed: true, value: recorded[id] } : { replayed: false }
+    },
+    async recordEffect(id, value) {
+      calls.push(`recordEffect ${id}=${JSON.stringify(value)}`)
+      recorded[id] = value
+    },
     async derive(path, fromNodeId) {
       calls.push(`derive ${path} from ${fromNodeId}`)
       if (fromNodeId === 'nobody') throw new Error(`derive("${path}"): no node "nobody" in this run`)
@@ -121,6 +132,7 @@ export default workflow({
       check: (outputs) => Object.keys(outputs).length === 1 ? [] : ['wrong count']
     })
     const answer = await ctx.ask({ reason: 'ok?', artifacts: { out: first.outputs.out } })
+    const gate = await ctx.effect('gate', () => ({ ok: true, ran: 1 }))
     const held = await ctx.openNode('review', { prompt: 'r' })
     const before = held.id
     const revised = await held.revise('again')
@@ -128,7 +140,7 @@ export default workflow({
     held.close()
     await ctx.derive('/artifacts/split.md', 'first')
     const staged = await ctx.stage({ workflow: 'next', inputs: { brief: ctx.inputs.brief } })
-    return { answer, before, after, revised: revised.summary, staged, cwd: ctx.cwd, dir: ctx.artifactDir }
+    return { answer, gate, before, after, revised: revised.summary, staged, cwd: ctx.cwd, dir: ctx.artifactDir }
   }
 })
 `
@@ -146,6 +158,7 @@ const FULL_DEF: WorkflowDef = {
       check: (outputs) => (Object.keys(outputs).length === 1 ? [] : ['wrong count'])
     })
     const answer = await ctx.ask({ reason: 'ok?', artifacts: { out: first.outputs.out } })
+    const gate = await ctx.effect('gate', () => ({ ok: true, ran: 1 }))
     const held = await ctx.openNode('review', { prompt: 'r' })
     const before = held.id
     const revised = await held.revise('again')
@@ -155,6 +168,7 @@ const FULL_DEF: WorkflowDef = {
     const staged = await ctx.stage({ workflow: 'next', inputs: { brief: ctx.inputs.brief } })
     return {
       answer,
+      gate,
       before,
       after,
       revised: revised.summary,
@@ -230,6 +244,8 @@ describe.each([
       'node first',
       'check first: ',
       'ask ok?',
+      'recordedEffect gate',
+      'recordEffect gate={"ok":true,"ran":1}',
       'openNode review',
       'derive /artifacts/split.md from first',
       'stage next'
@@ -237,6 +253,7 @@ describe.each([
     expect(ctx.opened).toEqual({ revisions: ['again'], closed: true })
     expect(outputs).toEqual({
       answer: 'approved',
+      gate: { ok: true, ran: 1 },
       before: 'review',
       after: 'review·r1',
       revised: 'review·r1 done',
@@ -244,6 +261,18 @@ describe.each([
       cwd: '/worktree',
       dir: '/artifacts'
     })
+  })
+
+  it('hands back a recorded effect instead of doing the work again', async () => {
+    // The same workflow over a record that already holds the gate's result:
+    // the file's own function never runs, and what it would have produced is
+    // not what comes back.
+    const ctx = recordingContext({ gate: { ok: false, ran: 0 } })
+    const outputs = await make.full().run(ctx)
+
+    expect(outputs?.gate).toEqual({ ok: false, ran: 0 })
+    expect(ctx.calls).toContain('recordedEffect gate')
+    expect(ctx.calls.some((call) => call.startsWith('recordEffect'))).toBe(false)
   })
 
   it("rejects with the workflow's own error", async () => {

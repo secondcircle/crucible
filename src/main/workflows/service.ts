@@ -3,7 +3,7 @@ import { basename, join } from 'node:path'
 import type { SessionId, TranscriptItem, Unsubscribe } from '../../shared/agent/port'
 import type { RunTools } from '../../shared/agent/run-tools'
 import { artifactKind, recordNamesPath } from '../../shared/workflows/artifacts'
-import { interruptedNodes } from '../../shared/workflows/run'
+import type { ResumeKind } from '../../shared/workflows/run'
 import { createTurnStart, describeRun, resumeAnswer } from '../../shared/workflows/status'
 import type {
   ArtifactView,
@@ -158,15 +158,20 @@ export function createLiveWorkflowRunService({
     // No session check, as `answer` has none: the deliberate call is the spend
     // authorization, and the run keeps reporting to the orchestrator its
     // record names.
-    async resume(_sessionId: SessionId, runId: string): Promise<string> {
-      // Read before the act: resuming reverts the cut nodes to ghosts, so
-      // afterwards there is nothing left to name.
+    async resume(_sessionId: SessionId, runId: string, kind?: ResumeKind): Promise<string> {
+      // Read before the act: once the run is working, where it stopped is no
+      // longer on the record to name.
       const before = engine.runs().find((candidate) => candidate.id === runId)
-      const cut = before === undefined ? [] : interruptedNodes(before).map((node) => node.id)
-      await engine.resume(runId)
+      // Copied, not held: the engine mutates its node records in place, and
+      // this is read after they have gone back to work.
+      const stopped =
+        before === undefined
+          ? undefined
+          : { ...before, nodes: before.nodes.map((node) => ({ ...node })) }
+      await engine.resume(runId, kind)
       const run = engine.runs().find((candidate) => candidate.id === runId)
       if (run === undefined) throw new Error(`No run is named "${runId}".`)
-      return resumeAnswer(run, cut)
+      return resumeAnswer(run, stopped, kind)
     }
   }
 
@@ -194,8 +199,8 @@ export function createLiveWorkflowRunService({
       engine.pause(runId)
     },
 
-    async resume(runId: string): Promise<void> {
-      await engine.resume(runId)
+    async resume(runId: string, kind?: ResumeKind): Promise<void> {
+      await engine.resume(runId, kind)
     },
 
     async cancel(runId: string): Promise<void> {

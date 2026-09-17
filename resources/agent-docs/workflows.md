@@ -19,7 +19,7 @@ To write a new workflow, read `workflow-authoring.md` beside this file.
   commit-ish.
 - `crucible_runs` — where this session's runs stand.
 - `crucible_answer` — answer the question a run raised, by run id.
-- `crucible_resume` — resume an interrupted run, by run id.
+- `crucible_resume` — put a stopped run back to work, by run id.
 
 ## What starting a run means
 
@@ -68,11 +68,19 @@ failure: the work did not go wrong, the app went away. The run sits at no
 cost until somebody deliberately resumes it — never on its own, not at
 launch and not on a timer.
 
-`crucible_resume` re-runs the node the quit cut down, from that node's
-beginning, in the same worktree, reporting back here. Nodes that had already
-completed are handed back from the record and cost nothing; the cut node
-re-spends what it had already burned, which is why the judgment is yours and
-the user's, not the app's.
+`crucible_resume` continues the node the run stopped on from that node's
+last turn, in its own session and the same worktree, reporting back here.
+Nothing already burned is spent again: completed nodes, answered check-ins
+and results the workflow recorded are handed back from the record, and the
+continued node keeps its conversation, its artifacts and its spend.
+
+It is total over every stop short of completion — interrupted, failed,
+cancelled, and paused, which un-pauses. Only a complete run has nothing to
+resume. Beside it stands one other act: `how: "clean-restart"` runs the
+stopped node again from its prompt with no memory of the attempt that
+stopped, recorded as a revision so the earlier transcript stays readable.
+That is for a node that died in a loop, where continuing would resume the
+loop; otherwise continuing is what you want.
 
 Resume when the user asks, or when this conversation's own judgment says the
 work is still wanted. Never as a reflex to seeing the interruption message:

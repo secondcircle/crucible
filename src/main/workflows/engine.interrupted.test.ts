@@ -17,6 +17,7 @@ import {
   git,
   loaderOf,
   outputPath,
+  recordsOnDisk,
   relaunch,
   rig,
   scriptedSessions,
@@ -69,6 +70,12 @@ const planThenPark: (nodeId: string) => NodeScript = (nodeId) => {
   }
 }
 
+/** The gate, picking up where it stopped and finishing. */
+const finishTheGate: NodeScript = (_prompt, tools) => {
+  writeFileSync(outputPath(tools.taskPrompt, 'verdict.md'), 'approved\n')
+  tools.complete({ summary: 'judged it', verdict: { verdict: 'approved' } })
+}
+
 /**
  * A run left exactly as an app quit leaves one: planner complete, gate holding
  * a blocked session, the record on disk still saying `running`. The engine that
@@ -77,9 +84,10 @@ const planThenPark: (nodeId: string) => NodeScript = (nodeId) => {
  */
 async function interruptedRun(
   defs: Record<string, WorkflowDef> = { gated },
-  script: (nodeId: string) => NodeScript = planThenPark
+  script: (nodeId: string) => NodeScript = planThenPark,
+  options: { readonly keepSessions?: boolean } = {}
 ): Promise<{ before: Rig; runId: string }> {
-  const before = rig(defs, script)
+  const before = rig(defs, script, options)
   const intent = join(before.repo, 'intent.md')
   writeFileSync(intent, 'the intent\n')
   const started = await before.engine.start(startRequest(before.repo, 'gated', { intent }))
@@ -116,12 +124,15 @@ describe('the startup sweep', () => {
     expect(run.nodes[1].error).toBe(INTERRUPTED_MESSAGE)
     expect(run.nodes[1].endedAt).toBe(lastSeen)
     expect(run.nodes[1].now).toBeUndefined()
+    // The session the cut node was working in is named on its record: that
+    // is what resume reopens.
+    expect(run.nodes[1].sessionToken).toBeDefined()
     // The orchestrator has not been told: no shell exists this early, so the
     // debt rides on the record.
     expect(run.noticePending).toBe(true)
     expect(after.delivered).toEqual([])
     // Written through, so the next launch reads the settled record.
-    expect(createRunStore(after.stateDir).load()[0].status).toBe('interrupted')
+    expect(recordsOnDisk(after)[0].status).toBe('interrupted')
 
     // A record, not a ghost: the live-only operations say so plainly.
     expect(() => after.engine.cancel(runId)).toThrow(/not live/)
@@ -152,6 +163,8 @@ describe('the startup sweep', () => {
       nodes: [{ id: 'work', status: 'failed', parents: [], reads: [], artifacts: [] }],
       createdAt: '2026-01-02T00:00:00.000Z'
     })
+    // The launch that wrote these is gone, and its quit put them on disk.
+    store.flush()
 
     const engine = createWorkflowEngine({
       loader: loaderOf({}),
@@ -179,17 +192,21 @@ describe('the startup sweep', () => {
 })
 
 describe('resume', () => {
-  it('replays what completed, re-runs the cut node in the same worktree, and finishes', async () => {
+  it('continues the cut node in its own session and finishes the run', async () => {
     const { before, runId } = await interruptedRun()
+    const cut = before.engine.runs()[0].nodes[1]
+    const token = cut.sessionToken
     const worktree = before.engine.runs()[0].worktreePath ?? ''
     const branch = before.engine.runs()[0].branch ?? ''
     const plannerEnded = before.engine.runs()[0].nodes[0].endedAt
 
     const cwds: string[] = []
+    const continued: boolean[] = []
     const after = relaunch(before, { gated }, () => (prompt, tools) => {
       cwds.push(tools.cwd)
-      writeFileSync(outputPath(prompt, 'verdict.md'), 'approved\n')
-      writeFileSync(join(tools.cwd, 'gate-was-here.txt'), 'again\n')
+      continued.push(tools.continued)
+      writeFileSync(outputPath(tools.taskPrompt, 'verdict.md'), 'approved\n')
+      writeFileSync(join(tools.cwd, 'gate-was-here.txt'), prompt.slice(0, 8))
       tools.complete({ summary: 'judged it', verdict: { verdict: 'approved' } })
     })
 
@@ -197,13 +214,23 @@ describe('resume', () => {
     await until(() => after.engine.runs()[0].status === 'complete')
     const run = after.engine.runs()[0]
 
-    // Only the cut node opened a session; the planner was handed back from its
+    // Only the cut node was worked on; the planner was handed back from its
     // record, so nothing was spent on it.
-    expect(after.sessions.prompts.map((prompt) => prompt.split(':')[0])).toEqual(['gate'])
+    expect(after.sessions.requests).toHaveLength(1)
     expect(cwds).toEqual([worktree])
-    // From the node's own beginning: the first prompt is the composed task,
-    // not a continuation of a conversation that no longer exists.
-    expect(after.sessions.prompts[0]).toContain('judge the branch')
+    // Its own session, reopened: the same conversation, not a new one.
+    expect(after.sessions.requests[0].resumeToken).toBe(token)
+    expect(continued).toEqual([true])
+    // And it is told it is continuing, not handed its task afresh.
+    expect(after.sessions.prompts[0]).toContain('same session')
+    expect(after.sessions.prompts[0]).not.toContain('judge the branch')
+
+    // One record for the gate, the one the quit cut down: no ghost, no
+    // second attempt.
+    expect(run.nodes.map((node) => node.id)).toEqual(['planner', 'gate'])
+    expect(run.nodes[1].status).toBe('complete')
+    expect(run.nodes[1].verdict).toEqual({ verdict: 'approved' })
+    expect(run.nodes[1].error).toBeUndefined()
 
     // The planner's record is untouched, artifact and stamps and all.
     expect(run.nodes[0].status).toBe('complete')
@@ -216,8 +243,6 @@ describe('resume', () => {
     expect(run.branch).toBe(branch)
     expect(run.worktreePath).toBe(worktree)
     expect(run.error).toBeUndefined()
-    expect(run.nodes[1].status).toBe('complete')
-    expect(run.nodes[1].verdict).toEqual({ verdict: 'approved' })
     expect(existsSync(join(worktree, 'gate-was-here.txt'))).toBe(true)
 
     // Its work is committed on its own branch, and the completion goes to the
@@ -234,8 +259,9 @@ describe('resume', () => {
     const burned = before.engine.runs()[0].nodes[1].cost ?? 0
     expect(burned).toBeGreaterThan(0)
 
-    // The re-run blocks without a line of activity, so no stats snapshot has
-    // happened yet: the record must still say what the first life spent.
+    // The continued node blocks without a line of activity, so no stats
+    // snapshot has happened yet: the record must still say what the first
+    // life spent.
     const after = relaunch(before, { gated }, () => (_prompt, tools) => {
       tools.block({ reason: 'which way?' })
     })
@@ -245,28 +271,50 @@ describe('resume', () => {
     expect(after.engine.runs()[0].nodes[1].cost ?? 0).toBeGreaterThanOrEqual(burned)
   })
 
-  it('keeps the money the cut node already burned and adds to it', async () => {
+  it('bills the continued turns once, on top of what the node had spent', async () => {
     const { before, runId } = await interruptedRun()
-    const burned = before.engine.runs()[0].nodes[1].cost ?? 0
+    const cut = before.engine.runs()[0].nodes[1]
+    const burned = cut.cost ?? 0
+    const calls = cut.toolCalls ?? 0
     expect(burned).toBeGreaterThan(0)
+    expect(calls).toBeGreaterThan(0)
 
-
-    const after = relaunch(before, { gated }, () => (prompt, tools) => {
-      writeFileSync(outputPath(prompt, 'verdict.md'), 'approved\n')
-      tools.complete({ summary: 'judged it' })
-    })
+    // The reopened session reports what it spent before the quit as well as
+    // after, the way a session file does; the record must add one turn's
+    // worth, not the whole conversation twice.
+    const after = relaunch(before, { gated }, () => finishTheGate)
     await after.engine.resume(runId)
     await until(() => after.engine.runs()[0].status === 'complete')
 
-    expect(after.engine.runs()[0].nodes[1].cost).toBeGreaterThan(burned)
+    // The scripted session bills a quarter per turn and three tool calls:
+    // two turns, so twice that and no more. Billing the reopened session's
+    // past again would show three turns' worth.
+    const node = after.engine.runs()[0].nodes[1]
+    expect(node.cost).toBe(burned * 2)
+    expect(node.toolCalls).toBe(calls * 2)
+  })
+
+  it('keeps the cut node’s transcript and adds to it', async () => {
+    const { before, runId } = await interruptedRun()
+    // What the quit leaves on disk is what the next launch reads.
+    before.store.flush()
+    const firstLife = await before.engine.nodeTranscript(runId, 'gate')
+    expect(firstLife.length).toBeGreaterThan(0)
+
+    const after = relaunch(before, { gated }, () => finishTheGate)
+    await after.engine.resume(runId)
+    await until(() => after.engine.runs()[0].status === 'complete')
+
+    // One transcript for one node, still there and now longer: the run view
+    // reads the whole of what the node did, across the quit.
+    const both = await after.engine.nodeTranscript(runId, 'gate')
+    expect(both).not.toEqual([])
+    expect(JSON.stringify(both)).toContain('turn 2')
   })
 
   it('clears a dismissal, because a run that is working again must show', async () => {
     const { before, runId } = await interruptedRun()
-    const after = relaunch(before, { gated }, () => (prompt, tools) => {
-      writeFileSync(outputPath(prompt, 'verdict.md'), 'approved\n')
-      tools.complete({ summary: 'judged it' })
-    })
+    const after = relaunch(before, { gated }, () => finishTheGate)
 
     // Dismissing an interrupted run stamps once and moves nothing else.
     after.engine.dismiss(runId)
@@ -281,12 +329,12 @@ describe('resume', () => {
     await until(() => after.engine.runs()[0].status === 'complete')
   })
 
-  it('refuses every status that is not stopped, and a second resume racing the first', async () => {
+  it('refuses a complete run, a running one, and a second resume racing the first', async () => {
     const { before, runId } = await interruptedRun()
-    const after = relaunch(before, { gated }, () => async (prompt, tools) => {
+    const after = relaunch(before, { gated }, () => async (_prompt, tools) => {
       // Slow enough that the second resume lands while the first is working.
       await new Promise((resolve) => setTimeout(resolve, 40))
-      writeFileSync(outputPath(prompt, 'verdict.md'), 'approved\n')
+      writeFileSync(outputPath(tools.taskPrompt, 'verdict.md'), 'approved\n')
       tools.complete({ summary: 'judged it' })
     })
 
@@ -364,8 +412,189 @@ describe('resume', () => {
     expect(run.waiting).toBe(true)
     expect(denied.delivered).toEqual([])
   })
+})
 
-  it('asks a check-in for real on a resumed run rather than replaying an answer', async () => {
+describe('resume over every stop', () => {
+  // A workflow whose only node fails outright, which is the run failing
+  // rather than the app going away.
+  const single: WorkflowDef = {
+    description: 'one node',
+    inputs: { intent: 'the intent document' },
+    plan: (): PlannedNode[] => [{ id: 'work' }],
+    run: async (ctx) => {
+      const done = await ctx.node('work', {
+        prompt: 'do the work',
+        reads: [ctx.inputs.intent],
+        outputs: { report: { file: 'report.md', desc: 'the report' } }
+      })
+      return { summary: done.summary }
+    }
+  }
+
+  async function startedRun(script: (nodeId: string) => NodeScript): Promise<Rig> {
+    const built = rig({ solo: single }, script)
+    const intent = join(built.repo, 'intent.md')
+    writeFileSync(intent, 'the intent\n')
+    await built.engine.start(startRequest(built.repo, 'solo', { intent }))
+    return built
+  }
+
+  it('puts a failed run back to work, continuing the node that failed', async () => {
+    // Three rejected completions fail the node, which fails the run; then
+    // the same agent, continued, writes what it owed.
+    let helpful = false
+    const built = await startedRun(() => (_prompt, tools) => {
+      if (!helpful) {
+        tools.complete({ summary: 'claimed done without writing anything' })
+        return
+      }
+      writeFileSync(outputPath(tools.taskPrompt, 'report.md'), 'the report\n')
+      tools.complete({ summary: 'wrote it this time' })
+    })
+    await until(() => built.engine.runs()[0].status === 'failed')
+    const failed = built.engine.runs()[0]
+    expect(failed.nodes[0].status).toBe('failed')
+    const token = failed.nodes[0].sessionToken
+    expect(token).toBeDefined()
+
+    helpful = true
+    await built.engine.resume(failed.id)
+    await until(() => built.engine.runs()[0].status === 'complete')
+
+    // The same node record, continued in the same session: no second
+    // attempt, and the error it failed with is gone.
+    const run = built.engine.runs()[0]
+    expect(run.nodes.map((node) => node.id)).toEqual(['work'])
+    expect(run.nodes[0].status).toBe('complete')
+    expect(run.nodes[0].error).toBeUndefined()
+    expect(built.sessions.requests.at(-1)?.resumeToken).toBe(token)
+  })
+
+  it('puts a cancelled run back to work the same way', async () => {
+    let helpful = false
+    const built = await startedRun(() => (_prompt, tools) => {
+      // Says nothing at all until it is told to finish, so the run is
+      // cancelled while the node is still working.
+      if (!helpful) return
+      writeFileSync(outputPath(tools.taskPrompt, 'report.md'), 'the report\n')
+      tools.complete({ summary: 'finished after the cancel' })
+    })
+    await until(() => built.sessions.prompts.length > 0)
+    const runId = built.engine.runs()[0].id
+    built.engine.cancel(runId)
+    await until(() => built.engine.runs()[0].status === 'cancelled')
+
+    helpful = true
+    await built.engine.resume(runId)
+    await until(() => built.engine.runs()[0].status === 'complete')
+    expect(built.engine.runs()[0].nodes[0].summary).toBe('finished after the cancel')
+  })
+})
+
+describe('a clean restart', () => {
+  it('runs the node again from its prompt, as a revision beside what stopped', async () => {
+    const { before, runId } = await interruptedRun()
+    const cut = before.engine.runs()[0].nodes[1]
+
+    const openings: string[] = []
+    const after = relaunch(before, { gated }, () => (prompt, tools) => {
+      openings.push(prompt)
+      writeFileSync(outputPath(prompt, 'verdict.md'), 'approved\n')
+      tools.complete({ summary: 'judged it fresh' })
+    })
+    await after.engine.resume(runId, 'clean-restart')
+    await until(() => after.engine.runs()[0].status === 'complete')
+    const run = after.engine.runs()[0]
+
+    // A fresh session, told what it is picking up, with the node's own task.
+    expect(after.sessions.requests[0].resumeToken).toBeUndefined()
+    expect(openings[0]).toContain('judge the branch')
+    expect(openings[0]).toContain('fresh session')
+
+    // The attempt that stopped keeps its record, its error and its spend; the
+    // new attempt is a revision that follows it.
+    const stopped = run.nodes.find((node) => node.id === 'gate')
+    expect(stopped?.status).toBe('interrupted')
+    expect(stopped?.cost).toBe(cut.cost)
+    const restarted = run.nodes.find((node) => node.id === 'gate·r1')
+    expect(restarted?.status).toBe('complete')
+    expect(restarted?.summary).toBe('judged it fresh')
+    expect(restarted?.parents).toContain('gate')
+
+    // Two transcripts, both readable: the point of recording it as a revision.
+    expect(await after.engine.nodeTranscript(runId, 'gate')).not.toEqual([])
+    expect(await after.engine.nodeTranscript(runId, 'gate·r1')).not.toEqual([])
+  })
+
+  it('is what a node with no session left gets, and the log says so', async () => {
+    // A launch whose node sessions leave nothing behind: what every record
+    // written before sessions outlived the app looks like.
+    const logged: Record<string, unknown>[] = []
+    const { before, runId } = await interruptedRun({ gated }, planThenPark, {
+      keepSessions: false
+    })
+    expect(before.engine.runs()[0].nodes[1].sessionToken).toBeUndefined()
+
+    const after = relaunch(
+      before,
+      { gated },
+      () => (prompt, tools) => {
+        writeFileSync(outputPath(prompt, 'verdict.md'), 'approved\n')
+        tools.complete({ summary: 'judged it fresh' })
+      },
+      { log: (event) => logged.push(event), keepSessions: false }
+    )
+    await after.engine.resume(runId)
+    await until(() => after.engine.runs()[0].status === 'complete')
+
+    // Never silently: the record shows a second attempt, and the log names it.
+    expect(after.engine.runs()[0].nodes.map((node) => node.id)).toEqual([
+      'planner',
+      'gate',
+      'gate·r1'
+    ])
+    expect(after.sessions.prompts[0]).toContain('judge the branch')
+    expect(logged).toContainEqual(
+      expect.objectContaining({ event: 'node_clean_restart', nodeId: 'gate', asked: false })
+    )
+  })
+
+  it('is the fallback when a recorded session will not reopen', async () => {
+    const logged: Record<string, unknown>[] = []
+    const { before, runId } = await interruptedRun()
+    // The token is on the record, and nothing will open it: a session file
+    // deleted, or a state directory that moved.
+    const record = createRunStore(before.stateDir)
+    before.store.flush()
+    const saved = record.load()[0]
+    record.save({
+      ...saved,
+      nodes: saved.nodes.map((node) =>
+        node.id === 'gate' ? { ...node, sessionToken: '/gone/session.jsonl' } : node
+      )
+    })
+    record.flush()
+
+    const after = rig(
+      { gated },
+      () => (prompt, tools) => {
+        writeFileSync(outputPath(prompt, 'verdict.md'), 'approved\n')
+        tools.complete({ summary: 'judged it fresh' })
+      },
+      { repo: before.repo, stateDir: before.stateDir, log: (event) => logged.push(event) }
+    )
+    await after.engine.resume(runId)
+    await until(() => after.engine.runs()[0].status === 'complete')
+
+    expect(logged).toContainEqual(
+      expect.objectContaining({ event: 'node_session_unreadable', nodeId: 'gate' })
+    )
+    expect(after.engine.runs()[0].nodes.map((node) => node.id)).toContain('gate·r1')
+  })
+})
+
+describe('what a resumed run does not do again', () => {
+  it('hands back the answer to a check-in it already had, and asks nothing', async () => {
     const asking: WorkflowDef = {
       description: 'a planner, a question, a gate',
       inputs: { intent: 'the intent document' },
@@ -381,28 +610,95 @@ describe('resume', () => {
         return { summary: gate.summary }
       }
     }
-    const { before, runId } = await interruptedRun({ gated: asking }, planThenPark)
-
-    const after = relaunch(before, { gated: asking }, (nodeId) =>
+    // The question is asked and answered, and the quit lands on the gate.
+    const before = rig({ gated: asking }, (nodeId) =>
       nodeId === 'planner'
         ? (prompt, tools) => {
             writeFileSync(outputPath(prompt, 'spec.md'), 'the spec\n')
             tools.complete({ summary: 'wrote the spec' })
           }
-        : (_prompt, tools) => tools.complete({ summary: 'judged it' })
+        : (_prompt, tools) => tools.block({ reason: 'which way?' })
     )
+    const intent = join(before.repo, 'intent.md')
+    writeFileSync(intent, 'the intent\n')
+    const started = await before.engine.start(startRequest(before.repo, 'gated', { intent }))
+    await until(() => before.engine.runs()[0].waiting === true)
+    before.engine.answer(started.id, 'ship it')
+    await until(() => before.engine.runs()[0].nodes.some((node) => node.status === 'blocked'))
 
-    await after.engine.resume(runId)
-    // The question is asked again, of the same orchestrator: only the latest
-    // question is ever recorded, so replaying an answer would be a guess.
-    await until(() => after.engine.runs()[0].waiting === true)
-    expect(after.delivered.at(-1)?.text).toContain('ship it?')
-
-    after.engine.answer(runId, 'ship it')
+    const after = relaunch(before, { gated: asking }, () => (_prompt, tools) => {
+      tools.complete({ summary: 'judged it' })
+    })
+    await after.engine.resume(started.id)
     await until(() => after.engine.runs()[0].status === 'complete')
-    expect(after.sessions.prompts.some((prompt) => prompt.includes('judge it: ship it'))).toBe(
-      true
-    )
+
+    // The human's one gate is not passed a second time: nobody was asked,
+    // and the workflow got what it was told the first time.
+    expect(after.delivered.filter((message) => message.text.includes('ship it?'))).toEqual([])
+    expect(after.engine.runs()[0].waiting).toBeFalsy()
+    const recorded = after.engine.runs()[0].effects ?? []
+    expect(recorded.map((effect) => effect.value)).toEqual(['ship it'])
+  })
+
+  it('hands back an effect it already recorded instead of doing the work again', async () => {
+    let gateRuns = 0
+    const gating: WorkflowDef = {
+      description: 'a gate the workflow runs itself, then a node',
+      inputs: { intent: 'the intent document' },
+      plan: (): PlannedNode[] => [{ id: 'work' }],
+      run: async (ctx) => {
+        // The five-minute `make check` of a real build workflow, and the
+        // commit hash the rest of the run is measured against.
+        const checked = await ctx.effect('make-check', () => {
+          gateRuns += 1
+          return { ok: true, at: `run ${gateRuns}` }
+        })
+        const done = await ctx.node('work', {
+          prompt: `fix what the gate said: ${JSON.stringify(checked)}`,
+          reads: [ctx.inputs.intent],
+          outputs: { report: { file: 'report.md', desc: 'the report' } }
+        })
+        return { summary: done.summary, checked }
+      }
+    }
+
+    const before = rig({ gated: gating }, () => (_prompt, tools) => {
+      tools.block({ reason: 'which way?' })
+    })
+    const intent = join(before.repo, 'intent.md')
+    writeFileSync(intent, 'the intent\n')
+    const started = await before.engine.start(startRequest(before.repo, 'gated', { intent }))
+    await until(() => before.engine.runs()[0].waiting === true)
+    expect(gateRuns).toBe(1)
+
+    const after = relaunch(before, { gated: gating }, () => (prompt, tools) => {
+      writeFileSync(outputPath(tools.taskPrompt, 'report.md'), prompt.slice(0, 10))
+      tools.complete({ summary: 'fixed it' })
+    })
+    await after.engine.resume(started.id)
+    await until(() => after.engine.runs()[0].status === 'complete')
+
+    // The gate ran once, in the life that was cut, and the resumed run was
+    // handed what it produced.
+    expect(gateRuns).toBe(1)
+    expect(after.engine.runs()[0].outputs).toMatchObject({ checked: { ok: true, at: 'run 1' } })
+    expect(after.engine.runs()[0].effects?.map((effect) => effect.key)).toEqual(['make-check'])
+  })
+
+  it('refuses two effects under one id, as it refuses two nodes under one id', async () => {
+    const twice: WorkflowDef = {
+      description: 'records the same id twice',
+      inputs: {},
+      run: async (ctx) => {
+        await ctx.effect('gate', () => 1)
+        await ctx.effect('gate', () => 2)
+        return {}
+      }
+    }
+    const built = rig({ solo: twice }, () => () => {})
+    await built.engine.start(startRequest(built.repo, 'solo', {}))
+    await until(() => built.engine.runs()[0].status === 'failed')
+    expect(built.engine.runs()[0].error).toContain('duplicate effect id "gate"')
   })
 })
 
@@ -426,7 +722,7 @@ describe('resume and held-open nodes', () => {
     }
   }
 
-  it('revises a replayed node in a fresh session that is told what it is picking up', async () => {
+  it('revises a replayed node in the session that node was working in', async () => {
     // The review completes and is held open; the fixer blocks, so the quit
     // catches the run with the review's session parked and complete.
     const before = rig({ gated: reviewing }, (nodeId) =>
@@ -442,6 +738,7 @@ describe('resume and held-open nodes', () => {
     const started = await before.engine.start(startRequest(before.repo, 'gated', { intent }))
     await until(() => before.engine.runs()[0].waiting === true)
     expect(before.engine.runs()[0].nodes[0].status).toBe('complete')
+    const reviewToken = before.engine.runs()[0].nodes[0].sessionToken
 
     const after = relaunch(before, { gated: reviewing }, (nodeId) =>
       nodeId === 'review'
@@ -456,8 +753,8 @@ describe('resume and held-open nodes', () => {
     await until(() => after.engine.runs()[0].status === 'complete')
     const run = after.engine.runs()[0]
 
-    // The completed review was replayed — no session for it — and the fixer,
-    // which the quit cut down, re-ran.
+    // The completed review was replayed — no session opened for it — and the
+    // fixer, which the quit cut down, carried on in its own.
     const revision = run.nodes.find((node) => node.id === 'review·r1')
     expect(revision?.status).toBe('complete')
     expect(revision?.summary).toBe('reviewed again')
@@ -465,18 +762,21 @@ describe('resume and held-open nodes', () => {
     // triggered it, exactly as a first run writes those edges.
     expect(revision?.parents).toEqual(['review', 'fixer'])
 
-    // Its session opened on the node's original task, was told the earlier
-    // context is gone, and then heard the revision.
-    const opening = after.sessions.prompts.find((prompt) => prompt.startsWith('review:'))
-    expect(opening).toContain('review the branch')
-    expect(run.outputs).toEqual({ summary: 'reviewed again' })
+    // The revision went into the review's own session, which is the whole
+    // point of holding one open: it was not told its earlier work was gone.
+    const reopened = after.sessions.requests.filter(
+      (request) => request.resumeToken === reviewToken
+    )
+    expect(reopened).toHaveLength(1)
     const revised = after.sessions.prompts.filter((prompt) => prompt.startsWith('review:'))
     expect(revised).toHaveLength(1)
+    expect(revised[0]).not.toContain('review the branch')
+    expect(run.outputs).toEqual({ summary: 'reviewed again' })
   })
 
-  it('re-runs a held-open node the quit cut down rather than replaying it', async () => {
+  it('continues a held-open node the quit cut down rather than replaying it', async () => {
     // The review itself never completed, so there is nothing to replay: it
-    // runs from its beginning like any interrupted node.
+    // carries on in its own session like any node the quit cut down.
     const before = rig({ gated: reviewing }, () => (_prompt, tools) => {
       tools.block({ reason: 'which way?' })
     })
@@ -497,12 +797,12 @@ describe('resume and held-open nodes', () => {
     await after.engine.resume(started.id)
     await until(() => after.engine.runs()[0].status === 'complete')
 
-    // One record for the review, not two, and a real session behind it.
+    // One record for the review, not two, and its own session behind it.
     const run = after.engine.runs()[0]
     expect(run.nodes.filter((node) => node.id === 'review')).toHaveLength(1)
-    expect(after.sessions.prompts.filter((prompt) => prompt.startsWith('review:')).length)
-      .toBeGreaterThan(0)
-    // Revised in the same session it opened, so no fresh revision was needed.
+    expect(after.sessions.requests[0].resumeToken).toBeDefined()
+    // Revised in the same session it continued in, so no fresh attempt was
+    // needed.
     expect(run.nodes.find((node) => node.id === 'review·r1')?.status).toBe('complete')
   })
 })
@@ -531,7 +831,7 @@ describe('the interruption notice', () => {
     after.engine.deliverNotices('orchestrator-1')
     expect(after.delivered).toHaveLength(1)
     expect(after.engine.runs()[0].noticePending).toBeUndefined()
-    expect(createRunStore(after.stateDir).load()[0].noticePending).toBeUndefined()
+    expect(recordsOnDisk(after)[0].noticePending).toBeUndefined()
   })
 
   it('stays owed when delivery fails, and lands on the next wake', async () => {
@@ -551,9 +851,9 @@ describe('the interruption notice', () => {
 
   it('says the run was resumed when it has been, rather than repeating the quit', async () => {
     const { before, runId } = await interruptedRun()
-    const after = relaunch(before, { gated }, () => async (prompt, tools) => {
+    const after = relaunch(before, { gated }, () => async (_prompt, tools) => {
       await new Promise((resolve) => setTimeout(resolve, 60))
-      writeFileSync(outputPath(prompt, 'verdict.md'), 'approved\n')
+      writeFileSync(outputPath(tools.taskPrompt, 'verdict.md'), 'approved\n')
       tools.complete({ summary: 'judged it' })
     })
 
@@ -589,7 +889,7 @@ describe('the interruption notice', () => {
     await until(() => after.engine.runs()[0].waiting === true)
     expect(after.delivered.at(-1)?.text).toContain('raised a blocker')
     expect(after.engine.runs()[0].noticePending).toBeUndefined()
-    expect(createRunStore(after.stateDir).load()[0].noticePending).toBeUndefined()
+    expect(recordsOnDisk(after)[0].noticePending).toBeUndefined()
 
     after.engine.deliverNotices('orchestrator-1')
     expect(after.delivered.filter((message) => message.text.includes('was interrupted'))).toEqual(

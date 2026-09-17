@@ -1,3 +1,4 @@
+import { statSync } from 'node:fs'
 import type {
   AgentSession,
   ToolDefinition
@@ -28,10 +29,14 @@ import type {
   NodeSessionStats
 } from './node-session.ts'
 
-// A node is a fresh π session with two injected tools and no interactive
-// user: in-memory session and settings managers, so nothing of π's state is
-// read or written, and a full prompt override composed of the node's role
-// and the standing prompt.
+// A node is a π session with two injected tools and no interactive user: an
+// in-memory settings manager and a session kept in the run's own directory,
+// so nothing of π's state is read or written, and a full prompt override
+// composed of the node's role and the standing prompt.
+//
+// The session is on disk because a node has to outlive the app quitting: its
+// token goes on the node's record, and a resume reopens it so the node
+// carries on from its last turn instead of paying for its work twice.
 
 type Sdk = typeof import('@earendil-works/pi-coding-agent')
 
@@ -130,6 +135,13 @@ export function createSdkNodeSessionFactory({
         ...(request.monitors === undefined ? [] : monitorPiTools(request.monitors))
       ]
 
+      // Kept where the run keeps everything else of its own; π's own session
+      // folders are neither read nor written.
+      const sessions =
+        request.resumeToken === undefined
+          ? pi.SessionManager.create(request.cwd, request.sessionDir)
+          : pi.SessionManager.open(reopenable(request.resumeToken), request.sessionDir, request.cwd)
+
       const skills = request.skills ?? []
       const resourceLoader = new pi.DefaultResourceLoader({
         cwd: request.cwd,
@@ -157,7 +169,7 @@ export function createSdkNodeSessionFactory({
         // tools loses the two it completes through.
         tools: [...request.tools, ...customTools.map((tool) => tool.name)] as never,
         customTools,
-        sessionManager: pi.SessionManager.inMemory(request.cwd),
+        sessionManager: sessions,
         settingsManager: pi.SettingsManager.inMemory()
       })
 
@@ -193,6 +205,22 @@ export function toolCallCount(messages: readonly StoredMessage[]): number {
   let count = 0
   for (const message of messages) if (message.role === 'toolResult') count += 1
   return count
+}
+
+/**
+ * The session file a token names, or a throw. An empty or missing file would
+ * open as a blank conversation, and a node told to carry on from a blank
+ * conversation has lost its task: the caller must run it again instead.
+ */
+export function reopenable(token: string): string {
+  let bytes: number
+  try {
+    bytes = statSync(token).size
+  } catch {
+    throw new Error(`this node's session file is gone: ${token}`)
+  }
+  if (bytes === 0) throw new Error(`this node's session file is empty: ${token}`)
+  return token
 }
 
 function wrap(session: AgentSession, skills: NodeSkills, cache: CacheWatch): NodeSession {
@@ -271,6 +299,12 @@ function wrap(session: AgentSession, skills: NodeSkills, cache: CacheWatch): Nod
   })
 
   return {
+    token(): string | undefined {
+      // The session's own file, which is why it leaves here as an opaque
+      // string and is never read as a path by anything above.
+      return session.sessionFile ?? undefined
+    },
+
     async prompt(text: string): Promise<void> {
       // Model trouble never rejects the loop: a turn that failed ends and
       // the engine's nudge/stall machinery takes it from there.

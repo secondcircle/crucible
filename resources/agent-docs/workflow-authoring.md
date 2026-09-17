@@ -230,7 +230,16 @@ too; `research.md` beside this file has the details.
   validated completion. Always `close()` it eventually.
 - `ctx.ask({ reason, artifacts })` — a check-in. `reason` reaches the
   orchestrating session's agent verbatim, so write it as a prompt; the
-  answer comes back verbatim. The run parks with no timeout.
+  answer comes back verbatim. The run parks with no timeout. Answers are
+  recorded, so a resumed run is handed back what it was already told rather
+  than asking again.
+- `ctx.effect(id, produce)` — do something once per run, whatever happens to
+  the run in between. `produce` runs the first time and its result is
+  recorded under `id`; a resumed run is handed that result back instead of
+  executing it again. The result must survive a JSON round trip, and what
+  comes back is the round-tripped value on the first run as well, so the two
+  cannot differ. Each id may be recorded once per run — reuse one and the
+  run fails, as two nodes sharing an id do. See below for what to wrap.
 - `await ctx.derive(path, fromNodeId)` — register a file the workflow itself
   wrote as produced by a node, so later readers get a real graph parent.
   Rejects when the node does not exist.
@@ -240,6 +249,50 @@ too; `research.md` beside this file has the details.
   continuing this run's branch from its final commit. Inputs may name files
   this run has not written yet — they are checked when the successor starts.
   Not idempotent: two calls stage two runs.
+
+## What a resume re-executes, and what it replays
+
+A run survives Crucible quitting, and a resume picks it up where it stopped.
+The way it does that is to **execute your `run()` again from the top**, over
+the record the previous life wrote. So:
+
+- A node that completed is handed back from its record: its outputs, its
+  verdict, its summary. No session, no spend.
+- The node the run stopped on continues in its own session, from its last
+  turn. Its conversation, artifacts and spend are kept.
+- A `ctx.ask` that was answered hands back that answer, and asks nobody.
+- A `ctx.effect` that was recorded hands back its value.
+- **Everything else in `run()` runs again, for real.** Your loops, your
+  branches, your `spawn` calls, your commits, your reads of `git rev-parse
+  HEAD`. The engine cannot know that a command you ran was expensive, or
+  that running it twice is wrong.
+
+That last line is the whole of what you have to think about. Wrap the work
+between nodes that must not happen twice — a gate that takes minutes, a
+merge, a commit hash the rest of the run measures against — in
+`ctx.effect`:
+
+```ts
+// Re-executed on every resume: three minutes each time, and a red result
+// from load the replay itself created.
+const gate = await sh('make check', ctx.cwd)
+
+// Run once per run, whatever happens to the run.
+const gate = await ctx.effect('gate-1', () => sh('make check', ctx.cwd))
+```
+
+The id is yours and must be unique within the run, so a gate inside a loop
+names its round: `ctx.effect(\`gate-${round}\`, ...)`. The same goes for a
+base commit read at the top of a step — recorded once, the resumed run
+diffs against the same commit the first one did:
+
+```ts
+const base = await ctx.effect(`base-${step}`, () => sh('git rev-parse HEAD', ctx.cwd))
+```
+
+Leave the cheap and the idempotent alone: reading a file, computing a
+prompt, checking whether a branch exists. Wrapping those buys nothing and
+fills the record with noise.
 
 ## What a node is told
 

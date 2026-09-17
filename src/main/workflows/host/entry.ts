@@ -8,6 +8,7 @@ import type {
 } from '../../../../resources/workflow-lib/workflow.ts'
 import {
   createRpc,
+  effectOver,
   type Channel,
   type HostRequests,
   type MainRequests,
@@ -124,6 +125,14 @@ function runContext(
       }
     },
     ask: (question) => rpc.request('ask', question),
+    // Built here, so the workflow's own code is what runs inside an effect
+    // and only its result crosses the wire.
+    effect: effectOver({
+      recordedEffect: (id) => rpc.request('recordedEffect', { id }),
+      recordEffect: async (id, value) => {
+        await rpc.request('recordEffect', { id, value })
+      }
+    }),
     derive: (path, fromNodeId) => rpc.request('derive', { path, fromNodeId }),
     stage: (opts) => rpc.request('stage', opts)
   }

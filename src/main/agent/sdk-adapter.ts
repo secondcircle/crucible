@@ -464,6 +464,7 @@ export function createSdkAdapter({
             base?: string
             runId?: string
             message?: string
+            how?: string
           }
           if (tool.name === 'crucible_workflows') {
             return said(await behaviors.workflows(workspacePath))
@@ -485,7 +486,15 @@ export function createSdkAdapter({
             )
           }
           if (tool.name === 'crucible_resume') {
-            return said(await behaviors.resume(sessionId, given.runId ?? ''))
+            // Anything but the one other word is the default act, because a
+            // model's typo must not silently throw a node's work away.
+            return said(
+              await behaviors.resume(
+                sessionId,
+                given.runId ?? '',
+                given.how === 'clean-restart' ? 'clean-restart' : 'continue'
+              )
+            )
           }
           return said(await behaviors.list(sessionId))
         }

@@ -246,23 +246,58 @@ describe('the live run service', () => {
     expect(text).toContain('resume with crucible_resume if this work is still wanted')
   })
 
-  it('resumes through the tool, naming the run, the cut node and the worktree', async () => {
+  it('resumes through the tool, naming the run, the stopped node and the worktree', async () => {
     const { engine, service } = serviceOver([
       record({
         id: 'cd34',
         status: 'interrupted',
         worktreePath: '/repos/thing/.crucible/worktrees/run-cd34',
-        nodes: [{ id: 'gate', status: 'interrupted', parents: [], reads: [], artifacts: [] }]
+        nodes: [
+          {
+            id: 'gate',
+            status: 'interrupted',
+            parents: [],
+            reads: [],
+            artifacts: [],
+            sessionToken: '/state/workflow-runs/cd34/sessions/1.jsonl'
+          }
+        ]
       })
     ])
 
     const said = await service.tools.resume('s1', 'cd34')
 
-    expect(engine.resume).toHaveBeenCalledWith('cd34')
+    expect(engine.resume).toHaveBeenCalledWith('cd34', undefined)
     expect(said).toContain('cd34')
     expect(said).toContain('"gate"')
+    expect(said).toContain('continues from its last turn')
     expect(said).toContain('/repos/thing/.crucible/worktrees/run-cd34')
     expect(said).toContain('reports back here')
+  })
+
+  it('restarts a node cleanly when the tool is asked for that instead', async () => {
+    const { engine, service } = serviceOver([
+      record({
+        id: 'cd34',
+        status: 'interrupted',
+        worktreePath: '/repos/thing/.crucible/worktrees/run-cd34',
+        nodes: [
+          {
+            id: 'gate',
+            status: 'interrupted',
+            parents: [],
+            reads: [],
+            artifacts: [],
+            sessionToken: '/state/workflow-runs/cd34/sessions/1.jsonl'
+          }
+        ]
+      })
+    ])
+
+    const said = await service.tools.resume('s1', 'cd34', 'clean-restart')
+
+    expect(engine.resume).toHaveBeenCalledWith('cd34', 'clean-restart')
+    expect(said).toContain('runs again from its prompt')
   })
 
   it('throws the refusal a model should read when there is nothing to resume', async () => {
