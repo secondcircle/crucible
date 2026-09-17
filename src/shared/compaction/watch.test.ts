@@ -82,6 +82,14 @@ describe('the size rules', () => {
     expect(fired).toEqual([{ id: 'a', trigger: 'threshold' }])
   })
 
+  // The size rules are not rules about the cache: a provider that reports no
+  // prefix still gets its threshold and its window edge.
+  it('runs on a size reported without any cache instant', () => {
+    watching()
+    watch.saw('a', { usedTokens: 210_000, contextWindow: 1_000_000 })
+    expect(fired).toEqual([{ id: 'a', trigger: 'threshold' }])
+  })
+
   // Right after a compaction π reports no size at all; the old facts would
   // fire again forever.
   it('fires once and then waits for facts that describe the new conversation', () => {
@@ -90,6 +98,28 @@ describe('the size rules', () => {
     watch.settled('a')
     watch.settled('a')
     expect(fired).toHaveLength(1)
+  })
+
+  // A compaction takes the recent span as it finds it. One that lands still
+  // over the threshold — a single turn bigger than the setting — would keep
+  // the same span and report the same size on every pass.
+  it('does not compact a conversation its own compaction left over the threshold', () => {
+    watching({ enabled: true, thresholdK: 40 })
+    watch.saw('a', { lastRequestAt: 0, usedTokens: 210_000, contextWindow: 1_000_000 })
+    expect(fired).toHaveLength(1)
+
+    watch.saw('a', { lastRequestAt: 0, usedTokens: 60_000, contextWindow: 1_000_000 })
+    watch.saw('a', { lastRequestAt: 0, usedTokens: 60_000, contextWindow: 1_000_000 })
+    expect(fired).toHaveLength(1)
+  })
+
+  it('compacts again once the conversation has grown past what that left', () => {
+    watching({ enabled: true, thresholdK: 40 })
+    watch.saw('a', { lastRequestAt: 0, usedTokens: 210_000, contextWindow: 1_000_000 })
+    watch.saw('a', { lastRequestAt: 0, usedTokens: 60_000, contextWindow: 1_000_000 })
+
+    watch.saw('a', { lastRequestAt: 0, usedTokens: 90_000, contextWindow: 1_000_000 })
+    expect(fired).toHaveLength(2)
   })
 })
 
@@ -119,6 +149,16 @@ describe('the idle clock', () => {
     expect(fired).toEqual([])
     clock.advance(6 * 60 * 1000)
     expect(fired).toEqual([{ id: 'a', trigger: 'idle' }])
+  })
+
+  // Nothing was reported to be holding a prefix, so there is no lapse to run
+  // ahead of and no timer worth arming.
+  it('does not run on a conversation that reported no cache instant', () => {
+    watching()
+    watch.saw('a', { usedTokens: 120_000, contextWindow: 1_000_000 })
+    expect(clock.pending()).toBe(0)
+    clock.advance(4 * 60 * 60 * 1000)
+    expect(fired).toEqual([])
   })
 
   it('does not exist under five-minute retention', () => {

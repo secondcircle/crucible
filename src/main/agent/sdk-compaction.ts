@@ -1,4 +1,4 @@
-import type { AssistantMessage, Context, Model } from '@earendil-works/pi-ai'
+import type { AssistantMessage, Context, Model, ThinkingLevel } from '@earendil-works/pi-ai'
 import type { AgentSession, InlineExtension, SessionEntry } from '@earendil-works/pi-coding-agent'
 import type { TranscriptItem } from '../../shared/agent/port'
 import {
@@ -106,28 +106,32 @@ export function compactionExtension(deps: CompactionDeps): InlineExtension {
 }
 
 // The compaction's own model request. It is the conversation as it stands —
-// same system prompt, same tools, same messages — with the instruction
-// appended, so the provider reads the prefix it is already holding instead of
-// re-billing it. That is the whole reason the idle compaction fires with the
-// cache still warm rather than after it has lapsed, and why the conversation
-// is not serialized into a blob first.
+// same system prompt, same tools, same messages, same thinking level — with
+// the instruction appended, so the provider reads the prefix it is already
+// holding instead of re-billing it. That is the whole reason the idle
+// compaction fires with the cache still warm rather than after it has lapsed,
+// and why the conversation is not serialized into a blob first.
 export function askOnWarmCache(options: {
   readonly session: AgentSession
   readonly toLlm: (messages: never) => unknown[]
   readonly complete: (
     model: Model<never>,
     context: Context,
-    options: { readonly signal: AbortSignal }
+    options: { readonly signal: AbortSignal; readonly reasoning?: ThinkingLevel }
   ) => Promise<AssistantMessage>
 }): CompactionDeps['ask'] {
   return async (instruction, signal) => {
     const { session } = options
     const model = session.model
     if (model === undefined) throw new Error('This conversation has no model to compact with.')
-    const active = new Set(session.getActiveToolNames())
+    // The agent's own list, in the agent's own order: π builds a turn's tools
+    // block from that list, and the block is a cache breakpoint, so a block
+    // that agrees on contents but not on order re-bills the whole prefix.
+    const defined = new Map(session.getAllTools().map((tool) => [tool.name, tool]))
     const tools = session
-      .getAllTools()
-      .filter((tool) => active.has(tool.name))
+      .getActiveToolNames()
+      .map((name) => defined.get(name))
+      .filter((tool) => tool !== undefined)
       .map((tool) => ({
         name: tool.name,
         description: tool.description,
@@ -141,9 +145,24 @@ export function askOnWarmCache(options: {
       ],
       tools
     } as unknown as Context
-    const answer = await options.complete(model as unknown as Model<never>, context, { signal })
+    const answer = await options.complete(model as unknown as Model<never>, context, {
+      signal,
+      ...reasoningOf(session)
+    })
     return textOf(answer)
   }
+}
+
+// The level the loop being compacted runs at, which is part of what makes the
+// request land on the prefix the provider is holding: a request at another
+// level is a different prompt and re-bills the conversation this one exists
+// to save. Omitted where π omits it — thinking off, or a model that does not
+// reason — because a level on such a request is a parameter the provider
+// would reject or ignore.
+function reasoningOf(session: AgentSession): { readonly reasoning?: ThinkingLevel } {
+  const level = session.thinkingLevel
+  if (session.model?.reasoning !== true || level === undefined || level === 'off') return {}
+  return { reasoning: level }
 }
 
 function textOf(message: AssistantMessage): string {

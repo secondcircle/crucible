@@ -219,7 +219,7 @@ export function createSdkNodeSessionFactory({
 
       // A node's turns are watched for cache misses exactly as a session's
       // are: same mirror, same arithmetic, and the engine writes the entry.
-      return wrap(
+      return wrapNodeSession(
         session,
         { skills, cwd: request.cwd },
         {
@@ -277,7 +277,12 @@ interface NodeCompaction {
   readonly onFailure: (cause: unknown) => void
 }
 
-function wrap(
+/**
+ * A π session as the engine's `NodeSession`: one delivery door, and the
+ * compaction the same rules give every other agent loop Crucible runs.
+ * Exported so the compaction's waits can be driven against a scripted session.
+ */
+export function wrapNodeSession(
   session: AgentSession,
   skills: NodeSkills,
   cache: CacheWatch,
@@ -288,21 +293,35 @@ function wrap(
   const { retention } = retentionInForce()
   /** One conversation, so the watch holds exactly one entry. */
   const NODE = 'node'
-  let compacting = false
+  // The compaction running on this conversation, if one is, and the promise a
+  // message waits on. π refuses a prompt outright while a compaction is in
+  // progress, so without somewhere to hold the wait the engine's next message
+  // — a monitor's wake, a run's report — would be thrown away and the node
+  // would stall on a turn that said nothing.
+  let compacting: Promise<void> | undefined
+  // Between the engine deciding to speak and π reporting a stream, this is the
+  // only sign the conversation is spoken for; without it a trigger could start
+  // a compaction underneath a turn that is about to begin, and `compact()`
+  // aborts whatever is running first.
+  let prompting = false
 
   const watch = createCompactionWatch({
     settings: compaction.settings,
     retention,
-    idle: () => !session.isStreaming && !compacting,
+    idle: () => !prompting && !session.isStreaming && compacting === undefined,
     compact: (_id, trigger) => {
-      compacting = true
       compaction.begin(trigger)
-      void session
-        .compact()
-        .catch((cause: unknown) => compaction.onFailure(cause))
-        .finally(() => {
-          compacting = false
-        })
+      // Never rejects: the watch is told when a compaction starts, and the
+      // failure is the run log's to carry.
+      compacting = (async () => {
+        try {
+          await session.compact()
+        } catch (cause) {
+          compaction.onFailure(cause)
+        }
+      })().finally(() => {
+        compacting = undefined
+      })
     }
   })
 
@@ -392,9 +411,6 @@ function wrap(
       observe(event.message as StoredMessage)
       noteSize(event.message as StoredMessage)
     }
-    // A held trigger acts the moment the node stops working, never inside a
-    // turn: a compaction takes the conversation away from whoever is using it.
-    if (event.type === 'agent_end') watch.settled(NODE)
     const now = liveness(event as Record<string, unknown>, inflight)
     if (now === null) return
     for (const listener of [...activityListeners]) listener(now)
@@ -402,16 +418,31 @@ function wrap(
 
   return {
     async prompt(text: string): Promise<void> {
-      // Model trouble never rejects the loop: a turn that failed ends and
-      // the engine's nudge/stall machinery takes it from there.
+      // A compaction is not a failed turn: it is a "not yet". The message waits
+      // for the rewrite rather than being refused and swallowed, exactly as a
+      // session's send waits in the shell.
+      prompting = true
       try {
+        while (compacting !== undefined) await compacting
+        // Model trouble never rejects the loop: a turn that failed ends and
+        // the engine's nudge/stall machinery takes it from there.
         await session.prompt(text)
       } catch {
         // The session's own subscribers saw whatever there was to see.
+      } finally {
+        prompting = false
+        // A trigger held back by this turn acts here, before the engine is told
+        // the turn is over — so the engine's next message finds the compaction
+        // already running and waits for it above, instead of racing it.
+        watch.settled(NODE)
       }
     },
 
     async abort(): Promise<void> {
+      // Whatever the conversation is doing stops, the rewrite included: a
+      // release that left a compaction running would hold the next message
+      // behind a wait nobody is waiting for any more.
+      if (compacting !== undefined) session.abortCompaction()
       await session.abort().catch(() => {})
     },
 
@@ -458,6 +489,7 @@ function wrap(
       unsubscribe()
       watch.dispose()
       activityListeners.clear()
+      if (compacting !== undefined) session.abortCompaction()
       void session
         .abort()
         .catch(() => {})

@@ -2,15 +2,11 @@ import type { CacheRetention } from '../agent/port'
 import { cacheTtlMs } from '../cache/ttl.ts'
 import type { CompactionTrigger } from './record.ts'
 import { thresholdTokens, type CompactionSettings } from './settings.ts'
-import { RECENT_SPAN_TOKENS, WINDOW_EDGE_RESERVE_TOKENS } from './window.ts'
+import { SMALLEST_WORTH_COMPACTING, WINDOW_EDGE_RESERVE_TOKENS } from './window.ts'
 
 // When a conversation compacts. Pure predicates, so the same rules hold for a
 // session's agent, the orchestrator and every workflow node without any of
 // them owning a copy.
-
-// Below this a compaction rewrites almost nothing: most of the conversation
-// is the recent span, which a compaction leaves untouched anyway.
-export const SMALLEST_WORTH_COMPACTING = 2 * RECENT_SPAN_TOKENS
 
 // How long before the cached prefix lapses the idle compaction runs. The
 // summarizing request has to read the cache rather than re-bill it, and it

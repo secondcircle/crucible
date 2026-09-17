@@ -5,9 +5,11 @@
 // defensively: an entry π wrote itself, or one an older Crucible wrote, must
 // leave the transcript standing rather than throwing on open.
 import { describe, expect, it } from 'vitest'
-import type { SessionEntry } from '@earendil-works/pi-coding-agent'
+import type { AgentSession, SessionEntry } from '@earendil-works/pi-coding-agent'
+import type { AssistantMessage } from '@earendil-works/pi-ai'
 import {
   COMPACTION_DETAILS_KEY,
+  askOnWarmCache,
   cutAtUserBoundary,
   previousCompaction,
   storedCompactionOf,
@@ -73,6 +75,79 @@ describe('the compaction a branch is standing on', () => {
 
   it('is nothing at all on a branch that has never compacted', () => {
     expect(previousCompaction([{ type: 'message' }, { type: 'branch_summary' }])).toBeUndefined()
+  })
+})
+
+// Q6: "Same model and same thinking level as the loop being compacted." The
+// request only reads the cached prefix if it is the same prompt the provider
+// is holding, and a thinking change is a cache miss in Crucible's own model of
+// one (`CacheMissFacts.thinkingChanged`). π carries the level the same way.
+describe('the compaction’s own model request', () => {
+  const sessionAt = (
+    thinkingLevel: string | undefined,
+    reasoning = true,
+    tools: { active: string[]; all: string[] } = { active: [], all: [] }
+  ): AgentSession =>
+    ({
+      model: { id: 'claude-probe', provider: 'anthropic', reasoning },
+      thinkingLevel,
+      systemPrompt: 'the session’s own system prompt',
+      messages: [{ role: 'user', content: 'the conversation so far' }],
+      getActiveToolNames: () => tools.active,
+      getAllTools: () =>
+        tools.all.map((name) => ({ name, description: name, parameters: {} }))
+    }) as unknown as AgentSession
+
+  async function askedWith(session: AgentSession): Promise<{
+    readonly options: { readonly reasoning?: string }
+    readonly context: { readonly tools?: { name: string }[] }
+  }> {
+    let seen:
+      | {
+          options: { readonly reasoning?: string }
+          context: { readonly tools?: { name: string }[] }
+        }
+      | undefined
+    const ask = askOnWarmCache({
+      session,
+      toLlm: (messages) => [...(messages as unknown as unknown[])],
+      complete: async (_model, context, options) => {
+        seen = { options, context: context as unknown as { tools?: { name: string }[] } }
+        return {
+          content: [{ type: 'text', text: '<trajectory>x</trajectory>' }]
+        } as AssistantMessage
+      }
+    })
+    await ask('compact this', new AbortController().signal)
+    if (seen === undefined) throw new Error('the request was supposed to be made')
+    return seen
+  }
+
+  it('runs at the thinking level the loop being compacted runs at', async () => {
+    expect((await askedWith(sessionAt('high'))).options.reasoning).toBe('high')
+  })
+
+  it('carries no level where the loop thinks not at all', async () => {
+    expect((await askedWith(sessionAt('off'))).options).not.toHaveProperty('reasoning')
+  })
+
+  it('carries no level on a model that does not reason', async () => {
+    expect((await askedWith(sessionAt('high', false))).options).not.toHaveProperty('reasoning')
+  })
+
+  // The tools block is a cache breakpoint: same tools in another order is
+  // another prefix, and the whole conversation is re-billed.
+  it('carries the agent’s own tools, in the agent’s own order', async () => {
+    const session = sessionAt('high', true, {
+      active: ['bash', 'read', 'write'],
+      all: ['read', 'write', 'bash', 'not_mounted']
+    })
+
+    expect((await askedWith(session)).context.tools?.map((tool) => tool.name)).toEqual([
+      'bash',
+      'read',
+      'write'
+    ])
   })
 })
 

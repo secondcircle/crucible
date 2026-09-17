@@ -1,12 +1,12 @@
 import { describe, expect, it } from 'vitest'
 import { LONG_CACHE_TTL_MS } from '../cache/ttl'
-import type { CompactionSettings } from './settings'
+import { MIN_THRESHOLD_K, thresholdTokens, type CompactionSettings } from './settings'
 import {
   idleCompactionDelayMs,
   idleTrigger,
-  sizeTrigger,
-  SMALLEST_WORTH_COMPACTING
+  sizeTrigger
 } from './trigger'
+import { SMALLEST_WORTH_COMPACTING } from './window'
 
 const ON: CompactionSettings = { enabled: true, thresholdK: 200 }
 const OFF: CompactionSettings = { enabled: false, thresholdK: 200 }
@@ -29,10 +29,13 @@ describe('what a conversation’s size calls for', () => {
     expect(sizeTrigger(wide, { usedTokens: 190_000, contextWindow: 200_000 })).toBe('windowEdge')
   })
 
+  // The floor is the smallest threshold the field accepts, so a conversation
+  // under it is one nobody could have asked to compact.
   it('leaves a conversation too small to gain anything alone', () => {
-    expect(sizeTrigger(ON, { usedTokens: SMALLEST_WORTH_COMPACTING - 1 })).toBeUndefined()
-    const tiny: CompactionSettings = { enabled: true, thresholdK: 20 }
-    expect(sizeTrigger(tiny, { usedTokens: 25_000, contextWindow: 200_000 })).toBeUndefined()
+    const lowest: CompactionSettings = { enabled: true, thresholdK: MIN_THRESHOLD_K }
+    expect(thresholdTokens(lowest)).toBe(SMALLEST_WORTH_COMPACTING)
+    expect(sizeTrigger(lowest, { usedTokens: SMALLEST_WORTH_COMPACTING - 1 })).toBeUndefined()
+    expect(sizeTrigger(lowest, { usedTokens: SMALLEST_WORTH_COMPACTING })).toBe('threshold')
   })
 
   it('says nothing about a window nobody reported', () => {

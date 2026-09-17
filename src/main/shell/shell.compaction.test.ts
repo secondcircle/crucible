@@ -7,10 +7,10 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import type { ConversationAdapter } from '../../shared/agent/adapter'
+import type { AdapterEventListener, ConversationAdapter } from '../../shared/agent/adapter'
 import { createFakeAdapter, FAKE_TRAJECTORY_SUMMARY } from '../../shared/agent/fake-adapter'
 import type { PortEvent, SessionId } from '../../shared/agent/port'
-import { DEFAULT_COMPACTION_SETTINGS } from '../../shared/compaction/settings'
+import { DEFAULT_COMPACTION_SETTINGS, MIN_THRESHOLD_K } from '../../shared/compaction/settings'
 import type { CacheRecorder, RecordedCacheMiss } from '../cache/ledger'
 import { createPanelModel } from '../panel/model'
 import { storePanelPersistence } from '../panel/store-persistence'
@@ -151,23 +151,46 @@ describe('the setting across the port', () => {
     expect(store.state.compaction).toEqual({ enabled: false, thresholdK: 120 })
   })
 
-  it('clamps a threshold that would compact a window into itself', async () => {
+  it('clamps a threshold below the smallest one that compacts anything', async () => {
     await shell.setCompactionSettings({ enabled: true, thresholdK: 2 })
 
-    await expect(shell.compactionSettings()).resolves.toEqual({ enabled: true, thresholdK: 20 })
+    await expect(shell.compactionSettings()).resolves.toEqual({
+      enabled: true,
+      thresholdK: MIN_THRESHOLD_K
+    })
   })
 })
 
 describe('the threshold trigger', () => {
   it('compacts once the conversation crosses the setting', async () => {
     const sessionId = await grown()
-    await shell.setCompactionSettings({ enabled: true, thresholdK: 20 })
+    await shell.setCompactionSettings({ enabled: true, thresholdK: MIN_THRESHOLD_K })
     await turn(sessionId, 'and the next thing')
 
     const [compacted] = compactions()
     expect(compacted?.record.trigger).toBe('threshold')
     expect(compacted?.record.tokensBefore).toBeGreaterThan(compacted?.record.tokensAfter ?? 0)
     expect(compacted?.text).toContain(FAKE_TRAJECTORY_SUMMARY)
+  })
+
+  // The compaction reports the conversation's new size the moment it lands,
+  // and that report is not a new request: a conversation still over the
+  // threshold afterwards has nothing to gain from compacting again, and a
+  // build that let it would spin.
+  it('compacts once, and not again on the size the compaction itself reports', async () => {
+    const sessionId = await grown()
+    await shell.setCompactionSettings({ enabled: true, thresholdK: MIN_THRESHOLD_K })
+    // One turn larger than the threshold, so the recent span the compaction
+    // keeps is over it too: the size the compaction reports on landing would
+    // call for another compaction, which would keep nothing new and report the
+    // same size again.
+    await turn(sessionId, LONG)
+    await settled()
+    await settled()
+
+    const [compacted] = compactions()
+    expect(compacted?.record.tokensAfter).toBeGreaterThan(MIN_THRESHOLD_K * 1_000)
+    expect(compactions()).toHaveLength(1)
   })
 
   it('leaves a conversation under the setting alone', async () => {
@@ -190,7 +213,7 @@ describe('the threshold trigger', () => {
 
   it('says nothing to the agent and starts no turn of its own', async () => {
     const sessionId = await grown()
-    await shell.setCompactionSettings({ enabled: true, thresholdK: 20 })
+    await shell.setCompactionSettings({ enabled: true, thresholdK: MIN_THRESHOLD_K })
     await turn(sessionId, 'and the next thing')
 
     const after = events.slice(events.findIndex((event) => event.type === 'compacted'))
@@ -202,7 +225,7 @@ describe('the threshold trigger', () => {
 
   it('leaves the compacted-away messages in the transcript, with the block after them', async () => {
     const sessionId = await grown()
-    await shell.setCompactionSettings({ enabled: true, thresholdK: 20 })
+    await shell.setCompactionSettings({ enabled: true, thresholdK: MIN_THRESHOLD_K })
     await turn(sessionId, 'and the next thing')
 
     const items = await shell.transcript(sessionId)
@@ -273,12 +296,61 @@ describe('the idle trigger', () => {
   })
 })
 
+// Two independent facts, and only one of them is always there. The threshold
+// and the window edge are rules about size; a provider that caches nothing —
+// a local server, or anything whose usage carries neither a cache read nor a
+// cache write — reports no prefix, and a conversation gated on one would grow
+// until the model refused it and then error on every send.
+describe('a conversation whose provider reports no prompt cache', () => {
+  /** The same adapter, saying what a provider that never caches says. */
+  const uncached = (adapter: ConversationAdapter): ConversationAdapter => ({
+    ...adapter,
+    onEvent: (listener: AdapterEventListener) =>
+      adapter.onEvent((event) => {
+        if (event.type !== 'usage') return listener(event)
+        const stripped = { ...event }
+        delete (stripped as { cachedPrefix?: unknown }).cachedPrefix
+        return listener(stripped)
+      })
+  })
+
+  it('still compacts when it crosses the threshold', async () => {
+    build('1h', uncached)
+    const sessionId = await grown()
+    await shell.setCompactionSettings({ enabled: true, thresholdK: MIN_THRESHOLD_K })
+    await turn(sessionId, 'and the next thing')
+
+    expect(compactions()[0]?.record.trigger).toBe('threshold')
+  })
+
+  it('still compacts at the model’s window with the switch off', async () => {
+    build('1h', uncached)
+    const sessionId = await grown()
+    await shell.setCompactionSettings({ enabled: false, thresholdK: 200 })
+    await turn(sessionId, 'y'.repeat(600_000))
+
+    expect(compactions()[0]?.record.trigger).toBe('windowEdge')
+  })
+
+  // The idle rule is the one rule about the cache, and there is no cache here
+  // to run ahead of: compacting on the clock would buy nothing and cost a
+  // model call.
+  it('has no idle clock to run', async () => {
+    build('1h', uncached)
+    await grown()
+
+    advance(4 * 60 * 60 * 1000)
+    await settled()
+    expect(compactions()).toEqual([])
+  })
+})
+
 describe('a compaction and a live turn', () => {
   // A compaction takes the conversation away from whoever is using it, so a
   // trigger that comes due mid-turn waits for the turn rather than killing it.
   it('waits for the turn a trigger came due inside', async () => {
     const sessionId = await grown()
-    await shell.setCompactionSettings({ enabled: true, thresholdK: 20 })
+    await shell.setCompactionSettings({ enabled: true, thresholdK: MIN_THRESHOLD_K })
 
     const started = shell.prompt(sessionId, 'and the next thing')
     expect(compactions()).toEqual([])

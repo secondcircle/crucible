@@ -7,6 +7,7 @@ import { act, fireEvent, render, screen, within } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 import type { ShellSnapshot, TranscriptItem } from '../../shared/agent/port'
 import type { CompactionRecord } from '../../shared/compaction/record'
+import { MIN_THRESHOLD_K } from '../../shared/compaction/settings'
 import { Shell } from './Shell'
 import { createScriptedCommands } from './testing/scripted-commands'
 import { createScriptedPort, oneSession, type ScriptedPort } from './testing/scripted-port'
@@ -129,7 +130,9 @@ describe('the compaction section', () => {
     expect(port.compaction).toEqual({ enabled: true, thresholdK: 100 })
   })
 
-  it('clamps a threshold that would compact a window into itself', async () => {
+  // The floor is the smallest size anything compacts at, so the field honors
+  // every number it accepts.
+  it('clamps a threshold below the smallest one that compacts anything', async () => {
     const port = await shell()
     await openCompactionSettings()
 
@@ -140,7 +143,7 @@ describe('the compaction section', () => {
     })
     await settled()
 
-    expect(port.compaction.thresholdK).toBe(20)
+    expect(port.compaction.thresholdK).toBe(MIN_THRESHOLD_K)
   })
 })
 

@@ -632,6 +632,13 @@ export function createShell({
     emitState()
   }
 
+  /** The idle clock's starting instant, and nothing when there is no reading. */
+  function prefixInstant(at: string | undefined): { readonly lastRequestAt?: number } {
+    if (at === undefined) return {}
+    const parsed = Date.parse(at)
+    return Number.isFinite(parsed) ? { lastRequestAt: parsed } : {}
+  }
+
   /** Everything this shell remembers about one conversation's compaction. */
   function forgetCompaction(id: SessionId): void {
     watch.forget(id)
@@ -973,14 +980,16 @@ export function createShell({
           ? {}
           : { cachedPrefix: { ...event.cachedPrefix, retention } })
       })
-      // The prefix's own stamp is the instant of the last billed request,
-      // which is exactly what the idle clock counts from. Without one there is
-      // no warm cache to save and nothing for the clock to do.
-      if (event.cachedPrefix !== undefined && store.session(event.sessionId) !== undefined) {
+      // Every billed request re-asks the size rules — the threshold and the
+      // window edge — which need nothing but the size. The prefix's own stamp
+      // is the instant of the last billed request and is what the idle clock
+      // counts from; a provider that reports no cache has no warm prefix to
+      // run ahead of, so it sends the size alone and the idle rule sits out.
+      if (store.session(event.sessionId) !== undefined) {
         watch.saw(event.sessionId, {
-          lastRequestAt: Date.parse(event.cachedPrefix.at),
           usedTokens: event.usedTokens,
-          contextWindow: event.contextWindow
+          contextWindow: event.contextWindow,
+          ...prefixInstant(event.cachedPrefix?.at)
         })
       }
       emitState()

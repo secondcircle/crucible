@@ -9,13 +9,19 @@ import { idleCompactionDelayMs, idleTrigger, sizeTrigger } from './trigger.ts'
 // long enough. Sessions and workflow nodes both drive one of these, so there
 // is no second set of rules anywhere.
 
-/** What a conversation's last billed request said about it. */
+// What a conversation's last billed request said about it. Two independent
+// facts, and only the size is always there: the size rules need nothing but
+// the size, while the idle rule is a rule about the cache and cannot run
+// without an instant to count the quiet from.
 export interface ConversationFacts {
-  /** Epoch ms of that request. */
-  readonly lastRequestAt: number
   readonly usedTokens: number
   /** The model's own window, when the reporter knows it. */
   readonly contextWindow?: number
+  // Epoch ms of the request whose prefix the provider is holding. Absent
+  // wherever there is no such prefix to lose — a provider that does not cache,
+  // a conversation that has not billed since its last compaction — which
+  // silences the idle rule for it and nothing else.
+  readonly lastRequestAt?: number
 }
 
 export interface CompactionWatch {
@@ -56,6 +62,14 @@ export function createCompactionWatch(options: CompactionWatchOptions): Compacti
   const clearTimer =
     options.clearTimer ?? ((handle: unknown): void => clearTimeout(handle as never))
   const watched = new Map<string, Watched>()
+  // The size each conversation's own last compaction left it at. Compacting
+  // takes the recent span as it finds it, so a conversation that is still over
+  // the threshold afterwards gains nothing from a second pass: it would keep
+  // the same span, report the same size and ask again, forever. Nothing fires
+  // on size again until the conversation has grown past what its compaction
+  // produced. `Infinity` is a compaction whose result has not been reported
+  // yet, which nothing can be over.
+  const compactedTo = new Map<string, number>()
   let disposed = false
 
   function disarm(held: Watched | undefined): void {
@@ -70,6 +84,7 @@ export function createCompactionWatch(options: CompactionWatchOptions): Compacti
   function fire(id: string, trigger: CompactionTrigger): void {
     disarm(watched.get(id))
     watched.delete(id)
+    compactedTo.set(id, Number.POSITIVE_INFINITY)
     options.compact(id, trigger)
   }
 
@@ -77,7 +92,8 @@ export function createCompactionWatch(options: CompactionWatchOptions): Compacti
     if (disposed) return
     const held = watched.get(id)
     if (held === undefined || !options.idle(id)) return
-    const trigger = sizeTrigger(options.settings(), held.facts)
+    const grown = held.facts.usedTokens > (compactedTo.get(id) ?? -1)
+    const trigger = grown ? sizeTrigger(options.settings(), held.facts) : undefined
     if (trigger !== undefined) {
       fire(id, trigger)
       return
@@ -86,21 +102,20 @@ export function createCompactionWatch(options: CompactionWatchOptions): Compacti
   }
 
   // One timer per conversation, re-armed from the last request rather than
-  // from now, so the deadline is the cache's and not the timer's.
+  // from now, so the deadline is the cache's and not the timer's. No reported
+  // prefix instant means no warm cache to run ahead of, so no timer.
   function arm(id: string, held: Watched): void {
     disarm(held)
+    const lastRequestAt = held.facts.lastRequestAt
+    if (lastRequestAt === undefined) return
     const delay = idleCompactionDelayMs(options.retention)
     if (delay === undefined) return
-    const at = held.facts.lastRequestAt + delay
+    const at = lastRequestAt + delay
     held.timer = setTimer(() => {
       held.timer = undefined
       if (disposed || !options.idle(id)) return
       const due = idleTrigger(
-        {
-          lastRequestAt: held.facts.lastRequestAt,
-          usedTokens: held.facts.usedTokens,
-          retention: options.retention
-        },
+        { lastRequestAt, usedTokens: held.facts.usedTokens, retention: options.retention },
         now()
       )
       if (due !== undefined) fire(id, due)
@@ -110,6 +125,11 @@ export function createCompactionWatch(options: CompactionWatchOptions): Compacti
   return {
     saw(id: string, facts: ConversationFacts): void {
       if (disposed) return
+      // The first size reported after a compaction is that compaction's own
+      // work, and it is the size the next one has to beat.
+      if (compactedTo.get(id) === Number.POSITIVE_INFINITY) {
+        compactedTo.set(id, facts.usedTokens)
+      }
       disarm(watched.get(id))
       watched.set(id, { facts })
       consider(id)
@@ -122,12 +142,14 @@ export function createCompactionWatch(options: CompactionWatchOptions): Compacti
     forget(id: string): void {
       disarm(watched.get(id))
       watched.delete(id)
+      compactedTo.delete(id)
     },
 
     dispose(): void {
       disposed = true
       for (const held of watched.values()) disarm(held)
       watched.clear()
+      compactedTo.clear()
     }
   }
 }

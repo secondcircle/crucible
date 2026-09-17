@@ -1,3 +1,5 @@
+import { SMALLEST_WORTH_COMPACTING } from './window.ts'
+
 // The one machine-global setting compaction has: whether it runs on its own,
 // and the context size it runs at. Shared rather than kept in main, because
 // the Settings section edits it and the shell decides with it, and one number
@@ -17,9 +19,10 @@ export const DEFAULT_COMPACTION_SETTINGS: CompactionSettings = {
   thresholdK: 200
 }
 
-// Below this a compaction would fire again on the window it just produced,
-// which is a loop rather than a setting.
-export const MIN_THRESHOLD_K = 20
+// The smallest size a compaction does anything at, in the unit the field is
+// typed in. Below it nothing compacts however low the number goes, so a lower
+// minimum would be a field that accepts a number it does not honor.
+export const MIN_THRESHOLD_K = SMALLEST_WORTH_COMPACTING / 1_000
 
 /** Past any model's window, so anything above it is the same as off. */
 export const MAX_THRESHOLD_K = 10_000

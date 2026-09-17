@@ -6,6 +6,12 @@
 /** The tail a compaction never touches, kept verbatim behind the skeleton. */
 export const RECENT_SPAN_TOKENS = 20_000
 
+// Below this a compaction rewrites almost nothing: most of the conversation
+// is the recent span, which a compaction leaves untouched anyway. It is also
+// the floor under the threshold setting — one number, so a threshold the user
+// types is the size their conversations actually compact at.
+export const SMALLEST_WORTH_COMPACTING = 2 * RECENT_SPAN_TOKENS
+
 /** What the model-written trajectory summary may take. */
 export const SUMMARY_BUDGET_TOKENS = 3_000
 
