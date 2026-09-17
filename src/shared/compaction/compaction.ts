@@ -8,7 +8,7 @@ import {
   trimSkeleton,
   type SkeletonLine
 } from './skeleton.ts'
-import { estimateTokens, SKELETON_BUDGET_TOKENS, SUMMARY_BUDGET_TOKENS } from './window.ts'
+import { estimateTokens, skeletonBudgetTokens, SUMMARY_BUDGET_TOKENS } from './window.ts'
 
 // A compaction, whole: what to ask the model for, and what the model's answer
 // becomes. Everything that decides what the window looks like afterwards is
@@ -54,11 +54,18 @@ export interface SettledCompaction {
 // the conversation is left as it was.
 export function settleCompaction(
   plan: CompactionPlan,
-  reply: string
+  reply: string,
+  // The model's own window, where the caller knows it: the skeleton has to fit
+  // inside what the compaction just made room in, and on a small model the
+  // wide-window budget is most of it.
+  contextWindow?: number
 ): SettledCompaction | undefined {
   const { trajectory, strike } = readCompactionReply(reply)
   if (trajectory === '') return undefined
-  const skeleton = trimSkeleton(pruneSkeleton(plan.lines, strike), SKELETON_BUDGET_TOKENS)
+  const skeleton = trimSkeleton(
+    pruneSkeleton(plan.lines, strike),
+    skeletonBudgetTokens(contextWindow)
+  )
   return {
     text: compactionText(clipToBudget(trajectory, SUMMARY_BUDGET_TOKENS), skeleton),
     state: { skeleton }

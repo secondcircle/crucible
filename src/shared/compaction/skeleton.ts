@@ -26,8 +26,9 @@ export type SkeletonLine =
   | { readonly kind: 'bashRun'; readonly command: string; readonly tokens: number }
   | { readonly kind: 'error'; readonly message: string }
 
-/** Past this a line is a paragraph; the whole of it is still on disk. */
-const LINE_LIMIT = 600
+// A handle has to stay short enough to be one line of a list. Nothing else
+// here is cut: what was said is kept whole, however long it ran.
+const HANDLE_LIMIT = 600
 
 // Everything that survives a compaction, in order. A summary in the span is a
 // previous compaction's own text and never enters the skeleton: summaries are
@@ -37,13 +38,20 @@ export function skeletonOf(items: readonly TranscriptItem[]): readonly SkeletonL
   const lines: SkeletonLine[] = []
   for (const item of items) {
     switch (item.kind) {
+      // Verbatim, whatever the length. What the two speakers said is the one
+      // thing a compaction cannot get back: a file can be re-read and a
+      // command re-run, but a brief the user typed in the first minute lives
+      // only in the session file and the transcript, neither of which the
+      // model can reach afterwards. The budget below and the model's own
+      // strike list are what hold the size down; a cut here would be a size
+      // policy nobody could see, applied before anything was asked.
       case 'user': {
-        const text = clip(item.text)
+        const text = item.text.trim()
         if (text !== '') lines.push({ kind: 'user', text })
         break
       }
       case 'assistant': {
-        const text = clip(item.markdown)
+        const text = item.markdown.trim()
         if (text !== '') lines.push({ kind: 'assistant', text })
         break
       }
@@ -64,7 +72,9 @@ export function skeletonOf(items: readonly TranscriptItem[]): readonly SkeletonL
         })
         break
       case 'error':
-        lines.push({ kind: 'error', message: clip(item.message) })
+        // Not speech: a failure's first line is what names it, and a stack
+        // behind it says nothing the agent can act on later.
+        lines.push({ kind: 'error', message: clipHandle(item.message) })
         break
       case 'thinking':
       case 'summary':
@@ -141,15 +151,10 @@ function count(tokens: number): string {
   return tokens.toLocaleString('en-US')
 }
 
-function clip(text: string): string {
-  const line = text.replace(/\s+/g, ' ').trim()
-  return line.length <= LINE_LIMIT ? line : `${line.slice(0, LINE_LIMIT)}…`
-}
-
 // A handle is only useful whole: a truncated path re-reads nothing. Long
 // commands are the one exception, and their first line is what identifies
 // them.
 function clipHandle(handle: string): string {
   const first = handle.split('\n')[0]?.trim() ?? ''
-  return first.length <= LINE_LIMIT ? first : `${first.slice(0, LINE_LIMIT)}…`
+  return first.length <= HANDLE_LIMIT ? first : `${first.slice(0, HANDLE_LIMIT)}…`
 }

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type {
   AgentPort,
   AuthMethod,
@@ -184,14 +184,32 @@ function CompactionPane({ port }: { readonly port: AgentPort }): React.JSX.Eleme
   }
 
   function commitThreshold(): void {
-    if (settings === undefined || typed === undefined) return
-    const asked = Number(typed)
+    const next = thresholdWritten(settings, typed)
     setTyped(undefined)
-    if (!Number.isFinite(asked)) return
-    const thresholdK = Math.min(MAX_THRESHOLD_K, Math.max(MIN_THRESHOLD_K, Math.round(asked)))
-    if (thresholdK === settings.thresholdK) return
-    write({ ...settings, thresholdK })
+    if (next !== undefined) write(next)
   }
+
+  // What the field is holding, for the unmount below to commit. Kept in a ref
+  // because the cleanup that reads it runs once, long after the render that
+  // last set these.
+  const held = useRef<{ settings?: CompactionSettings; typed?: string }>({})
+  useEffect(() => {
+    held.current = { settings, typed }
+  })
+
+  // A number typed and then dismissed is still a number the user typed. The
+  // card closes on Escape through the window's own ladder, which unmounts this
+  // pane without React firing a blur on the field, so the commit has to happen
+  // here or not at all. Every other control in this pane writes in the frame
+  // of the gesture; this is the one where the loss would be invisible.
+  useEffect(() => {
+    return () => {
+      const next = thresholdWritten(held.current.settings, held.current.typed)
+      // Nothing to roll back onto: the pane is gone, and a refusal is reported
+      // by the field reading its old number when the card is opened again.
+      if (next !== undefined) void port.setCompactionSettings(next).catch(() => {})
+    }
+  }, [port])
 
   return (
     <div className="pane">
@@ -260,6 +278,21 @@ function CompactionPane({ port }: { readonly port: AgentPort }): React.JSX.Eleme
       </p>
     </div>
   )
+}
+
+// The setting a typed threshold amounts to, or nothing where it amounts to no
+// change at all: the field holds text while it is being typed into, and `2` on
+// the way to `200` is not a setting anybody asked for.
+function thresholdWritten(
+  settings: CompactionSettings | undefined,
+  typed: string | undefined
+): CompactionSettings | undefined {
+  if (settings === undefined || typed === undefined) return undefined
+  const asked = Number(typed)
+  if (typed.trim() === '' || !Number.isFinite(asked)) return undefined
+  const thresholdK = Math.min(MAX_THRESHOLD_K, Math.max(MIN_THRESHOLD_K, Math.round(asked)))
+  if (thresholdK === settings.thresholdK) return undefined
+  return { ...settings, thresholdK }
 }
 
 /** Signed-in providers only; the rest of π's catalog lives behind the picker. */

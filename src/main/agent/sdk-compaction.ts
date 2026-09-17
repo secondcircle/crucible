@@ -10,7 +10,7 @@ import type {
   CompactionRecord,
   CompactionTrigger
 } from '../../shared/compaction/record.ts'
-import { estimateTokens } from '../../shared/compaction/window.ts'
+import { estimateTokens, recentSpanTokens } from '../../shared/compaction/window.ts'
 import type { StoredMessage } from './sdk-transcript.ts'
 
 // Crucible's compaction, handed to π through the hook π offers for exactly
@@ -43,11 +43,28 @@ export interface CompactionDeps {
   readonly toItems: (messages: readonly StoredMessage[]) => readonly TranscriptItem[]
   /** π's own per-message estimate, so the window after is counted π's way. */
   readonly sizeOf: (message: StoredMessage) => number
+  // The window the conversation's model has, so what a compaction keeps is
+  // sized against it rather than against a 200k-plus model nobody here may be
+  // running. Absent where there is no model to ask.
+  readonly contextWindow: () => number | undefined
   // π drops a hook that throws and falls back to its own summarizer, so a
   // failure is reported here and the compaction cancelled instead.
   readonly failed: (message: string) => void
   /** The compaction as it was written, for the transcript and the port. */
   readonly settled: (stored: StoredCompaction, text: string) => void
+}
+
+// π finds a compaction's cut point, so the span kept verbatim is π's setting
+// to read. It is re-stated from the model's own window whenever a compaction
+// is asked for, because a session's model can change under it and a 20k span
+// is two thirds of a 32k window.
+export function applyRecentSpan(session: AgentSession): void {
+  session.settingsManager.applyOverrides({
+    compaction: {
+      enabled: false,
+      keepRecentTokens: recentSpanTokens(session.model?.contextWindow)
+    }
+  })
 }
 
 export function compactionExtension(deps: CompactionDeps): InlineExtension {
@@ -77,7 +94,7 @@ export function compactionExtension(deps: CompactionDeps): InlineExtension {
         }
         if (signal.aborted) return { cancel: true }
 
-        const settled = settleCompaction(plan, reply)
+        const settled = settleCompaction(plan, reply, deps.contextWindow())
         if (settled === undefined) {
           deps.failed('The trajectory summary came back empty.')
           return { cancel: true }

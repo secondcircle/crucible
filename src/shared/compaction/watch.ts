@@ -104,6 +104,10 @@ export function createCompactionWatch(options: CompactionWatchOptions): Compacti
   // One timer per conversation, re-armed from the last request rather than
   // from now, so the deadline is the cache's and not the timer's. No reported
   // prefix instant means no warm cache to run ahead of, so no timer.
+  //
+  // The setting is read when the timer fires rather than when it is armed: a
+  // switch turned off while a conversation sat idle governs that conversation
+  // too.
   function arm(id: string, held: Watched): void {
     disarm(held)
     const lastRequestAt = held.facts.lastRequestAt
@@ -115,7 +119,15 @@ export function createCompactionWatch(options: CompactionWatchOptions): Compacti
       held.timer = undefined
       if (disposed || !options.idle(id)) return
       const due = idleTrigger(
-        { lastRequestAt, usedTokens: held.facts.usedTokens, retention: options.retention },
+        options.settings(),
+        {
+          lastRequestAt,
+          usedTokens: held.facts.usedTokens,
+          ...(held.facts.contextWindow === undefined
+            ? {}
+            : { contextWindow: held.facts.contextWindow }),
+          retention: options.retention
+        },
         now()
       )
       if (due !== undefined) fire(id, due)

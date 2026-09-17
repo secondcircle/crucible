@@ -559,6 +559,7 @@ _Avoid_: masked history, stubs, digest.
 
 **Recent span**:
 The tail of the conversation a compaction never touches, kept verbatim behind
-the skeleton. A fixed size the implementation owns, cut at a user-message
-boundary.
+the skeleton. A size the implementation owns and no setting reaches, capped
+against the model's own window so a small one is not mostly recent span, cut
+at a user-message boundary.
 _Avoid_: keep-recent (π's setting), tail window, hot context.

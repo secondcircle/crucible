@@ -41,6 +41,27 @@ describe('the skeleton', () => {
     )
   })
 
+  // What the two speakers said is the one thing a compaction cannot get back:
+  // the session file and the transcript keep it, and the model can reach
+  // neither afterwards. Length is the budget's business and the model's, not
+  // a cut made before anything is asked.
+  it('keeps a long message whole, however long it ran', () => {
+    const spec = `Rewrite the importer. ${'The rows carry a provider, a model and a cost. '.repeat(80)}Stop once the tests pass.`
+    expect(skeletonOf([{ kind: 'user', text: spec }])).toEqual([{ kind: 'user', text: spec }])
+    expect(skeletonOf([{ kind: 'assistant', markdown: spec }])).toEqual([
+      { kind: 'assistant', text: spec }
+    ])
+  })
+
+  // A handle is the one thing here with a ceiling: it has to be one line of a
+  // list, and its first line is what identifies it.
+  it('keeps a call’s handle to one line', () => {
+    const [line] = skeletonOf([
+      { kind: 'bashRun', command: `git log\n${'x'.repeat(2_000)}`, output: '', exitCode: 0 }
+    ])
+    expect(line).toEqual({ kind: 'bashRun', command: 'git log', tokens: 0 })
+  })
+
   it('states the handle a dropped result can be re-read or re-run from', () => {
     const lines = renderSkeleton(skeletonOf(SPAN))
     expect(lines).toContain('3. [read] src/a/client.ts → ok · 1,000 tok dropped')

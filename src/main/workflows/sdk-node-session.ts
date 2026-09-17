@@ -32,7 +32,7 @@ import {
 } from '../../shared/compaction/settings.ts'
 import type { CompactionTrigger } from '../../shared/compaction/record.ts'
 import { createCompactionWatch } from '../../shared/compaction/watch.ts'
-import { RECENT_SPAN_TOKENS } from '../../shared/compaction/window.ts'
+import { recentSpanTokens } from '../../shared/compaction/window.ts'
 import { retentionInForce } from '../cache/retention.ts'
 import { forPi, type LoadedSkill } from '../skills/service.ts'
 import type {
@@ -162,9 +162,13 @@ export function createSdkNodeSessionFactory({
       const settings = pi.SettingsManager.inMemory()
       // π's own auto-compaction is off here for the same reason it is off in a
       // session: Crucible decides when a loop compacts and writes what the
-      // model reads afterwards.
+      // model reads afterwards. The span π keeps verbatim is sized against
+      // this node's model, which unlike a session's cannot change under it.
       settings.applyOverrides({
-        compaction: { enabled: false, keepRecentTokens: RECENT_SPAN_TOKENS }
+        compaction: {
+          enabled: false,
+          keepRecentTokens: recentSpanTokens(model.contextWindow)
+        }
       })
       const resourceLoader = new pi.DefaultResourceLoader({
         cwd: request.cwd,
@@ -194,6 +198,7 @@ export function createSdkNodeSessionFactory({
             trigger: () => live.trigger,
             toItems: (messages) => toTranscript(messages),
             sizeOf: pi.estimateTokens,
+            contextWindow: () => held.session?.model?.contextWindow,
             failed: onCompactionFailure,
             settled: () => {}
           })
@@ -392,24 +397,31 @@ export function wrapNodeSession(
     return toTranscript(messages, seams, skills, compactions)
   }
 
-  // Every billed turn re-arms the idle clock and re-asks the size rules, from
-  // the same facts a session reports across the port.
-  function noteSize(message: StoredMessage): void {
-    const at = (message as { timestamp?: unknown }).timestamp
-    if (typeof at !== 'number') return
+  // Every billed turn re-asks the size rules, which need nothing but the
+  // size, and re-arms the idle clock when there is a cache to run ahead of.
+  //
+  // The instant is the prefix's, never the message's own stamp: the idle rule
+  // exists to spend a compaction while a warm prefix is still there to read,
+  // so on a provider that caches nothing it must not run at all. That is the
+  // same fact, from the same scan, that a session reports across the port.
+  function noteSize(): void {
     const usage = session.getContextUsage()
     if (usage?.tokens == null) return
+    const prefix = scanCacheMisses(
+      entriesToScan(session.sessionManager.getEntries()),
+      cache
+    ).tracker.cachedPrefix()
     watch.saw(NODE, {
-      lastRequestAt: at,
       usedTokens: usage.tokens,
-      contextWindow: usage.contextWindow
+      contextWindow: usage.contextWindow,
+      ...(prefix === undefined ? {} : { lastRequestAt: prefix.at })
     })
   }
 
   const unsubscribe = session.subscribe((event) => {
     if (event.type === 'message_end' && event.message.role === 'assistant') {
       observe(event.message as StoredMessage)
-      noteSize(event.message as StoredMessage)
+      noteSize()
     }
     const now = liveness(event as Record<string, unknown>, inflight)
     if (now === null) return

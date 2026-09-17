@@ -130,6 +130,24 @@ describe('the compaction section', () => {
     expect(port.compaction).toEqual({ enabled: true, thresholdK: 100 })
   })
 
+  // The card closes on Escape through the window's own ladder, which unmounts
+  // the pane without React firing a blur on the field. A number typed and then
+  // dismissed the way the card's own footer says to dismiss it is still a
+  // number the user typed: it is written, not dropped in silence.
+  it('writes a threshold typed and then dismissed with Escape', async () => {
+    const port = await shell()
+    await openCompactionSettings()
+
+    const field = screen.getByLabelText('Compact at, in thousands of tokens')
+    await act(async () => {
+      fireEvent.change(field, { target: { value: '100' } })
+    })
+    await settled()
+    await escape()
+
+    expect(port.compaction).toEqual({ enabled: true, thresholdK: 100 })
+  })
+
   // The floor is the smallest size anything compacts at, so the field honors
   // every number it accepts.
   it('clamps a threshold below the smallest one that compacts anything', async () => {

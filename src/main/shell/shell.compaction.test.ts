@@ -171,6 +171,10 @@ describe('the threshold trigger', () => {
     expect(compacted?.record.trigger).toBe('threshold')
     expect(compacted?.record.tokensBefore).toBeGreaterThan(compacted?.record.tokensAfter ?? 0)
     expect(compacted?.text).toContain(FAKE_TRAJECTORY_SUMMARY)
+    // What the person said is in the block whole. It is the one thing the
+    // model cannot get back afterwards: the transcript still shows it and the
+    // session file still holds it, and the model can read neither.
+    expect(compacted?.text).toContain(LONG)
   })
 
   // The compaction reports the conversation's new size the moment it lands,
@@ -253,6 +257,20 @@ describe('the idle trigger', () => {
 
     advance(4 * 60 * 60 * 1000)
     await settled()
+    expect(compactions()).toEqual([])
+  })
+
+  // An idle compaction is a paid background request that rewrites what the
+  // agent reads, so the switch governs it like everything else. Only the
+  // model's own window edge survives the switch being off, which is what the
+  // Settings pane says in as many words.
+  it('is left alone with the switch off, however long the conversation sits', async () => {
+    await grown()
+    await shell.setCompactionSettings({ enabled: false, thresholdK: 200 })
+
+    advance(51 * 60 * 1000)
+    await settled()
+
     expect(compactions()).toEqual([])
   })
 

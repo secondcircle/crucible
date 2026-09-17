@@ -9,7 +9,7 @@
 //
 // Driven against a scripted session that behaves the way π's does. Nothing
 // here constructs an SDK session.
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { AgentSession } from '@earendil-works/pi-coding-agent'
 import type { StoredMessage } from '../agent/sdk-transcript'
 import { wrapNodeSession } from './sdk-node-session'
@@ -102,14 +102,15 @@ function scripted(): Scripted {
 
 function node(
   session: AgentSession,
-  onFailure: (cause: unknown) => void = () => {}
+  onFailure: (cause: unknown) => void = () => {},
+  thresholdK = 200
 ): ReturnType<typeof wrapNodeSession> {
   return wrapNodeSession(
     session,
     { skills: [], cwd: '/repos/crucible' },
     {},
     {
-      settings: () => ({ enabled: true, thresholdK: 200 }),
+      settings: () => ({ enabled: true, thresholdK }),
       begin: () => {},
       entryToMessages: () => [],
       onFailure
@@ -186,6 +187,31 @@ describe('a compaction the turn’s own size called for', () => {
       'compacted',
       'prompt:and the next thing'
     ])
+    session.dispose()
+  })
+})
+
+// The idle rule is a rule about the cache: it spends a compaction at minute
+// fifty so a warm prefix is read instead of re-billed. On a provider that
+// caches nothing there is no prefix to run ahead of, and a compaction there is
+// a cold whole-context request that saves nothing — which is why a node reports
+// the prefix's own instant, never the message's wall-clock stamp, exactly as a
+// session does across the port.
+describe('a node on a provider that reports no prompt cache', () => {
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it('has no idle clock to run', async () => {
+    vi.useFakeTimers()
+    const fake = scripted()
+    // Far above the conversation: only the idle rule could fire here.
+    const session = node(fake.session, () => {}, 10_000)
+
+    fake.say(400_000)
+    await vi.advanceTimersByTimeAsync(51 * 60 * 1000)
+
+    expect(fake.compactions()).toBe(0)
     session.dispose()
   })
 })

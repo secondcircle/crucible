@@ -44,9 +44,14 @@ let fired: { id: string; trigger: CompactionTrigger }[]
 let busy: Set<string>
 let watch: CompactionWatch
 
-function watching(settings: CompactionSettings = ON, retention: '1h' | '5m' = '1h'): void {
+// A fixed setting, or a function where a test moves the switch under a
+// conversation that is already being watched.
+function watching(
+  settings: CompactionSettings | (() => CompactionSettings) = ON,
+  retention: '1h' | '5m' = '1h'
+): void {
   watch = createCompactionWatch({
-    settings: () => settings,
+    settings: typeof settings === 'function' ? settings : () => settings,
     retention,
     idle: (id) => !busy.has(id),
     compact: (id, trigger) => fired.push({ id, trigger }),
@@ -168,11 +173,26 @@ describe('the idle clock', () => {
     expect(fired).toEqual([])
   })
 
-  it('runs with the switch off, because it is about the cache and not the size', () => {
+  // An idle compaction is a paid background request that rewrites what the
+  // agent reads. The switch is the switch for the feature, and the one thing
+  // ruled to survive it being off is the model's own window edge.
+  it('does not run with the switch off', () => {
     watching({ enabled: false, thresholdK: 200 })
     watch.saw('a', { lastRequestAt: 0, usedTokens: 120_000, contextWindow: 1_000_000 })
     clock.advance(51 * 60 * 1000)
-    expect(fired).toEqual([{ id: 'a', trigger: 'idle' }])
+    expect(fired).toEqual([])
+  })
+
+  // The setting is read when the clock strikes, not when it was armed: a
+  // conversation left sitting under a switch that was on is governed by the
+  // switch as it stands now.
+  it('is called off by a switch turned off while the conversation sat', () => {
+    let settings: CompactionSettings = ON
+    watching(() => settings)
+    watch.saw('a', { lastRequestAt: 0, usedTokens: 120_000, contextWindow: 1_000_000 })
+    settings = { enabled: false, thresholdK: 200 }
+    clock.advance(51 * 60 * 1000)
+    expect(fired).toEqual([])
   })
 
   it('leaves a working conversation alone when its moment comes', () => {
