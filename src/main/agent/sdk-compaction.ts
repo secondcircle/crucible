@@ -50,8 +50,11 @@ export interface CompactionDeps {
   // π drops a hook that throws and falls back to its own summarizer, so a
   // failure is reported here and the compaction cancelled instead.
   readonly failed: (message: string) => void
-  /** The compaction as it was written, for the transcript and the port. */
-  readonly settled: (stored: StoredCompaction, text: string) => void
+  // The compaction as it was written, where the caller has something to do
+  // with it as it lands — a session announces it across the port. Everything
+  // durable about it is on π's entry either way, so a caller that reads it
+  // back from there wants none of this.
+  readonly settled?: (stored: StoredCompaction, text: string) => void
 }
 
 // π finds a compaction's cut point, so the span kept verbatim is π's setting
@@ -107,7 +110,7 @@ export function compactionExtension(deps: CompactionDeps): InlineExtension {
             estimateTokens(settled.text) + keptTokens(branchEntries, keptFrom, deps.sizeOf)
         }
         const stored: StoredCompaction = { record, state: settled.state }
-        deps.settled(stored, settled.text)
+        deps.settled?.(stored, settled.text)
 
         return {
           compaction: {

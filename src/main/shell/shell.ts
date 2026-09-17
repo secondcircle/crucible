@@ -625,9 +625,9 @@ export function createShell({
       .compact(sessionId, trigger)
       .then((record) => {
         // What it left the conversation at is what the rules weigh the next
-        // one against; a compaction that wrote nothing leaves them judging the
-        // conversation as they did before.
-        watch.compacted(sessionId, record?.tokensAfter)
+        // one against, and the conversation reports that itself with its next
+        // size: the rules are told here only that this one is over.
+        watch.compacted(sessionId)
         // An idle compaction is the one that changes what the next send costs,
         // so it is the one the next send is accounted against.
         if (record !== undefined && trigger === 'idle') idleCompacted.add(sessionId)
@@ -993,14 +993,18 @@ export function createShell({
           : { cachedPrefix: { ...event.cachedPrefix, retention } })
       })
       // Every billed request re-asks the size rules — the threshold and the
-      // window edge — which need nothing but the size. The prefix's own stamp
-      // is the instant of the last billed request and is what the idle clock
+      // window edge — which need the size and what this conversation's own
+      // last compaction produced. Both travel with the conversation, so a
+      // conversation restored at launch is judged on what it was really
+      // compacted to rather than on a blank memory. The prefix's own stamp is
+      // the instant of the last billed request and is what the idle clock
       // counts from; a provider that reports no cache has no warm prefix to
-      // run ahead of, so it sends the size alone and the idle rule sits out.
+      // run ahead of, so it sends the sizes alone and the idle rule sits out.
       if (store.session(event.sessionId) !== undefined) {
         watch.saw(event.sessionId, {
           usedTokens: event.usedTokens,
           contextWindow: event.contextWindow,
+          ...(event.compactedTo === undefined ? {} : { compactedTo: event.compactedTo }),
           ...prefixInstant(event.cachedPrefix?.at)
         })
       }

@@ -210,6 +210,14 @@ export type AdapterEvent =
       // What the provider is holding for this conversation, reported at the
       // same moments too. Absent when nothing is cached.
       readonly cachedPrefix?: ObservedCachedPrefix
+      // What this conversation's own last compaction left it at, read back
+      // from the conversation rather than remembered, and absent where the
+      // path it stands on has never been compacted. It rides with the size
+      // because it is half of every question about compacting again: the size
+      // says how big the conversation is, this says how much of that another
+      // compaction could take away. A conversation restored next launch
+      // reports the number the launch that compacted it saw.
+      readonly compactedTo?: number
     }
   // A live login's questions and running commentary. Session-less, because
   // credentials belong to the machine rather than to any conversation.

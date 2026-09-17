@@ -12,6 +12,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { AgentSession } from '@earendil-works/pi-coding-agent'
 import type { StoredMessage } from '../agent/sdk-transcript'
+import { COMPACTION_DETAILS_KEY } from '../agent/sdk-compaction'
 import { wrapNodeSession } from './sdk-node-session'
 
 type Listener = (event: unknown) => void
@@ -24,8 +25,6 @@ interface Scripted {
   say(usedTokens: number): void
   /** Lets the compaction π is running finish, on the window it wrote. */
   finishCompaction(tokensAfter?: number): void
-  /** What the last compaction left behind, as the hook reports it. */
-  readonly landed: () => number | undefined
   readonly compactions: () => number
   readonly aborted: () => string[]
 }
@@ -37,7 +36,9 @@ function scripted(): Scripted {
   let usage = { tokens: 1_000, contextWindow: 1_000_000 }
   let compacting: { resolve: () => void; reject: (cause: unknown) => void } | undefined
   let compactions = 0
-  let landed: number | undefined
+  // π's own entries, which is where a compaction's result is written down and
+  // where every reader of it — this launch or the next — goes for it.
+  const entries: unknown[] = []
 
   const session = {
     get isStreaming() {
@@ -45,7 +46,7 @@ function scripted(): Scripted {
     },
     thinkingLevel: 'medium',
     messages: [],
-    sessionManager: { getEntries: () => [], getBranch: () => [] },
+    sessionManager: { getEntries: () => entries, getBranch: () => entries },
     subscribe(listener: Listener) {
       listeners.add(listener)
       return () => listeners.delete(listener)
@@ -95,11 +96,23 @@ function scripted(): Scripted {
       for (const listener of listeners) listener({ type: 'agent_end' })
     },
     finishCompaction(tokensAfter?: number) {
-      landed = tokensAfter
+      // A compaction that wrote something leaves π an entry of its own,
+      // carrying Crucible's record in the `details` slot π documents. One that
+      // wrote nothing leaves no entry, and the conversation is what it was.
+      if (tokensAfter !== undefined) {
+        entries.push({
+          type: 'compaction',
+          details: {
+            [COMPACTION_DETAILS_KEY]: {
+              record: { trigger: 'threshold', tokensBefore: 0, tokensAfter },
+              state: { skeleton: [] }
+            }
+          }
+        })
+      }
       compacting?.resolve()
       compacting = undefined
     },
-    landed: () => landed,
     compactions: () => compactions,
     aborted: () => aborted
   }
@@ -117,7 +130,6 @@ function node(
     {
       settings: () => ({ enabled: true, thresholdK }),
       begin: () => {},
-      landed: fake.landed,
       entryToMessages: () => [],
       onFailure
     }

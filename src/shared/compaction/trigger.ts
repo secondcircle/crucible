@@ -13,6 +13,10 @@ import { smallestWorthCompacting, windowEdgeReserveTokens } from './window.ts'
 // conversation is, and this says how much of that a compaction could take
 // away. A conversation sitting on the result of its own last compaction gains
 // nothing from another, however far over the threshold that result is.
+//
+// It comes from the conversation, beside the size and from the same report,
+// because it is written down with the conversation: the rule answers the same
+// way in the launch that compacted and in every launch after it.
 export interface CompactionHistory {
   readonly compactedTo?: number
 }

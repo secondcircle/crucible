@@ -36,6 +36,9 @@ let events: PortEvent[]
 let written: RecordedCacheMiss[]
 let clock: number
 let armed: { at: number; run: () => void }[]
+// The shell a relaunch test replaced goes on hearing the adapter the two of
+// them share, so the harness stops listening to the one it let go.
+let stopListening: (() => void) | undefined
 
 /** Hand-cranked, so the fifty-minute rule is tested at its own minute. */
 function advance(ms: number): void {
@@ -82,7 +85,8 @@ function build(
       }
     }
   })
-  shell.onEvent((event) => events.push(event))
+  stopListening?.()
+  stopListening = shell.onEvent((event) => events.push(event))
 }
 
 async function withSession(): Promise<SessionId> {
@@ -126,6 +130,7 @@ function compactions(): Extract<PortEvent, { type: 'compacted' }>[] {
 
 beforeEach(() => {
   directory = mkdtempSync(join(tmpdir(), 'crucible-shell-compaction-'))
+  stopListening = undefined
   // The fake stamps its cached prefix with the wall clock, and the idle rule
   // counts from that stamp: the two have to be the same clock.
   clock = Date.now()
@@ -276,6 +281,70 @@ describe('the threshold trigger', () => {
     const items = await shell.transcript(sessionId)
     expect(items[0]).toEqual({ kind: 'user', text: LONG })
     expect(items.at(-1)?.kind).toBe('summary')
+  })
+})
+
+// A launch ends; the conversation does not. The rule that stops a
+// conversation buying the same window twice therefore cannot live in one
+// launch's memory: what the last compaction produced is written down with the
+// conversation and reported with its size, so the launch that restores it
+// weighs the same fact the launch that ran it did. Without that, the first
+// thing a restored conversation does — report the context it came back
+// holding — buys the whole window again, at the worst moment for it: a prefix
+// hours old, re-billed rather than read.
+describe('a conversation that outlives the launch that compacted it', () => {
+  // The same fake adapter across both launches, holding the conversations the
+  // way π's session files do.
+  const relaunch = (adapter: ConversationAdapter) => (): ConversationAdapter => adapter
+
+  it('is left alone on the size its own last compaction produced', async () => {
+    const adapter = createFakeAdapter({ pauseMs: 0 })
+    build('1h', relaunch(adapter))
+    await shell.setCompactionSettings({ enabled: true, thresholdK: MIN_THRESHOLD_K })
+    const sessionId = await grown()
+    await settled()
+    // This launch's compaction landed over the threshold, because the
+    // conversation's own words are over it and the skeleton keeps them.
+    expect(compactions()).toHaveLength(1)
+    expect(compactions()[0]?.record.tokensAfter).toBeGreaterThan(MIN_THRESHOLD_K * 1_000)
+
+    shell.dispose()
+    await adapter.release(sessionId)
+    build('1h', relaunch(adapter))
+    // Opening the session is what a launch does with the session it restores:
+    // the bind reports the context the conversation came back holding.
+    await shell.transcript(sessionId)
+    await settled()
+
+    expect(compactions()).toEqual([])
+  })
+
+  // What the restored conversation carries is a number the rules weigh, never
+  // a "has compacted, never again" flag: one that goes on growing is compacted
+  // again, and at the model's own window it still gets its last resort on a
+  // launch that never saw the first one.
+  it('is compacted again when it grows to the model’s window after the relaunch', async () => {
+    const adapter = createFakeAdapter({ pauseMs: 0 })
+    build('1h', relaunch(adapter))
+    await shell.setCompactionSettings({ enabled: true, thresholdK: MIN_THRESHOLD_K })
+    const sessionId = await grown()
+    await settled()
+    const landed = compactions()[0]?.record.tokensAfter ?? 0
+
+    shell.dispose()
+    await adapter.release(sessionId)
+    build('1h', relaunch(adapter))
+    await shell.transcript(sessionId)
+    await settled()
+    expect(compactions()).toEqual([])
+
+    // A whole compacted window's worth of new conversation on top, which
+    // takes this one to the fake model's own 200k window.
+    await turn(sessionId, 'x'.repeat(landed * 4))
+    await settled()
+
+    expect(compactions()).toHaveLength(1)
+    expect(compactions()[0]?.record.trigger).toBe('windowEdge')
   })
 })
 

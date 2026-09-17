@@ -120,12 +120,32 @@ describe('the size rules', () => {
     watch.saw('a', { lastRequestAt: 0, usedTokens: 300_000, contextWindow: 1_000_000 })
     expect(fired).toHaveLength(1)
 
-    // The compaction's own result, then ordinary turns on top of it.
-    watch.compacted('a', 100_000)
-    watch.saw('a', { lastRequestAt: 1, usedTokens: 100_000, contextWindow: 1_000_000 })
-    watch.saw('a', { lastRequestAt: 2, usedTokens: 101_000, contextWindow: 1_000_000 })
-    watch.saw('a', { lastRequestAt: 3, usedTokens: 118_000, contextWindow: 1_000_000 })
+    // The compaction's own result, reported with every size after it because
+    // it is written down with the conversation, then ordinary turns on top.
+    watch.compacted('a')
+    const after = { contextWindow: 1_000_000, compactedTo: 100_000 }
+    watch.saw('a', { lastRequestAt: 1, usedTokens: 100_000, ...after })
+    watch.saw('a', { lastRequestAt: 2, usedTokens: 101_000, ...after })
+    watch.saw('a', { lastRequestAt: 3, usedTokens: 118_000, ...after })
     expect(fired).toHaveLength(1)
+  })
+
+  // The launch that compacted is not the only one that has to know. A
+  // conversation restored next launch reports what its own last compaction
+  // left it at along with its size — the number is on the conversation, not in
+  // a map that died with the app — so the rule answers the same way on a
+  // watch that has never seen it before.
+  it('refuses a conversation restored on a compaction it has never seen', () => {
+    watching(LOW)
+
+    watch.saw('restored', {
+      lastRequestAt: 0,
+      usedTokens: 110_595,
+      contextWindow: 1_000_000,
+      compactedTo: 110_595
+    })
+
+    expect(fired).toEqual([])
   })
 
   // Nothing was rewritten — there was no boundary to cut at, or the model call
@@ -140,6 +160,8 @@ describe('the size rules', () => {
     expect(fired).toHaveLength(1)
 
     watch.compacted('a')
+    // Nothing was written, so the conversation reports no compaction of its
+    // own to be weighed against.
     watch.saw('a', { lastRequestAt: 1, usedTokens: 301_000, contextWindow: 1_000_000 })
     expect(fired).toHaveLength(2)
   })
@@ -160,13 +182,14 @@ describe('the size rules', () => {
   it('compacts again once there is as much to take away as the last one left', () => {
     watching(LOW)
     watch.saw('a', { lastRequestAt: 0, usedTokens: 300_000, contextWindow: 1_000_000 })
-    watch.compacted('a', 100_000)
-    watch.saw('a', { lastRequestAt: 1, usedTokens: 100_000, contextWindow: 1_000_000 })
+    watch.compacted('a')
+    const after = { contextWindow: 1_000_000, compactedTo: 100_000 }
+    watch.saw('a', { lastRequestAt: 1, usedTokens: 100_000, ...after })
 
-    watch.saw('a', { lastRequestAt: 2, usedTokens: 199_000, contextWindow: 1_000_000 })
+    watch.saw('a', { lastRequestAt: 2, usedTokens: 199_000, ...after })
     expect(fired).toHaveLength(1)
 
-    watch.saw('a', { lastRequestAt: 3, usedTokens: 200_000, contextWindow: 1_000_000 })
+    watch.saw('a', { lastRequestAt: 3, usedTokens: 200_000, ...after })
     expect(fired).toHaveLength(2)
   })
 
@@ -179,9 +202,10 @@ describe('the size rules', () => {
     expect(fired).toEqual([{ id: 'a', trigger: 'windowEdge' }])
 
     // The words alone fill the window: what it wrote is still at the edge.
-    watch.compacted('a', 188_000)
-    watch.saw('a', { lastRequestAt: 1, usedTokens: 188_000, contextWindow: 200_000 })
-    watch.saw('a', { lastRequestAt: 2, usedTokens: 189_000, contextWindow: 200_000 })
+    watch.compacted('a')
+    const edge = { contextWindow: 200_000, compactedTo: 188_000 }
+    watch.saw('a', { lastRequestAt: 1, usedTokens: 188_000, ...edge })
+    watch.saw('a', { lastRequestAt: 2, usedTokens: 189_000, ...edge })
     expect(fired).toHaveLength(1)
   })
 })

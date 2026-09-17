@@ -4,15 +4,19 @@ import type { CompactionSettings } from './settings.ts'
 import { idleCompactionDelayMs, idleTrigger, sizeTrigger } from './trigger.ts'
 
 // Who compacts and when, for one collection of conversations. The rules are
-// the pure predicates beside this; what this adds is the memory of each
-// conversation's last billed request and the timer that fires when it has sat
-// long enough. Sessions and workflow nodes both drive one of these, so there
-// is no second set of rules anywhere.
+// the pure predicates beside this; what this adds is the timer that fires when
+// a conversation has sat long enough. Sessions and workflow nodes both drive
+// one of these, so there is no second set of rules anywhere.
+//
+// Nothing about a conversation is remembered here across a report, and
+// nothing about one outlives the launch: every fact the rules decide on
+// arrives with the reported size, from whoever is holding the conversation.
 
-// What a conversation's last billed request said about it. Two independent
+// What a conversation's last billed request said about it. Three independent
 // facts, and only the size is always there: the size rules need nothing but
-// the size, while the idle rule is a rule about the cache and cannot run
-// without an instant to count the quiet from.
+// the size and what the last compaction produced, while the idle rule is a
+// rule about the cache and cannot run without an instant to count the quiet
+// from.
 export interface ConversationFacts {
   readonly usedTokens: number
   /** The model's own window, when the reporter knows it. */
@@ -22,19 +26,29 @@ export interface ConversationFacts {
   // a conversation that has not billed since its last compaction — which
   // silences the idle rule for it and nothing else.
   readonly lastRequestAt?: number
+  // What this conversation's own last compaction left it at, and nothing
+  // where it has never compacted. Every rule here weighs it: the size says how
+  // big the conversation is, this says how much of that another compaction
+  // could take away. It is reported rather than remembered because it is
+  // written down with the conversation — a launch that never saw the
+  // compaction reads the same number the launch that ran it did, and a
+  // conversation restored onto a path with no compaction behind it reports
+  // none.
+  readonly compactedTo?: number
 }
 
 export interface CompactionWatch {
   // Fresh facts: the conversation billed a request. Re-arms its idle timer and
   // compacts at once if its size now calls for it.
   saw(id: string, facts: ConversationFacts): void
-  // The compaction this watch asked for is over: `tokensAfter` is the window it
-  // left the conversation at, and nothing where it did not land — no boundary
-  // to cut at, a model call that failed, a summary that came back empty, a
-  // cancelled wait. Every compaction the watch asks for comes back here, both
-  // ways: the size a compaction produces is what the next one has to beat, and
-  // until this is called nothing fires for that conversation at all.
-  compacted(id: string, tokensAfter?: number): void
+  // The compaction this watch asked for is over, however it ended — landed,
+  // no boundary to cut at, a model call that failed, a summary that came back
+  // empty, a cancelled wait. Every compaction the watch asks for comes back
+  // here, because until it does nothing fires for that conversation at all.
+  // What it left the conversation at is not said here: that is the
+  // conversation's own fact, and it arrives with the next size reported for
+  // it.
+  compacted(id: string): void
   /** The conversation stopped working, which is when a held trigger can act. */
   settled(id: string): void
   /** The conversation is gone: no timer outlives it. */
@@ -69,26 +83,18 @@ export function createCompactionWatch(options: CompactionWatchOptions): Compacti
   const clearTimer =
     options.clearTimer ?? ((handle: unknown): void => clearTimeout(handle as never))
   const watched = new Map<string, Watched>()
-  // The size each conversation's own last compaction left it at, which is the
-  // second fact every rule here decides on: what the rules ask is not "is this
-  // conversation big" but "is there enough here for a compaction to take
-  // away", and this is what the last one could not. It is measured rather than
-  // estimated, so a conversation whose words alone exceed the budgets is
-  // judged by what compacting it actually does.
-  const compactedTo = new Map<string, number>()
   // The conversations whose compaction is out. Nothing fires for one while it
   // is in here: the conversation the held facts describe is being rewritten,
   // and what that is worth is not known until `compacted` says.
   const asked = new Set<string>()
   let disposed = false
 
-  /** What this conversation's last compaction produced, for the rules to weigh. */
-  function lastResult(id: string): { compactedTo?: number } {
-    // A compaction still out has produced nothing yet, and nothing is smaller
-    // than a size nobody knows.
-    if (asked.has(id)) return { compactedTo: Number.POSITIVE_INFINITY }
-    const left = compactedTo.get(id)
-    return left === undefined ? {} : { compactedTo: left }
+  // The facts as the rules must read them. A compaction still out has produced
+  // nothing yet, and nothing is smaller than a size nobody knows, so a
+  // conversation being rewritten is held out of every rule until it reports
+  // again.
+  function weigh(id: string, facts: ConversationFacts): ConversationFacts {
+    return asked.has(id) ? { ...facts, compactedTo: Number.POSITIVE_INFINITY } : facts
   }
 
   function disarm(held: Watched | undefined): void {
@@ -111,10 +117,7 @@ export function createCompactionWatch(options: CompactionWatchOptions): Compacti
     if (disposed) return
     const held = watched.get(id)
     if (held === undefined || !options.idle(id)) return
-    const trigger = sizeTrigger(options.settings(), {
-      ...held.facts,
-      ...lastResult(id)
-    })
+    const trigger = sizeTrigger(options.settings(), weigh(id, held.facts))
     if (trigger !== undefined) {
       fire(id, trigger)
       return
@@ -139,15 +142,14 @@ export function createCompactionWatch(options: CompactionWatchOptions): Compacti
     held.timer = setTimer(() => {
       held.timer = undefined
       if (disposed || !options.idle(id)) return
+      const facts = weigh(id, held.facts)
       const due = idleTrigger(
         options.settings(),
         {
           lastRequestAt,
-          usedTokens: held.facts.usedTokens,
-          ...(held.facts.contextWindow === undefined
-            ? {}
-            : { contextWindow: held.facts.contextWindow }),
-          ...lastResult(id),
+          usedTokens: facts.usedTokens,
+          ...(facts.contextWindow === undefined ? {} : { contextWindow: facts.contextWindow }),
+          ...(facts.compactedTo === undefined ? {} : { compactedTo: facts.compactedTo }),
           retention: options.retention
         },
         now()
@@ -164,14 +166,14 @@ export function createCompactionWatch(options: CompactionWatchOptions): Compacti
       consider(id)
     },
 
-    // A compaction that landed is the size the next one has to beat. One that
-    // did not land rewrote nothing, so the conversation is what it was and the
-    // rules judge it as they did before — on the next report, not now, so a
-    // compaction that keeps failing is retried at the pace of the conversation
-    // rather than in a loop.
-    compacted(id: string, tokensAfter?: number): void {
-      if (!asked.delete(id)) return
-      if (tokensAfter !== undefined) compactedTo.set(id, tokensAfter)
+    // What the compaction did is the conversation's to report: one that landed
+    // says so with its next size, and one that rewrote nothing leaves the
+    // conversation exactly as the rules last judged it. Either way the rules
+    // speak again on the next report rather than now, so a compaction that
+    // keeps failing is retried at the pace of the conversation rather than in
+    // a loop.
+    compacted(id: string): void {
+      asked.delete(id)
     },
 
     settled(id: string): void {
@@ -181,7 +183,6 @@ export function createCompactionWatch(options: CompactionWatchOptions): Compacti
     forget(id: string): void {
       disarm(watched.get(id))
       watched.delete(id)
-      compactedTo.delete(id)
       asked.delete(id)
     },
 
@@ -189,7 +190,6 @@ export function createCompactionWatch(options: CompactionWatchOptions): Compacti
       disposed = true
       for (const held of watched.values()) disarm(held)
       watched.clear()
-      compactedTo.clear()
       asked.clear()
     }
   }

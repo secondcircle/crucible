@@ -24,6 +24,7 @@ import {
 import {
   askOnWarmCache,
   compactionExtension,
+  previousCompaction,
   storedCompactionOf
 } from '../agent/sdk-compaction.ts'
 import {
@@ -158,9 +159,9 @@ export function createSdkNodeSessionFactory({
       // Assigned once, below, and read late: the compaction hook is built
       // before the session it compacts exists.
       const held: { session?: AgentSession } = {}
-      // What the running compaction was asked for, and what it left behind
-      // when it landed. π calls the hook back, so both are read late.
-      const live: { trigger: CompactionTrigger; landed?: number } = { trigger: 'threshold' }
+      // What the running compaction was asked for. π calls the hook back, so
+      // it is read late.
+      const live: { trigger: CompactionTrigger } = { trigger: 'threshold' }
       const settings = pi.SettingsManager.inMemory()
       // π's own auto-compaction is off here for the same reason it is off in a
       // session: Crucible decides when a loop compacts and writes what the
@@ -201,10 +202,11 @@ export function createSdkNodeSessionFactory({
             toItems: (messages) => toTranscript(messages),
             sizeOf: pi.estimateTokens,
             contextWindow: () => held.session?.model?.contextWindow,
-            failed: onCompactionFailure,
-            settled: (stored) => {
-              live.landed = stored.record.tokensAfter
-            }
+            failed: onCompactionFailure
+            // Nothing to hand the compaction to as it is written: a node's run
+            // view builds its transcript from the entries, and what the
+            // compaction left the conversation at is read back off the same
+            // entries when the size is reported.
           })
         ]
       })
@@ -240,12 +242,7 @@ export function createSdkNodeSessionFactory({
           settings: compaction,
           begin: (trigger) => {
             live.trigger = trigger
-            live.landed = undefined
           },
-          // Nothing where the compaction wrote nothing: π cancels a compaction
-          // its hook refused without rejecting, so a resolved `compact()` is
-          // not on its own a compaction that happened.
-          landed: () => live.landed,
           entryToMessages: pi.sessionEntryToContextMessages as (
             entry: never
           ) => readonly StoredMessage[],
@@ -287,8 +284,6 @@ export function toolCallCount(messages: readonly StoredMessage[]): number {
 interface NodeCompaction {
   readonly settings: () => CompactionSettings
   readonly begin: (trigger: CompactionTrigger) => void
-  /** What the compaction that just ran left the conversation at, if it ran. */
-  readonly landed: () => number | undefined
   readonly entryToMessages: (entry: never) => readonly StoredMessage[]
   readonly onFailure: (cause: unknown) => void
 }
@@ -327,17 +322,17 @@ export function wrapNodeSession(
     idle: () => !prompting && !session.isStreaming && compacting === undefined,
     compact: (_id, trigger) => {
       compaction.begin(trigger)
-      // Never rejects: the watch is told when a compaction starts, and the
-      // failure is the run log's to carry. It is also told what the compaction
-      // did — the window it left, or nothing where it left none — because that
-      // is what the rules weigh the next one against.
+      // Never rejects: the watch is told when a compaction is over however it
+      // ended, and the failure is the run log's to carry. What the compaction
+      // left behind is read off the conversation with the next size, the same
+      // way a session's is.
       compacting = (async () => {
         try {
           await session.compact()
-          watch.compacted(NODE, compaction.landed())
         } catch (cause) {
-          watch.compacted(NODE)
           compaction.onFailure(cause)
+        } finally {
+          watch.compacted(NODE)
         }
       })().finally(() => {
         compacting = undefined
@@ -412,8 +407,11 @@ export function wrapNodeSession(
     return toTranscript(messages, seams, skills, compactions)
   }
 
-  // Every billed turn re-asks the size rules, which need nothing but the
-  // size, and re-arms the idle clock when there is a cache to run ahead of.
+  // Every billed turn re-asks the size rules, which need the size and what
+  // this conversation's own last compaction left it at, and re-arms the idle
+  // clock when there is a cache to run ahead of. The compaction's result is
+  // read off the entries π keeps rather than remembered here, exactly as a
+  // session reads it off its own, so one fact has one home.
   //
   // The instant is the prefix's, never the message's own stamp: the idle rule
   // exists to spend a compaction while a warm prefix is still there to read,
@@ -426,9 +424,11 @@ export function wrapNodeSession(
       entriesToScan(session.sessionManager.getEntries()),
       cache
     ).tracker.cachedPrefix()
+    const compactedTo = previousCompaction(session.sessionManager.getBranch())?.record.tokensAfter
     watch.saw(NODE, {
       usedTokens: usage.tokens,
       contextWindow: usage.contextWindow,
+      ...(compactedTo === undefined ? {} : { compactedTo }),
       ...(prefix === undefined ? {} : { lastRequestAt: prefix.at })
     })
   }

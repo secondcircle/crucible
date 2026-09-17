@@ -89,6 +89,7 @@ import {
   applyRecentSpan,
   askOnWarmCache,
   compactionExtension,
+  previousCompaction,
   storedCompactionOf,
   type StoredCompaction
 } from './sdk-compaction.ts'
@@ -159,6 +160,7 @@ interface ReportedUsage {
   readonly cost?: number
   readonly cacheMisses?: { readonly count: number; readonly dollars: number }
   readonly cachedPrefix?: ObservedCachedPrefix
+  readonly compactedTo?: number
 }
 
 interface PendingShare {
@@ -1113,12 +1115,19 @@ export function createSdkAdapter({
     // jump. The misses are counted the same way, for the same reason.
     const spent = usageOf(bound.session.sessionManager)
     const { totals: misses, cachedPrefix } = missTotals(bound.session.sessionManager)
+    // Read off the branch every time, like the tokens above: what the last
+    // compaction of this path produced is written on π's own compaction entry,
+    // so it outlives the launch that ran it and travels with the conversation
+    // through a jump.
+    const compactedTo = previousCompaction(bound.session.sessionManager.getBranch())?.record
+      .tokensAfter
     const next: ReportedUsage = {
       usedTokens: usage.tokens,
       contextWindow: usage.contextWindow,
       ...(spent === undefined ? {} : { cost: spent.totalCost }),
       cacheMisses: misses,
-      ...(cachedPrefix === undefined ? {} : { cachedPrefix })
+      ...(cachedPrefix === undefined ? {} : { cachedPrefix }),
+      ...(compactedTo === undefined ? {} : { compactedTo })
     }
     const last = bound.reported
     if (
@@ -1132,7 +1141,8 @@ export function createSdkAdapter({
       // above may not: a re-sent conversation of the same size still re-dates
       // what the provider is holding.
       last.cachedPrefix?.at === cachedPrefix?.at &&
-      last.cachedPrefix?.tokens === cachedPrefix?.tokens
+      last.cachedPrefix?.tokens === cachedPrefix?.tokens &&
+      last.compactedTo === compactedTo
     ) {
       return
     }

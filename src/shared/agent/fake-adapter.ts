@@ -665,6 +665,7 @@ export function createFakeAdapter({
     // An empty conversation has reported nothing, and a dash is what nothing
     // looks like.
     if (usedTokens === 0) return
+    const compacted = compactedTo(conversation)
     emit({
       type: 'usage',
       sessionId,
@@ -683,8 +684,24 @@ export function createFakeAdapter({
       },
       // Beside the tokens at every report, exactly as the SDK adapter sends
       // it: what the last turn of this conversation left cached.
-      ...(conversation.prefix === undefined ? {} : { cachedPrefix: conversation.prefix })
+      ...(conversation.prefix === undefined ? {} : { cachedPrefix: conversation.prefix }),
+      // And what the last compaction of this path left it at, read off the
+      // path the same way — the stand-in for the record π keeps on its own
+      // compaction entry, which is why it is still there next launch.
+      ...(compacted === undefined ? {} : { compactedTo: compacted })
     })
+  }
+
+  /** What this conversation's own last compaction left it at, from the path. */
+  function compactedTo(conversation: Conversation): number | undefined {
+    const path = pathEntries(conversation)
+    for (let at = path.length - 1; at >= 0; at -= 1) {
+      const item = path[at]?.item
+      if (item?.kind === 'summary' && item.compaction !== undefined) {
+        return item.compaction.tokensAfter
+      }
+    }
+    return undefined
   }
 
   // The kind is in the token because canned conversations come back identical
