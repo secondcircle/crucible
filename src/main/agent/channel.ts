@@ -11,6 +11,7 @@ import type {
   QueuedKind,
   SessionWorktree
 } from '../../shared/agent/port'
+import { readCompactionSettings } from '../../shared/compaction/settings'
 import type { Shell } from '../shell/shell'
 import { displaySafeMessage } from './adapter-error'
 
@@ -242,6 +243,12 @@ async function invoke(shell: Shell, request: unknown): Promise<unknown> {
       return shell.resumeSession(text(0), text(1))
     case 'setWorktree':
       return shell.setWorktree(text(0), worktree(1))
+    case 'compactionSettings':
+      return shell.compactionSettings()
+    // Read as whatever it turns out to be: the shell normalizes it, so a
+    // threshold nobody could have typed cannot be stored by sending it.
+    case 'setCompactionSettings':
+      return shell.setCompactionSettings(readCompactionSettings(given[0]))
     case 'listModels':
       return shell.listModels()
     case 'setModel':

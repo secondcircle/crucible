@@ -21,6 +21,8 @@ import type {
   TurnId,
   Unsubscribe
 } from './port'
+import type { CompactionRecord } from '../compaction/record'
+import type { CompactionTrigger } from '../compaction/record'
 
 // Crucible's identities go down and π's never come up: where a conversation
 // lives is an opaque token nothing above this seam interprets.
@@ -169,6 +171,15 @@ export type AdapterEvent =
       /** Display-safe; the provider's own payload went to the run log. */
       readonly message: string
     }
+  // A compaction is running, and then is not. Session-scoped like `usage`,
+  // because a compaction is not a turn: nothing is being said to the agent.
+  | { readonly type: 'compaction_started'; readonly sessionId: SessionId }
+  | {
+      readonly type: 'compacted'
+      readonly sessionId: SessionId
+      /** Absent when the compaction ended without rewriting anything. */
+      readonly compaction?: { readonly text: string; readonly record: CompactionRecord }
+    }
   | { readonly type: 'turn_ended'; readonly sessionId: SessionId; readonly turnId: TurnId }
   | { readonly type: 'turn_cancelled'; readonly sessionId: SessionId; readonly turnId: TurnId }
   | {
@@ -199,6 +210,14 @@ export type AdapterEvent =
       // What the provider is holding for this conversation, reported at the
       // same moments too. Absent when nothing is cached.
       readonly cachedPrefix?: ObservedCachedPrefix
+      // What this conversation's own last compaction left it at, read back
+      // from the conversation rather than remembered, and absent where the
+      // path it stands on has never been compacted. It rides with the size
+      // because it is half of every question about compacting again: the size
+      // says how big the conversation is, this says how much of that another
+      // compaction could take away. A conversation restored next launch
+      // reports the number the launch that compacted it saw.
+      readonly compactedTo?: number
     }
   // A live login's questions and running commentary. Session-less, because
   // credentials belong to the machine rather than to any conversation.
@@ -351,8 +370,18 @@ export interface ConversationAdapter {
     text: string
   ): Promise<QueuedEntry | undefined>
 
-  // Stops what the session is doing: its live turn, and the branch summary a
-  // summarizing jump is waiting on. Harmless when there is neither.
+  // Rewrites what the model sees of this conversation: a trajectory summary,
+  // a skeleton of the compacted span, and the recent span untouched. Nothing
+  // is said to the agent, and nothing of the conversation is deleted.
+  // `undefined` means there was nothing to compact, which is not a failure.
+  compact(
+    sessionId: SessionId,
+    trigger: CompactionTrigger
+  ): Promise<CompactionRecord | undefined>
+
+  // Stops what the session is doing: its live turn, the branch summary a
+  // summarizing jump is waiting on, and a running compaction. Harmless when
+  // there is none of them.
   cancel(sessionId: SessionId): Promise<void>
 
   onEvent(listener: AdapterEventListener): Unsubscribe

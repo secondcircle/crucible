@@ -12,6 +12,7 @@ import {
 } from '../state/tool-chains'
 import { ASK_TOOL } from '../../../shared/agent/ask-tool'
 import { seamFacts } from '../cache/format'
+import { compactionFacts } from '../compaction/format'
 import { pathPieces } from '../files/named-path'
 import { useNamedPath } from '../files/path-links'
 import { Markdown } from './Markdown'
@@ -228,11 +229,18 @@ const Item = memo(function Item({
       return <Thinking text={item.text} running={item.running} />
 
     // The context the conversation now stands on — a branch summary or a
-    // compaction — shown in full so nobody wonders what the agent knows.
+    // compaction — shown in full so nobody wonders what the agent knows. The
+    // messages a compaction replaced are still above it: what changed is what
+    // the model reads, not what happened.
     case 'summary':
       return (
         <div className="summarycard" aria-label="Context summary">
-          <div className="sumtag">context summary</div>
+          <div className="sumtag">
+            context summary
+            {item.compaction === undefined ? null : (
+              <span className="sumfacts">{compactionFacts(item.compaction)}</span>
+            )}
+          </div>
           <Markdown markdown={item.text} />
         </div>
       )

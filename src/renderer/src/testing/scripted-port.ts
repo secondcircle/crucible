@@ -39,6 +39,11 @@ import type {
   WorkspaceId
 } from '../../../shared/agent/port'
 import { isLocalAddress } from '../../../shared/agent/local-address'
+import type { CompactionRecord } from '../../../shared/compaction/record'
+import {
+  DEFAULT_COMPACTION_SETTINGS,
+  type CompactionSettings
+} from '../../../shared/compaction/settings'
 import { composeAnswerBatch, type AnsweredQuestion } from '../../../shared/questions/wording'
 
 // Answers operations the way main does but streams nothing by itself, so a
@@ -119,6 +124,13 @@ export interface ScriptedPort extends AgentPort {
   // the `state` event goes out, and `question_asked` follows it.
   askQuestion(sessionId: SessionId, question: Question): void
   questionsOf(sessionId: SessionId): QuestionLine | undefined
+
+  /** What `compactionSettings` answers with, and what a write leaves behind. */
+  compaction: CompactionSettings
+  // A compaction the way main announces one: the session is marked while it
+  // runs, and the block lands where the conversation stands.
+  compactionStarted(sessionId: SessionId): void
+  compacted(sessionId: SessionId, text: string, record: CompactionRecord): void
 
   /** What `listProviders` answers with; a test may change it between calls. */
   providers: readonly ProviderState[]
@@ -386,10 +398,26 @@ export function createScriptedPort(initial: Partial<ShellSnapshot> = {}): Script
   let heldWorktree: (() => void) | undefined
   let login: { resolve: () => void; reject: (cause: Error) => void } | undefined
 
+  // The one thing a compaction shows in the snapshot while it runs, folded
+  // exactly as main folds it.
+  function markCompacting(sessionId: SessionId, running: boolean): void {
+    snapshot = {
+      ...snapshot,
+      sessions: snapshot.sessions.map((session) => {
+        if (session.id !== sessionId) return session
+        const rest = { ...session }
+        delete rest.compacting
+        return running ? { ...rest, compacting: true as const } : rest
+      })
+    }
+    emitState()
+  }
+
   const port: ScriptedPort = {
     calls,
     models: [],
     history: [],
+    compaction: DEFAULT_COMPACTION_SETTINGS,
     providers: [],
     usage: new Map(),
     transcripts: new Map(),
@@ -675,6 +703,22 @@ export function createScriptedPort(initial: Partial<ShellSnapshot> = {}): Script
       const settle = heldShare
       heldShare = undefined
       settle?.(outcome)
+    },
+
+    compactionSettings: () => record('compactionSettings', [], port.compaction),
+    setCompactionSettings(settings: CompactionSettings): Promise<void> {
+      calls.push({ op: 'setCompactionSettings', args: [settings] })
+      port.compaction = settings
+      return Promise.resolve()
+    },
+
+    compactionStarted(sessionId: SessionId): void {
+      markCompacting(sessionId, true)
+    },
+
+    compacted(sessionId: SessionId, text: string, record: CompactionRecord): void {
+      markCompacting(sessionId, false)
+      emit({ type: 'compacted', sessionId, text, record })
     },
 
     listModels: () => record('listModels', [], port.models),

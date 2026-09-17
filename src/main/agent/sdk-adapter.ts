@@ -86,7 +86,19 @@ import {
 import { sanitizeTitle, TITLE_INSTRUCTION, titleInput } from './sdk-titler.ts'
 import { branchSummaryExtension } from './sdk-branch-summary.ts'
 import {
+  applyRecentSpan,
+  askOnWarmCache,
+  compactionExtension,
+  previousCompaction,
+  storedCompactionOf,
+  type StoredCompaction
+} from './sdk-compaction.ts'
+import type { CompactionRecord } from '../../shared/compaction/record.ts'
+import type { CompactionTrigger } from '../../shared/compaction/record.ts'
+import { RECENT_SPAN_TOKENS } from '../../shared/compaction/window.ts'
+import {
   BASH_RUN_TYPE,
+  branchHistory,
   deliveredBashRunId,
   entriesToScan,
   pathSeams,
@@ -110,6 +122,10 @@ interface Bound {
   // True while a summarizing jump waits on π's summary. A summary is not a
   // turn, so this is what `cancel` reads to know there is something to abort.
   summarizing?: boolean
+  // The compaction running on this conversation, if one is. A compaction is
+  // not a turn — nothing is said to the agent — so it is held apart from
+  // `running` and stopped by its own signal.
+  compacting?: LiveCompaction
   /** Bash runs waiting for the boundary that delivers them, oldest first. */
   readonly shares: PendingShare[]
   // π reports its queue as text, so the pictures a queued message carries wait
@@ -144,6 +160,7 @@ interface ReportedUsage {
   readonly cost?: number
   readonly cacheMisses?: { readonly count: number; readonly dollars: number }
   readonly cachedPrefix?: ObservedCachedPrefix
+  readonly compactedTo?: number
 }
 
 interface PendingShare {
@@ -155,6 +172,14 @@ interface RunningTurn {
   cancel(): void
   /** Abandon it with its document: the turn says nothing more at all. */
   abandon(): void
+}
+
+interface LiveCompaction {
+  readonly trigger: CompactionTrigger
+  /** What the hook wrote, read by the call that asked for the compaction. */
+  written?: { readonly stored: StoredCompaction; readonly text: string }
+  /** Why it went nowhere, when Crucible's own hook refused it. */
+  failure?: string
 }
 
 // A login π is running for us: its questions are out as port events and their
@@ -337,7 +362,14 @@ export function createSdkAdapter({
       packages: [],
       extensions: [],
       steeringMode: 'all',
-      followUpMode: 'all'
+      followUpMode: 'all',
+      // π's own auto-compaction is off in every loop Crucible starts: Crucible
+      // decides when a conversation compacts and writes the compaction itself,
+      // so π's threshold can never fire and π's summary can never reach the
+      // window. `keepRecentTokens` is still π's, because π finds the cut point
+      // for the compactions Crucible asks for; `applyRecentSpan` re-states it
+      // against the model's own window before each one.
+      compaction: { enabled: false, keepRecentTokens: RECENT_SPAN_TOKENS }
     })
     const resourceLoader = new pi.DefaultResourceLoader({
       cwd: workspacePath,
@@ -374,6 +406,29 @@ export function createSdkAdapter({
               message: displaySafeMessage(errorMessage, 'The summary could not be written.')
             }),
           failed: (message) => summaryFailures.set(sessionId, message)
+        }),
+        // The compaction, whoever asked for it: Crucible writes the whole of
+        // what the model reads afterwards, and π persists it.
+        compactionExtension({
+          ask: (instruction, signal) =>
+            askOnWarmCache({
+              session: requireBound(sessionId).session,
+              toLlm: pi.convertToLlm,
+              complete: (model, context, options) =>
+                models.completeSimple(model, context, options)
+            })(instruction, signal),
+          trigger: () => sessions.get(sessionId)?.compacting?.trigger ?? 'threshold',
+          toItems: (messages) => toTranscript(messages as readonly StoredMessage[]),
+          sizeOf: pi.estimateTokens,
+          contextWindow: () => sessions.get(sessionId)?.session.model?.contextWindow,
+          failed: (message) => {
+            const live = sessions.get(sessionId)?.compacting
+            if (live !== undefined) live.failure = message
+          },
+          settled: (stored, text) => {
+            const live = sessions.get(sessionId)?.compacting
+            if (live !== undefined) live.written = { stored, text }
+          }
         })
       ]
     })
@@ -1060,12 +1115,19 @@ export function createSdkAdapter({
     // jump. The misses are counted the same way, for the same reason.
     const spent = usageOf(bound.session.sessionManager)
     const { totals: misses, cachedPrefix } = missTotals(bound.session.sessionManager)
+    // Read off the branch every time, like the tokens above: what the last
+    // compaction of this path produced is written on π's own compaction entry,
+    // so it outlives the launch that ran it and travels with the conversation
+    // through a jump.
+    const compactedTo = previousCompaction(bound.session.sessionManager.getBranch())?.record
+      .tokensAfter
     const next: ReportedUsage = {
       usedTokens: usage.tokens,
       contextWindow: usage.contextWindow,
       ...(spent === undefined ? {} : { cost: spent.totalCost }),
       cacheMisses: misses,
-      ...(cachedPrefix === undefined ? {} : { cachedPrefix })
+      ...(cachedPrefix === undefined ? {} : { cachedPrefix }),
+      ...(compactedTo === undefined ? {} : { compactedTo })
     }
     const last = bound.reported
     if (
@@ -1079,7 +1141,8 @@ export function createSdkAdapter({
       // above may not: a re-sent conversation of the same size still re-dates
       // what the provider is holding.
       last.cachedPrefix?.at === cachedPrefix?.at &&
-      last.cachedPrefix?.tokens === cachedPrefix?.tokens
+      last.cachedPrefix?.tokens === cachedPrefix?.tokens &&
+      last.compactedTo === compactedTo
     ) {
       return
     }
@@ -1255,13 +1318,21 @@ export function createSdkAdapter({
     async transcript(sessionId: SessionId): Promise<readonly TranscriptItem[]> {
       const bound = requireBound(sessionId)
       const { session } = bound
-      const { messages } = session
+      const pi = await sdk()
+      // The branch rather than the model's view of it: a compaction changes
+      // what the next request carries and nothing about what happened.
+      const { messages, compactions } = branchHistory(
+        session.sessionManager.getBranch(),
+        pi.sessionEntryToContextMessages as (entry: never) => readonly StoredMessage[],
+        (details) => storedCompactionOf(details)?.record
+      )
       // Seams in place: a reopened conversation shows where it paid twice, and
       // its skill reads read as skill reads.
       return toTranscript(
         messages,
         seamsOf(session.sessionManager, messages),
-        skillsHeld(bound.workspacePath)
+        skillsHeld(bound.workspacePath),
+        compactions
       )
     },
 
@@ -1642,6 +1713,46 @@ export function createSdkAdapter({
       return removed
     },
 
+    // π finds the cut point and persists the entry; everything about what the
+    // model reads afterwards is decided in the hook above. Answers with what
+    // was written, or nothing when there was nothing to compact.
+    async compact(
+      sessionId: SessionId,
+      trigger: CompactionTrigger
+    ): Promise<CompactionRecord | undefined> {
+      const bound = requireBound(sessionId)
+      // One at a time: a second ask while one runs joins the first rather than
+      // starting a compaction on a conversation already being rewritten.
+      if (bound.compacting !== undefined) return undefined
+      const live: LiveCompaction = { trigger }
+      bound.compacting = live
+      emit({ type: 'compaction_started', sessionId })
+      try {
+        // Read against the model the conversation is on right now: the ring
+        // can have moved it to a narrower window since the session opened.
+        applyRecentSpan(bound.session)
+        await bound.session.compact()
+      } catch (cause) {
+        // π throws for its own refusals too — "Nothing to compact", a cancel —
+        // and the hook's own reason is the better one where there is one.
+        const message = live.failure ?? displaySafeMessage(cause, 'That compaction did not finish.')
+        emit({ type: 'compacted', sessionId })
+        throw new Error(message, { cause })
+      } finally {
+        bound.compacting = undefined
+      }
+      const written = live.written
+      emit({
+        type: 'compacted',
+        sessionId,
+        ...(written === undefined
+          ? {}
+          : { compaction: { text: written.text, record: written.stored.record } })
+      })
+      reportUsage(sessionId, bound)
+      return written?.stored.record
+    },
+
     // Stop what this session is doing, whatever that is. A summarizing jump
     // is not a turn, so it is stopped by its own abort — π drops out of the
     // backoff sleep at once rather than waiting the delay out.
@@ -1649,6 +1760,9 @@ export function createSdkAdapter({
       const bound = sessions.get(sessionId)
       if (bound === undefined) return
       if (bound.summarizing === true) bound.session.abortBranchSummary()
+      // A compaction is stopped on its own account, for the same reason: it is
+      // not a turn, and there may be no turn to stop beside it.
+      if (bound.compacting !== undefined) bound.session.abortCompaction()
       if (bound.running === undefined) return
       // Cleared before the abort, so nothing queued and no shared run can fire
       // at a plan the user just killed.

@@ -2,6 +2,7 @@ import { mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { basename, join } from 'node:path'
 import type { SessionId } from '../../shared/agent/port'
+import type { CompactionSettings } from '../../shared/compaction/settings'
 import type { NodeMonitors } from '../../shared/monitors/service'
 import { swapModel } from '../../shared/quota/model-swap'
 import type { QuotaService } from '../../shared/quota/service'
@@ -66,6 +67,9 @@ export interface WorkflowRunWiring {
   readonly sessionExists: (sessionId: SessionId) => boolean
   /** The cache ledger every observed miss is appended to, sessions and runs alike. */
   readonly cache?: CacheRecorder
+  // The machine-global compaction setting, read per decision. A node compacts
+  // by the same rules a session does; absent leaves nodes on the default.
+  readonly compaction?: () => CompactionSettings
   /**
    * What a node's model is checked against before it starts. Absent, every
    * node runs the model its workflow declared.
@@ -164,7 +168,15 @@ export function selectWorkflowRunService(
     store,
     sessions: createSdkNodeSessionFactory({
       standingPrompt: readShippedStandingPrompt(wiring.appPath),
-      agentDir: join(wiring.stateDir, 'workflow-agent')
+      agentDir: join(wiring.stateDir, 'workflow-agent'),
+      ...(wiring.compaction === undefined ? {} : { compaction: wiring.compaction }),
+      onCompactionFailure: (cause) => {
+        log.append({
+          source: 'main',
+          event: 'node_compaction_failed',
+          message: cause instanceof Error ? cause.message : String(cause)
+        })
+      }
     }),
     deliver: wiring.deliver,
     // An orphaned resumed run only parks for adoption if the engine is told

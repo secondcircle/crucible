@@ -5,6 +5,7 @@ import type {
   ImageAttachment,
   TranscriptItem
 } from '../../shared/agent/port'
+import type { CompactionRecord } from '../../shared/compaction/record.ts'
 // Spelled with its extension so this module can also be loaded by plain Node.
 import { displaySafeMessage } from './adapter-error.ts'
 import {
@@ -39,7 +40,11 @@ export const BASH_RUN_TYPE = 'crucible.bashRun'
 export function toTranscript(
   messages: readonly StoredMessage[],
   seams?: ReadonlyMap<number, CacheMissFacts>,
-  skills?: SkillsInForce
+  skills?: SkillsInForce,
+  // What each compaction among the messages did, keyed the way the seams are.
+  // π's own summary message carries the text and nothing else, so the trigger
+  // and the two token counts travel beside it.
+  compactions?: ReadonlyMap<number, CompactionRecord>
 ): TranscriptItem[] {
   const items: TranscriptItem[] = []
   const calls = new Map<string, DisplayedCall>()
@@ -81,8 +86,15 @@ export function toTranscript(
 
     // π writes these when a branch is left with a summary or the context is
     // compacted: the summary IS the context now, so the transcript shows it.
+    // What a compaction replaced stays above it either way — the block marks
+    // where the model's view changed and hides nothing.
     if (message.role === 'branchSummary' || message.role === 'compactionSummary') {
-      items.push({ kind: 'summary', text: message.summary })
+      const record = compactions?.get(index)
+      items.push({
+        kind: 'summary',
+        text: message.summary,
+        ...(record === undefined ? {} : { compaction: record })
+      })
       continue
     }
 
@@ -146,6 +158,36 @@ export function toTranscript(
 interface StoredEntry {
   readonly type?: unknown
   readonly message?: unknown
+  readonly details?: unknown
+}
+
+/** What the transcript is built from, and what each compaction in it did. */
+export interface BranchHistory {
+  readonly messages: readonly StoredMessage[]
+  readonly compactions: ReadonlyMap<number, CompactionRecord>
+}
+
+// The whole path, not the model's view of it: a compaction takes messages out
+// of what the next request carries and out of nothing else, so the transcript
+// reads the branch and shows the compaction where it happened. π's own
+// entry-to-message mapping is handed in so this module stays free of π values.
+export function branchHistory(
+  entries: readonly unknown[],
+  toMessages: (entry: never) => readonly StoredMessage[],
+  recordOf: (details: unknown) => CompactionRecord | undefined
+): BranchHistory {
+  const messages: StoredMessage[] = []
+  const compactions = new Map<number, CompactionRecord>()
+  for (const raw of entries) {
+    const entry = (raw ?? {}) as StoredEntry
+    const produced = toMessages(raw as never)
+    if (entry.type === 'compaction') {
+      const record = recordOf(entry.details)
+      if (record !== undefined) compactions.set(messages.length, record)
+    }
+    messages.push(...produced)
+  }
+  return { messages, compactions }
 }
 
 // Every entry of the conversation, every branch of it: what the whole-session

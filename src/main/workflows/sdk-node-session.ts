@@ -14,12 +14,26 @@ import {
   type DetectedCacheMiss
 } from '../agent/cache-miss.ts'
 import {
+  branchHistory,
   entriesToScan,
   pathSeams,
   toCacheMessage,
   toTranscript,
   type StoredMessage
 } from '../agent/sdk-transcript.ts'
+import {
+  askOnWarmCache,
+  compactionExtension,
+  previousCompaction,
+  storedCompactionOf
+} from '../agent/sdk-compaction.ts'
+import {
+  DEFAULT_COMPACTION_SETTINGS,
+  type CompactionSettings
+} from '../../shared/compaction/settings.ts'
+import type { CompactionTrigger } from '../../shared/compaction/record.ts'
+import { createCompactionWatch } from '../../shared/compaction/watch.ts'
+import { recentSpanTokens } from '../../shared/compaction/window.ts'
 import { retentionInForce } from '../cache/retention.ts'
 import { forPi, type LoadedSkill } from '../skills/service.ts'
 import type {
@@ -41,11 +55,18 @@ export interface SdkNodeSessionOptions {
   readonly standingPrompt: string
   /** A scratch agent dir for π's resource loader; nothing durable lives in it. */
   readonly agentDir: string
+  // The machine-global compaction setting, read per decision. A node is an
+  // agent loop like any other: same switch, same threshold, same idle rule.
+  readonly compaction?: () => CompactionSettings
+  /** A compaction nobody asked for and nobody is shown; the run log is the report. */
+  readonly onCompactionFailure?: (cause: unknown) => void
 }
 
 export function createSdkNodeSessionFactory({
   standingPrompt,
-  agentDir
+  agentDir,
+  compaction = () => DEFAULT_COMPACTION_SETTINGS,
+  onCompactionFailure = () => {}
 }: SdkNodeSessionOptions): NodeSessionFactory {
   let sdkModule: Promise<Sdk> | undefined
   let modelRuntime: Promise<import('@earendil-works/pi-coding-agent').ModelRuntime> | undefined
@@ -135,9 +156,27 @@ export function createSdkNodeSessionFactory({
       ]
 
       const skills = request.skills ?? []
+      // Assigned once, below, and read late: the compaction hook is built
+      // before the session it compacts exists.
+      const held: { session?: AgentSession } = {}
+      // What the running compaction was asked for. π calls the hook back, so
+      // it is read late.
+      const live: { trigger: CompactionTrigger } = { trigger: 'threshold' }
+      const settings = pi.SettingsManager.inMemory()
+      // π's own auto-compaction is off here for the same reason it is off in a
+      // session: Crucible decides when a loop compacts and writes what the
+      // model reads afterwards. The span π keeps verbatim is sized against
+      // this node's model, which unlike a session's cannot change under it.
+      settings.applyOverrides({
+        compaction: {
+          enabled: false,
+          keepRecentTokens: recentSpanTokens(model.contextWindow)
+        }
+      })
       const resourceLoader = new pi.DefaultResourceLoader({
         cwd: request.cwd,
         agentDir,
+        settingsManager: settings,
         noExtensions: true,
         noPromptTemplates: true,
         // π's own folders stay unread; the node's skills are handed in whole
@@ -146,7 +185,30 @@ export function createSdkNodeSessionFactory({
         skillsOverride: () => ({ skills: forPi(skills), diagnostics: [] }),
         systemPromptOverride: () =>
           composeSystemPrompt({ role: request.rolePrompt, standing: standingPrompt }),
-        appendSystemPromptOverride: () => []
+        appendSystemPromptOverride: () => [],
+        extensionFactories: [
+          compactionExtension({
+            ask: (instruction, signal) => {
+              const bound = held.session
+              if (bound === undefined) throw new Error('this node has no conversation yet')
+              return askOnWarmCache({
+                session: bound,
+                toLlm: pi.convertToLlm,
+                complete: (model, context, options) =>
+                  models.completeSimple(model, context, options)
+              })(instruction, signal)
+            },
+            trigger: () => live.trigger,
+            toItems: (messages) => toTranscript(messages),
+            sizeOf: pi.estimateTokens,
+            contextWindow: () => held.session?.model?.contextWindow,
+            failed: onCompactionFailure
+            // Nothing to hand the compaction to as it is written: a node's run
+            // view builds its transcript from the entries, and what the
+            // compaction left the conversation at is read back off the same
+            // entries when the size is reported.
+          })
+        ]
       })
       await resourceLoader.reload()
 
@@ -162,15 +224,31 @@ export function createSdkNodeSessionFactory({
         tools: [...request.tools, ...customTools.map((tool) => tool.name)] as never,
         customTools,
         sessionManager: pi.SessionManager.inMemory(request.cwd),
-        settingsManager: pi.SettingsManager.inMemory()
+        settingsManager: settings
       })
+      held.session = session
 
       // A node's turns are watched for cache misses exactly as a session's
       // are: same mirror, same arithmetic, and the engine writes the entry.
-      return wrap(session, { skills, cwd: request.cwd }, {
-        listedCacheReadPerMillion: (provider, id) => models.getModel(provider, id)?.cost.cacheRead,
-        ...(request.onCacheMiss === undefined ? {} : { onCacheMiss: request.onCacheMiss })
-      })
+      return wrapNodeSession(
+        session,
+        { skills, cwd: request.cwd },
+        {
+          listedCacheReadPerMillion: (provider, id) =>
+            models.getModel(provider, id)?.cost.cacheRead,
+          ...(request.onCacheMiss === undefined ? {} : { onCacheMiss: request.onCacheMiss })
+        },
+        {
+          settings: compaction,
+          begin: (trigger) => {
+            live.trigger = trigger
+          },
+          entryToMessages: pi.sessionEntryToContextMessages as (
+            entry: never
+          ) => readonly StoredMessage[],
+          onFailure: onCompactionFailure
+        }
+      )
     }
   }
 }
@@ -199,10 +277,68 @@ export function toolCallCount(messages: readonly StoredMessage[]): number {
   return count
 }
 
-function wrap(session: AgentSession, skills: NodeSkills, cache: CacheWatch): NodeSession {
+// What a node needs to compact itself: the setting, somewhere to record which
+// trigger fired, π's entry mapping for the transcript, and where a failure is
+// reported. The rules themselves are the shared ones — there is no
+// node-specific compaction.
+interface NodeCompaction {
+  readonly settings: () => CompactionSettings
+  readonly begin: (trigger: CompactionTrigger) => void
+  readonly entryToMessages: (entry: never) => readonly StoredMessage[]
+  readonly onFailure: (cause: unknown) => void
+}
+
+/**
+ * A π session as the engine's `NodeSession`: one delivery door, and the
+ * compaction the same rules give every other agent loop Crucible runs.
+ * Exported so the compaction's waits can be driven against a scripted session.
+ */
+export function wrapNodeSession(
+  session: AgentSession,
+  skills: NodeSkills,
+  cache: CacheWatch,
+  compaction: NodeCompaction
+): NodeSession {
   const activityListeners = new Set<(now: string | undefined) => void>()
   const inflight = new Map<string, string>()
   const { retention } = retentionInForce()
+  /** One conversation, so the watch holds exactly one entry. */
+  const NODE = 'node'
+  // The compaction running on this conversation, if one is, and the promise a
+  // message waits on. π refuses a prompt outright while a compaction is in
+  // progress, so without somewhere to hold the wait the engine's next message
+  // — a monitor's wake, a run's report — would be thrown away and the node
+  // would stall on a turn that said nothing.
+  let compacting: Promise<void> | undefined
+  // Between the engine deciding to speak and π reporting a stream, this is the
+  // only sign the conversation is spoken for; without it a trigger could start
+  // a compaction underneath a turn that is about to begin, and `compact()`
+  // aborts whatever is running first.
+  let prompting = false
+
+  const watch = createCompactionWatch({
+    settings: compaction.settings,
+    retention,
+    idle: () => !prompting && !session.isStreaming && compacting === undefined,
+    compact: (_id, trigger) => {
+      compaction.begin(trigger)
+      // Never rejects: the watch is told when a compaction is over however it
+      // ended, and the failure is the run log's to carry. What the compaction
+      // left behind is read off the conversation with the next size, the same
+      // way a session's is.
+      compacting = (async () => {
+        try {
+          await session.compact()
+        } catch (cause) {
+          compaction.onFailure(cause)
+        } finally {
+          watch.compacted(NODE)
+        }
+      })().finally(() => {
+        compacting = undefined
+      })
+    }
+  })
 
   /** Rounded to a hundredth of a cent, so no dollar figure carries a tail. */
   const round = (dollars: number): number => Math.round(dollars * 10_000) / 10_000
@@ -253,21 +389,54 @@ function wrap(session: AgentSession, skills: NodeSkills, cache: CacheWatch): Nod
   }
 
   // The run view renders a node's transcript through the chat's own code, so
-  // the seams have to be in it. Placed the one way Crucible places them: over
-  // the entries, which for a node session that never jumps or compacts is the
-  // path it is showing anyway.
+  // the seams have to be in it, placed the one way Crucible places them: over
+  // the entries.
   function transcriptNow(): readonly TranscriptItem[] {
-    const messages = session.messages as unknown as StoredMessage[]
+    // The branch rather than the model's view of it: a compaction changes what
+    // the next request carries, and the run view goes on showing everything
+    // the node did.
+    const { messages, compactions } = branchHistory(
+      session.sessionManager.getBranch(),
+      compaction.entryToMessages,
+      (details) => storedCompactionOf(details)?.record
+    )
     const seams = new Map<number, CacheMissFacts>()
     for (const [at, miss] of pathSeams(session.sessionManager.getEntries(), messages, cache)) {
       seams.set(at, seamFacts(miss))
     }
-    return toTranscript(messages, seams, skills)
+    return toTranscript(messages, seams, skills, compactions)
+  }
+
+  // Every billed turn re-asks the size rules, which need the size and what
+  // this conversation's own last compaction left it at, and re-arms the idle
+  // clock when there is a cache to run ahead of. The compaction's result is
+  // read off the entries π keeps rather than remembered here, exactly as a
+  // session reads it off its own, so one fact has one home.
+  //
+  // The instant is the prefix's, never the message's own stamp: the idle rule
+  // exists to spend a compaction while a warm prefix is still there to read,
+  // so on a provider that caches nothing it must not run at all. That is the
+  // same fact, from the same scan, that a session reports across the port.
+  function noteSize(): void {
+    const usage = session.getContextUsage()
+    if (usage?.tokens == null) return
+    const prefix = scanCacheMisses(
+      entriesToScan(session.sessionManager.getEntries()),
+      cache
+    ).tracker.cachedPrefix()
+    const compactedTo = previousCompaction(session.sessionManager.getBranch())?.record.tokensAfter
+    watch.saw(NODE, {
+      usedTokens: usage.tokens,
+      contextWindow: usage.contextWindow,
+      ...(compactedTo === undefined ? {} : { compactedTo }),
+      ...(prefix === undefined ? {} : { lastRequestAt: prefix.at })
+    })
   }
 
   const unsubscribe = session.subscribe((event) => {
     if (event.type === 'message_end' && event.message.role === 'assistant') {
       observe(event.message as StoredMessage)
+      noteSize()
     }
     const now = liveness(event as Record<string, unknown>, inflight)
     if (now === null) return
@@ -276,16 +445,31 @@ function wrap(session: AgentSession, skills: NodeSkills, cache: CacheWatch): Nod
 
   return {
     async prompt(text: string): Promise<void> {
-      // Model trouble never rejects the loop: a turn that failed ends and
-      // the engine's nudge/stall machinery takes it from there.
+      // A compaction is not a failed turn: it is a "not yet". The message waits
+      // for the rewrite rather than being refused and swallowed, exactly as a
+      // session's send waits in the shell.
+      prompting = true
       try {
+        while (compacting !== undefined) await compacting
+        // Model trouble never rejects the loop: a turn that failed ends and
+        // the engine's nudge/stall machinery takes it from there.
         await session.prompt(text)
       } catch {
         // The session's own subscribers saw whatever there was to see.
+      } finally {
+        prompting = false
+        // A trigger held back by this turn acts here, before the engine is told
+        // the turn is over — so the engine's next message finds the compaction
+        // already running and waits for it above, instead of racing it.
+        watch.settled(NODE)
       }
     },
 
     async abort(): Promise<void> {
+      // Whatever the conversation is doing stops, the rewrite included: a
+      // release that left a compaction running would hold the next message
+      // behind a wait nobody is waiting for any more.
+      if (compacting !== undefined) session.abortCompaction()
       await session.abort().catch(() => {})
     },
 
@@ -330,7 +514,9 @@ function wrap(session: AgentSession, skills: NodeSkills, cache: CacheWatch): Nod
 
     dispose(): void {
       unsubscribe()
+      watch.dispose()
       activityListeners.clear()
+      if (compacting !== undefined) session.abortCompaction()
       void session
         .abort()
         .catch(() => {})

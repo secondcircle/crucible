@@ -51,6 +51,7 @@ import type {
 import { useIssueBoards } from './board/use-boards'
 import { BashDrawer, type RunView } from './components/BashDrawer'
 import { CacheExpiryChoice } from './components/CacheExpiryChoice'
+import { SummarizingDialog } from './components/SummarizingDialog'
 import { CacheHealthView } from './components/CacheHealthView'
 import { IssueBoard, type IssueSession } from './components/IssueBoard'
 import { type Attachment, Composer, useElapsedSeconds } from './components/Composer'
@@ -158,6 +159,15 @@ interface Choice {
   // that put it there, so this flag is all a cleanup needs to tell the wait
   // state apart from a choice still waiting on an answer.
   readonly summarizing?: boolean
+}
+
+// A send made while the session's conversation was being compacted. The
+// message waits for the compaction rather than cancelling it, and goes out the
+// moment it lands. The draft is untouched meanwhile, so Escape leaves the
+// message exactly where the user typed it.
+interface CompactionWait {
+  readonly sessionId: SessionId
+  readonly text: string
 }
 
 type Confirm =
@@ -300,6 +310,11 @@ export function Shell({
   // The cache expiry choice. Per session like everything else here: what one
   // session asked about puts nothing on another session's screen.
   const [choice, setChoice] = useState<Choice | undefined>(undefined)
+  // A send that arrived mid-compaction, per session like the choice above it.
+  // The ref beside it is what the port's own subscription reads: the
+  // subscription is set up once and never sees a later render's state.
+  const [compactionWait, setCompactionWait] = useState<CompactionWait | undefined>(undefined)
+  const waitingOnCompaction = useRef<CompactionWait | undefined>(undefined)
   // What the model ring just switched to, shown before the port has confirmed
   // it. Dropped when the snapshot agrees, and dropped again if the call fails.
   const [ringed, setRinged] = useState<
@@ -912,6 +927,8 @@ export function Shell({
   // The cache expiry choice belongs to the session that raised it: landing
   // anywhere else dismisses it, so it can only ever be on screen there.
   const choiceShown = choice !== undefined && choice.sessionId === activeSessionId
+  const compactionWaitShown =
+    compactionWait !== undefined && compactionWait.sessionId === activeSessionId
   const occupied =
     issuesOpen ||
     schedulesShown ||
@@ -1071,6 +1088,20 @@ export function Shell({
         arrive(event.snapshot.activeSessionId)
       }
       if (event.type === 'state') askedNow.current = event.snapshot.sessions
+      // The message that waited for a compaction goes out the moment the
+      // session stops compacting, landed or failed: either way the window is
+      // settled and the send is an ordinary one from there.
+      if (event.type === 'state') {
+        const waiting = waitingOnCompaction.current
+        if (
+          waiting !== undefined &&
+          event.snapshot.sessions.find((one) => one.id === waiting.sessionId)?.compacting !== true
+        ) {
+          waitingOnCompaction.current = undefined
+          setCompactionWait(undefined)
+          sendLatest.current(waiting.sessionId, waiting.text)
+        }
+      }
       // A question is a needs-you the moment it is asked, and the snapshot
       // above already carries it.
       if (event.type === 'question_asked') asked(event.sessionId, event.questionId)
@@ -1352,6 +1383,7 @@ export function Shell({
     () => ({
       loginOpen: liveLogin !== undefined,
       expiryChoiceOpen: choice !== undefined,
+      compactionWaitOpen: compactionWait !== undefined,
       confirmOpen: confirm !== undefined,
       popoverOpen: popover !== 'none',
       commandPopoverOpen: browsingCommands,
@@ -1372,6 +1404,7 @@ export function Shell({
     [
       liveLogin,
       choice,
+      compactionWait,
       confirm,
       popover,
       browsingCommands,
@@ -1395,6 +1428,18 @@ export function Shell({
         case 'closeLogin':
           closeLogin()
           return
+
+        // The compaction is stopped and the message stays in the composer,
+        // exactly as it was typed: nothing was cleared while it waited.
+        case 'cancelCompaction': {
+          if (compactionWait === undefined) return
+          const { sessionId } = compactionWait
+          waitingOnCompaction.current = undefined
+          setCompactionWait(undefined)
+          void port.cancel(sessionId).catch((cause: unknown) => report(cause, sessionId))
+          box.current?.focus()
+          return
+        }
 
         case 'answerExpiryChoice': {
           if (choice === undefined) return
@@ -1485,6 +1530,7 @@ export function Shell({
     [
       closeLogin,
       choice,
+      compactionWait,
       jumps,
       port,
       report,
@@ -1986,11 +2032,23 @@ export function Shell({
     if (id === undefined) return
     const text = draft.trim()
     if (text === '') return
+    // A compaction is rewriting what this conversation's model reads. The
+    // message waits for it rather than racing it: sending into a window that
+    // is being replaced would put the turn on whichever half won.
+    if (session?.compacting === true) {
+      const waiting = { sessionId: id, text }
+      waitingOnCompaction.current = waiting
+      setCompactionWait(waiting)
+      return
+    }
     // The cache expiry choice, decided in the frame of the gesture and before
     // anything is expanded, cleared or sent. Only a send that would start a
     // turn can meet it: a live turn's cache is warm, and nothing the run
     // delivers comes through here at all.
-    const prefix = session?.cachedPrefix
+    // An idle compaction already dealt with this conversation's idleness, so
+    // the send goes straight through however long it then sat: what it writes
+    // is the small compacted prefix, not the whole conversation.
+    const prefix = session?.idleCompacted === true ? undefined : session?.cachedPrefix
     const at = Date.now()
     if (!working && prefix !== undefined && prefixExpired(prefix, at)) {
       setChoice({ sessionId: id, prefix, text, at })
@@ -3132,7 +3190,7 @@ export function Shell({
         {/* The overlay region: one host for every overlay. It is here at all
             only while something is in it, and everything in it is anchored to
             it, so no overlay can reach the sidebar or either bar. */}
-        {occupied || confirm !== undefined || choiceShown ? (
+        {occupied || confirm !== undefined || choiceShown || compactionWaitShown ? (
           <div className="region">
             {issuesOpen ? (
               <IssueBoard
@@ -3309,6 +3367,16 @@ export function Shell({
                 onCancel={() => setConfirm(undefined)}
               />
             )}
+
+            {/* A send that arrived while this session was compacting: the
+                same wait the summarize door puts up, and the same way out. */}
+            {compactionWaitShown ? (
+              <SummarizingDialog
+                title="Compacting the conversation"
+                subtitle="Rewriting what the agent reads. Your message goes out the moment this lands."
+                footer="cancel — the conversation is left exactly as it was"
+              />
+            ) : null}
 
             {/* The choice a send raised, above whatever it was raised over,
                 and only ever on the session that raised it. */}

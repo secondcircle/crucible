@@ -17,6 +17,8 @@ import { ASK_TOOL, bindAskTool, type AskRequest, type AskTools } from './ask-too
 import { isWakeMessage, monitorCallSummary } from '../monitors/wording'
 import { isAnswerBatch } from '../questions/wording'
 import type { RunTools } from './run-tools'
+import { planCompaction, settleCompaction } from '../compaction/compaction'
+import type { CompactionRecord, CompactionTrigger } from '../compaction/record'
 import type {
   AuthMethod,
   BashRunShare,
@@ -421,6 +423,13 @@ const SHARED_RUN_ANSWER_DELTAS: readonly string[] = [
 export const FAKE_BRANCH_SUMMARY =
   'Summary of the abandoned branch: the fake adapter summarizes deterministically, in one sentence.'
 
+// What the fake model answers when it is asked to write a trajectory summary.
+// The reply goes through the same reader a real one does, so the compaction a
+// UI check drives is composed by the code a paid one would use.
+export const FAKE_TRAJECTORY_SUMMARY =
+  'Where we are: the fake adapter compacts deterministically. The goal, the standing ' +
+  'decisions and what was abandoned would be written here by the session’s own model.'
+
 // Every workspace starts with these, so resume has something to find.
 const CANNED_HISTORY: readonly { readonly preview: string; readonly items: TranscriptItem[] }[] = [
   {
@@ -656,6 +665,7 @@ export function createFakeAdapter({
     // An empty conversation has reported nothing, and a dash is what nothing
     // looks like.
     if (usedTokens === 0) return
+    const compacted = compactedTo(conversation)
     emit({
       type: 'usage',
       sessionId,
@@ -674,8 +684,24 @@ export function createFakeAdapter({
       },
       // Beside the tokens at every report, exactly as the SDK adapter sends
       // it: what the last turn of this conversation left cached.
-      ...(conversation.prefix === undefined ? {} : { cachedPrefix: conversation.prefix })
+      ...(conversation.prefix === undefined ? {} : { cachedPrefix: conversation.prefix }),
+      // And what the last compaction of this path left it at, read off the
+      // path the same way — the stand-in for the record π keeps on its own
+      // compaction entry, which is why it is still there next launch.
+      ...(compacted === undefined ? {} : { compactedTo: compacted })
     })
+  }
+
+  /** What this conversation's own last compaction left it at, from the path. */
+  function compactedTo(conversation: Conversation): number | undefined {
+    const path = pathEntries(conversation)
+    for (let at = path.length - 1; at >= 0; at -= 1) {
+      const item = path[at]?.item
+      if (item?.kind === 'summary' && item.compaction !== undefined) {
+        return item.compaction.tokensAfter
+      }
+    }
+    return undefined
   }
 
   // The kind is in the token because canned conversations come back identical
@@ -1969,6 +1995,54 @@ export function createFakeAdapter({
       const [removed] = queue.splice(index, 1)
       emitQueue(bound, sessionId)
       return removed
+    },
+
+    // The same compaction a paid one produces, from a canned reply: the
+    // skeleton, the budget and the composition are the shared code, and only
+    // the model's words are scripted.
+    async compact(
+      sessionId: SessionId,
+      trigger: CompactionTrigger
+    ): Promise<CompactionRecord | undefined> {
+      const { conversation } = requireBound(sessionId)
+      emit({ type: 'compaction_started', sessionId })
+      const items = pathEntries(conversation).map((entry) => entry.item)
+      // Cut at the last user message, so a turn is never split between the
+      // skeleton and the verbatim tail.
+      const cut = items.findLastIndex((item) => item.kind === 'user')
+      const aged = cut <= 0 ? [] : items.slice(0, cut)
+      if (aged.length === 0) {
+        emit({ type: 'compacted', sessionId })
+        throw new Error('There is nothing in this conversation to compact yet.')
+      }
+
+      const plan = planCompaction(undefined, aged)
+      const settled = settleCompaction(
+        plan,
+        `<trajectory>${FAKE_TRAJECTORY_SUMMARY}</trajectory><strike></strike>`
+      )
+      if (settled === undefined) {
+        emit({ type: 'compacted', sessionId })
+        throw new Error('The trajectory summary came back empty.')
+      }
+
+      const tokensBefore = conversation.usedTokens
+      const record: CompactionRecord = {
+        trigger,
+        tokensBefore,
+        tokensAfter:
+          estimateTokens(settled.text) +
+          items.slice(cut).reduce((sum, item) => sum + estimateTokens(JSON.stringify(item)), 0)
+      }
+      append(conversation, { kind: 'summary', text: settled.text, compaction: record })
+      conversation.usedTokens = record.tokensAfter
+      // The context legitimately changed, so nothing of the old prefix is held
+      // any more and the next billed turn establishes a new one.
+      conversation.prefix = undefined
+      conversation.at = new Date().toISOString()
+      reportUsage(sessionId, conversation, 0)
+      emit({ type: 'compacted', sessionId, compaction: { text: settled.text, record } })
+      return record
     },
 
     // There is no summary to abort here: the canned one is written in the

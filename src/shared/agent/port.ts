@@ -1,5 +1,10 @@
-// This module imports nothing on purpose: it is the one module the renderer
-// shares with main, so any import here could smuggle a π SDK type across.
+// This module imports nothing that imports anything, on purpose: it is the one
+// module the renderer shares with main, so any import here could smuggle a π
+// SDK type across. The two below are Crucible's own leaf vocabulary, carried
+// by the port because the port is what states them.
+
+import type { CompactionRecord } from '../compaction/record'
+import type { CompactionSettings } from '../compaction/settings'
 
 export type WorkspaceId = string
 
@@ -251,6 +256,14 @@ export interface SessionState {
   // The context panel's tabs, folded in exactly as the queue is. Absent when
   // the session has no tabs, which is what makes the region vanish.
   readonly panel?: PanelState
+  // A compaction is running on this conversation. Not the same as `working`:
+  // nothing is being said to the agent, and a send made now waits for it
+  // rather than joining it. Absent whenever none is.
+  readonly compacting?: true
+  // An idle compaction dealt with this conversation and nothing has been sent
+  // since. What makes the next send go straight through however long it sat,
+  // and what has the miss it may pay recorded as one that was accounted for.
+  readonly idleCompacted?: true
 }
 
 // What Crucible knows about one fact of a cache miss. `'unknown'` is never
@@ -374,8 +387,15 @@ export type TranscriptItem =
       readonly exitCode?: number
     }
   // The context a jump-with-summary or a compaction carried forward: what
-  // the conversation is standing on now, shown so nobody starts blind.
-  | { readonly kind: 'summary'; readonly text: string }
+  // the conversation is standing on now, shown so nobody starts blind. The
+  // messages a compaction replaced stay in the transcript above it: only the
+  // model's view of them changed.
+  | {
+      readonly kind: 'summary'
+      readonly text: string
+      /** Present for a compaction; absent for a branch summary. */
+      readonly compaction?: CompactionRecord
+    }
   // The seam, immediately above the assistant message that paid for it, so a
   // reopened conversation shows its misses where they happened.
   | { readonly kind: 'cacheMiss'; readonly miss: CacheMissFacts }
@@ -553,6 +573,16 @@ export type PortEvent =
       readonly turnId: TurnId
       readonly miss: CacheMissFacts
     }
+  // A compaction finished on this conversation. The `state` event before it
+  // already carried the session with its `compacting` gone; this names what
+  // the model reads now, so an open transcript shows the block where it
+  // happened without re-fetching the whole history.
+  | {
+      readonly type: 'compacted'
+      readonly sessionId: SessionId
+      readonly text: string
+      readonly record: CompactionRecord
+    }
   // π scheduled another attempt at a branch summary a jump is waiting on.
   // Session-scoped like `usage`, with no turn id, because a jump is not a
   // turn.
@@ -647,6 +677,11 @@ export interface AgentPort {
   // checkout. Refused unless the session is fresh; nothing on disk is deleted
   // either way.
   setWorktree(sessionId: SessionId, worktree?: SessionWorktree): Promise<void>
+
+  // The machine-global compaction setting: one switch and one threshold, read
+  // by every agent loop Crucible starts and edited in one place.
+  compactionSettings(): Promise<CompactionSettings>
+  setCompactionSettings(settings: CompactionSettings): Promise<void>
 
   listModels(): Promise<readonly ModelInfo[]>
   setModel(sessionId: SessionId, model: ModelId): Promise<void>
@@ -748,7 +783,8 @@ export interface AgentPort {
   // location a tab carries is what the panel displays, never what it reads by.
   exhibit(sessionId: SessionId, tabId: TabId): Promise<{ readonly body: string }>
 
-  // Stop what this session is doing: the live turn, and a summarizing jump
-  // waiting on π's summary. Harmless when there is nothing to stop.
+  // Stop what this session is doing: the live turn, a summarizing jump waiting
+  // on π's summary, and a running compaction. Harmless when there is nothing
+  // to stop.
   cancel(sessionId: SessionId): Promise<void>
 }

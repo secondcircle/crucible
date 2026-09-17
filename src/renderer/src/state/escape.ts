@@ -10,6 +10,7 @@ export type EscapeSource = 'window' | 'exhibit'
 export type EscapeRung =
   | 'closeLogin'
   | 'answerExpiryChoice'
+  | 'cancelCompaction'
   | 'closeConfirm'
   | 'closePopover'
   | 'closeCommandPopover'
@@ -27,6 +28,8 @@ export type EscapeRung =
 export interface EscapeState {
   readonly loginOpen: boolean
   readonly expiryChoiceOpen: boolean
+  /** A send is waiting on a compaction, which Escape stops. */
+  readonly compactionWaitOpen: boolean
   readonly confirmOpen: boolean
   readonly popoverOpen: boolean
   readonly commandPopoverOpen: boolean
@@ -67,6 +70,9 @@ function windowRung(state: EscapeState): EscapeRung {
   // The cache expiry choice is an answer owed to a send, so it comes off
   // before anything under it.
   if (state.expiryChoiceOpen) return 'answerExpiryChoice'
+  // A send waiting on a compaction is owed the same answer, and Escape is the
+  // only way to stop work that is already spending money.
+  if (state.compactionWaitOpen) return 'cancelCompaction'
   // A confirm is an answer to a click, not a navigation: it stacks above
   // whatever is up and comes off first.
   if (state.confirmOpen) return 'closeConfirm'

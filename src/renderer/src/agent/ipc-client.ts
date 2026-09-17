@@ -26,6 +26,7 @@ import type {
   Unsubscribe,
   WorkspaceId
 } from '../../../shared/agent/port'
+import type { CompactionSettings } from '../../../shared/compaction/settings'
 import { agentBridge } from '../bridge'
 
 // The renderer's side of the agent channel. It holds no state: correlation,
@@ -87,6 +88,10 @@ export function createIpcClient(): AgentPort {
       worktree === undefined
         ? call<void>('setWorktree', sessionId)
         : call<void>('setWorktree', sessionId, worktree),
+
+    compactionSettings: () => call<CompactionSettings>('compactionSettings'),
+    setCompactionSettings: (settings: CompactionSettings) =>
+      call<void>('setCompactionSettings', settings),
 
     listModels: () => call<readonly ModelInfo[]>('listModels'),
 
