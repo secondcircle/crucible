@@ -166,6 +166,12 @@
   margin-right: 6px;
 }
 
+/* A row whose meta states a fact rather than a status carries no mark, and
+   still lines up with the rows that do. */
+.prov .pmeta.nodot {
+  padding-left: 13px;
+}
+
 .dot.in {
   background: var(--ok);
 }
@@ -212,6 +218,81 @@
 
 .addrow {
   margin: 14px 0 0;
+}
+
+/* The switch, built exactly as the schedule board's: one shape for one gesture
+   wherever it appears. */
+.prov .stog {
+  flex: none;
+  width: 30px;
+  height: 16px;
+  border-radius: 9px;
+  border: 1px solid var(--line);
+  background: var(--bg2);
+  position: relative;
+  padding: 0;
+}
+
+.prov .stog i {
+  position: absolute;
+  top: 2px;
+  left: 3px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--faint);
+}
+
+.prov .stog.on {
+  border-color: color-mix(in srgb, var(--accent) 55%, transparent);
+}
+
+.prov .stog.on i {
+  left: auto;
+  right: 3px;
+  background: var(--accent2);
+}
+
+.prov .stog:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+/* A number in thousands: the unit sits inside the field, so the figure typed
+   and the figure meant are never two different things. */
+.kfield {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 3px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  padding: 3px 9px;
+  background: var(--bg2);
+}
+
+.kfield input {
+  width: 56px;
+  border: none;
+  background: none;
+  color: var(--ink);
+  font: 13px var(--mono);
+  text-align: right;
+  padding: 0;
+}
+
+.kfield input:focus {
+  outline: none;
+}
+
+.kfield input::-webkit-outer-spin-button,
+.kfield input::-webkit-inner-spin-button {
+  appearance: none;
+  margin: 0;
+}
+
+.kfield .unit {
+  color: var(--dim);
+  font: 11.5px var(--mono);
 }
 
 .picker {

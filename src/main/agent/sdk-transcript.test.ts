@@ -5,6 +5,7 @@
 import { describe, expect, it } from 'vitest'
 import type { AgentSessionEvent } from '@earendil-works/pi-coding-agent'
 import {
+  branchHistory,
   deliveredBashRunId,
   pathSeams,
   toTranscript,
@@ -319,5 +320,77 @@ describe('a path message \u03c0 repaired on load', () => {
 
     expect([...seams.keys()]).toEqual([1])
     expect(seams.get(1)?.missedTokens).toBe(2000)
+  })
+})
+
+// The whole path, not the model's view of it. π's own entry-to-message
+// mapping is handed in, so this stands in for it with the same contract: one
+// message per message entry, a summary message for a compaction entry.
+function entryToMessages(entry: never): readonly StoredMessage[] {
+  const held = entry as { type?: string; message?: unknown; summary?: string; tokensBefore?: number }
+  if (held.type === 'message') return [held.message as StoredMessage]
+  if (held.type === 'compaction') {
+    return messages({
+      role: 'compactionSummary',
+      summary: held.summary,
+      tokensBefore: held.tokensBefore
+    })
+  }
+  return []
+}
+
+const RECORD = { trigger: 'idle' as const, tokensBefore: 214_000, tokensAfter: 48_000 }
+
+describe('a branch that has been compacted', () => {
+  const branch = [
+    { type: 'message', message: { role: 'user', content: 'The first ask, long ago.' } },
+    {
+      type: 'message',
+      message: {
+        role: 'assistant',
+        stopReason: 'endTurn',
+        content: [{ type: 'text', text: 'Answered it.' }]
+      }
+    },
+    {
+      type: 'compaction',
+      summary: '## Where we are\n\nStanding here.',
+      tokensBefore: 214_000,
+      details: { crucible: { record: RECORD, state: { skeleton: [] } } }
+    },
+    { type: 'message', message: { role: 'user', content: 'The ask after it.' } }
+  ]
+
+  it('keeps every compacted-away message in the transcript', () => {
+    const { messages: path, compactions } = branchHistory(branch, entryToMessages, () => RECORD)
+    const items = toTranscript(path, undefined, undefined, compactions)
+
+    expect(items.map((item) => item.kind)).toEqual(['user', 'assistant', 'summary', 'user'])
+    expect(items[0]).toEqual({ kind: 'user', text: 'The first ask, long ago.' })
+  })
+
+  it('states what fired the compaction and what the window went from and to', () => {
+    const { messages: path, compactions } = branchHistory(branch, entryToMessages, () => RECORD)
+    const items = toTranscript(path, undefined, undefined, compactions)
+
+    expect(items[2]).toEqual({
+      kind: 'summary',
+      text: '## Where we are\n\nStanding here.',
+      compaction: RECORD
+    })
+  })
+
+  // A branch summary is a summary too, and carries none of this.
+  it('leaves a summary nobody recorded facts for as a plain one', () => {
+    const { messages: path, compactions } = branchHistory(
+      branch,
+      entryToMessages,
+      () => undefined
+    )
+    expect(compactions.size).toBe(0)
+    expect(toTranscript(path, undefined, undefined, compactions)[2]).toEqual({
+      kind: 'summary',
+      text: '## Where we are\n\nStanding here.'
+    })
   })
 })

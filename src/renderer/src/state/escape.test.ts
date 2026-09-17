@@ -4,6 +4,7 @@ import { escapeRung, type EscapeRung, type EscapeState } from './escape'
 const NOTHING_UP: EscapeState = {
   loginOpen: false,
   expiryChoiceOpen: false,
+  compactionWaitOpen: false,
   confirmOpen: false,
   popoverOpen: false,
   commandPopoverOpen: false,

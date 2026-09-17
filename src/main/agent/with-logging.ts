@@ -86,6 +86,12 @@ export function withLogging(shell: Shell, log: LogSink, adapter: string): Shell 
       shell.setWorktree(sessionId, worktree)
     ),
 
+    // Read-only like the snapshot, and read whenever the section opens.
+    compactionSettings: () => shell.compactionSettings(),
+    setCompactionSettings: op('setCompactionSettings', (settings) =>
+      shell.setCompactionSettings(settings)
+    ),
+
     listModels: op('listModels', () => shell.listModels()),
     setModel: op('setModel', (sessionId, model) => shell.setModel(sessionId, model)),
     setThinkingLevel: op('setThinkingLevel', (sessionId, level) =>

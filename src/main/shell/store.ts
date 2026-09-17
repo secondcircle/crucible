@@ -9,6 +9,11 @@ import type {
   ThinkingLevel,
   WorkspaceId
 } from '../../shared/agent/port'
+import {
+  DEFAULT_COMPACTION_SETTINGS,
+  readCompactionSettings,
+  type CompactionSettings
+} from '../../shared/compaction/settings'
 import type { Flavor } from '../agent/select-adapter'
 import type { StoredPanel, StoredPanelTab } from '../panel/model'
 
@@ -69,12 +74,16 @@ export interface ShellStoreState {
   readonly activeSessionByWorkspace: Readonly<Record<WorkspaceId, SessionId>>
   /** What a new session starts on. */
   readonly lastModel?: ModelId
+  // Machine-global, like the file it lives in: one switch and one threshold
+  // governing every agent loop this installation starts.
+  readonly compaction: CompactionSettings
 }
 
 const EMPTY: ShellStoreState = {
   workspaces: [],
   sessions: [],
-  activeSessionByWorkspace: {}
+  activeSessionByWorkspace: {},
+  compaction: DEFAULT_COMPACTION_SETTINGS
 }
 
 export interface ShellStore {
@@ -97,6 +106,7 @@ export interface ShellStore {
   // up the sidebar. The only writer of `lastUsedAt`.
   recordUse(id: WorkspaceId): void
   setLastModel(model: ModelId): void
+  setCompaction(settings: CompactionSettings): void
 }
 
 export type StoreWriteFailure = (cause: unknown) => void
@@ -238,6 +248,10 @@ export function createShellStore(
 
     setLastModel(model: ModelId): void {
       save({ ...state, lastModel: model })
+    },
+
+    setCompaction(settings: CompactionSettings): void {
+      save({ ...state, compaction: settings })
     }
   }
 }
@@ -328,7 +342,10 @@ function load(path: string): ShellStoreState {
     activeWorkspaceId: workspaces.some((workspace) => workspace.id === file.activeWorkspaceId)
       ? (file.activeWorkspaceId as WorkspaceId)
       : workspaces[0]?.id,
-    lastModel: typeof file.lastModel === 'string' ? file.lastModel : undefined
+    lastModel: typeof file.lastModel === 'string' ? file.lastModel : undefined,
+    // A record written before the setting existed reads as the default, which
+    // is what every installation runs until somebody changes it.
+    compaction: readCompactionSettings(file.compaction)
   }
 }
 

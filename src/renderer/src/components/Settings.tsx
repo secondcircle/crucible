@@ -7,6 +7,11 @@ import type {
   SessionState,
   SessionUsage
 } from '../../../shared/agent/port'
+import {
+  MAX_THRESHOLD_K,
+  MIN_THRESHOLD_K,
+  type CompactionSettings
+} from '../../../shared/compaction/settings'
 import type { WorkspaceService } from '../../../shared/workspace/service'
 import { tokens } from '../labels'
 import type { AskedPrompt, Auth } from '../settings/use-auth'
@@ -17,7 +22,7 @@ import './settings.css'
 // recomputed on demand from π's per-message numbers.
 
 /** A row in the rail. Only sections that exist are listed. */
-export type SettingsSection = 'providers' | 'usage' | 'research'
+export type SettingsSection = 'providers' | 'usage' | 'research' | 'compaction'
 
 // The rail's whole content. Adding a section here costs no layout anywhere,
 // which is the point of the fixed card.
@@ -31,7 +36,13 @@ const SECTIONS: readonly {
   { id: 'usage', label: 'Usage', glyph: '$', subtitle: 'Tokens and cost, recomputed on open' },
   // Never the vendor's name: a second research provider later must not rename
   // the section. Machine-global, so it renders the same with no workspace open.
-  { id: 'research', label: 'Research', glyph: '⌕', subtitle: 'Reading the web, on this machine' }
+  { id: 'research', label: 'Research', glyph: '⌕', subtitle: 'Reading the web, on this machine' },
+  {
+    id: 'compaction',
+    label: 'Compaction',
+    glyph: '↯',
+    subtitle: 'When an agent rewrites its own context'
+  }
 ]
 
 /** Two decimals, or a dash while nothing has been reported (the meter's rule). */
@@ -114,6 +125,8 @@ export function Settings({
                 // Mounted only while it is the shown section, which is what
                 // reads the status on every open and never on any other.
                 <ResearchPane workspace={workspace} />
+              ) : section === 'compaction' ? (
+                <CompactionPane port={port} />
               ) : (
                 <UsagePane
                   port={port}
@@ -129,6 +142,122 @@ export function Settings({
 
         {auth.login === undefined ? null : <LoginDialog auth={auth} />}
       </div>
+    </div>
+  )
+}
+
+// One switch and one number, for every agent loop this machine runs. The
+// recent span and the idle minutes are not here on purpose: they are the
+// implementation's, and the idle minutes are derived from the retention.
+function CompactionPane({ port }: { readonly port: AgentPort }): React.JSX.Element {
+  const [settings, setSettings] = useState<CompactionSettings | undefined>(undefined)
+  // What the field holds while it is being typed into, which is not yet a
+  // threshold: `2` on the way to `200` is not a setting anybody asked for.
+  const [typed, setTyped] = useState<string | undefined>(undefined)
+  const [failure, setFailure] = useState<string | undefined>(undefined)
+
+  useEffect(() => {
+    let current = true
+    port
+      .compactionSettings()
+      .then((read) => {
+        if (current) setSettings(read)
+      })
+      .catch((cause: unknown) => {
+        if (current) setFailure(cause instanceof Error ? cause.message : String(cause))
+      })
+    return () => {
+      current = false
+    }
+  }, [port])
+
+  // The control moves in the frame of the click and the write follows it; a
+  // refusal puts the control back where it was.
+  function write(next: CompactionSettings): void {
+    const previous = settings
+    setSettings(next)
+    setFailure(undefined)
+    void port.setCompactionSettings(next).catch((cause: unknown) => {
+      setSettings(previous)
+      setFailure(cause instanceof Error ? cause.message : String(cause))
+    })
+  }
+
+  function commitThreshold(): void {
+    if (settings === undefined || typed === undefined) return
+    const asked = Number(typed)
+    setTyped(undefined)
+    if (!Number.isFinite(asked)) return
+    const thresholdK = Math.min(MAX_THRESHOLD_K, Math.max(MIN_THRESHOLD_K, Math.round(asked)))
+    if (thresholdK === settings.thresholdK) return
+    write({ ...settings, thresholdK })
+  }
+
+  return (
+    <div className="pane">
+      <div className="prov">
+        <span className="pname">Compact automatically</span>
+        <span className="pmeta">
+          <span
+            className={`dot ${settings?.enabled === true ? 'in' : 'out'}`}
+            aria-hidden="true"
+          />
+          {settings === undefined
+            ? 'Reading the setting…'
+            : settings.enabled
+              ? 'On for every agent Crucible runs'
+              : 'Off — only the model’s own window edge compacts'}
+        </span>
+        <button
+          className={`stog${settings?.enabled === true ? ' on' : ''}`}
+          role="switch"
+          aria-checked={settings?.enabled === true}
+          aria-label="Compact automatically"
+          disabled={settings === undefined}
+          onClick={() => {
+            if (settings !== undefined) write({ ...settings, enabled: !settings.enabled })
+          }}
+        >
+          <i />
+        </button>
+      </div>
+
+      <div className="prov">
+        <span className="pname">Compact at</span>
+        <span className="pmeta nodot">
+          Thousands of tokens — {MIN_THRESHOLD_K} to {MAX_THRESHOLD_K.toLocaleString()}
+        </span>
+        <span className="kfield">
+          <input
+            type="number"
+            aria-label="Compact at, in thousands of tokens"
+            min={MIN_THRESHOLD_K}
+            max={MAX_THRESHOLD_K}
+            disabled={settings === undefined}
+            value={typed ?? settings?.thresholdK ?? ''}
+            onChange={(changed) => setTyped(changed.target.value)}
+            onBlur={commitThreshold}
+            onKeyDown={(pressed) => {
+              if (pressed.key === 'Enter') pressed.currentTarget.blur()
+            }}
+          />
+          <span className="unit">k</span>
+        </span>
+      </div>
+
+      {failure === undefined ? null : (
+        <p className="pfail" role="alert">
+          {failure}
+        </p>
+      )}
+
+      <p className="note">
+        A conversation past the threshold rewrites what its model reads: a trajectory summary the
+        model writes, a skeleton of everything before that point, and the recent messages
+        untouched. Nothing is deleted — the transcript and the session tree keep every message.
+        A conversation that has sat idle long enough to lose its prompt cache is compacted before
+        it does, so the next message is billed against the small context instead of the whole one.
+      </p>
     </div>
   )
 }

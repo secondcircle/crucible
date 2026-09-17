@@ -328,6 +328,11 @@
   max-width: var(--column);
   margin: 0 auto 16px;
   padding: 10px 14px;
+  /* A skeleton line carries a path, a command or a stretch of what somebody
+     typed, any of which can be one unbreakable run of characters. Without this
+     one of them pushes the card past the column and scrolls the transcript
+     sideways. */
+  overflow-wrap: anywhere;
   border: 1px solid color-mix(in srgb, var(--thinking) 45%, transparent);
   border-radius: var(--radius);
   background: var(--think-bg);
@@ -341,6 +346,16 @@
   letter-spacing: 0.08em;
   color: var(--thinking);
   margin-bottom: 6px;
+}
+
+/* The compaction's own facts, on the tag row rather than in the summary: the
+   summary is what the model reads, and these are about the rewrite. */
+.summarycard .sumfacts {
+  margin-left: 8px;
+  color: var(--faint);
+  text-transform: none;
+  letter-spacing: 0;
+  font: 11px var(--mono);
 }
 
 /* errors are cards in the transcript, never toasts */

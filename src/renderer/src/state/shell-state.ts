@@ -9,6 +9,7 @@ import type {
   TranscriptItem,
   TurnId
 } from '../../../shared/agent/port'
+import type { CompactionRecord } from '../../../shared/compaction/record'
 
 // Time is an input, never a reading: the caller stamps each event, so React
 // may replay this reducer under StrictMode without elapsed times drifting.
@@ -47,7 +48,11 @@ export type ViewItem =
       readonly output: string
       readonly exitCode?: number
     }
-  | { readonly kind: 'summary'; readonly text: string }
+  | {
+      readonly kind: 'summary'
+      readonly text: string
+      readonly compaction?: CompactionRecord
+    }
   | { readonly kind: 'system'; readonly text: string; readonly card: SystemCard }
   | { readonly kind: 'cacheMiss'; readonly miss: CacheMissFacts }
   | { readonly kind: 'stopped' }
@@ -230,6 +235,18 @@ function heard(state: ShellState, event: PortEvent, at: number): ShellState {
           output: event.output,
           ...(event.exitCode === undefined ? {} : { exitCode: event.exitCode })
         }
+      ]
+    })
+  }
+
+  // A compaction belongs to no turn: it lands where the conversation stands,
+  // and the messages it replaced stay above it exactly as they were.
+  if (event.type === 'compacted') {
+    return withView(state, sessionId, {
+      ...view,
+      items: [
+        ...settle(view.items, at),
+        { kind: 'summary', text: event.text, compaction: event.record }
       ]
     })
   }
