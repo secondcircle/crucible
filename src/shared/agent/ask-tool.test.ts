@@ -50,6 +50,16 @@ describe('the teaching the tool carries', () => {
   const parameter = (name: string): string =>
     ASK_TOOL_DEFINITION.parameters.find((one) => one.name === name)?.description ?? ''
 
+  // The rule comes first, so a model skimming the description reads when
+  // before how: every question, whether or not it goes on working.
+  it('opens by claiming every question, and rules the message out', () => {
+    expect(description.startsWith('The channel for every question you have for the user.')).toBe(
+      true
+    )
+    expect(description).toMatch(/whether you keep working or end your turn/)
+    expect(description).toMatch(/typed into a message scrolls\s+away/)
+  })
+
   it('says the call comes back at once and carries no answer', () => {
     expect(description).toMatch(/comes back\s+at once/)
     expect(description).toMatch(/never carries an answer/)

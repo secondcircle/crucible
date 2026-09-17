@@ -23,9 +23,11 @@ export const ASK_TOOL_DEFINITION: AskToolDefinition = {
   name: ASK_TOOL,
   label: 'Ask the User',
   description:
-    'Put one decision to the user without stopping. The question appears in the questions ' +
-    'dock, pinned above their composer where it cannot scroll away, and this call comes back ' +
-    'at once.\n\n' +
+    'The channel for every question you have for the user. Anything you would otherwise ' +
+    'end a message with a question mark on goes here instead, one decision per call, ' +
+    'whether you keep working or end your turn. A question typed into a message scrolls ' +
+    'away under the next tool call; one asked here appears in the questions dock, pinned ' +
+    'above their composer where it cannot scroll away, and this call comes back at once.\n\n' +
     'It never carries an answer. Ask, then carry on with whatever does not depend on the ' +
     'answer, or end your turn and wait. Never sleep, never poll, never ask the same thing ' +
     'again in a message: a second ask is a second question in their line.\n\n' +
@@ -36,9 +38,9 @@ export const ASK_TOOL_DEFINITION: AskToolDefinition = {
     'decide that one yourself and say what you decided.\n\n' +
     'One question per call. Several decisions are several calls, made together; do not pack ' +
     'two questions into one.\n\n' +
-    'Ask when the work genuinely forks and the user owns the fork: a preference, a ' +
-    'trade-off, a scope call, something only they know. Do not ask what the repository, the ' +
-    'code or your own tools can tell you, and do not ask for permission to do the obvious.',
+    'A question is for a decision the user owns: a preference, a trade-off, a scope call, ' +
+    'something only they know. Facts the repository, the code or your own tools can tell ' +
+    'you are yours to find, and the obvious needs no permission.',
   parameters: [
     {
       name: 'question',

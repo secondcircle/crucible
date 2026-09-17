@@ -34,17 +34,13 @@ Everything else, you decide:
   veto at a glance.
 - **Facts** are found, never asked. Go and find them with your own tools.
 
-Expect one round, occasionally two. Prefer `crucible_ask` for every question:
-one call per question, all of them together, so the round lands in the user's
-questions dock rather than scrolling away under the next tool chain. Where
-that tool is not available, ask in the message instead, numbered continuously
-so the user can point back at one:
-
-```
-❓ **Q1** - **<question title>**: <question body>
-
-➡️ <your recommended answer>
-```
+Expect one round, occasionally two. Every question is a `crucible_ask` call:
+one call per question, all of them made together, so the round lands in the
+user's questions dock rather than scrolling away under the next tool chain.
+Never write a round into the message instead. Open each `question` with its
+number (`Q1: ...`), numbered continuously across rounds so the user can point
+back at one; the choices go in `context`, your recommended answer in
+`recommendation`.
 
 Zero questions is a legitimate interview: if the subject has no real
 functional trade-offs, restate what you understood, confirm it, and end.

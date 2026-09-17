@@ -26,16 +26,12 @@ guessing at answers you haven't heard yet. Ask the whole frontier in one
 round: number each question and give your recommended answer. Then wait for
 the user's answers before the next round.
 
-Prefer `crucible_ask` for every question of a round: one call per question,
-all of them together, so the round arrives in the user's questions dock where
-it cannot scroll away and their answers come back in one message. Where that
-tool is not available, ask in the message instead, formatted like so:
-
-```
-❓ **Q1** - **<question title>**: <question body, might be multiple paragraphs, including multiple choices>
-
-➡️ <your recommended answer>
-```
+Every question of a round is a `crucible_ask` call: one call per question,
+all of them made together, so the round arrives in the user's questions dock
+where it cannot scroll away and their answers come back in one message. Never
+write a round into the message instead. Open each `question` with its number
+(`Q1: ...`), put the choices in `context`, and your recommended answer in
+`recommendation`.
 
 Each round the user answers reshapes the tree: settled decisions push the
 frontier outward and unblock questions that depended on them. Recompute the
