@@ -66,8 +66,10 @@ function namedNodes(nodes: readonly RunNode[]): string {
  * falling back to fixed words, because an empty plan is not an unknown state:
  * it is a run the quit caught between nodes, or on a workflow-level check-in,
  * or mid-revision of a node whose own record completed. The engine replays
- * what completed in every one of them, and re-spends nothing, so nothing here
- * may name a fresh attempt from a prompt.
+ * what completed in every one of them. What it then does to a cut revision is
+ * the same two-way split, read from the same token the engine reopens, so a
+ * record written before sessions outlived the app is told it runs again from
+ * its prompt rather than promised a continuation nothing can make.
  */
 function resumeSentence(run: RunRecord, kind: ResumeKind): string {
   const { continued, restarted } = resumePlan(run, kind)
@@ -79,13 +81,22 @@ function resumeSentence(run: RunRecord, kind: ResumeKind): string {
         'already finished from the record rather than working it again'
     )
     const cut = cutRevisions(run)
-    if (cut.length > 0) {
-      const one = cut.length === 1
+    if (cut.continued.length > 0) {
+      const one = cut.continued.length === 1
       parts.push(
-        `${namedNodes(cut)} ${one ? 'is a revision' : 'are revisions'} the quit cut down, and ` +
-          `${one ? 'it continues' : 'they continue'} in the session ` +
+        `${namedNodes(cut.continued)} ${one ? 'is a revision' : 'are revisions'} the quit cut ` +
+          `down, and ${one ? 'it continues' : 'they continue'} in the session ` +
           `${one ? 'that node was' : 'those nodes were'} working in, so nothing ` +
           `${one ? 'it' : 'they'} already spent is spent again`
+      )
+    }
+    if (cut.restarted.length > 0) {
+      const one = cut.restarted.length === 1
+      parts.push(
+        `${namedNodes(cut.restarted)} ${one ? 'is a revision' : 'are revisions'} the quit cut ` +
+          `down with no session left to continue, so ${one ? 'it runs' : 'they run'} again from ` +
+          `${one ? 'its' : 'their'} prompt as a fresh attempt beside the ` +
+          `${one ? 'one' : 'ones'} that stopped`
       )
     }
     return `Resuming: ${parts.join('; ')}.`

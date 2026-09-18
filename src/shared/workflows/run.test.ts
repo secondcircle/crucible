@@ -119,15 +119,34 @@ describe('what a resume will do', () => {
   // The state the empty plan hides, named on its own so a surface can speak
   // about it: the record the quit cut down is a revision of a node that had
   // already completed once, and the session behind it is the completed
-  // record's.
-  it('names the revision a quit cut down, which is nobody the plan puts to work', () => {
+  // record's — so it is that record's token, not the revision's, that says
+  // which act the resume performs.
+  it('continues the revision a quit cut down in the session its completion named', () => {
     const run = runOf([
       node('spec', 'complete'),
       node('gate', 'complete', { sessionToken: TOKEN }),
       node('gate·r1', 'interrupted')
     ])
-    expect(cutRevisions(run).map((record) => record.id)).toEqual(['gate·r1'])
+    expect(cutRevisions(run).continued.map((record) => record.id)).toEqual(['gate·r1'])
+    expect(cutRevisions(run).restarted).toEqual([])
     expect(stoppedNodes(run)).toEqual([])
+  })
+
+  // A record written before sessions outlived the app: nothing in the chain
+  // carries a token, so `revise()` opens a fresh session from the node's whole
+  // prompt. The split says so rather than promising a continuation.
+  it('restarts the cut revision of a chain whose completion named no session', () => {
+    const run = runOf([node('gate', 'complete'), node('gate·r1', 'interrupted')])
+    expect(cutRevisions(run).restarted.map((record) => record.id)).toEqual(['gate·r1'])
+    expect(cutRevisions(run).continued).toEqual([])
+
+    // The revision's own token is never the one reopened: the engine reads the
+    // completed record's, so a token here changes nothing.
+    const revisionToken = runOf([
+      node('gate', 'complete'),
+      node('gate·r1', 'interrupted', { sessionToken: OTHER_TOKEN })
+    ])
+    expect(cutRevisions(revisionToken).restarted.map((record) => record.id)).toEqual(['gate·r1'])
   })
 
   it('names no revision for a chain that finished, or one that never revised', () => {
@@ -135,8 +154,11 @@ describe('what a resume will do', () => {
       cutRevisions(
         runOf([node('gate', 'complete', { sessionToken: TOKEN }), node('gate·r1', 'complete')])
       )
-    ).toEqual([])
-    expect(cutRevisions(runOf([node('gate', 'interrupted', { sessionToken: TOKEN })]))).toEqual([])
+    ).toEqual({ continued: [], restarted: [] })
+    expect(cutRevisions(runOf([node('gate', 'interrupted', { sessionToken: TOKEN })]))).toEqual({
+      continued: [],
+      restarted: []
+    })
   })
 
   it('still names every node of a fan-out the quit cut down', () => {

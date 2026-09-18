@@ -42,13 +42,26 @@ function bigTranscript(): readonly TranscriptItem[] {
 
 const settled = (ms = 30): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms))
 
+// Waiting for a write to land, rather than guessing how long one takes. A
+// fixed sleep passes on an idle machine and fails on a loaded one, which is
+// the only machine this store exists for: the writes are off the caller's
+// thread now, so a test that asserts on disk has to watch the disk. The
+// sleeps that remain below are the ones whose duration is the subject.
+async function landed(what: () => boolean | Promise<boolean>, ms = 4000): Promise<void> {
+  const deadline = Date.now() + ms
+  while (!(await what())) {
+    if (Date.now() > deadline) throw new Error('timed out waiting for a write to land')
+    await settled(5)
+  }
+}
+
 describe('run store', () => {
   it('loads what was saved, newest first, across store instances', async () => {
     const root = tempRoot()
     const store = createRunStore(root, undefined, 0)
     store.save(record('aa11', '2026-08-20T10:00:00.000Z'))
     store.save(record('bb22', '2026-08-20T11:00:00.000Z'))
-    await settled()
+    await landed(() => existsSync(join(root, 'bb22', 'run.json')))
 
     const again = createRunStore(root)
     expect(again.load().map((run) => run.id)).toEqual(['bb22', 'aa11'])
@@ -59,10 +72,11 @@ describe('run store', () => {
   })
 
   it('keeps transcripts per node, revision ids included', async () => {
-    const store = createRunStore(tempRoot(), undefined, 0)
+    const root = tempRoot()
+    const store = createRunStore(root, undefined, 0)
     store.save(record('cc33', '2026-08-20T10:00:00.000Z'))
     store.writeTranscript('cc33', 'review·r1', () => [{ kind: 'assistant', markdown: 'judged.' }])
-    await settled()
+    await landed(async () => (await store.readTranscript('cc33', 'review·r1')).length > 0)
     await expect(store.readTranscript('cc33', 'review·r1')).resolves.toEqual([
       { kind: 'assistant', markdown: 'judged.' }
     ])
@@ -97,7 +111,7 @@ describe('what a write costs the caller', () => {
     expect(existsSync(path)).toBe(false)
     expect(spent).toBeLessThan(100)
 
-    await settled(60)
+    await landed(() => existsSync(path))
     expect(JSON.parse(readFileSync(path, 'utf8'))).toHaveLength(transcript.length)
   })
 
@@ -142,15 +156,15 @@ describe('what a write costs the caller', () => {
         return [{ kind: 'assistant', markdown: `turn ${at}` }]
       })
     }
-    await settled(120)
+    const path = join(root, 'gg77', 'transcripts', 'builder.json')
+    await landed(() => existsSync(path) && readFileSync(path, 'utf8').includes('turn 49'))
 
     // One write went out at once and one trailing write carried the latest
     // value; the forty-eight in between cost nothing but a function call.
     expect(taken).toBeLessThanOrEqual(2)
-    const written = JSON.parse(
-      readFileSync(join(root, 'gg77', 'transcripts', 'builder.json'), 'utf8')
-    ) as TranscriptItem[]
-    expect(written).toEqual([{ kind: 'assistant', markdown: 'turn 49' }])
+    expect(JSON.parse(readFileSync(path, 'utf8')) as TranscriptItem[]).toEqual([
+      { kind: 'assistant', markdown: 'turn 49' }
+    ])
   })
 
   it('never stacks a write behind one in flight', async () => {
@@ -165,7 +179,8 @@ describe('what a write costs the caller', () => {
         return [{ kind: 'assistant', markdown: `turn ${at}` }]
       })
     }
-    await settled(60)
+    const path = join(root, 'hh88', 'transcripts', 'builder.json')
+    await landed(() => existsSync(path) && readFileSync(path, 'utf8').includes('turn 199'))
     expect(taken).toBe(2)
   })
 
@@ -173,7 +188,7 @@ describe('what a write costs the caller', () => {
     const root = tempRoot()
     const store = createRunStore(root, undefined, 0)
     store.save(record('ii99', '2026-08-20T10:00:00.000Z'))
-    await settled()
+    await landed(() => existsSync(join(root, 'ii99', 'run.json')))
     const body = readFileSync(join(root, 'ii99', 'run.json'), 'utf8')
     expect(body).not.toContain('\n')
     expect(JSON.parse(body)).toMatchObject({ id: 'ii99' })
@@ -186,10 +201,12 @@ describe('what a write costs the caller', () => {
     // out the interval, which here is longer than the app has left.
     store.save(record('jj00', '2026-08-20T10:00:00.000Z'))
     store.writeTranscript('jj00', 'builder', () => [{ kind: 'assistant', markdown: 'first' }])
-    await settled()
+    await landed(() => existsSync(join(root, 'jj00', 'transcripts', 'builder.json')))
 
     store.save({ ...record('jj00', '2026-08-20T10:00:00.000Z'), status: 'interrupted' })
     store.writeTranscript('jj00', 'builder', () => [{ kind: 'assistant', markdown: 'last word' }])
+    // Held for the interval, which outlasts this test by a minute: what is on
+    // disk is still the first write, whenever this looks.
     await settled()
     expect(createRunStore(root).load()[0].status).toBe('complete')
 
@@ -208,11 +225,11 @@ describe('what a write costs the caller', () => {
     const circular: Record<string, unknown> = {}
     circular.self = circular
     store.writeTranscript('kk11', 'builder', () => circular as unknown as TranscriptItem[])
-    await settled()
+    await landed(() => failures.length > 0)
     expect(failures).toHaveLength(1)
 
     store.writeTranscript('kk11', 'builder', () => [{ kind: 'assistant', markdown: 'fine' }])
-    await settled()
+    await landed(() => existsSync(join(root, 'kk11', 'transcripts', 'builder.json')))
     await expect(store.readTranscript('kk11', 'builder')).resolves.toEqual([
       { kind: 'assistant', markdown: 'fine' }
     ])

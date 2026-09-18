@@ -1053,6 +1053,7 @@ describe('resume and held-open nodes', () => {
 
     // Not `relaunch`: that flushes again, and this launch must read the
     // record exactly as the old app left it.
+    const logged: Record<string, unknown>[] = []
     const after = rig(
       { gated: reviewing },
       (nodeId) =>
@@ -1062,7 +1063,7 @@ describe('resume and held-open nodes', () => {
               tools.complete({ summary: 'reviewed again' })
             }
           : (_prompt, tools) => tools.complete({ summary: 'fixed it' }),
-      { repo: before.repo, stateDir: before.stateDir }
+      { repo: before.repo, stateDir: before.stateDir, log: (event) => logged.push(event) }
     )
     const swept = after.engine.runs()[0]
     expect(swept.status).toBe('interrupted')
@@ -1080,6 +1081,17 @@ describe('resume and held-open nodes', () => {
     await until(() => after.engine.runs()[0].status === 'complete')
     expect(after.sessions.requests).toHaveLength(1)
     expect(after.sessions.requests[0].resumeToken).toBeUndefined()
+
+    // Never silently, on this path as on the direct one: the log names the
+    // from-the-prompt re-run the re-issued revise() had to make.
+    expect(logged).toContainEqual(
+      expect.objectContaining({
+        event: 'node_clean_restart',
+        nodeId: 'review',
+        recordId: 'review·r2',
+        asked: false
+      })
+    )
 
     // So the notice must not have promised the opposite act.
     expect(notice?.text).not.toContain('continues in the session')

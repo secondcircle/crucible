@@ -69,6 +69,20 @@ describe('the interruption notice', () => {
     expect(notice).not.toContain('runs again from its prompt')
     expect(notice).not.toContain('no session left')
   })
+
+  // The same state on a record written before sessions outlived the app: the
+  // completed record names no session, so the re-issued revise() opens a
+  // fresh one from the node's whole prompt. The notice says that act, and
+  // never that nothing is spent twice.
+  it('says a revision whose completion named no session runs again from its prompt', () => {
+    const notice = interruptionNotice(
+      runOf([node('review', 'complete'), node('review·r1', 'interrupted')])
+    )
+    expect(notice).toContain('node "review·r1" is a revision the quit cut down with no session')
+    expect(notice).toContain('runs again from its prompt')
+    expect(notice).not.toContain('continues in the session')
+    expect(notice).not.toContain('spent is spent again')
+  })
 })
 
 describe('what crucible_resume answers', () => {

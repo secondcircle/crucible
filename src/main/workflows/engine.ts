@@ -806,18 +806,38 @@ export function createWorkflowEngine(options: EngineOptions): WorkflowEngine {
                 })
               ).catch(reject)
             })
-          let opened: OpenNode
-          try {
-            opened = await open(record.sessionToken)
-          } catch (cause) {
-            if (!(cause instanceof SessionGone)) throw cause
+          // Opening without a token is a from-the-prompt re-run, which the
+          // direct path logs and this one owes the log too: the record has no
+          // session to reopen (every record written before sessions outlived
+          // the app), or the one it named would not open. Nobody asked for
+          // it, so `asked` is false.
+          const restarting = (): void => {
             log?.({
-              event: 'node_session_unreadable',
+              event: 'node_clean_restart',
               runId: run.id,
               nodeId: record.id,
-              message: cause.message
+              recordId: revisionId,
+              asked: false
             })
+          }
+          let opened: OpenNode
+          if (record.sessionToken === undefined) {
+            restarting()
             opened = await open()
+          } else {
+            try {
+              opened = await open(record.sessionToken)
+            } catch (cause) {
+              if (!(cause instanceof SessionGone)) throw cause
+              log?.({
+                event: 'node_session_unreadable',
+                runId: run.id,
+                nodeId: record.id,
+                message: cause.message
+              })
+              restarting()
+              opened = await open()
+            }
           }
           live = opened
           return opened.result

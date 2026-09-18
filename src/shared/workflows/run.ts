@@ -321,22 +321,52 @@ export function stoppedNodes(run: RunRecord): readonly RunNode[] {
 }
 
 /**
+ * The two acts a resume can perform on one node, and the only two: carry its
+ * session on from its last turn, or run it again from its prompt beside the
+ * record that stopped. Every split in this module — the nodes a resume puts
+ * back to work (`resumePlan`), the revisions a quit cut down
+ * (`cutRevisions`) — comes out in this shape, on the one fact the engine
+ * acts on: whether there is a session token to reopen. One record per node,
+ * the one the engine acts on, so no surface can promise a different act from
+ * the one the engine performs.
+ */
+export interface ResumePlan {
+  /** Nodes that carry on from their last turn, spending nothing twice. */
+  readonly continued: readonly RunNode[]
+  /** Nodes that run again from their prompt, beside the attempt that stopped. */
+  readonly restarted: readonly RunNode[]
+}
+
+/**
  * The records of nodes the quit caught mid-revision: the chain's furthest
  * record stopped, but a record behind it completed. The engine puts none of
  * these back to work itself — it hands the completion back, and the
- * workflow's re-issued `revise()` reopens that node's own session — so they
- * are never `stoppedNodes`, and no surface may call one a fresh attempt from
- * a prompt.
+ * workflow's re-issued `revise()` acts on that record — so they are never
+ * `stoppedNodes`.
+ *
+ * Which act that is written in the same place the engine reads it: the
+ * session named by the chain's **completed** record, because that is the
+ * token `replayedHandle.revise` reopens. The cut revision record never
+ * carries one of its own. With a token the node carries on in the session it
+ * was working in; without one — every record main wrote, before sessions
+ * outlived the app — `revise()` opens a fresh session from the node's whole
+ * prompt, which is a from-the-prompt re-run and has to be named as one.
  */
-export function cutRevisions(run: RunRecord): readonly RunNode[] {
-  return nodeChains(run)
-    .filter(
-      (chain) =>
-        chain.complete !== undefined &&
-        chain.furthest !== chain.complete &&
-        isStopped(chain.furthest)
-    )
-    .map((chain) => chain.furthest)
+export function cutRevisions(run: RunRecord): ResumePlan {
+  const cut = nodeChains(run).filter(
+    (chain) =>
+      chain.complete !== undefined &&
+      chain.furthest !== chain.complete &&
+      isStopped(chain.furthest)
+  )
+  return {
+    continued: cut
+      .filter((chain) => chain.complete?.sessionToken !== undefined)
+      .map((chain) => chain.furthest),
+    restarted: cut
+      .filter((chain) => chain.complete?.sessionToken === undefined)
+      .map((chain) => chain.furthest)
+  }
 }
 
 function isStopped(node: RunNode): boolean {
@@ -355,16 +385,8 @@ function isStopped(node: RunNode): boolean {
  * the engine splits them: a node whose own session is on disk continues from
  * its last turn, and one with no session recorded — a record written before
  * sessions outlived the app — runs again from its prompt, as does every node
- * of a clean restart. One record per node, the one the engine acts on, so no
- * surface can promise a different act from the one the engine performs.
+ * of a clean restart.
  */
-export interface ResumePlan {
-  /** Nodes that carry on from their last turn, spending nothing twice. */
-  readonly continued: readonly RunNode[]
-  /** Nodes that run again from their prompt, beside the attempt that stopped. */
-  readonly restarted: readonly RunNode[]
-}
-
 export function resumePlan(run: RunRecord, kind: ResumeKind): ResumePlan {
   const stopped = stoppedNodes(run)
   const continued =
