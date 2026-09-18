@@ -2,6 +2,7 @@ import type { SessionId } from '../agent/port'
 import {
   currentNode,
   INTERRUPTED_MESSAGE,
+  resumePlan,
   runCost,
   runMessageHeader,
   stoppedNodes,
@@ -56,16 +57,12 @@ function namedNodes(nodes: readonly RunNode[]): string {
 }
 
 /**
- * What resuming this run would do, as one sentence about its nodes. A node
- * whose own session is on disk continues from its last turn; one with no
- * session recorded — a record written before sessions outlived the app —
- * runs again from its prompt, and so does every node of a clean restart.
+ * What resuming this run would do, as one sentence about its nodes, worded
+ * from the split `resumePlan` makes: continued nodes carry on from their last
+ * turn, restarted ones run again from their prompt.
  */
 function resumeSentence(run: RunRecord, kind: ResumeKind): string {
-  const stopped = stoppedNodes(run)
-  const continued =
-    kind === 'clean-restart' ? [] : stopped.filter((node) => node.sessionToken !== undefined)
-  const restarted = stopped.filter((node) => !continued.includes(node))
+  const { continued, restarted } = resumePlan(run, kind)
   const where = run.worktreePath === undefined ? '' : ` (${run.worktreePath})`
   const parts: string[] = []
   if (continued.length > 0) {

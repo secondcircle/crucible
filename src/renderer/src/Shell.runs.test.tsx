@@ -908,6 +908,31 @@ describe('an interrupted run', () => {
     })
     const banner = screen.getByLabelText('Run 45c8').querySelector('.rvwhy')
     expect(banner?.textContent).not.toContain('from that node\u2019s beginning')
+    // What the click will actually do, in the words every other surface uses.
+    expect(banner?.textContent).toContain(
+      'Resume continues the interrupted node \u2014 gate-alignment \u2014 from its last turn, in ' +
+        'the same worktree, reporting to the same session, so nothing it already spent is spent ' +
+        'again.'
+    )
+  })
+
+  // The other half of the same rule: a record written before sessions outlived
+  // the app has no session to continue, and the banner says that instead of
+  // promising a continuation it cannot make.
+  it('says a node with no session on disk runs again from its prompt', async () => {
+    await open([interrupted()])
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Open run' }))
+      await settled()
+    })
+
+    const banner = screen.getByLabelText('Run 45c8').querySelector('.rvwhy')
+    expect(banner?.textContent).toContain(
+      'Resume runs the interrupted node \u2014 gate-alignment \u2014 again from its prompt, in ' +
+        'the same worktree, reporting to the same session: no session of its own is on disk to ' +
+        'continue from.'
+    )
+    expect(banner?.textContent).not.toContain('continues')
   })
 })
 

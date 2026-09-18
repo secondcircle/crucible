@@ -1384,7 +1384,8 @@ function cannedFailed(
 
 // A build the app quit out from under, shaped like the approved mock's row:
 // four nodes done, the gate cut down mid-flight, an orchestrator that is owed
-// the news, and $3.62 already spent. Resume re-runs the cut node alone.
+// the news, and $3.62 already spent. Resume continues the cut node alone, from
+// its last turn: its session is on disk below.
 function cannedInterrupted(
   workspace: CannedWorkspace,
   artifactDir: (runId: WorkflowRunId) => string,

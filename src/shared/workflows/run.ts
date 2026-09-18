@@ -238,6 +238,28 @@ export function stoppedNodes(run: RunRecord): readonly RunNode[] {
   )
 }
 
+/**
+ * What a resume will do to each node it puts back to work, split the one way
+ * the engine splits them: a node whose own session is on disk continues from
+ * its last turn, and one with no session recorded — a record written before
+ * sessions outlived the app — runs again from its prompt, as does every node
+ * of a clean restart. One rule, so no surface can promise a different act
+ * from the one the engine performs.
+ */
+export interface ResumePlan {
+  /** Nodes that carry on from their last turn, spending nothing twice. */
+  readonly continued: readonly RunNode[]
+  /** Nodes that run again from their prompt, beside the attempt that stopped. */
+  readonly restarted: readonly RunNode[]
+}
+
+export function resumePlan(run: RunRecord, kind: ResumeKind): ResumePlan {
+  const stopped = stoppedNodes(run)
+  const continued =
+    kind === 'clean-restart' ? [] : stopped.filter((node) => node.sessionToken !== undefined)
+  return { continued, restarted: stopped.filter((node) => !continued.includes(node)) }
+}
+
 /** Whether a message in a session's transcript is a run talking, not a human. */
 export function isRunMessage(text: string): boolean {
   return text.startsWith(RUN_MESSAGE_PREFIX)
@@ -281,8 +303,9 @@ export function runIsLive(run: RunRecord): boolean {
   return run.status === 'running' || run.status === 'paused'
 }
 
-// The nodes the quit cut down, in record order: what Resume re-runs. There is
-// no field for them — a status is the whole truth, and a fan-out interrupted
+// The nodes the quit cut down, in record order: what Resume puts back to work,
+// each one continued or restarted as `resumePlan` splits them. There is no
+// field for them — a status is the whole truth, and a fan-out interrupted
 // mid-flight is several of them.
 export function interruptedNodes(run: RunRecord): readonly RunNode[] {
   return run.nodes.filter((node) => node.status === 'interrupted')
