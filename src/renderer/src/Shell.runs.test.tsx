@@ -877,6 +877,38 @@ describe('an interrupted run', () => {
     // Never a session that no longer exists.
     expect(banner?.textContent).toContain('reporting to whichever session adopts it')
   })
+
+  // Reproduction for review-2's finding. The engine continues a stopped node
+  // from its last turn in its own session (engine.interrupted.test.ts:
+  // 'continues the cut node in its own session'), and every other surface —
+  // the interruption notice, the resume tool's answer, the authoring doc —
+  // says so. This banner is the one place that still promises the old act:
+  // a re-run "from that node's beginning", i.e. a re-spend that will not
+  // happen. It states what the primary button will do, so it must not state
+  // the opposite of what the button does.
+  it('does not claim Resume re-runs a node whose own session is on disk', async () => {
+    await open([
+      interrupted({
+        nodes: [
+          {
+            id: 'gate-alignment',
+            status: 'interrupted',
+            parents: [],
+            reads: [],
+            artifacts: [],
+            cost: 3.2,
+            sessionToken: '/state/workflow-runs/45c8/sessions/1.jsonl'
+          }
+        ]
+      })
+    ])
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Open run' }))
+      await settled()
+    })
+    const banner = screen.getByLabelText('Run 45c8').querySelector('.rvwhy')
+    expect(banner?.textContent).not.toContain('from that node\u2019s beginning')
+  })
 })
 
 describe('investigating a run', () => {
