@@ -29,8 +29,9 @@ export function compactionInstruction({ aged, carried }: CompactionRequest): str
       'that hold, what was tried and abandoned and why it was abandoned, what is in flight, ' +
       'what comes next, and the few files that matter now. Name the abandoned approaches — ' +
       'left out, they get retried. Aim under 1,200 words.',
-    'DEAD LINES. Beside your account the conversation survives as a skeleton: what was said, ' +
-      'verbatim, and one line per tool call naming what it touched. ' +
+    'DEAD LINES. Beside your account the conversation survives as a skeleton: what the user ' +
+      'said, verbatim; the opening of each reply you gave; one line per tool call naming what ' +
+      'it touched; one line per message Crucible sent you, naming what it announced. ' +
       numbering,
     renderSkeleton(aged, carried + 1),
     'Give the numbers of the lines that no longer bear on the work — an exploration that ' +

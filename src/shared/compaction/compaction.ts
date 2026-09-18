@@ -86,8 +86,9 @@ function compactionText(trajectory: string, skeleton: readonly SkeletonLine[]): 
   if (skeleton.length > 0) {
     parts.push(
       '## What happened before this point\n\n' +
-        'One numbered line each, oldest first. The results were dropped, not lost: every ' +
-        'file named is on disk and every command named can be run again.\n\n' +
+        'One numbered line each, oldest first. What was dropped is not lost: every file ' +
+        'named is on disk, every command named can be run again, and every run or question ' +
+        'named has its record.\n\n' +
         renderSkeleton(skeleton)
     )
   }

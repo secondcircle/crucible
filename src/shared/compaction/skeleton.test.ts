@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import type { TranscriptItem } from '../agent/port'
+import { WAKE_MESSAGE_PREFIX } from '../monitors/wording'
+import { ANSWER_BATCH_PREFIX } from '../questions/wording'
+import { RUN_MESSAGE_PREFIX } from '../workflows/run'
 import {
   pruneSkeleton,
   renderSkeleton,
@@ -41,16 +44,59 @@ describe('the skeleton', () => {
     )
   })
 
-  // What the two speakers said is the one thing a compaction cannot get back:
-  // the session file and the transcript keep it, and the model can reach
-  // neither afterwards. Length is the budget's business and the model's, not
-  // a cut made before anything is asked.
-  it('keeps a long message whole, however long it ran', () => {
+  // What the person said is the one thing a compaction cannot get back: the
+  // session file and the transcript keep it, and the model can reach neither
+  // afterwards. Length is the budget's business and the model's, not a cut
+  // made before anything is asked.
+  it('keeps a long user message whole, however long it ran', () => {
     const spec = `Rewrite the importer. ${'The rows carry a provider, a model and a cost. '.repeat(80)}Stop once the tests pass.`
     expect(skeletonOf([{ kind: 'user', text: spec }])).toEqual([{ kind: 'user', text: spec }])
-    expect(skeletonOf([{ kind: 'assistant', markdown: spec }])).toEqual([
-      { kind: 'assistant', text: spec }
+  })
+
+  // A reply opens with what is waiting on the person; the account behind it
+  // is what the trajectory summary is rewritten from at the same compaction.
+  it('keeps a reply’s opening paragraph and counts the rest', () => {
+    const reply =
+      'One decision is waiting in your dock: whether I merge or you do.\n\n' +
+      `The run came back approved. ${'Every requirement is met and pinned. '.repeat(40)}`
+    expect(skeletonOf([{ kind: 'assistant', markdown: reply }])).toEqual([
+      {
+        kind: 'assistant',
+        text: 'One decision is waiting in your dock: whether I merge or you do.',
+        more: expect.any(Number)
+      }
     ])
+    expect(renderSkeleton(skeletonOf([{ kind: 'assistant', markdown: reply }]))).toMatch(
+      /^1\. \[agent\] One decision is waiting in your dock: whether I merge or you do\. · \d+ more tok$/
+    )
+  })
+
+  it('renders a one-paragraph reply as it was, with nothing counted', () => {
+    expect(renderSkeleton(skeletonOf([{ kind: 'assistant', markdown: 'Done.' }]))).toBe(
+      '1. [agent] Done.'
+    )
+  })
+
+  // A run's report, a monitor's wake and an answer batch arrive in the user's
+  // role, but nobody typed them and every fact in one is on a record. Kept
+  // whole they are most of a skeleton, protected by a rule written for the
+  // person's brief.
+  it('keeps one line per message Crucible sent, naming what it announced', () => {
+    const report =
+      `${RUN_MESSAGE_PREFIX} 09fb (build) completed · branch crucible/run-09fb.\n\n` +
+      `Outputs: ${JSON.stringify({ verdict: 'approved', reason: 'x'.repeat(4_000) })}`
+    const wake = `${WAKE_MESSAGE_PREFIX} m1 ended: condition met.\n\nThe check printed nothing.`
+    const answers = `${ANSWER_BATCH_PREFIX}. Every question you had open, answered.\n\n1. Merge?\n   Answer: yes`
+    const lines = skeletonOf([
+      { kind: 'user', text: report },
+      { kind: 'user', text: wake },
+      { kind: 'user', text: answers },
+      { kind: 'user', text: 'Okay so everything is on main now?' }
+    ])
+    expect(lines.map((line) => line.kind)).toEqual(['notice', 'notice', 'notice', 'user'])
+    expect(renderSkeleton(lines.slice(0, 1))).toMatch(
+      /^1\. \[crucible\] ⚑ Crucible run 09fb \(build\) completed · branch crucible\/run-09fb\. · 1,0\d\d tok dropped$/
+    )
   })
 
   // A handle is the one thing here with a ceiling: it has to be one line of a
@@ -90,11 +136,22 @@ describe('the skeleton’s budget', () => {
     tokens: 900
   }))
 
-  it('drops the oldest lines that are nobody’s words until it fits', () => {
+  it('drops the oldest lines that are not the person’s words until it fits', () => {
     const trimmed = trimSkeleton(calls, 300)
     expect(skeletonTokens(trimmed)).toBeLessThanOrEqual(300)
     // The newest survive: age is the judge among tool calls.
     expect(trimmed.at(-1)).toEqual(calls.at(-1))
+  })
+
+  it('trims Crucible’s notices and the agent’s replies like any other line', () => {
+    const chatter: readonly SkeletonLine[] = Array.from({ length: 100 }, (_unused, at) =>
+      at % 2 === 0
+        ? { kind: 'notice' as const, text: `⚑ Crucible run ${at} (build) is checking in:`, tokens: 900 }
+        : { kind: 'assistant' as const, text: `Approved checkpoint ${at}; nothing needed from you.`, more: 400 }
+    )
+    const trimmed = trimSkeleton([{ kind: 'user', text: 'the brief' }, ...chatter], 200)
+    expect(skeletonTokens(trimmed)).toBeLessThanOrEqual(200)
+    expect(trimmed[0]).toEqual({ kind: 'user', text: 'the brief' })
   })
 
   // Only the model, naming one, may drop a user message. A skeleton that

@@ -1,8 +1,7 @@
 import type { TranscriptItem } from '../../shared/agent/port'
-// Spelled with their extensions so plain Node can load this module for
+// Spelled with its extension so plain Node can load this module for
 // `prove:sdk`: its ESM resolver does no extension guessing.
-import { isWakeMessage } from '../../shared/monitors/wording.ts'
-import { isRunMessage } from '../../shared/workflows/run.ts'
+import { spokenByCrucible } from '../../shared/agent/spoken-by-crucible.ts'
 
 // No SDK type reaches this module, so the shaping and sanitizing stay testable
 // without constructing an SDK adapter.
@@ -15,10 +14,6 @@ export const TITLE_INSTRUCTION =
 
 /** Past this a message says nothing more about what the session is about. */
 const MESSAGE_LIMIT = 500
-
-function spokenByCrucible(text: string): boolean {
-  return isRunMessage(text) || isWakeMessage(text)
-}
 
 // The instruction asks for 5-8 words. Well past that the model is talking
 // rather than naming — "I need more context to name this conversation" must

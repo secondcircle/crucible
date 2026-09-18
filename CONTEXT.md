@@ -550,11 +550,14 @@ compaction over the previous one; summaries never stack.
 _Avoid_: history summary, recap, compaction summary (π's field name).
 
 **Skeleton**:
-The compacted span with its bulk removed: user and assistant words verbatim,
-thinking gone, each tool call one line naming its handle, each result one
-line naming its size. Every dropped thing is restorable from disk or by
-re-running. Pruned by the model's judgment at each later compaction and held
-under a budget, so it cannot grow without bound.
+The compacted span with its bulk removed: the user's words verbatim, the
+opening paragraph of each of the agent's replies, thinking gone, each tool
+call one line naming its handle and its result's size, each message Crucible
+sent in the user's role (a run's report, a wake, an answer batch) one line
+naming what it announced. Every dropped thing is restorable from disk, by
+re-running, or from the run's record. Pruned by the model's judgment at each
+later compaction and held under a budget, so it cannot grow without bound;
+only the user's words are never trimmed mechanically.
 _Avoid_: masked history, stubs, digest.
 
 **Recent span**:
