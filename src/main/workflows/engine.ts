@@ -5,6 +5,7 @@ import type { SessionId, TranscriptItem } from '../../shared/agent/port'
 import {
   dismissRefusal,
   INTERRUPTED_MESSAGE,
+  nodeChain,
   resumeRefusal,
   runCanResume,
   runMessageHeader,
@@ -575,22 +576,13 @@ export function createWorkflowEngine(options: EngineOptions): WorkflowEngine {
     // engine's own marker in ids, so no workflow's effect id collides.
     let asks = 0
 
-    const recordOf = (nodeId: string): LiveNode | undefined =>
-      run.nodes.find((candidate) => candidate.id === nodeId)
-
     // Every record one node's session has taken: `id`, then `id·rN` in
-    // order. One session, several records, which is what a revision is.
-    function chainOf(id: string): LiveNode[] {
-      const revised = run.nodes
-        .filter((candidate) => candidate.id.startsWith(`${id}·r`))
-        .map((candidate) => ({
-          node: candidate,
-          round: Number(candidate.id.slice(id.length + 2))
-        }))
-        .filter((candidate) => Number.isFinite(candidate.round))
-        .sort((left, right) => left.round - right.round)
-      const base = recordOf(id)
-      return [...(base === undefined ? [] : [base]), ...revised.map((candidate) => candidate.node)]
+    // order. One session, several records, which is what a revision is. The
+    // rule lives in shared/workflows/run.ts, where the surfaces read it, so
+    // what a run view or an orchestrator is told about a node is worked out
+    // from the same records this is about to act on.
+    function chainOf(id: string): readonly LiveNode[] {
+      return nodeChain(run.nodes, id)
     }
 
     /** The furthest completed record of that chain: a replayed handle's result. */

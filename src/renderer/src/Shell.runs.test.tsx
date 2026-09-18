@@ -976,6 +976,54 @@ describe('an interrupted run', () => {
     })
     const banner = screen.getByLabelText('Run 45c8').querySelector('.rvwhy')
     expect(banner?.textContent).not.toContain('interrupted nodes')
+    // One node, one act, named as the record the engine will actually reopen.
+    expect(banner?.textContent).toContain(
+      'Resume continues the interrupted node \u2014 gate-alignment\u00b7r1 \u2014 from its last ' +
+        'turn, in the same worktree, reporting to the same session, so nothing it already spent ' +
+        'is spent again.'
+    )
+  })
+
+  // The same root, the other way round: a quit during a held-open node’s
+  // revision leaves the base record complete and ·r1 interrupted with no
+  // session of its own (an in-session revision records no token). The engine
+  // replays the completion and the workflow’s re-issued revise() continues the
+  // node through the base record’s session — so the banner must not tell the
+  // human a node is about to be re-run from its prompt.
+  it('does not promise a from-the-prompt re-run of a revision the engine replays', async () => {
+    await open([
+      interrupted({
+        nodes: [
+          {
+            id: 'gate-alignment',
+            status: 'complete',
+            parents: [],
+            reads: [],
+            artifacts: [],
+            summary: 'approved',
+            cost: 3.2,
+            sessionToken: '/state/workflow-runs/45c8/sessions/1.jsonl'
+          },
+          {
+            id: 'gate-alignment\u00b7r1',
+            status: 'interrupted',
+            parents: ['gate-alignment'],
+            reads: [],
+            artifacts: [],
+            cost: 0.4
+          }
+        ]
+      })
+    ])
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Open run' }))
+      await settled()
+    })
+    const banner = screen.getByLabelText('Run 45c8').querySelector('.rvwhy')
+    expect(banner?.textContent).not.toContain('again from')
+    expect(banner?.textContent).toContain(
+      'Resume puts this run back to work in the same worktree, reporting to the same session.'
+    )
   })
 })
 

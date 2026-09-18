@@ -480,7 +480,9 @@ function sameOrder(held: readonly string[], next: readonly string[]): boolean {
 // `resumePlan` the engine and the interruption notice read splits the cut
 // nodes into the ones that continue from their last turn and the ones with no
 // session left, and each half is described as what it is — so the sentence
-// above the button can never promise a re-spend the click will not make.
+// above the button can never promise a re-spend the click will not make. It
+// names one act per node and not per record: a record a clean restart
+// superseded is not a second node, and the engine will never reopen it.
 // Present exactly while the run is interrupted — resuming re-renders the
 // column without it.
 function InterruptedBanner({

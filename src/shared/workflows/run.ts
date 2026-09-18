@@ -223,18 +223,111 @@ export function runCanResume(run: RunRecord): boolean {
   return run.status !== 'complete' && run.status !== 'running'
 }
 
-// The nodes a resume puts back to work: whatever the run stopped with
-// unfinished, whichever stop it was. A completed node is replayed instead,
-// and a node that never started is simply run.
+// One node, several records: a revision — a clean restart, or a held-open
+// node revised — leaves the record it follows exactly where it stopped and
+// puts the work on `<id>·rN`. The engine acts on the furthest record of that
+// chain and on no other one (engine.ts `runNode`), so anything that says what
+// a node is or what a resume will do to it has to read the chain rather than
+// the record. The id convention is the whole mechanism, and this module is
+// where it is spelled: the engine reads it from here too, so there is one
+// answer and not two.
+const REVISION_MARK = '\u00b7r'
+
+/** A revision id split into the node it belongs to and which round it is. */
+interface Revision {
+  readonly base: string
+  readonly round: number
+}
+
+function revisionOf(recordId: string): Revision | undefined {
+  const at = recordId.lastIndexOf(REVISION_MARK)
+  if (at <= 0) return undefined
+  const round = recordId.slice(at + REVISION_MARK.length)
+  if (!/^\d+$/.test(round)) return undefined
+  return { base: recordId.slice(0, at), round: Number(round) }
+}
+
+/** The node a record belongs to: `gate·r1` is a record of `gate`. */
+export function baseNodeId(recordId: string): string {
+  return revisionOf(recordId)?.base ?? recordId
+}
+
+/**
+ * Every record one node's session has taken, in the order it took them: the
+ * node's own id first, then `id·r1`, `id·r2` … Generic over the record shape
+ * so the engine's own mutable nodes walk the same rule the surfaces do.
+ */
+export function nodeChain<T extends { readonly id: string }>(
+  nodes: readonly T[],
+  id: string
+): readonly T[] {
+  const revised = nodes
+    .map((node) => ({ node, revision: revisionOf(node.id) }))
+    .filter(
+      (candidate): candidate is { node: T; revision: Revision } =>
+        candidate.revision?.base === id
+    )
+    .sort((left, right) => left.revision.round - right.revision.round)
+  const base = nodes.find((node) => node.id === id)
+  return [...(base === undefined ? [] : [base]), ...revised.map((candidate) => candidate.node)]
+}
+
+/** One node as its records tell it, which is how the engine reads it. */
+export interface NodeChain {
+  /** The node's own id: the base record's, and what names its revisions. */
+  readonly id: string
+  /** Its records, base first, then each revision in order. */
+  readonly records: readonly RunNode[]
+  // The record the engine acts on: the furthest one its session took. What
+  // every surface must speak about, because the records behind it are history
+  // the engine will never touch again.
+  readonly furthest: RunNode
+  // The furthest record that completed, if any. A resume hands its result
+  // back instead of putting the node to work at all, whichever record of the
+  // chain carried it.
+  readonly complete?: RunNode
+}
+
+/** The run's nodes as nodes rather than records, in the order they appear. */
+export function nodeChains(run: RunRecord): readonly NodeChain[] {
+  const bases: string[] = []
+  for (const node of run.nodes) {
+    const base = baseNodeId(node.id)
+    if (!bases.includes(base)) bases.push(base)
+  }
+  return bases.map((id) => {
+    const records = nodeChain(run.nodes, id)
+    const complete = records.filter((record) => record.status === 'complete').at(-1)
+    return {
+      id,
+      records,
+      // `bases` comes from the records themselves, so every chain has one.
+      furthest: records[records.length - 1],
+      ...(complete === undefined ? {} : { complete })
+    }
+  })
+}
+
+// The nodes a resume puts back to work: one record per node — the furthest of
+// its chain — whenever that record stopped short of finishing, whichever stop
+// it was. A node any record of whose chain completed is replayed instead, and
+// a node that never started is simply run. The records a revision superseded
+// are nobody's work: the engine leaves them as they stopped and never reopens
+// their sessions.
 export function stoppedNodes(run: RunRecord): readonly RunNode[] {
-  return run.nodes.filter(
-    (node) =>
-      node.status === 'interrupted' ||
-      node.status === 'failed' ||
-      node.status === 'blocked' ||
-      node.status === 'stalled' ||
-      node.status === 'paused' ||
-      node.status === 'running'
+  return nodeChains(run)
+    .filter((chain) => chain.complete === undefined && isStopped(chain.furthest))
+    .map((chain) => chain.furthest)
+}
+
+function isStopped(node: RunNode): boolean {
+  return (
+    node.status === 'interrupted' ||
+    node.status === 'failed' ||
+    node.status === 'blocked' ||
+    node.status === 'stalled' ||
+    node.status === 'paused' ||
+    node.status === 'running'
   )
 }
 
@@ -243,8 +336,8 @@ export function stoppedNodes(run: RunRecord): readonly RunNode[] {
  * the engine splits them: a node whose own session is on disk continues from
  * its last turn, and one with no session recorded — a record written before
  * sessions outlived the app — runs again from its prompt, as does every node
- * of a clean restart. One rule, so no surface can promise a different act
- * from the one the engine performs.
+ * of a clean restart. One record per node, the one the engine acts on, so no
+ * surface can promise a different act from the one the engine performs.
  */
 export interface ResumePlan {
   /** Nodes that carry on from their last turn, spending nothing twice. */
@@ -281,7 +374,13 @@ export function runCacheMisses(run: RunRecord): number {
 
 /** The node the chip names: the running one, else the latest that isn't pending. */
 export function currentNode(run: RunRecord): RunNode | undefined {
-  const active = run.nodes.find(
+  // Each node as its furthest record, in record order: a record a revision
+  // superseded is history, and naming it would tell a session the run stands
+  // somewhere it left long ago.
+  const speaking = nodeChains(run)
+    .map((chain) => chain.furthest)
+    .sort((left, right) => run.nodes.indexOf(left) - run.nodes.indexOf(right))
+  const active = speaking.find(
     (node) =>
       node.status === 'running' ||
       node.status === 'blocked' ||
@@ -292,23 +391,15 @@ export function currentNode(run: RunRecord): RunNode | undefined {
   // The node the quit cut down is what an interrupted run is about, so it is
   // the node every surface names for one — but only while nothing else is
   // working, because a clean restart leaves that record where it stopped.
-  const cut = run.nodes.find((node) => node.status === 'interrupted')
+  const cut = speaking.find((node) => node.status === 'interrupted')
   if (cut !== undefined) return cut
-  const settled = run.nodes.filter((node) => node.status !== 'pending')
+  const settled = speaking.filter((node) => node.status !== 'pending')
   return settled.at(-1)
 }
 
 /** Live in the sense the strip cares about: it may still change. */
 export function runIsLive(run: RunRecord): boolean {
   return run.status === 'running' || run.status === 'paused'
-}
-
-// The nodes the quit cut down, in record order: what Resume puts back to work,
-// each one continued or restarted as `resumePlan` splits them. There is no
-// field for them — a status is the whole truth, and a fan-out interrupted
-// mid-flight is several of them.
-export function interruptedNodes(run: RunRecord): readonly RunNode[] {
-  return run.nodes.filter((node) => node.status === 'interrupted')
 }
 
 /**

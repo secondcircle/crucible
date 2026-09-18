@@ -59,25 +59,31 @@ function namedNodes(nodes: readonly RunNode[]): string {
 /**
  * What resuming this run would do, as one sentence about its nodes, worded
  * from the split `resumePlan` makes: continued nodes carry on from their last
- * turn, restarted ones run again from their prompt.
+ * turn, restarted ones run again from their prompt. One node is named once
+ * however many records its chain holds, because the engine performs one act
+ * on it.
  */
 function resumeSentence(run: RunRecord, kind: ResumeKind): string {
   const { continued, restarted } = resumePlan(run, kind)
   const where = run.worktreePath === undefined ? '' : ` (${run.worktreePath})`
   const parts: string[] = []
   if (continued.length > 0) {
+    const one = continued.length === 1
     parts.push(
-      `${namedNodes(continued)} continues from its last turn, in the same session and the same ` +
-        `worktree${where}, so nothing it already spent is spent again`
+      `${namedNodes(continued)} ${one ? 'continues' : 'continue'} from ${one ? 'its' : 'their'} ` +
+        `last turn, in the same session and the same worktree${where}, so nothing ` +
+        `${one ? 'it' : 'they'} already spent is spent again`
     )
   }
   if (restarted.length > 0 || continued.length === 0) {
+    const one = restarted.length <= 1
     parts.push(
       kind === 'clean-restart'
-        ? `${namedNodes(restarted)} runs again from its prompt, in the same worktree${where}, ` +
-          'as a fresh attempt beside the one that stopped'
-        : `${namedNodes(restarted)} has no session left to continue, so it runs again from its ` +
-          'prompt as a fresh attempt beside the one that stopped'
+        ? `${namedNodes(restarted)} ${one ? 'runs' : 'run'} again from ${one ? 'its' : 'their'} ` +
+          `prompt, in the same worktree${where}, as a fresh attempt beside the one that stopped`
+        : `${namedNodes(restarted)} ${one ? 'has' : 'have'} no session left to continue, so ` +
+          `${one ? 'it runs' : 'they run'} again from ${one ? 'its' : 'their'} prompt as a ` +
+          'fresh attempt beside the one that stopped'
     )
   }
   return `Resuming: ${parts.join('; ')}.`
