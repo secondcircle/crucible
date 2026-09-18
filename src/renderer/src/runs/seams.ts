@@ -1,7 +1,7 @@
 import type { TranscriptItem } from '../../../shared/agent/port'
 import {
   isContinuedNodeMessage,
-  runStop,
+  nodeStop,
   stoppedNodes,
   type RunNode,
   type RunRecord
@@ -11,9 +11,10 @@ import { since, toViewItem } from './format'
 
 // Where one node's transcript was cut and where it was joined again, drawn
 // into the transcript itself. Both seams are read from what is already on the
-// record: the stop from the run, the pick-up from the message Crucible sends
-// a node whose session it reopened. Nothing here invents a time it was not
-// given — a node resumed twice has two rules and neither claims an instant.
+// record: the stop from that node's own record, the pick-up from the message
+// Crucible sends a node whose session it reopened. Nothing here invents a time
+// it was not given — a node resumed twice has two rules and neither claims an
+// instant.
 
 /**
  * One node's transcript as the run view shows it, with a rule where a resume
@@ -40,12 +41,14 @@ export function transcriptWithSeams(
 }
 
 /**
- * The rule that ends a stopped node's transcript. The run says which stop it
- * was, not the node: a cancelled run leaves the node it stopped recorded as
- * failed, and the human is owed the word for what actually happened.
+ * The rule that ends a stopped node's transcript, in that node's own word for
+ * how it stopped (`nodeStop`). A run can hold several nodes in flight, so the
+ * stop that ended the run is not always the stop that ended this node: the
+ * run's word carries only where the record has none of its own, which is the
+ * node a cancel or a quit released.
  */
 function closingRule(run: RunRecord, node: RunNode, now: number): ViewItem | undefined {
-  const stop = runStop(run)
+  const stop = nodeStop(run, node)
   if (stop === undefined) return undefined
   if (!stoppedNodes(run).some((stopped) => stopped.id === node.id)) return undefined
   const age = since(node.endedAt ?? run.endedAt, now)

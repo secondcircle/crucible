@@ -45,6 +45,34 @@ export function runStop(run: Pick<RunRecord, 'status'>): RunStop | undefined {
   }
 }
 
+// What the engine writes on a node it released because the run ended around
+// it: the node did not go wrong, it was let go. Spelled here rather than in
+// the engine alone because the run view reads it back — it is the one thing
+// on the record that tells the node a cancel caught apart from a node that
+// had already died.
+export const RELEASED_ON_RUN_END = 'the run ended before this node finished'
+
+/**
+ * How one node stopped, in the word the human is owed for that node. The run
+ * supplies the word only where the record cannot: a node the run's own stop
+ * released is recorded `failed` with the engine's release message, and
+ * reading that back as a failure blames the work for the human's cancel. A
+ * node that failed on its own keeps its own word, whatever stopped the run
+ * around it afterwards — a run holds several nodes in flight, so the stop
+ * that ended the run is not always the stop that ended the node.
+ */
+export function nodeStop(
+  run: Pick<RunRecord, 'status'>,
+  node: Pick<RunNode, 'status' | 'error'>
+): RunStop | undefined {
+  const stop = runStop(run)
+  if (stop === undefined) return undefined
+  if (node.status === 'interrupted') return 'interrupted'
+  const ownError = node.error !== undefined && node.error !== RELEASED_ON_RUN_END
+  if (node.status === 'failed' && ownError) return 'failed'
+  return stop
+}
+
 export type RunNodeStatus =
   | 'pending'
   | 'running'
@@ -337,7 +365,7 @@ export interface NodeChain {
 }
 
 /** The run's nodes as nodes rather than records, in the order they appear. */
-export function nodeChains(run: RunRecord): readonly NodeChain[] {
+export function nodeChains(run: Pick<RunRecord, 'nodes'>): readonly NodeChain[] {
   const bases: string[] = []
   for (const node of run.nodes) {
     const base = baseNodeId(node.id)

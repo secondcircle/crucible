@@ -4,6 +4,7 @@ import {
   baseNodeId,
   currentNode,
   nextRevisionId,
+  nodeStop,
   resumePlan,
   runCost,
   runIsLive,
@@ -512,12 +513,17 @@ function StopBanner({
 }): React.JSX.Element {
   const { continued, restarted } = resumePlan(run, 'continue')
   const stopped = stoppedNodes(run)
+  // The nodes this stop actually caught, which is not every stopped node: a
+  // run holds several in flight, and one that died on its own an hour earlier
+  // is waiting to be put back to work too. Only a node the stop caught can be
+  // named as where the run stopped.
+  const caught = stopped.filter((node) => nodeStop(run, node) === stop)
   // Never a session that no longer exists: a run with none parks until one
   // adopts it.
   const where = toSession ? 'the same session' : 'whichever session adopts it'
   return (
     <div className={`rvwhy ${stop}`} role="status">
-      <b>{headline(stop, stopped)}</b> Its worktree is left as it stands.
+      <b>{headline(stop, caught)}</b> Its worktree is left as it stands.
       {/* Where it can be read, rather than in the node facts alone: what the
           run died on is the first thing the reader is deciding from. */}
       {stop === 'failed' && run.error !== undefined ? (
@@ -526,15 +532,15 @@ function StopBanner({
       <div className="acts">
         {continued.length === 0 ? null : (
           <>
-            <i>Resume</i> continues the {nodeWord(stop, continued)} {nodeNames(continued)} from{' '}
-            {possessive(continued)} last turn, in the same worktree, reporting to {where}, so
-            nothing {continued.length === 1 ? 'it' : 'they'} already spent is spent again.
+            <i>Resume</i> continues {nodeNames(continued)} from {possessive(continued)} last turn,
+            in the same worktree, reporting to {where}, so nothing{' '}
+            {continued.length === 1 ? 'it' : 'they'} already spent is spent again.
           </>
         )}
         {restarted.length === 0 ? null : (
           <>
-            {continued.length === 0 ? <i>Resume</i> : 'It'} runs the {nodeWord(stop, restarted)}{' '}
-            {nodeNames(restarted)} again from {possessive(restarted)} prompt, in the same worktree
+            {continued.length === 0 ? <i>Resume</i> : 'It'} runs {nodeNames(restarted)} again from{' '}
+            {possessive(restarted)} prompt, in the same worktree
             {continued.length === 0 ? <>, reporting to {where}</> : null}: no session of{' '}
             {possessive(restarted)} own is on disk to continue from.
           </>
@@ -547,8 +553,8 @@ function StopBanner({
         ) : (
           <>
             {' '}
-            <i>Start node over</i> runs the {nodeWord(stop, stopped)} {nodeNames(stopped)} again
-            from {possessive(stopped)} prompt with no memory of{' '}
+            <i>Start node over</i> runs {nodeNames(stopped)} again from {possessive(stopped)}{' '}
+            prompt with no memory of{' '}
             {stopped.length === 1 ? 'this attempt' : 'these attempts'}, as{' '}
             {revisionNames(run, stopped)}.
           </>
@@ -559,17 +565,19 @@ function StopBanner({
 }
 
 /** The first sentence: which stop it was, and the node it stopped at. */
-function headline(stop: RunStop, stopped: readonly RunNode[]): React.JSX.Element {
+function headline(stop: RunStop, caught: readonly RunNode[]): React.JSX.Element {
   // The quit's own sentence, kept: it is about the app rather than the work,
   // and it is the one the interrupted banner has always said.
   if (stop === 'interrupted') return <>Crucible quit while this run was working.</>
   const said = stop === 'failed' ? 'This run failed' : 'This run was cancelled'
-  // Named here only when there is one to name; several are named by the acts
-  // below instead of crowding the sentence that says what happened.
-  if (stopped.length !== 1) return <>{said}.</>
+  // Named here only when the stop caught exactly one node; several are named
+  // by the acts below instead of crowding the sentence that says what
+  // happened, and none is named at all rather than pinning the run's stop to a
+  // node that stopped some other way.
+  if (caught.length !== 1) return <>{said}.</>
   return (
     <>
-      {said} at <code>{stopped[0].id}</code>.
+      {said} at <code>{caught[0].id}</code>.
     </>
   )
 }
@@ -588,26 +596,24 @@ function revisionNames(run: RunRecord, nodes: readonly RunNode[]): React.JSX.Ele
   )
 }
 
-function nodeWord(stop: RunStop, nodes: readonly RunNode[]): string {
-  return nodes.length === 1 ? `${stop} node` : `${stop} nodes`
-}
-
 function possessive(nodes: readonly RunNode[]): string {
   return nodes.length === 1 ? 'its' : 'their'
 }
 
-/** The node ids as code chips, em-dashed off the phrase that named them. */
+// The nodes an act will move, named as code chips and nothing else. No stop
+// word stands in front of them: the stop belongs to the run, the record
+// belongs to the node, and a run that stopped one way can hold a node that
+// stopped another. The acts are then word for word the same on every stop,
+// which is what both briefs rule and what the mock prints.
 function nodeNames(nodes: readonly RunNode[]): React.JSX.Element {
   return (
     <>
-      —{' '}
       {nodes.map((node, at) => (
         <span key={node.id}>
           {at === 0 ? null : ', '}
           <code>{node.id}</code>
         </span>
-      ))}{' '}
-      —
+      ))}
     </>
   )
 }

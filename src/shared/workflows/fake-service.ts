@@ -7,6 +7,7 @@ import {
   dismissRefusal,
   INTERRUPTED_MESSAGE,
   nextRevisionId,
+  RELEASED_ON_RUN_END,
   resumeRefusal,
   runCanResume,
   runMessageHeader,
@@ -1025,6 +1026,11 @@ export function createFakeWorkflowRunService({
     for (const node of run.nodes) {
       if (node.status === 'running' || node.status === 'blocked') {
         node.status = 'failed'
+        // The engine's own word for a node it let go, so the fake flavor
+        // produces the record the run view reads: this node did not go wrong,
+        // the cancel took it. A node that had already failed keeps its own
+        // error and its own word.
+        node.error = RELEASED_ON_RUN_END
         node.endedAt = nowIso()
         delete node.now
       }

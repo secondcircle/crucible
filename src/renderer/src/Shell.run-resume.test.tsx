@@ -162,11 +162,11 @@ describe('a failed run', () => {
 
     const acts = said?.querySelector('.acts')?.textContent ?? ''
     expect(acts).toContain(
-      'Resume continues the failed node — fixer-1 — from its last turn, in the same worktree, ' +
+      'Resume continues fixer-1 from its last turn, in the same worktree, ' +
         'reporting to the same session, so nothing it already spent is spent again.'
     )
     expect(acts).toContain(
-      'Start node over runs the failed node — fixer-1 — again from its prompt with no memory ' +
+      'Start node over runs fixer-1 again from its prompt with no memory ' +
         'of this attempt, as fixer-1·r1.'
     )
   })
@@ -251,7 +251,7 @@ describe('a failed run', () => {
 
     const acts = banner()?.querySelector('.acts')?.textContent ?? ''
     expect(acts).toContain(
-      'Resume runs the failed node — fixer-1 — again from its prompt, in the same worktree, ' +
+      'Resume runs fixer-1 again from its prompt, in the same worktree, ' +
         'reporting to the same session: no session of its own is on disk to continue from.'
     )
     expect(acts).not.toContain('continues')
@@ -282,13 +282,15 @@ describe('a cancelled run', () => {
     expect(said?.className).toContain('cancelled')
     expect(said?.textContent).toContain('This run was cancelled at fixer-1.')
     expect(said?.querySelector('.quote')).toBeNull()
-    // One vocabulary: the acts are word for word the failed run's, bar the stop.
+    // One vocabulary: the acts are word for word the failed run's. The stop is
+    // said once, in the first sentence, and nowhere else.
     expect(said?.querySelector('.acts')?.textContent).toContain(
-      'Resume continues the cancelled node — fixer-1 — from its last turn'
+      'Resume continues fixer-1 from its last turn'
     )
     expect(said?.querySelector('.acts')?.textContent).toContain(
-      'Start node over runs the cancelled node — fixer-1 — again from its prompt'
+      'Start node over runs fixer-1 again from its prompt'
     )
+    expect(said?.querySelector('.acts')?.textContent).not.toContain('cancelled')
   })
 })
 

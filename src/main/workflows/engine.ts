@@ -9,6 +9,7 @@ import {
   latestNodeActivity,
   nextRevisionId,
   nodeChain,
+  RELEASED_ON_RUN_END,
   resumeRefusal,
   runCanResume,
   runMessageHeader,
@@ -1131,14 +1132,14 @@ export function createWorkflowEngine(options: EngineOptions): WorkflowEngine {
         },
         forceDispose(why: ReleaseReason): void {
           releasedBecause ??= why
-          finishNode('failed', 'the run ended before this node finished')
+          finishNode('failed', RELEASED_ON_RUN_END)
         }
       }
       handle.live.add(control)
 
       const bailIfReleased = (): void => {
         if (releasedBecause === undefined) return
-        finishNode('failed', 'the run ended before this node finished')
+        finishNode('failed', RELEASED_ON_RUN_END)
         throw new Error(`node "${node.id}" was released when the run ended`)
       }
 

@@ -692,6 +692,16 @@ describe('the graph header count', () => {
     }
     const counted = (said: string): string => said.match(/(\d+) nodes?/)?.[1] ?? ''
     expect(counted(nodeProgress(run))).toBe(counted(graphCount(nodes)))
+    expect(nodeProgress(run)).toBe('2/2 nodes')
+    expect(graphCount(nodes)).toBe('2 nodes · 1 revision · 2 done')
+    // Both read the status off the record the engine is acting on, so a node
+    // whose revision is still running is done in neither count.
+    const working = {
+      ...run,
+      nodes: [nodes[0], nodes[1], { ...nodes[2], status: 'running' as const }]
+    }
+    expect(nodeProgress(working)).toBe('1/2 nodes')
+    expect(graphCount(working.nodes)).toBe('2 nodes · 1 revision · 1 done · 1 running')
   })
 })
 

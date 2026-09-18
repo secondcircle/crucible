@@ -1,4 +1,4 @@
-import { baseNodeId, nodeChain, type RunNode } from '../../../shared/workflows/run'
+import { nodeChains, type RunNode } from '../../../shared/workflows/run'
 import { money, nodeDuration, shortModel } from './format'
 import { readLoops, type Loop, type LoopReading, type NodeSpot } from './loops'
 
@@ -198,15 +198,14 @@ export function cardFace(node: RunNode, now = Date.now()): CardFace {
 // node of its own, so it is counted as what it is and the statuses are read
 // off the record the engine is acting on.
 export function graphCount(nodes: readonly RunNode[]): string {
-  const bases = [...new Set(nodes.map((node) => baseNodeId(node.id)))]
-  const furthest = bases
-    .map((base) => nodeChain(nodes, base).at(-1))
-    .filter((node): node is RunNode => node !== undefined)
-  const revisions = nodes.length - bases.length
+  // The same reading of the record the header strip counts from, so the two
+  // counts an inch apart cannot say different numbers.
+  const chains = nodeChains({ nodes })
+  const revisions = nodes.length - chains.length
   const of = (status: RunNode['status']): number =>
-    furthest.filter((node) => node.status === status).length
+    chains.filter((chain) => chain.furthest.status === status).length
   return [
-    `${bases.length} ${bases.length === 1 ? 'node' : 'nodes'}`,
+    `${chains.length} ${chains.length === 1 ? 'node' : 'nodes'}`,
     revisions === 0 ? '' : `${revisions} ${revisions === 1 ? 'revision' : 'revisions'}`,
     of('complete') === 0 ? '' : `${of('complete')} done`,
     of('running') === 0 ? '' : `${of('running')} running`,

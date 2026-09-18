@@ -8,6 +8,8 @@ import {
   nextRevisionId,
   nodeChain,
   nodeChains,
+  nodeStop,
+  RELEASED_ON_RUN_END,
   resumePlan,
   runStop,
   stoppedNodes,
@@ -227,6 +229,38 @@ describe('how a run stopped', () => {
     for (const [status, stop] of cases) {
       expect(runStop(runOf([], status))).toBe(stop)
     }
+  })
+})
+
+// A run holds several nodes in flight, so the stop that ended the run is not
+// always the stop that ended a node. Every surface that puts a word on a
+// node's record reads it here, and never off the run alone.
+describe('how one node stopped', () => {
+  it('is the run’s word for a node the run’s own stop released', () => {
+    const released = node('builder', 'failed', { error: RELEASED_ON_RUN_END })
+    expect(nodeStop(runOf([released], 'cancelled'), released)).toBe('cancelled')
+    // The engine's release message is not the only shape: a fake, and older
+    // records, leave the released node with no error at all.
+    const bare = node('builder', 'failed')
+    expect(nodeStop(runOf([bare], 'cancelled'), bare)).toBe('cancelled')
+    // Nothing settled it either way: whatever caught the run caught it.
+    const blocked = node('builder', 'blocked')
+    expect(nodeStop(runOf([blocked], 'cancelled'), blocked)).toBe('cancelled')
+  })
+
+  it('is the node’s own word where the record carries one', () => {
+    const died = node('spec-audit', 'failed', { error: 'ran out of context, twice' })
+    // Cancelled an hour after this node died on its own: the cancel did not
+    // kill it, and saying so blames the human's click for the node's failure.
+    expect(nodeStop(runOf([died], 'cancelled'), died)).toBe('failed')
+    expect(nodeStop(runOf([died], 'failed'), died)).toBe('failed')
+    const cut = node('gate', 'interrupted')
+    expect(nodeStop(runOf([cut], 'cancelled'), cut)).toBe('interrupted')
+  })
+
+  it('is nothing at all while the run can still move itself', () => {
+    const died = node('spec-audit', 'failed', { error: 'ran out of context, twice' })
+    expect(nodeStop(runOf([died], 'running'), died)).toBeUndefined()
   })
 })
 
