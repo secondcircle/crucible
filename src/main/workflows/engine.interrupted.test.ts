@@ -937,6 +937,80 @@ describe('resume and held-open nodes', () => {
     // needed.
     expect(run.nodes.find((node) => node.id === 'review·r1')?.status).toBe('complete')
   })
+
+  // Review-4 reproduction. The quit catches the run mid-revision: the base
+  // record is complete with its session on disk, and `review·r1` — the
+  // in-session revision the quit cut down — carries no token of its own
+  // (`openRevision` records none). `resumePlan` for that record chain is
+  // empty, and `resumeSentence`'s empty-plan fallback tells the orchestrator
+  // the node "has no session left to continue, so it runs again from its
+  // prompt as a fresh attempt". The engine does the opposite, as the resume
+  // half of this test shows: it replays the completion and the re-issued
+  // revise() continues the review's own session, billing nothing twice.
+  it('does not tell the orchestrator a revision the engine will continue is a fresh attempt', async () => {
+    // First life: the review completes and is held open, the fixer completes,
+    // and the revision blocks — so the quit catches `review·r1` mid-flight.
+    const before = rig({ gated: reviewing }, (nodeId) =>
+      nodeId === 'review'
+        ? (_prompt, tools, turn) => {
+            if (turn === 1) {
+              writeFileSync(outputPath(tools.taskPrompt, 'review.md'), 'changes required\n')
+              tools.complete({ summary: 'reviewed once' })
+              return
+            }
+            tools.activity('looking again…')
+            tools.block({ reason: 'which way?' })
+          }
+        : (_prompt, tools) => tools.complete({ summary: 'fixed it' })
+    )
+    const intent = join(before.repo, 'intent.md')
+    writeFileSync(intent, 'the intent\n')
+    const started = await before.engine.start(startRequest(before.repo, 'gated', { intent }))
+    await until(() => before.engine.runs()[0].waiting === true)
+    const blocked = (): { cost?: number } | undefined =>
+      before.engine.runs()[0].nodes.find((node) => node.status === 'blocked')
+    await until(() => blocked()?.cost !== undefined)
+    const reviewToken = before.engine.runs()[0].nodes.find(
+      (node) => node.id === 'review'
+    )?.sessionToken
+    expect(reviewToken).toBeDefined()
+
+    const after = relaunch(before, { gated: reviewing }, (nodeId) =>
+      nodeId === 'review'
+        ? (_prompt, tools) => {
+            writeFileSync(outputPath(tools.taskPrompt, 'review.md'), 'approved\n')
+            tools.complete({ summary: 'reviewed again' })
+          }
+        : (_prompt, tools) => tools.complete({ summary: 'fixed it' })
+    )
+
+    // The state the sweep leaves: base complete with its session, the
+    // revision interrupted with none.
+    const swept = after.engine.runs()[0]
+    expect(swept.status).toBe('interrupted')
+    expect(swept.nodes.find((node) => node.id === 'review')?.status).toBe('complete')
+    expect(swept.nodes.find((node) => node.id === 'review·r1')?.status).toBe('interrupted')
+    expect(swept.nodes.find((node) => node.id === 'review·r1')?.sessionToken).toBeUndefined()
+
+    // The notice, composed from that record.
+    after.engine.deliverNotices('orchestrator-1')
+    const notice = after.delivered.find((message) => message.text.includes('was interrupted'))
+    expect(notice).toBeDefined()
+
+    // What the click it describes actually does: the completion is replayed,
+    // and the re-issued revise() reopens the review's own session — one
+    // request, the base record's token, no fresh attempt from a prompt.
+    await after.engine.resume(started.id)
+    await until(() => after.engine.runs()[0].status === 'complete')
+    const run = after.engine.runs()[0]
+    expect(run.nodes.find((node) => node.id === 'review·r2')?.status).toBe('complete')
+    expect(after.sessions.requests).toHaveLength(1)
+    expect(after.sessions.requests[0].resumeToken).toBe(reviewToken)
+
+    // So the notice must not have claimed the opposite act.
+    expect(notice?.text).not.toContain('runs again from its prompt')
+    expect(notice?.text).not.toContain('no session left')
+  })
 })
 
 describe('the interruption notice', () => {
