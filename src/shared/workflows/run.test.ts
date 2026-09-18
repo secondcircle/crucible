@@ -1,11 +1,15 @@
 import { describe, expect, it } from 'vitest'
 import {
   baseNodeId,
+  CONTINUED_NODE_MESSAGE,
   currentNode,
   cutRevisions,
+  isContinuedNodeMessage,
+  nextRevisionId,
   nodeChain,
   nodeChains,
   resumePlan,
+  runStop,
   stoppedNodes,
   type RunNode,
   type RunNodeStatus,
@@ -207,5 +211,43 @@ describe('the node a run is at', () => {
   it('is the cut node while the run is interrupted', () => {
     const run = runOf([node('spec', 'complete'), node('gate', 'interrupted')])
     expect(currentNode(run)?.id).toBe('gate')
+  })
+})
+
+describe('how a run stopped', () => {
+  it('is one word over every stop short of completing, and nothing otherwise', () => {
+    const cases: ReadonlyArray<[RunRecord['status'], string | undefined]> = [
+      ['interrupted', 'interrupted'],
+      ['failed', 'failed'],
+      ['cancelled', 'cancelled'],
+      ['running', undefined],
+      ['paused', undefined],
+      ['complete', undefined]
+    ]
+    for (const [status, stop] of cases) {
+      expect(runStop(runOf([], status))).toBe(stop)
+    }
+  })
+})
+
+// The id the run view names before the click has to be the id the engine
+// mints after it, so both read it from here.
+describe('the id a clean restart mints', () => {
+  it('is the first ·rN of that node the record does not already hold', () => {
+    expect(nextRevisionId([node('gate', 'failed')], 'gate')).toBe('gate·r1')
+    expect(
+      nextRevisionId([node('gate', 'interrupted'), node('gate·r1', 'failed')], 'gate')
+    ).toBe('gate·r2')
+    // Named after the node, never after the record: a stopped revision starts
+    // over as the next revision of the node it belongs to.
+    expect(nextRevisionId([node('gate·r1', 'failed')], baseNodeId('gate·r1'))).toBe('gate·r2')
+  })
+})
+
+describe('the message a continued node is sent', () => {
+  it('is recognized by what opens it, whatever else the engine appends', () => {
+    expect(isContinuedNodeMessage(CONTINUED_NODE_MESSAGE)).toBe(true)
+    expect(isContinuedNodeMessage(`${CONTINUED_NODE_MESSAGE}\n\nOne monitor was lost.`)).toBe(true)
+    expect(isContinuedNodeMessage('Apply the findings in review-1.md.')).toBe(false)
   })
 })

@@ -642,6 +642,28 @@ describe('the graph header count', () => {
     expect(graphCount([nodeOf('a', [], { status: 'pending' })])).toBe('1 node')
     expect(graphCount([])).toBe('0 nodes')
   })
+
+  // A clean restart and a reviewer's send-back both leave two records of one
+  // node. The header counts nodes, says how many revisions there are, and
+  // reads each node's state off the record the engine is acting on — so the
+  // attempt a revision superseded is never counted as a second node, nor as a
+  // failure the run is still carrying.
+  it('counts a revision as a revision, not as another node', () => {
+    expect(
+      graphCount([
+        nodeOf('plan'),
+        nodeOf('fixer-1', ['plan'], { status: 'failed' }),
+        nodeOf('fixer-1\u00b7r1', ['fixer-1'], { status: 'running' })
+      ])
+    ).toBe('2 nodes · 1 revision · 1 done · 1 running')
+    expect(
+      graphCount([
+        nodeOf('gate'),
+        nodeOf('gate\u00b7r1', ['gate']),
+        nodeOf('gate\u00b7r2', ['gate\u00b7r1'])
+      ])
+    ).toBe('1 node · 2 revisions · 1 done')
+  })
 })
 
 describe('what an edge means', () => {

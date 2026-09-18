@@ -561,3 +561,48 @@
   color: var(--error);
   border-color: var(--error);
 }
+
+/* A seam in a run node's transcript: where the node stopped, and where a
+   resume picked it up again. A hairline with a word on it, in the color of
+   what it marks — teal for work carried on, the stop's own color for where it
+   stopped, and neutral for a cancel, which broke nothing. */
+.txrule {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: var(--column);
+  margin: 18px auto 14px;
+  padding: 0 24px;
+}
+
+.txrule::before,
+.txrule::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--line);
+}
+
+.txrule span {
+  font: 10.5px var(--mono);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  color: var(--faint);
+}
+
+.txrule.resumed span {
+  color: var(--run);
+}
+
+.txrule.failed span {
+  color: var(--error);
+}
+
+.txrule.interrupted span {
+  color: var(--warn);
+}
+
+.txrule.cancelled span {
+  color: var(--dim);
+}

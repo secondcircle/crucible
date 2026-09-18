@@ -274,6 +274,13 @@ const Item = memo(function Item({
         </div>
       )
 
+    case 'rule':
+      return (
+        <div className={`txrule ${item.tone}`}>
+          <span>{item.text}</span>
+        </div>
+      )
+
     case 'stopped':
       return <div className="stopped">Stopped</div>
 

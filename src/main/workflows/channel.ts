@@ -5,6 +5,7 @@ import {
   type WorkflowRunResult
 } from '../../shared/workflows/channels'
 import type { MainWorkflowRunService, WorkflowRunService } from '../../shared/workflows/service'
+import type { ResumeKind } from '../../shared/workflows/run'
 import { displaySafeMessage } from '../agent/adapter-error'
 
 // Plumbing only, exactly as the other channels are: every rule about what a
@@ -63,13 +64,25 @@ export async function invoke(service: WorkflowRunService, request: unknown): Pro
     return value
   }
 
+  // The two acts and nothing else: anything the renderer might send that is
+  // neither is refused here rather than reaching the engine as a third kind
+  // of resume.
+  function resumeKind(position: number): ResumeKind | undefined {
+    const value = given[position]
+    if (value === undefined) return undefined
+    if (value !== 'continue' && value !== 'clean-restart') {
+      throw new Error(`${op} takes "continue" or "clean-restart", and was given neither.`)
+    }
+    return value
+  }
+
   switch (op) {
     case 'snapshot':
       return service.snapshot()
     case 'pause':
       return service.pause(text(0))
     case 'resume':
-      return service.resume(text(0))
+      return service.resume(text(0), resumeKind(1))
     case 'cancel':
       return service.cancel(text(0))
     case 'dismiss':

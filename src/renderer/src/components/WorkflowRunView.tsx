@@ -1,25 +1,25 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { TranscriptItem } from '../../../shared/agent/port'
 import {
+  baseNodeId,
   currentNode,
+  nextRevisionId,
   resumePlan,
   runCost,
   runIsLive,
+  runStop,
+  stoppedNodes,
+  type ResumeKind,
   type RunArtifact,
   type RunNode,
-  type RunRecord
+  type RunRecord,
+  type RunStop
 } from '../../../shared/workflows/run'
 import { artifactName } from '../../../shared/workflows/artifacts'
 import { waitedFor } from '../monitors/activity'
 import type { ArtifactView } from '../../../shared/workflows/service'
-import {
-  money,
-  nodeProgress,
-  shortAge,
-  shortModel,
-  since,
-  toViewItems
-} from '../runs/format'
+import { money, nodeProgress, shortAge, shortModel, since } from '../runs/format'
+import { transcriptWithSeams } from '../runs/seams'
 import { railOf, rowFor, type RailModel } from '../runs/rail'
 import { relativeTime } from '../labels'
 import { useClock } from '../clock'
@@ -92,10 +92,11 @@ export function WorkflowRunView({
   readonly onCopyPath: (path: string) => void
   readonly onGoToSession: () => void
   readonly onPause: () => void
-  // Un-pauses a paused run, and puts an interrupted one back to work. It
-  // resolves when the act has landed either way, which is what takes the
-  // button out of its waiting state.
-  readonly onResume: () => Promise<void>
+  // Un-pauses a paused run, and puts a stopped one back to work — continuing
+  // the node it stopped on, or starting that node over. It resolves when the
+  // act has landed either way, which is what takes the buttons out of their
+  // waiting state.
+  readonly onResume: (kind: ResumeKind) => Promise<void>
   /** Raises the same confirm the run row raises; stopping never goes silent. */
   readonly onCancel: () => void
   /** The same flow the row's Investigate runs, landing in a new session. */
@@ -143,18 +144,24 @@ export function WorkflowRunView({
   }, [shown, transcriptKey, transcript])
 
   const live = runIsLive(run)
-  // Set from the click to the act's answer, so the button says it heard in the
-  // same frame and cannot be clicked twice.
+  // Set from the click to the act's answer, so the buttons say they heard in
+  // the same frame and neither can be clicked while the other is in flight.
   const [resuming, setResuming] = useState(false)
-  const resume = (): void => {
+  const resume = (kind: ResumeKind): void => {
     setResuming(true)
-    void onResume()
+    void onResume(kind)
       .catch(() => {
         // The refusal is reported where every run refusal is; here it only
-        // means the button comes back.
+        // means the buttons come back.
       })
       .then(() => setResuming(false))
   }
+  // How this run stopped, if it has: the one fact the banner, its tint and
+  // the two acts are all read from.
+  const stop = runStop(run)
+  // Nothing to start over on a run the stop caught between nodes, so the act
+  // is not offered there; the banner says Resume alone applies.
+  const canStartOver = stop !== undefined && stoppedNodes(run).length > 0
   const rail = usePlacedRail(run)
   const body = useRef<HTMLDivElement>(null)
   const { graphWidth, railShown, startDrag } = useSplitter(body)
@@ -189,10 +196,10 @@ export function WorkflowRunView({
           {nodeProgress(run)}
         </span>
         {canGoToSession ? (
-          // Quiet while the run is interrupted: Resume is the one primary
-          // there, because it is the one act that moves the run.
+          // Quiet while the run is stopped: Resume is the one primary there,
+          // because it is the one act that moves the run.
           <button
-            className={`btn${run.status === 'interrupted' ? '' : ' primary'}`}
+            className={`btn${stop === undefined ? ' primary' : ''}`}
             onClick={onGoToSession}
           >
             Go to session
@@ -200,7 +207,7 @@ export function WorkflowRunView({
         ) : null}
         {live ? (
           run.status === 'paused' ? (
-            <button className="btn" disabled={resuming} onClick={resume}>
+            <button className="btn" disabled={resuming} onClick={() => resume('continue')}>
               Resume
             </button>
           ) : (
@@ -214,12 +221,17 @@ export function WorkflowRunView({
             Cancel
           </button>
         ) : null}
-        {/* The primary, in the slot Pause and Cancel occupy on a live run:
-            there is no live handle here to pause or to cancel, and this is
-            the one act that moves the run. */}
-        {run.status === 'interrupted' ? (
-          <button className="btn primary" disabled={resuming} onClick={resume}>
+        {/* The two acts, in the slot Pause and Cancel occupy on a live run:
+            there is no live handle here to pause or to cancel, and these are
+            the acts that move the run. One set of buttons on every stop. */}
+        {stop === undefined ? null : (
+          <button className="btn primary" disabled={resuming} onClick={() => resume('continue')}>
             Resume
+          </button>
+        )}
+        {canStartOver ? (
+          <button className="btn" disabled={resuming} onClick={() => resume('clean-restart')}>
+            Start node over
           </button>
         ) : null}
         {/* On every status: what happened is a question worth asking of a
@@ -264,9 +276,9 @@ export function WorkflowRunView({
         )}
 
         <div className="detail" style={fullScreen ? HIDDEN : undefined}>
-          {run.status === 'interrupted' ? (
-            <InterruptedBanner run={run} toSession={canGoToSession} />
-          ) : null}
+          {stop === undefined ? null : (
+            <StopBanner run={run} stop={stop} toSession={canGoToSession} />
+          )}
           {openRow !== undefined ? (
             <ArtifactReader
               runId={run.id}
@@ -321,7 +333,7 @@ export function WorkflowRunView({
               </div>
 
               <Transcript
-                items={toViewItems(items)}
+                items={transcriptWithSeams(run, shown, items, now)}
                 sessionId={`run-${run.id}-${shown.id}`}
               />
 
@@ -475,57 +487,109 @@ function sameOrder(held: readonly string[], next: readonly string[]): boolean {
   return held.length === next.length && held.every((path, at) => path === next[at])
 }
 
-// What the quit did and what Resume will do about it, stated before the click
-// rather than discovered after it. What it will do is not one act: the same
-// `resumePlan` the engine and the interruption notice read splits the cut
-// nodes into the ones that continue from their last turn and the ones with no
-// session left, and each half is described as what it is — so the sentence
-// above the button can never promise a re-spend the click will not make. It
-// names one act per node and not per record: a record a clean restart
-// superseded is not a second node, and the engine will never reopen it.
-// Present exactly while the run is interrupted — resuming re-renders the
-// column without it.
-function InterruptedBanner({
+// What stopped this run and what each act will do about it, stated before the
+// click rather than discovered after it. One banner for every stop: only the
+// first sentence and the tint tell failed, cancelled and interrupted apart,
+// and a failed run quotes the error it recorded.
+//
+// What Resume will do is not one act: the same `resumePlan` the engine and
+// the interruption notice read splits the stopped nodes into the ones that
+// continue from their last turn and the ones with no session left, and each
+// half is described as what it is — so the sentence above the button can
+// never promise a re-spend the click will not make. It names one act per node
+// and not per record: a record a clean restart superseded is not a second
+// node, and the engine will never reopen it. Present exactly while the run is
+// stopped — resuming re-renders the column without it.
+function StopBanner({
   run,
+  stop,
   toSession
 }: {
   readonly run: RunRecord
+  readonly stop: RunStop
   /** Whether the recorded orchestrator session is still there to report to. */
   readonly toSession: boolean
 }): React.JSX.Element {
   const { continued, restarted } = resumePlan(run, 'continue')
+  const stopped = stoppedNodes(run)
   // Never a session that no longer exists: a run with none parks until one
   // adopts it.
   const where = toSession ? 'the same session' : 'whichever session adopts it'
   return (
-    <div className="rvwhy" role="status">
-      <b>Crucible quit while this run was working.</b> Its worktree is left as it stands.
-      {continued.length === 0 ? null : (
-        <>
-          {' '}
-          Resume continues the {nodeWord(continued)} {nodeNames(continued)} from{' '}
-          {possessive(continued)} last turn, in the same worktree, reporting to {where}, so nothing{' '}
-          {continued.length === 1 ? 'it' : 'they'} already spent is spent again.
-        </>
-      )}
-      {restarted.length === 0 ? null : (
-        <>
-          {' '}
-          {continued.length === 0 ? 'Resume runs' : 'It runs'} the {nodeWord(restarted)}{' '}
-          {nodeNames(restarted)} again from {possessive(restarted)} prompt, in the same worktree
-          {continued.length === 0 ? <>, reporting to {where}</> : null}: no session of{' '}
-          {possessive(restarted)} own is on disk to continue from.
-        </>
-      )}
-      {continued.length + restarted.length === 0 ? (
-        <> Resume puts this run back to work in the same worktree, reporting to {where}.</>
+    <div className={`rvwhy ${stop}`} role="status">
+      <b>{headline(stop, stopped)}</b> Its worktree is left as it stands.
+      {/* Where it can be read, rather than in the node facts alone: what the
+          run died on is the first thing the reader is deciding from. */}
+      {stop === 'failed' && run.error !== undefined ? (
+        <div className="quote">{run.error}</div>
       ) : null}
+      <div className="acts">
+        {continued.length === 0 ? null : (
+          <>
+            <i>Resume</i> continues the {nodeWord(stop, continued)} {nodeNames(continued)} from{' '}
+            {possessive(continued)} last turn, in the same worktree, reporting to {where}, so
+            nothing {continued.length === 1 ? 'it' : 'they'} already spent is spent again.
+          </>
+        )}
+        {restarted.length === 0 ? null : (
+          <>
+            {continued.length === 0 ? <i>Resume</i> : 'It'} runs the {nodeWord(stop, restarted)}{' '}
+            {nodeNames(restarted)} again from {possessive(restarted)} prompt, in the same worktree
+            {continued.length === 0 ? <>, reporting to {where}</> : null}: no session of{' '}
+            {possessive(restarted)} own is on disk to continue from.
+          </>
+        )}
+        {stopped.length === 0 ? (
+          <>
+            <i>Resume</i> puts this run back to work in the same worktree, reporting to {where}.
+            Nothing was left mid-flight to start over, so Resume is the only act here.
+          </>
+        ) : (
+          <>
+            {' '}
+            <i>Start node over</i> runs the {nodeWord(stop, stopped)} {nodeNames(stopped)} again
+            from {possessive(stopped)} prompt with no memory of{' '}
+            {stopped.length === 1 ? 'this attempt' : 'these attempts'}, as{' '}
+            {revisionNames(run, stopped)}.
+          </>
+        )}
+      </div>
     </div>
   )
 }
 
-function nodeWord(nodes: readonly RunNode[]): string {
-  return nodes.length === 1 ? 'interrupted node' : 'interrupted nodes'
+/** The first sentence: which stop it was, and the node it stopped at. */
+function headline(stop: RunStop, stopped: readonly RunNode[]): React.JSX.Element {
+  // The quit's own sentence, kept: it is about the app rather than the work,
+  // and it is the one the interrupted banner has always said.
+  if (stop === 'interrupted') return <>Crucible quit while this run was working.</>
+  const said = stop === 'failed' ? 'This run failed' : 'This run was cancelled'
+  // Named here only when there is one to name; several are named by the acts
+  // below instead of crowding the sentence that says what happened.
+  if (stopped.length !== 1) return <>{said}.</>
+  return (
+    <>
+      {said} at <code>{stopped[0].id}</code>.
+    </>
+  )
+}
+
+/** The ids a clean restart would mint, worked out where the engine works them out. */
+function revisionNames(run: RunRecord, nodes: readonly RunNode[]): React.JSX.Element {
+  return (
+    <>
+      {nodes.map((node, at) => (
+        <span key={node.id}>
+          {at === 0 ? null : ', '}
+          <code>{nextRevisionId(run.nodes, baseNodeId(node.id))}</code>
+        </span>
+      ))}
+    </>
+  )
+}
+
+function nodeWord(stop: RunStop, nodes: readonly RunNode[]): string {
+  return nodes.length === 1 ? `${stop} node` : `${stop} nodes`
 }
 
 function possessive(nodes: readonly RunNode[]): string {

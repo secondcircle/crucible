@@ -28,6 +28,23 @@ export type RunStatus =
 // its prompt with no memory of the attempt that stopped.
 export type ResumeKind = 'continue' | 'clean-restart'
 
+// Every way a run stops short of completing. One vocabulary for all three:
+// what the human is offered on one of them is what they are offered on the
+// others, and only the sentence naming the stop differs.
+export type RunStop = Extract<RunStatus, 'interrupted' | 'failed' | 'cancelled'>
+
+/** How this run stopped, or nothing at all while it can still move itself. */
+export function runStop(run: Pick<RunRecord, 'status'>): RunStop | undefined {
+  switch (run.status) {
+    case 'interrupted':
+    case 'failed':
+    case 'cancelled':
+      return run.status
+    default:
+      return undefined
+  }
+}
+
 export type RunNodeStatus =
   | 'pending'
   | 'running'
@@ -192,6 +209,23 @@ export const INTERRUPTED_MESSAGE =
   'Crucible quit while this run was working, so it stopped where it stood. ' +
   'Its worktree is left as it stands.'
 
+// What a continued node hears first. Its own session is reopened, so
+// everything it did is above this line; the only news is the gap. Spelled
+// here rather than in the engine because the run view reads it back: it is
+// the seam in a node's transcript where the resume picked the node up, and
+// the rule the view draws there.
+export const CONTINUED_NODE_MESSAGE =
+  'Crucible quit while this run was working, and the run has now been resumed. This is the same ' +
+  'session: everything above is yours, and the worktree is as you left it. Check what is already ' +
+  'on disk before redoing anything.'
+
+// A prefix, not the whole message: the engine appends what else the node is
+// owed — the lost monitors it was waiting on, a reviewer's send-back — under
+// the same opening.
+export function isContinuedNodeMessage(text: string): boolean {
+  return text.startsWith(CONTINUED_NODE_MESSAGE)
+}
+
 // Every message a run sends its orchestrator opens with this, and three
 // things downstream read it back: the fake orchestrator recognizes a run
 // speaking, the titler declines to name a session after one, and a human
@@ -250,6 +284,20 @@ function revisionOf(recordId: string): Revision | undefined {
 /** The node a record belongs to: `gate·r1` is a record of `gate`. */
 export function baseNodeId(recordId: string): string {
   return revisionOf(recordId)?.base ?? recordId
+}
+
+// The next free revision id of a node: `<id>·rN`. The engine mints the record
+// with it and the run view names it before the click, so it is worked out in
+// one place and neither can promise an id the other will not write.
+export function nextRevisionId(nodes: readonly { readonly id: string }[], id: string): string {
+  const known = new Set(nodes.map((candidate) => candidate.id))
+  let round = 0
+  let revisionId: string
+  do {
+    round += 1
+    revisionId = `${id}${REVISION_MARK}${round}`
+  } while (known.has(revisionId))
+  return revisionId
 }
 
 /**

@@ -75,28 +75,31 @@ export function nodeProgress(run: RunRecord): string {
 // The chat pane's shapes, restored: what the store snapshotted of a node's
 // session renders through the same component the chat uses, nothing live.
 export function toViewItems(items: readonly TranscriptItem[]): readonly ViewItem[] {
-  return items.map((item): ViewItem => {
-    switch (item.kind) {
-      case 'assistant':
-        return { kind: 'assistant', markdown: item.markdown, streaming: false }
-      case 'thinking':
-        return {
-          kind: 'thinking',
-          text: item.text,
-          ...(item.seconds === undefined ? {} : { seconds: item.seconds }),
-          running: false
-        }
-      case 'tool':
-        return {
-          kind: 'tool',
-          name: item.name,
-          summary: item.summary,
-          output: item.output,
-          ok: item.ok,
-          running: false
-        }
-      default:
-        return item
-    }
-  })
+  return items.map(toViewItem)
+}
+
+/** One stored item as the transcript renders it. */
+export function toViewItem(item: TranscriptItem): ViewItem {
+  switch (item.kind) {
+    case 'assistant':
+      return { kind: 'assistant', markdown: item.markdown, streaming: false }
+    case 'thinking':
+      return {
+        kind: 'thinking',
+        text: item.text,
+        ...(item.seconds === undefined ? {} : { seconds: item.seconds }),
+        running: false
+      }
+    case 'tool':
+      return {
+        kind: 'tool',
+        name: item.name,
+        summary: item.summary,
+        output: item.output,
+        ok: item.ok,
+        running: false
+      }
+    default:
+      return item
+  }
 }

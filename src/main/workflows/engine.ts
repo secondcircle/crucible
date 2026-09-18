@@ -3,9 +3,11 @@ import { existsSync, statSync } from 'node:fs'
 import { basename, join } from 'node:path'
 import type { SessionId, TranscriptItem } from '../../shared/agent/port'
 import {
+  CONTINUED_NODE_MESSAGE,
   dismissRefusal,
   INTERRUPTED_MESSAGE,
   latestNodeActivity,
+  nextRevisionId,
   nodeChain,
   resumeRefusal,
   runCanResume,
@@ -47,13 +49,6 @@ const DEFAULT_TOOLS = ['read', 'bash', 'edit', 'write', 'grep', 'find', 'ls']
 
 const NUDGE_LIMIT = 2
 const VALIDATION_RETRY_LIMIT = 3
-
-// What a continued node hears first. Its own session is reopened, so
-// everything it did is above this line; the only news is the gap.
-const CONTINUED_NOTICE =
-  'Crucible quit while this run was working, and the run has now been resumed. This is the same ' +
-  'session: everything above is yours, and the worktree is as you left it. Check what is already ' +
-  'on disk before redoing anything.'
 
 // What a node run again from its prompt hears, when its own session could
 // not be reopened. A clean restart asked for by name says the same thing:
@@ -593,18 +588,6 @@ export function createWorkflowEngine(options: EngineOptions): WorkflowEngine {
         .at(-1)
     }
 
-    /** The next free revision id of a node: `<id>·rN`. */
-    function nextRevisionId(id: string): string {
-      const known = new Set(run.nodes.map((candidate) => candidate.id))
-      let round = 0
-      let revisionId: string
-      do {
-        round += 1
-        revisionId = `${id}·r${round}`
-      } while (known.has(revisionId))
-      return revisionId
-    }
-
     /** One session of one node: what it is asked, and which record carries it. */
     interface NodeJob {
       /** The node's own id, which names its revisions and its role prompt. */
@@ -698,9 +681,10 @@ export function createWorkflowEngine(options: EngineOptions): WorkflowEngine {
             recordId: stopped.id,
             spec,
             outputPaths,
-            firstMessage: [CONTINUED_NOTICE, ...(lost.length === 0 ? [] : [lostMonitorsNotice(lost)])].join(
-              '\n\n'
-            ),
+            firstMessage: [
+              CONTINUED_NODE_MESSAGE,
+              ...(lost.length === 0 ? [] : [lostMonitorsNotice(lost)])
+            ].join('\n\n'),
             resume: stopped.sessionToken,
             ...(onHold === undefined ? {} : { onHold })
           })
@@ -718,7 +702,7 @@ export function createWorkflowEngine(options: EngineOptions): WorkflowEngine {
       // A clean restart, or a stopped node with no session to reopen: run
       // again from the prompt, under a revision id, so the transcript of the
       // attempt that stopped stays readable beside it.
-      const restartId = nextRevisionId(id)
+      const restartId = nextRevisionId(run.nodes, id)
       log?.({
         event: 'node_clean_restart',
         runId: run.id,
@@ -785,7 +769,7 @@ export function createWorkflowEngine(options: EngineOptions): WorkflowEngine {
         },
         async revise(message: string, opts?: ReviseOptions): Promise<NodeResult> {
           if (live !== undefined) return live.revise(message, opts)
-          const revisionId = nextRevisionId(id)
+          const revisionId = nextRevisionId(run.nodes, id)
           const parents = [
             ...new Set([record.id, ...keptParents(run, revisionId, opts?.from ?? [])])
           ]
@@ -801,7 +785,7 @@ export function createWorkflowEngine(options: EngineOptions): WorkflowEngine {
                   firstMessage:
                     token === undefined
                       ? [composeTaskPrompt(spec, outputPaths), RESTART_NOTICE, message].join('\n\n')
-                      : [CONTINUED_NOTICE, message].join('\n\n'),
+                      : [CONTINUED_NODE_MESSAGE, message].join('\n\n'),
                   ...(token === undefined ? {} : { resume: token }),
                   onHold: resolve
                 })
@@ -1067,7 +1051,7 @@ export function createWorkflowEngine(options: EngineOptions): WorkflowEngine {
       })
 
       const openRevision = (from: string[] | undefined): void => {
-        const revisionId = nextRevisionId(id)
+        const revisionId = nextRevisionId(run.nodes, id)
         const revisionParents = [
           ...new Set([node.id, ...keptParents(run, revisionId, from ?? [])])
         ]

@@ -743,7 +743,7 @@ describe('an interrupted run', () => {
 
     // No dialog: the click is the spend authorization.
     expect(screen.queryByRole('dialog')).toBeNull()
-    expect(workflowRuns.calls).toContainEqual({ op: 'resume', args: ['45c8'] })
+    expect(workflowRuns.calls).toContainEqual({ op: 'resume', args: ['45c8', 'continue'] })
     expect((screen.getByRole('button', { name: 'Resume' }) as HTMLButtonElement).disabled).toBe(
       true
     )
@@ -817,11 +817,12 @@ describe('an interrupted run', () => {
     expect(banner?.textContent).toContain('gate-alignment')
     expect(banner?.textContent).toContain('reporting to the same session')
 
-    // Resume is the primary, and there is no live handle to pause or cancel.
+    // Resume is the primary, Start node over stands beside it, and there is
+    // no live handle to pause or cancel.
     const header = view.querySelector('.rvtop')
     expect(
       [...(header?.querySelectorAll('button') ?? [])].map((button) => button.textContent)
-    ).toEqual(['Go to session', 'Resume', 'Investigate', 'esc'])
+    ).toEqual(['Go to session', 'Resume', 'Start node over', 'Investigate', 'esc'])
     // The only primary in the header: Go to session goes quiet beside it.
     expect(
       [...(header?.querySelectorAll('button.primary') ?? [])].map((one) => one.textContent)
@@ -841,7 +842,7 @@ describe('an interrupted run', () => {
       fireEvent.click(within(view.querySelector('.rvtop') as HTMLElement).getByText('Resume'))
       await settled()
     })
-    expect(workflowRuns.calls).toContainEqual({ op: 'resume', args: ['45c8'] })
+    expect(workflowRuns.calls).toContainEqual({ op: 'resume', args: ['45c8', 'continue'] })
 
     // The record moving to running re-renders the header into the live shape.
     await act(async () => {
