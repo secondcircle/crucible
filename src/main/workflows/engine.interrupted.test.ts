@@ -591,6 +591,98 @@ describe('a clean restart', () => {
     )
     expect(after.engine.runs()[0].nodes.map((node) => node.id)).toContain('gate·r1')
   })
+
+  // Twice stopped, with a clean restart in between: the completion lives on
+  // `gate·r1` while the base record stays `interrupted` for good. The record
+  // chain is the one answer to "is this node done" — read the base record
+  // alone and the next resume reopens a finished node's session, pays for a
+  // turn on work that is done, and pushes a second record under one id.
+  it('completes a node for good: the next resume replays it rather than re-running it', async () => {
+    const threeStep: WorkflowDef = {
+      description: 'a planner, a gate, a builder',
+      inputs: { intent: 'the intent document' },
+      plan: (): PlannedNode[] => [
+        { id: 'planner' },
+        { id: 'gate', parents: ['planner'] },
+        { id: 'builder', parents: ['gate'] }
+      ],
+      run: async (ctx) => {
+        const planned = await ctx.node('planner', {
+          prompt: 'write the spec',
+          reads: [ctx.inputs.intent],
+          outputs: { spec: { file: 'spec.md', desc: 'the Spec' } }
+        })
+        const gate = await ctx.node('gate', {
+          prompt: 'judge the branch',
+          reads: [planned.outputs.spec],
+          outputs: { verdict: { file: 'verdict.md', desc: 'the verdict' } }
+        })
+        const built = await ctx.node('builder', {
+          prompt: 'build it',
+          reads: [gate.outputs.verdict],
+          outputs: { report: { file: 'report.md', desc: 'the report' } }
+        })
+        return { summary: built.summary }
+      }
+    }
+    const write =
+      (file: string, summary: string): NodeScript =>
+      (_prompt, tools) => {
+        writeFileSync(outputPath(tools.taskPrompt, file), 'done\n')
+        tools.complete({ summary })
+      }
+    const park: NodeScript = (_prompt, tools) => {
+      tools.activity('working…')
+      tools.block({ reason: 'which way?' })
+    }
+
+    // Life 1: the planner completes, the gate parks, the app quits.
+    const first = rig({ threeStep }, (nodeId) =>
+      nodeId === 'planner' ? write('spec.md', 'wrote the spec') : park
+    )
+    const intent = join(first.repo, 'intent.md')
+    writeFileSync(intent, 'the intent\n')
+    const started = await first.engine.start(startRequest(first.repo, 'threeStep', { intent }))
+    await until(() =>
+      first.engine
+        .runs()[0]
+        .nodes.some((node) => node.status === 'blocked' && node.cost !== undefined)
+    )
+
+    // Life 2: a clean restart. `gate·r1` completes, the builder parks, quit.
+    const second = relaunch(first, { threeStep }, (nodeId) =>
+      nodeId === 'gate' ? write('verdict.md', 'judged it fresh') : park
+    )
+    await second.engine.resume(started.id, 'clean-restart')
+    await until(() =>
+      second.engine
+        .runs()[0]
+        .nodes.some(
+          (node) => node.id === 'builder' && node.status === 'blocked' && node.cost !== undefined
+        )
+    )
+    expect(second.engine.runs()[0].nodes.find((node) => node.id === 'gate·r1')?.status).toBe(
+      'complete'
+    )
+
+    // Life 3: a plain resume. Only the builder goes back to work.
+    const third = relaunch(second, { threeStep }, () => (_prompt, tools) => {
+      writeFileSync(outputPath(tools.taskPrompt, 'report.md'), 'the report\n')
+      tools.complete({ summary: 'built it' })
+    })
+    await third.engine.resume(started.id)
+    await until(() => third.engine.runs()[0].status !== 'running')
+    const run = third.engine.runs()[0]
+
+    // No session was opened for the gate: its completed revision is handed
+    // back from the record, exactly as a completed base node is.
+    expect(third.sessions.prompts.filter((prompt) => prompt.startsWith('gate'))).toEqual([])
+    // One record per id: the completed gate·r1 keeps its summary, ungrown.
+    expect(run.nodes.filter((node) => node.id === 'gate·r1')).toHaveLength(1)
+    expect(run.nodes.find((node) => node.id === 'gate·r1')?.summary).toBe('judged it fresh')
+    expect(run.nodes.find((node) => node.id === 'builder')?.summary).toBe('built it')
+    expect(run.status).toBe('complete')
+  }, 20000)
 })
 
 describe('what a resumed run does not do again', () => {
@@ -699,6 +791,46 @@ describe('what a resumed run does not do again', () => {
     await built.engine.start(startRequest(built.repo, 'solo', {}))
     await until(() => built.engine.runs()[0].status === 'failed')
     expect(built.engine.runs()[0].error).toContain('duplicate effect id "gate"')
+  })
+
+  it('refuses them on a resumed run too, where the second one would replay', async () => {
+    // An id asked for twice is the workflow's mistake whether the value comes
+    // out of the work or off the record: a resumed run refuses it where a
+    // first life did, rather than quietly handing the same value back twice.
+    let calls = 0
+    const twice: WorkflowDef = {
+      description: 'one effect, then a node, then the same effect again',
+      inputs: { intent: 'the intent document' },
+      plan: (): PlannedNode[] => [{ id: 'work' }],
+      run: async (ctx) => {
+        await ctx.effect('gate', () => (calls += 1))
+        const done = await ctx.node('work', {
+          prompt: 'do the work',
+          reads: [ctx.inputs.intent]
+        })
+        await ctx.effect('gate', () => (calls += 1))
+        return { summary: done.summary }
+      }
+    }
+
+    const before = rig({ solo: twice }, () => (_prompt, tools) => {
+      tools.activity('working…')
+      tools.block({ reason: 'which way?' })
+    })
+    const intent = join(before.repo, 'intent.md')
+    writeFileSync(intent, 'the intent\n')
+    const started = await before.engine.start(startRequest(before.repo, 'solo', { intent }))
+    await until(() => before.engine.runs()[0].waiting === true)
+    expect(calls).toBe(1)
+
+    const after = relaunch(before, { solo: twice }, () => (_prompt, tools) => {
+      tools.complete({ summary: 'did the work' })
+    })
+    await after.engine.resume(started.id)
+    await until(() => after.engine.runs()[0].status === 'failed')
+    expect(after.engine.runs()[0].error).toContain('duplicate effect id "gate"')
+    // The first call replayed; the second was refused before any work ran.
+    expect(calls).toBe(1)
   })
 })
 

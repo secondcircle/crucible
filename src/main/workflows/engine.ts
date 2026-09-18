@@ -563,6 +563,11 @@ export function createWorkflowEngine(options: EngineOptions): WorkflowEngine {
     const recordedEffects = new Map<string, RunEffect>(
       (replay ? (run.effects ?? []) : []).map((effect) => [effect.key, effect])
     )
+    // Every effect id this execution has claimed, whether its value came off
+    // the record or out of the work, and the subset it has written. One id,
+    // once per run: an id that replays is still claimed, so a workflow asking
+    // for one twice fails on a resumed run exactly as it does on a first one.
+    const effectsClaimed = new Set<string>()
     const effectsRecorded = new Set<string>()
     // Check-ins carry no id of their own, so the key is their order in the
     // run: `run()` re-executes from the top, and the nth check-in of a
@@ -650,12 +655,14 @@ export function createWorkflowEngine(options: EngineOptions): WorkflowEngine {
       // A resumed run replays what the previous life completed. Anything else
       // — a node the quit cut down, one that failed, one this definition never
       // ran before — goes back to work below.
-      const recorded = !replay
-        ? undefined
-        : onHold === undefined
-          ? recordOf(id)
-          : furthestComplete(id)
-      if (recorded?.status === 'complete') {
+      //
+      // The record chain is the single answer to "is this node done", for a
+      // plain node exactly as for a held-open one. A clean restart leaves the
+      // base record `interrupted` for good and puts the completion on a
+      // revision, so a check that read the base alone would send finished
+      // work back to a paid session.
+      const recorded = replay ? furthestComplete(id) : undefined
+      if (recorded !== undefined) {
         return replayed(id, recorded, spec, outputPaths, onHold)
       }
       // Nothing of this node completed, so what goes back to work is the
@@ -678,9 +685,15 @@ export function createWorkflowEngine(options: EngineOptions): WorkflowEngine {
           ...(onHold === undefined ? {} : { onHold })
         })
 
-      // A node that never started, on a resumed run or not, is simply run.
+      // A node that never started, on a resumed run or not, is simply run. A
+      // complete record is never stopped: whichever record of the chain
+      // carried the completion, it was replayed above.
       const stopped =
-        furthest === undefined || furthest.status === 'pending' ? undefined : furthest
+        furthest === undefined ||
+        furthest.status === 'pending' ||
+        furthest.status === 'complete'
+          ? undefined
+          : furthest
       if (stopped === undefined) return fresh()
 
       // The node the stop cut down. Its own session holds its work, so it
@@ -841,11 +854,17 @@ export function createWorkflowEngine(options: EngineOptions): WorkflowEngine {
 
       // The record this session's first turn takes over: the plan's ghost, or
       // — on a resumed run — whatever the previous life left under this id
-      // and never completed. One record per id, whichever life wrote it.
-      const slot = run.nodes.findIndex(
-        (candidate) => candidate.id === job.recordId && candidate.status !== 'complete'
-      )
+      // and never completed. One record per id, whichever life wrote it, so
+      // the slot is found by id alone: a second record under one id is a
+      // state `chainOf`, `nextRevisionId`, the transcript store and the run
+      // graph all take to be impossible. A complete record is nobody's to
+      // take over — that work is replayed, not redone — and this throws
+      // before a session is opened, so the refusal costs nothing.
+      const slot = run.nodes.findIndex((candidate) => candidate.id === job.recordId)
       const held = slot >= 0 ? run.nodes[slot] : undefined
+      if (held?.status === 'complete') {
+        throw new Error(`node "${job.recordId}" is already complete in this run`)
+      }
       // The spec's own declaration wins the moment the node starts; failing
       // that the plan's forecast stands, because a record rebuilt from
       // inference alone would erase edges the workflow already got right.
@@ -1426,17 +1445,27 @@ export function createWorkflowEngine(options: EngineOptions): WorkflowEngine {
       }
     }
 
+    /** One key, once per run: asking for it twice is the workflow's mistake. */
+    function claimEffect(key: string): void {
+      if (effectsClaimed.has(key)) throw new Error(`duplicate effect id "${key}"`)
+      effectsClaimed.add(key)
+    }
+
     /** What this run recorded under a key, for a resumed run to be handed. */
     function recordedEffect(key: string): RecordedEffect {
+      claimEffect(key)
       const already = recordedEffects.get(key)
       if (already === undefined) return { replayed: false }
       log?.({ event: 'effect_replayed', runId: run.id, key })
       return { replayed: true, value: already.value }
     }
 
-    /** One key, once per run: recording it twice is the workflow's mistake. */
+    /** The second half of an effect: the value the work just produced. */
     function recordEffect(key: string, value: unknown): void {
       if (effectsRecorded.has(key)) throw new Error(`duplicate effect id "${key}"`)
+      // Claimed already by the lookup half that precedes it; claimed here for
+      // a caller that skipped that half.
+      if (!effectsClaimed.has(key)) claimEffect(key)
       effectsRecorded.add(key)
       run.effects = [...(run.effects ?? []), { key, value, at: nowIso() }]
       save(run)
