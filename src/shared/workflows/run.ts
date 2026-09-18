@@ -320,6 +320,25 @@ export function stoppedNodes(run: RunRecord): readonly RunNode[] {
     .map((chain) => chain.furthest)
 }
 
+/**
+ * The records of nodes the quit caught mid-revision: the chain's furthest
+ * record stopped, but a record behind it completed. The engine puts none of
+ * these back to work itself — it hands the completion back, and the
+ * workflow's re-issued `revise()` reopens that node's own session — so they
+ * are never `stoppedNodes`, and no surface may call one a fresh attempt from
+ * a prompt.
+ */
+export function cutRevisions(run: RunRecord): readonly RunNode[] {
+  return nodeChains(run)
+    .filter(
+      (chain) =>
+        chain.complete !== undefined &&
+        chain.furthest !== chain.complete &&
+        isStopped(chain.furthest)
+    )
+    .map((chain) => chain.furthest)
+}
+
 function isStopped(node: RunNode): boolean {
   return (
     node.status === 'interrupted' ||

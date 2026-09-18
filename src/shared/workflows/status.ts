@@ -1,6 +1,7 @@
 import type { SessionId } from '../agent/port'
 import {
   currentNode,
+  cutRevisions,
   INTERRUPTED_MESSAGE,
   resumePlan,
   runCost,
@@ -61,12 +62,34 @@ function namedNodes(nodes: readonly RunNode[]): string {
  * from the split `resumePlan` makes: continued nodes carry on from their last
  * turn, restarted ones run again from their prompt. One node is named once
  * however many records its chain holds, because the engine performs one act
- * on it.
+ * on it. When the plan is empty the sentence reads the chains too rather than
+ * falling back to fixed words, because an empty plan is not an unknown state:
+ * it is a run the quit caught between nodes, or on a workflow-level check-in,
+ * or mid-revision of a node whose own record completed. The engine replays
+ * what completed in every one of them, and re-spends nothing, so nothing here
+ * may name a fresh attempt from a prompt.
  */
 function resumeSentence(run: RunRecord, kind: ResumeKind): string {
   const { continued, restarted } = resumePlan(run, kind)
   const where = run.worktreePath === undefined ? '' : ` (${run.worktreePath})`
   const parts: string[] = []
+  if (continued.length === 0 && restarted.length === 0) {
+    parts.push(
+      `the run picks up where it stopped, in the same worktree${where}, handing back what it ` +
+        'already finished from the record rather than working it again'
+    )
+    const cut = cutRevisions(run)
+    if (cut.length > 0) {
+      const one = cut.length === 1
+      parts.push(
+        `${namedNodes(cut)} ${one ? 'is a revision' : 'are revisions'} the quit cut down, and ` +
+          `${one ? 'it continues' : 'they continue'} in the session ` +
+          `${one ? 'that node was' : 'those nodes were'} working in, so nothing ` +
+          `${one ? 'it' : 'they'} already spent is spent again`
+      )
+    }
+    return `Resuming: ${parts.join('; ')}.`
+  }
   if (continued.length > 0) {
     const one = continued.length === 1
     parts.push(
@@ -75,8 +98,8 @@ function resumeSentence(run: RunRecord, kind: ResumeKind): string {
         `${one ? 'it' : 'they'} already spent is spent again`
     )
   }
-  if (restarted.length > 0 || continued.length === 0) {
-    const one = restarted.length <= 1
+  if (restarted.length > 0) {
+    const one = restarted.length === 1
     parts.push(
       kind === 'clean-restart'
         ? `${namedNodes(restarted)} ${one ? 'runs' : 'run'} again from ${one ? 'its' : 'their'} ` +

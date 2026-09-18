@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   baseNodeId,
   currentNode,
+  cutRevisions,
   nodeChain,
   nodeChains,
   resumePlan,
@@ -113,6 +114,29 @@ describe('what a resume will do', () => {
       node('gate·r1', 'complete', { sessionToken: OTHER_TOKEN })
     ])
     expect(stoppedNodes(restarted)).toEqual([])
+  })
+
+  // The state the empty plan hides, named on its own so a surface can speak
+  // about it: the record the quit cut down is a revision of a node that had
+  // already completed once, and the session behind it is the completed
+  // record's.
+  it('names the revision a quit cut down, which is nobody the plan puts to work', () => {
+    const run = runOf([
+      node('spec', 'complete'),
+      node('gate', 'complete', { sessionToken: TOKEN }),
+      node('gate·r1', 'interrupted')
+    ])
+    expect(cutRevisions(run).map((record) => record.id)).toEqual(['gate·r1'])
+    expect(stoppedNodes(run)).toEqual([])
+  })
+
+  it('names no revision for a chain that finished, or one that never revised', () => {
+    expect(
+      cutRevisions(
+        runOf([node('gate', 'complete', { sessionToken: TOKEN }), node('gate·r1', 'complete')])
+      )
+    ).toEqual([])
+    expect(cutRevisions(runOf([node('gate', 'interrupted', { sessionToken: TOKEN })]))).toEqual([])
   })
 
   it('still names every node of a fan-out the quit cut down', () => {
