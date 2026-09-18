@@ -69,6 +69,25 @@ describe('the workflow-run channel', () => {
     ).rejects.toThrow(/needs text/)
   })
 
+  // Two acts reach the engine from the run view's two buttons, and the
+  // channel is where a third one would have to be turned away.
+  it('carries which act a resume asked for, and refuses any other', async () => {
+    const service = serviceRecorder()
+    await invoke(service, { op: 'resume', args: ['ab12'] })
+    expect(service.resume).toHaveBeenCalledWith('ab12', undefined)
+    await invoke(service, { op: 'resume', args: ['ab12', 'continue'] })
+    expect(service.resume).toHaveBeenCalledWith('ab12', 'continue')
+    await invoke(service, { op: 'resume', args: ['ab12', 'clean-restart'] })
+    expect(service.resume).toHaveBeenCalledWith('ab12', 'clean-restart')
+
+    await expect(invoke(service, { op: 'resume', args: ['ab12', 'from-scratch'] })).rejects.toThrow(
+      /"continue" or "clean-restart"/
+    )
+    await expect(invoke(service, { op: 'resume', args: ['ab12', true] })).rejects.toThrow(
+      /"continue" or "clean-restart"/
+    )
+  })
+
   it('refuses garbage rather than passing it through', async () => {
     const service = serviceRecorder()
     await expect(invoke(service, 'nonsense')).rejects.toThrow(/has to be an object/)

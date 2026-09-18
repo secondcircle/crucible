@@ -54,9 +54,17 @@ export type ViewItem =
       readonly compaction?: CompactionRecord
     }
   | { readonly kind: 'system'; readonly text: string; readonly card: SystemCard }
+  // A hairline across the transcript naming what happened between the two
+  // items it sits between: where a run's node stopped, where a resume picked
+  // it up again. Drawn from a run's record, so no conversation ever produces
+  // one.
+  | { readonly kind: 'rule'; readonly text: string; readonly tone: RuleTone }
   | { readonly kind: 'cacheMiss'; readonly miss: CacheMissFacts }
   | { readonly kind: 'stopped' }
   | { readonly kind: 'error'; readonly message: string }
+
+/** Teal for work picked back up; the stop's own color for where it stopped. */
+export type RuleTone = 'resumed' | 'interrupted' | 'failed' | 'cancelled'
 
 export interface SessionView {
   readonly items: readonly ViewItem[]

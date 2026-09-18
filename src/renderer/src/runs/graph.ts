@@ -1,4 +1,4 @@
-import type { RunNode } from '../../../shared/workflows/run'
+import { nodeChains, type RunNode } from '../../../shared/workflows/run'
 import { money, nodeDuration, shortModel } from './format'
 import { readLoops, type Loop, type LoopReading, type NodeSpot } from './loops'
 
@@ -193,12 +193,20 @@ export function cardFace(node: RunNode, now = Date.now()): CardFace {
   }
 }
 
-/** The header's live count: `9 nodes · 6 done · 1 running`, zeroes omitted. */
+// The header's live count: `9 nodes · 6 done · 1 running`, zeroes omitted. A
+// revision is another record of a node the graph already counted, never a
+// node of its own, so it is counted as what it is and the statuses are read
+// off the record the engine is acting on.
 export function graphCount(nodes: readonly RunNode[]): string {
+  // The same reading of the record the header strip counts from, so the two
+  // counts an inch apart cannot say different numbers.
+  const chains = nodeChains({ nodes })
+  const revisions = nodes.length - chains.length
   const of = (status: RunNode['status']): number =>
-    nodes.filter((node) => node.status === status).length
+    chains.filter((chain) => chain.furthest.status === status).length
   return [
-    `${nodes.length} ${nodes.length === 1 ? 'node' : 'nodes'}`,
+    `${chains.length} ${chains.length === 1 ? 'node' : 'nodes'}`,
+    revisions === 0 ? '' : `${revisions} ${revisions === 1 ? 'revision' : 'revisions'}`,
     of('complete') === 0 ? '' : `${of('complete')} done`,
     of('running') === 0 ? '' : `${of('running')} running`,
     of('failed') === 0 ? '' : `${of('failed')} failed`,

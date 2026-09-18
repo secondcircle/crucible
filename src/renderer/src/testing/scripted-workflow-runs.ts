@@ -1,5 +1,5 @@
 import type { TranscriptItem } from '../../../shared/agent/port'
-import type { RunRecord } from '../../../shared/workflows/run'
+import type { ResumeKind, RunRecord } from '../../../shared/workflows/run'
 import type {
   ArtifactView,
   WorkflowRunListener,
@@ -58,8 +58,10 @@ export function createScriptedWorkflowRuns(
       calls.push({ op: 'pause', args: [runId] })
     },
 
-    async resume(runId: string) {
-      calls.push({ op: 'resume', args: [runId] })
+    // The act is recorded beside the run: which of the two a click asked for
+    // is the whole of what this seam carries.
+    async resume(runId: string, kind?: ResumeKind) {
+      calls.push({ op: 'resume', args: kind === undefined ? [runId] : [runId, kind] })
     },
 
     async cancel(runId: string) {

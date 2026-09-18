@@ -1,5 +1,5 @@
 import type { TranscriptItem } from '../../../shared/agent/port'
-import type { RunNode, RunRecord } from '../../../shared/workflows/run'
+import { nodeChains, type RunNode, type RunRecord } from '../../../shared/workflows/run'
 import type { ViewItem } from '../state/shell-state'
 
 // The run surfaces' small display formats, in one place so the chip, the
@@ -66,37 +66,45 @@ export function chipNodeLabel(run: RunRecord, node: RunNode | undefined): string
   return `▸ ${node.id}`
 }
 
-/** `3/4 nodes`, counting what settled against what the graph shows. */
+// `3/4 nodes`, counting what settled against what the graph shows. Nodes, not
+// records: a revision is another attempt at a node the count already made,
+// and counting it again puts this strip an inch above a graph header that
+// says something else. The status is read off the record the engine is acting
+// on, the furthest of each chain, for the same reason.
 export function nodeProgress(run: RunRecord): string {
-  const settled = run.nodes.filter((node) => node.status === 'complete').length
-  return `${settled}/${run.nodes.length} nodes`
+  const chains = nodeChains(run)
+  const settled = chains.filter((chain) => chain.furthest.status === 'complete').length
+  return `${settled}/${chains.length} nodes`
 }
 
 // The chat pane's shapes, restored: what the store snapshotted of a node's
 // session renders through the same component the chat uses, nothing live.
 export function toViewItems(items: readonly TranscriptItem[]): readonly ViewItem[] {
-  return items.map((item): ViewItem => {
-    switch (item.kind) {
-      case 'assistant':
-        return { kind: 'assistant', markdown: item.markdown, streaming: false }
-      case 'thinking':
-        return {
-          kind: 'thinking',
-          text: item.text,
-          ...(item.seconds === undefined ? {} : { seconds: item.seconds }),
-          running: false
-        }
-      case 'tool':
-        return {
-          kind: 'tool',
-          name: item.name,
-          summary: item.summary,
-          output: item.output,
-          ok: item.ok,
-          running: false
-        }
-      default:
-        return item
-    }
-  })
+  return items.map(toViewItem)
+}
+
+/** One stored item as the transcript renders it. */
+export function toViewItem(item: TranscriptItem): ViewItem {
+  switch (item.kind) {
+    case 'assistant':
+      return { kind: 'assistant', markdown: item.markdown, streaming: false }
+    case 'thinking':
+      return {
+        kind: 'thinking',
+        text: item.text,
+        ...(item.seconds === undefined ? {} : { seconds: item.seconds }),
+        running: false
+      }
+    case 'tool':
+      return {
+        kind: 'tool',
+        name: item.name,
+        summary: item.summary,
+        output: item.output,
+        ok: item.ok,
+        running: false
+      }
+    default:
+      return item
+  }
 }

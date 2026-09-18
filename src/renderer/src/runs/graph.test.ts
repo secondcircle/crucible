@@ -7,6 +7,7 @@
 import { describe, expect, it } from 'vitest'
 import type { RunNode } from '../../../shared/workflows/run'
 import { cardFace, edgeState, graphCount, layOutGraph } from './graph'
+import { nodeProgress } from './format'
 
 function nodeOf(id: string, parents: string[] = [], overrides: Partial<RunNode> = {}): RunNode {
   return {
@@ -641,6 +642,66 @@ describe('the graph header count', () => {
     ).toBe('4 nodes · 1 done · 1 running · 1 failed')
     expect(graphCount([nodeOf('a', [], { status: 'pending' })])).toBe('1 node')
     expect(graphCount([])).toBe('0 nodes')
+  })
+
+  // A clean restart and a reviewer's send-back both leave two records of one
+  // node. The header counts nodes, says how many revisions there are, and
+  // reads each node's state off the record the engine is acting on — so the
+  // attempt a revision superseded is never counted as a second node, nor as a
+  // failure the run is still carrying.
+  it('counts a revision as a revision, not as another node', () => {
+    expect(
+      graphCount([
+        nodeOf('plan'),
+        nodeOf('fixer-1', ['plan'], { status: 'failed' }),
+        nodeOf('fixer-1\u00b7r1', ['fixer-1'], { status: 'running' })
+      ])
+    ).toBe('2 nodes · 1 revision · 1 done · 1 running')
+    expect(
+      graphCount([
+        nodeOf('gate'),
+        nodeOf('gate\u00b7r1', ['gate']),
+        nodeOf('gate\u00b7r2', ['gate\u00b7r1'])
+      ])
+    ).toBe('1 node · 2 revisions · 1 done')
+  })
+
+  // Reproduction for review-1's finding. The graph header and the header
+  // strip above it count the same thing for the same reader, an inch apart.
+  // Once a revision exists they disagree: the graph says "2 nodes · 1
+  // revision" and the strip says "2/3 nodes", counting the revision as a node
+  // of its own. Section 4 of the mock keeps the strip on the node count
+  // (`$4.20 · 3 / 6 nodes` beside `6 nodes · 1 revision`). Drive it with
+  // `npm run dev`: open the failed run `b1n7` and click Start node over.
+  it('counts the same nodes the header strip counts', () => {
+    const nodes = [
+      nodeOf('planner'),
+      nodeOf('builder', ['planner'], { status: 'failed' }),
+      nodeOf('builder\u00b7r1', ['builder'])
+    ]
+    const run = {
+      id: 'b1n7',
+      workflow: 'build',
+      status: 'running' as const,
+      workspacePath: '/repos/crucible',
+      workspaceName: 'crucible',
+      inputs: {},
+      nodes,
+      createdAt: '2026-08-21T10:00:00.000Z',
+      startedAt: '2026-08-21T10:00:00.000Z'
+    }
+    const counted = (said: string): string => said.match(/(\d+) nodes?/)?.[1] ?? ''
+    expect(counted(nodeProgress(run))).toBe(counted(graphCount(nodes)))
+    expect(nodeProgress(run)).toBe('2/2 nodes')
+    expect(graphCount(nodes)).toBe('2 nodes · 1 revision · 2 done')
+    // Both read the status off the record the engine is acting on, so a node
+    // whose revision is still running is done in neither count.
+    const working = {
+      ...run,
+      nodes: [nodes[0], nodes[1], { ...nodes[2], status: 'running' as const }]
+    }
+    expect(nodeProgress(working)).toBe('1/2 nodes')
+    expect(graphCount(working.nodes)).toBe('2 nodes · 1 revision · 1 done · 1 running')
   })
 })
 

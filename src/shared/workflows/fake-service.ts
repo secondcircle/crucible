@@ -2,8 +2,12 @@ import type { SessionId, TranscriptItem, Unsubscribe } from '../agent/port'
 import type { RunTools } from '../agent/run-tools'
 import { artifactKind, artifactName, recordNamesPath } from './artifacts'
 import {
+  baseNodeId,
+  CONTINUED_NODE_MESSAGE,
   dismissRefusal,
   INTERRUPTED_MESSAGE,
+  nextRevisionId,
+  RELEASED_ON_RUN_END,
   resumeRefusal,
   runCanResume,
   runMessageHeader,
@@ -600,6 +604,9 @@ export function createFakeWorkflowRunService({
   const timers = new Map<WorkflowRunId, ReturnType<typeof setTimeout>>()
   const waiting = new Map<WorkflowRunId, (answer: string) => void>()
   const paused = new Set<WorkflowRunId>()
+  // `<runId>:<nodeId>` of every node a resume continued, so its dig shows the
+  // seam a continued node's transcript really carries.
+  const continued = new Set<string>()
   let minted = 0
 
   const nowIso = (): string => new Date().toISOString()
@@ -921,7 +928,7 @@ export function createFakeWorkflowRunService({
       // Added to what this node already burned, never replacing it: the money
       // the first attempt spent was really spent.
       node.cost = Number(((node.cost ?? 0) + 0.28).toFixed(2))
-      node.summary = `Continued ${node.id} after the app quit; nothing was sent anywhere.`
+      node.summary = `Picked ${node.id} back up and finished it; nothing was sent anywhere.`
       node.artifacts = node.artifacts.map((artifact) => {
         files?.write(artifact.path, CANNED_BODIES[artifactName(artifact.path)] ?? CANNED_BODY)
         return { ...artifact, writtenAt: nowIso() }
@@ -943,24 +950,36 @@ export function createFakeWorkflowRunService({
     }
     if (!runCanResume(run as RunRecord)) throw new Error(resumeRefusal(runId, run.status))
     // The record goes back to working with every stopped node's own record
-    // kept, spend and all — the engine's own shape. A clean restart is the
-    // other act: the node starts over, so what it had written is unwritten.
+    // kept, spend and all — the engine's own shape.
     run.status = 'running'
     delete run.error
     delete run.endedAt
     delete run.dismissedAt
     for (const stopped of stoppedNodes(run as RunRecord)) {
-      const node = run.nodes.find((candidate) => candidate.id === stopped.id)
-      if (node === undefined) continue
+      const at = run.nodes.findIndex((candidate) => candidate.id === stopped.id)
+      if (at < 0) continue
+      const node = run.nodes[at]
+      if (kind === 'clean-restart') {
+        // The engine's own shape for the second act: the attempt that stopped
+        // is left exactly as it stopped, transcript and spend and all, and
+        // the work goes on a revision chained after it.
+        run.nodes.splice(at + 1, 0, {
+          id: nextRevisionId(run.nodes, baseNodeId(node.id)),
+          status: 'running',
+          parents: [...new Set([node.id, ...node.parents])],
+          ...(node.model === undefined ? {} : { model: node.model }),
+          reads: [...node.reads],
+          artifacts: node.artifacts.map(({ name, path, desc }) => ({ name, path, desc })),
+          startedAt: nowIso(),
+          lastActivityAt: nowIso()
+        })
+        continue
+      }
       node.status = 'running'
       node.lastActivityAt = nowIso()
       delete node.error
       delete node.endedAt
-      if (kind === 'clean-restart') {
-        node.artifacts = node.artifacts.map(({ name, path, desc }) => ({ name, path, desc }))
-        delete node.summary
-        node.startedAt = nowIso()
-      }
+      continued.add(`${runId}:${node.id}`)
     }
     changed()
     walkResumed(run)
@@ -1007,6 +1026,11 @@ export function createFakeWorkflowRunService({
     for (const node of run.nodes) {
       if (node.status === 'running' || node.status === 'blocked') {
         node.status = 'failed'
+        // The engine's own word for a node it let go, so the fake flavor
+        // produces the record the run view reads: this node did not go wrong,
+        // the cancel took it. A node that had already failed keeps its own
+        // error and its own word.
+        node.error = RELEASED_ON_RUN_END
         node.endedAt = nowIso()
         delete node.now
       }
@@ -1116,8 +1140,14 @@ export function createFakeWorkflowRunService({
       cancelRun(runId)
     },
 
-    async nodeTranscript(): Promise<readonly TranscriptItem[]> {
-      return CANNED_NODE_TRANSCRIPT
+    async nodeTranscript(
+      runId: WorkflowRunId,
+      nodeId: string
+    ): Promise<readonly TranscriptItem[]> {
+      if (!continued.has(`${runId}:${nodeId}`)) return CANNED_NODE_TRANSCRIPT
+      // The same session, carrying on: everything it had said, then what
+      // Crucible told it when it was picked up, then its next turn.
+      return [...CANNED_NODE_TRANSCRIPT, ...CANNED_PICKED_UP]
     },
 
     async artifact(runId: WorkflowRunId, path: string): Promise<ArtifactView> {
@@ -1371,7 +1401,10 @@ function cannedFailed(
         toolCalls: 34,
         startedAt: hoursAgo(5.4),
         endedAt: hoursAgo(5),
-        lastActivityAt: hoursAgo(5)
+        lastActivityAt: hoursAgo(5),
+        // A node that failed still has its session on disk, so Resume on this
+        // row continues it — which is what the run view says it will do.
+        sessionToken: `${runDir('b1n7')}/sessions/builder.jsonl`
       }
     ],
     error: 'node "builder" failed validation: required output "changes" is missing or empty',
@@ -1623,6 +1656,15 @@ function cannedUnattended(
     dir: runDir(CANNED_UNATTENDED_ID)
   }
 }
+
+/** What a continued node's transcript carries past the seam. */
+const CANNED_PICKED_UP: readonly TranscriptItem[] = [
+  { kind: 'user', text: CONTINUED_NODE_MESSAGE },
+  {
+    kind: 'assistant',
+    markdown: 'Picking up where I left off — the review is written; filing it now.'
+  }
+]
 
 /** What a node dig shows in the fake flavor: the chat pane's own shapes. */
 const CANNED_NODE_TRANSCRIPT: readonly TranscriptItem[] = [

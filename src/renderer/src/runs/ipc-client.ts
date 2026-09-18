@@ -1,4 +1,5 @@
 import type { TranscriptItem, Unsubscribe } from '../../../shared/agent/port'
+import type { ResumeKind } from '../../../shared/workflows/run'
 import type { ArtifactView, RunsSnapshot } from '../../../shared/workflows/service'
 import type {
   WorkflowRunListener,
@@ -34,7 +35,11 @@ export function createWorkflowRunClient(): WorkflowRunService {
     },
 
     pause: (runId: string) => call<void>('pause', runId),
-    resume: (runId: string) => call<void>('resume', runId),
+    // The act travels or it does not: an argument list with a hole in it
+    // depends on how the bridge serializes `undefined`, which is nothing to
+    // rest a paid act on.
+    resume: (runId: string, kind?: ResumeKind) =>
+      kind === undefined ? call<void>('resume', runId) : call<void>('resume', runId, kind),
     cancel: (runId: string) => call<void>('cancel', runId),
     dismiss: (runId: string) => call<void>('dismiss', runId),
     adopt: (runId: string, sessionId: string) => call<void>('adopt', runId, sessionId),

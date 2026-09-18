@@ -40,6 +40,7 @@ import type {
 import {
   currentNode,
   runIsLive,
+  type ResumeKind,
   type RunRecord,
   type WorkflowRunId
 } from '../../shared/workflows/run'
@@ -2721,10 +2722,10 @@ export function Shell({
   // means the run is working again and the snapshot will re-band its row; a
   // refusal is reported where run refusals are and hands the button back.
   const resumeRun = useCallback(
-    async (runId: WorkflowRunId): Promise<RunActOutcome> => {
+    async (runId: WorkflowRunId, kind: ResumeKind = 'continue'): Promise<RunActOutcome> => {
       if (workflowRuns === undefined) return 'kept'
       try {
-        await workflowRuns.resume(runId)
+        await workflowRuns.resume(runId, kind)
         return 'cleared'
       } catch (cause) {
         report(cause)
@@ -3288,7 +3289,7 @@ export function Shell({
                   if (openRun.sessionId !== undefined) goToRunSession(openRun.sessionId)
                 }}
                 onPause={() => void workflowRuns.pause(openRun.id).catch(report)}
-                onResume={() => resumeRun(openRun.id).then(() => {})}
+                onResume={(kind) => resumeRun(openRun.id, kind).then(() => {})}
                 onCancel={() => void cancelRun(openRun.id)}
                 onInvestigate={() => investigateRun(openRun.id)}
                 onClose={() => {

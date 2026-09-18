@@ -278,6 +278,27 @@ describe('the fake workflow run service', () => {
       service.dispose()
     })
 
+    // What the run view's second button asks for, in the shape the engine
+    // gives it: the attempt that stopped is left where it stopped and the
+    // work goes on a revision chained after it, so the fake flavor shows the
+    // act the button performs rather than an ordinary resume.
+    it('starts a node over as a revision beside the attempt it supersedes', async () => {
+      const service = createFakeWorkflowRunService({ beatMs: 0 })
+      await service.resume('45c8', 'clean-restart')
+
+      const run = (await service.snapshot()).runs.find((candidate) => candidate.id === '45c8')
+      const superseded = run?.nodes.find((node) => node.id === 'gate-alignment')
+      const revision = run?.nodes.find((node) => node.id === 'gate-alignment\u00b7r1')
+      expect(superseded?.status).toBe('interrupted')
+      expect(superseded?.cost).toBe(0.39)
+      expect(revision?.parents).toContain('gate-alignment')
+      // Its own record from its own start: nothing of the attempt that
+      // stopped is carried into it.
+      expect(revision?.cost).toBeUndefined()
+      expect(revision?.artifacts.every((artifact) => artifact.writtenAt === undefined)).toBe(true)
+      service.dispose()
+    })
+
     it('refuses only what has nothing to resume, in the live service\u2019s words', async () => {
       const service = createFakeWorkflowRunService({ beatMs: 0 })
       await expect(service.tools.resume('s1', 'd3p8')).rejects.toThrow(

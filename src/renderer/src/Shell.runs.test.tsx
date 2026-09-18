@@ -743,7 +743,7 @@ describe('an interrupted run', () => {
 
     // No dialog: the click is the spend authorization.
     expect(screen.queryByRole('dialog')).toBeNull()
-    expect(workflowRuns.calls).toContainEqual({ op: 'resume', args: ['45c8'] })
+    expect(workflowRuns.calls).toContainEqual({ op: 'resume', args: ['45c8', 'continue'] })
     expect((screen.getByRole('button', { name: 'Resume' }) as HTMLButtonElement).disabled).toBe(
       true
     )
@@ -817,11 +817,12 @@ describe('an interrupted run', () => {
     expect(banner?.textContent).toContain('gate-alignment')
     expect(banner?.textContent).toContain('reporting to the same session')
 
-    // Resume is the primary, and there is no live handle to pause or cancel.
+    // Resume is the primary, Start node over stands beside it, and there is
+    // no live handle to pause or cancel.
     const header = view.querySelector('.rvtop')
     expect(
       [...(header?.querySelectorAll('button') ?? [])].map((button) => button.textContent)
-    ).toEqual(['Go to session', 'Resume', 'Investigate', 'esc'])
+    ).toEqual(['Go to session', 'Resume', 'Start node over', 'Investigate', 'esc'])
     // The only primary in the header: Go to session goes quiet beside it.
     expect(
       [...(header?.querySelectorAll('button.primary') ?? [])].map((one) => one.textContent)
@@ -841,7 +842,7 @@ describe('an interrupted run', () => {
       fireEvent.click(within(view.querySelector('.rvtop') as HTMLElement).getByText('Resume'))
       await settled()
     })
-    expect(workflowRuns.calls).toContainEqual({ op: 'resume', args: ['45c8'] })
+    expect(workflowRuns.calls).toContainEqual({ op: 'resume', args: ['45c8', 'continue'] })
 
     // The record moving to running re-renders the header into the live shape.
     await act(async () => {
@@ -871,9 +872,10 @@ describe('an interrupted run', () => {
     })
 
     const banner = screen.getByLabelText('Run 45c8').querySelector('.rvwhy')
-    expect(banner?.textContent).toContain('interrupted nodes')
-    expect(banner?.textContent).toContain('left')
-    expect(banner?.textContent).toContain('right')
+    // Both nodes in one sentence about both: the acts name the nodes and
+    // never the stop, which is said once, in the first sentence.
+    expect(banner?.textContent).toContain('Resume runs left, right again from their prompt')
+    expect(banner?.textContent).not.toContain('interrupted node')
     // Never a session that no longer exists.
     expect(banner?.textContent).toContain('reporting to whichever session adopts it')
   })
@@ -910,9 +912,8 @@ describe('an interrupted run', () => {
     expect(banner?.textContent).not.toContain('from that node\u2019s beginning')
     // What the click will actually do, in the words every other surface uses.
     expect(banner?.textContent).toContain(
-      'Resume continues the interrupted node \u2014 gate-alignment \u2014 from its last turn, in ' +
-        'the same worktree, reporting to the same session, so nothing it already spent is spent ' +
-        'again.'
+      'Resume continues gate-alignment from its last turn, in the same worktree, reporting to ' +
+        'the same session, so nothing it already spent is spent again.'
     )
   })
 
@@ -928,9 +929,8 @@ describe('an interrupted run', () => {
 
     const banner = screen.getByLabelText('Run 45c8').querySelector('.rvwhy')
     expect(banner?.textContent).toContain(
-      'Resume runs the interrupted node \u2014 gate-alignment \u2014 again from its prompt, in ' +
-        'the same worktree, reporting to the same session: no session of its own is on disk to ' +
-        'continue from.'
+      'Resume runs gate-alignment again from its prompt, in the same worktree, reporting to the ' +
+        'same session: no session of its own is on disk to continue from.'
     )
     expect(banner?.textContent).not.toContain('continues')
   })
@@ -975,12 +975,12 @@ describe('an interrupted run', () => {
       await settled()
     })
     const banner = screen.getByLabelText('Run 45c8').querySelector('.rvwhy')
-    expect(banner?.textContent).not.toContain('interrupted nodes')
+    // One node, not two: the plural possessive would mean both records.
+    expect(banner?.textContent).not.toContain('their last turn')
     // One node, one act, named as the record the engine will actually reopen.
     expect(banner?.textContent).toContain(
-      'Resume continues the interrupted node \u2014 gate-alignment\u00b7r1 \u2014 from its last ' +
-        'turn, in the same worktree, reporting to the same session, so nothing it already spent ' +
-        'is spent again.'
+      'Resume continues gate-alignment\u00b7r1 from its last turn, in the same worktree, ' +
+        'reporting to the same session, so nothing it already spent is spent again.'
     )
   })
 

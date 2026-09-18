@@ -1,11 +1,17 @@
 import { describe, expect, it } from 'vitest'
 import {
   baseNodeId,
+  CONTINUED_NODE_MESSAGE,
   currentNode,
   cutRevisions,
+  isContinuedNodeMessage,
+  nextRevisionId,
   nodeChain,
   nodeChains,
+  nodeStop,
+  RELEASED_ON_RUN_END,
   resumePlan,
+  runStop,
   stoppedNodes,
   type RunNode,
   type RunNodeStatus,
@@ -207,5 +213,75 @@ describe('the node a run is at', () => {
   it('is the cut node while the run is interrupted', () => {
     const run = runOf([node('spec', 'complete'), node('gate', 'interrupted')])
     expect(currentNode(run)?.id).toBe('gate')
+  })
+})
+
+describe('how a run stopped', () => {
+  it('is one word over every stop short of completing, and nothing otherwise', () => {
+    const cases: ReadonlyArray<[RunRecord['status'], string | undefined]> = [
+      ['interrupted', 'interrupted'],
+      ['failed', 'failed'],
+      ['cancelled', 'cancelled'],
+      ['running', undefined],
+      ['paused', undefined],
+      ['complete', undefined]
+    ]
+    for (const [status, stop] of cases) {
+      expect(runStop(runOf([], status))).toBe(stop)
+    }
+  })
+})
+
+// A run holds several nodes in flight, so the stop that ended the run is not
+// always the stop that ended a node. Every surface that puts a word on a
+// node's record reads it here, and never off the run alone.
+describe('how one node stopped', () => {
+  it('is the run’s word for a node the run’s own stop released', () => {
+    const released = node('builder', 'failed', { error: RELEASED_ON_RUN_END })
+    expect(nodeStop(runOf([released], 'cancelled'), released)).toBe('cancelled')
+    // The engine's release message is not the only shape: a fake, and older
+    // records, leave the released node with no error at all.
+    const bare = node('builder', 'failed')
+    expect(nodeStop(runOf([bare], 'cancelled'), bare)).toBe('cancelled')
+    // Nothing settled it either way: whatever caught the run caught it.
+    const blocked = node('builder', 'blocked')
+    expect(nodeStop(runOf([blocked], 'cancelled'), blocked)).toBe('cancelled')
+  })
+
+  it('is the node’s own word where the record carries one', () => {
+    const died = node('spec-audit', 'failed', { error: 'ran out of context, twice' })
+    // Cancelled an hour after this node died on its own: the cancel did not
+    // kill it, and saying so blames the human's click for the node's failure.
+    expect(nodeStop(runOf([died], 'cancelled'), died)).toBe('failed')
+    expect(nodeStop(runOf([died], 'failed'), died)).toBe('failed')
+    const cut = node('gate', 'interrupted')
+    expect(nodeStop(runOf([cut], 'cancelled'), cut)).toBe('interrupted')
+  })
+
+  it('is nothing at all while the run can still move itself', () => {
+    const died = node('spec-audit', 'failed', { error: 'ran out of context, twice' })
+    expect(nodeStop(runOf([died], 'running'), died)).toBeUndefined()
+  })
+})
+
+// The id the run view names before the click has to be the id the engine
+// mints after it, so both read it from here.
+describe('the id a clean restart mints', () => {
+  it('is the first ·rN of that node the record does not already hold', () => {
+    expect(nextRevisionId([node('gate', 'failed')], 'gate')).toBe('gate·r1')
+    expect(
+      nextRevisionId([node('gate', 'interrupted'), node('gate·r1', 'failed')], 'gate')
+    ).toBe('gate·r2')
+    // Named after the node, never after the record: a stopped revision starts
+    // over as the next revision of the node it belongs to.
+    expect(nextRevisionId([node('gate·r1', 'failed')], baseNodeId('gate·r1'))).toBe('gate·r2')
+  })
+})
+
+describe('the message a continued node is sent', () => {
+  it('is recognized by what opens it, whatever else the engine appends', () => {
+    expect(isContinuedNodeMessage(CONTINUED_NODE_MESSAGE)).toBe(true)
+    expect(isContinuedNodeMessage(`${CONTINUED_NODE_MESSAGE}\n\nOne monitor was lost.`)).toBe(true)
+    expect(isContinuedNodeMessage('Apply the findings in review-1.md.')).toBe(false)
   })
 })
