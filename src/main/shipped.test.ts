@@ -734,12 +734,27 @@ describe('the shipped standing prompt', () => {
     expect(text.endsWith('</answering-questions>')).toBe(true)
   })
 
-  it('carries the three sections, recognizable sentence by sentence', () => {
+  it('carries the four sections, recognizable sentence by sentence', () => {
     const text = standing()
     expect(text).toContain('Write like a person, not a language model.')
     expect(text).toContain('Prefer the plain word.')
     expect(text).toContain('is anything waiting\non them')
     expect(text).toContain('A question wants an answer, not a project.')
+    expect(text).toContain('<asking-the-user>')
+  })
+
+  // A question in prose is the failure this section exists to end, so the
+  // prompt has to name both channels and rule the message out by name.
+  it('routes every question through the asking tool, in a session and in a node', () => {
+    const text = standing()
+    expect(text).toContain('`crucible_ask` in a Crucible session')
+    expect(text).toContain('`raise_blocker` in a workflow node')
+    expect(text).toMatch(/Never type the question into a message/)
+    expect(text).toMatch(/whether you keep\s+working afterwards or end your turn/)
+  })
+
+  it('tells the message to note a waiting decision, not carry it', () => {
+    expect(standing()).toMatch(/A decision goes through the\s+asking tool/)
   })
 })
 

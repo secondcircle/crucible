@@ -9,6 +9,7 @@ import type {
   AuthMethod,
   BashRunShare,
   CachedPrefix,
+  FileView,
   HistoryMatch,
   ImageAttachment,
   MessageOrigin,
@@ -38,6 +39,10 @@ import type {
   Unsubscribe,
   WorkspaceId
 } from '../../shared/agent/port'
+import { isLocalAddress } from '../../shared/agent/local-address'
+import { readCompactionSettings, type CompactionSettings } from '../../shared/compaction/settings'
+import type { CompactionTrigger } from '../../shared/compaction/record'
+import { createCompactionWatch } from '../../shared/compaction/watch'
 import { displaySafeMessage } from '../agent/adapter-error'
 import type { Flavor } from '../agent/select-adapter'
 import type { CacheRecorder } from '../cache/ledger'
@@ -98,6 +103,16 @@ export interface ShellOptions {
   // A titling pass nobody asked for and nobody is shown: its failure goes to
   // the run log through here and nowhere else.
   readonly onTitlingFailure?: (cause: unknown) => void
+  // A compaction nobody asked for either: the trigger fired, the model refused
+  // and the conversation is exactly as it was. The run log is the report.
+  readonly onCompactionFailure?: (sessionId: SessionId, cause: unknown) => void
+  // Overridden by tests that drive the idle clock themselves. Absent means the
+  // real one.
+  readonly compactionTimers?: {
+    readonly now: () => number
+    readonly setTimer: (run: () => void, ms: number) => unknown
+    readonly clearTimer: (handle: unknown) => void
+  }
 }
 
 // What this shell put into the conversation itself and therefore owes an
@@ -164,7 +179,9 @@ export function createShell({
   turnContext,
   onSessionEnded,
   cache,
-  onTitlingFailure = () => {}
+  onTitlingFailure = () => {},
+  onCompactionFailure = () => {},
+  compactionTimers
 }: ShellOptions): Shell {
   const listeners = new Set<PortEventListener>()
   const live = new Map<SessionId, LiveTurn>()
@@ -204,6 +221,15 @@ export function createShell({
   // its own message coming back — as a delivery, in a queue snapshot, or in a
   // flush — without the adapter learning that system messages exist.
   const systemQueued = new Map<SessionId, SystemMessage[]>()
+  // The compaction running on each session, if one is. A compaction is not a
+  // turn — nothing is said to the agent — so it is held apart from `live`, and
+  // a message on its way to a session that is compacting waits on this rather
+  // than landing on a window being rewritten.
+  const compacting = new Map<SessionId, Promise<void>>()
+  // Sessions an idle compaction handled with nothing sent since. The next send
+  // goes straight through however long the session then sat, and the miss it
+  // may pay was accounted for by the compaction rather than sprung on anyone.
+  const idleCompacted = new Set<SessionId>()
   let turns = 0
   let disposed = false
 
@@ -250,6 +276,8 @@ export function createShell({
         // Beside them for the same reason: what the provider still holds is a
         // fact about the conversation, not about its token count.
         ...(reported?.cachedPrefix === undefined ? {} : { cachedPrefix: reported.cachedPrefix }),
+        ...(compacting.has(session.id) ? { compacting: true as const } : {}),
+        ...(idleCompacted.has(session.id) ? { idleCompacted: true as const } : {}),
         ...(queued(queue) ? { queue } : {}),
         ...(tabs === undefined ? {} : { panel: tabs }),
         ...(line === undefined ? {} : { questions: line })
@@ -260,7 +288,8 @@ export function createShell({
       workspaces: store.state.workspaces.map((workspace) => ({
         id: workspace.id,
         name: basename(workspace.path),
-        path: workspace.path
+        path: workspace.path,
+        ...(workspace.lastUsedAt === undefined ? {} : { lastUsedAt: workspace.lastUsedAt })
       })),
       activeWorkspaceId: store.state.activeWorkspaceId,
       sessions,
@@ -295,7 +324,10 @@ export function createShell({
     if (session === undefined) return
     const workspace = store.workspace(session.workspaceId)
     const { turnId } = turn
-    const acknowledged = turn.expiryAcknowledged
+    // An idle compaction already priced this conversation's next write: the
+    // person was never told, because nobody was there to tell, but nobody was
+    // caught either. The strip exists for the miss that caught somebody.
+    const acknowledged = turn.expiryAcknowledged || idleCompacted.has(sessionId)
     turn.expiryAcknowledged = false
     void cache.append({
       at: new Date().toISOString(),
@@ -333,9 +365,16 @@ export function createShell({
     })
   }
 
+  // The one place session activity is recorded, and so the one place a
+  // workspace is recorded as used: a message sent, a turn ending, a
+  // conversation resumed. Creating a session, activating one and adding a
+  // workspace do not come through here, which is what keeps looking from ever
+  // counting as use.
   function touch(id: SessionId): void {
-    if (store.session(id) === undefined) return
+    const session = store.session(id)
+    if (session === undefined) return
     store.updateSession(id, { lastActivityAt: new Date().toISOString() })
+    store.recordUse(session.workspaceId)
   }
 
   // A live pass is reading a conversation about to be replaced, so whatever it
@@ -542,14 +581,81 @@ export function createShell({
 
   // The one place a turn stops being live, so nothing waiting on `over` is
   // left waiting.
+  // The idle clock and the size rules, for every curated session. One watch
+  // per shell: the rules are the shared ones, so a workflow node's conversation
+  // is governed by the same predicates through a watch of its own.
+  const watch = createCompactionWatch({
+    settings: () => store.state.compaction,
+    retention,
+    // Neither a live turn nor a compaction already running is a conversation
+    // that can be rewritten.
+    idle: (id) => !live.has(id) && !compacting.has(id) && store.session(id) !== undefined,
+    compact: runCompaction,
+    ...(compactionTimers ?? {})
+  })
+
   function endTurn(sessionId: SessionId, turn: LiveTurn): void {
     live.delete(sessionId)
     turn.settled(turn.cancelled ? 'stopped' : 'ended')
+    // The turn wrote a prefix of its own, so whatever an idle compaction was
+    // covering is covered.
+    idleCompacted.delete(sessionId)
+    // A trigger that came due while the turn was running acts now: a
+    // compaction takes the conversation away from whoever is using it, so it
+    // never lands in the middle of one.
+    watch.settled(sessionId)
     // However the turn ended, the conversation says something new about what
     // this session is about — unless the session itself is on its way out.
     if (removing.has(sessionId)) return
     touch(sessionId)
     requestTitle(sessionId)
+  }
+
+  // A compaction Crucible asked for on its own account. Nothing is sent to the
+  // agent afterwards and the session is never marked needs-you: it is
+  // housekeeping, and the transcript block is the whole of the report.
+  function runCompaction(sessionId: SessionId, trigger: CompactionTrigger): void {
+    // Nothing is run twice over one conversation, and the rules are told so:
+    // an ask they hear no answer to is a conversation they never judge again.
+    if (compacting.has(sessionId)) {
+      watch.compacted(sessionId)
+      return
+    }
+    const running = adapter
+      .compact(sessionId, trigger)
+      .then((record) => {
+        // What it left the conversation at is what the rules weigh the next
+        // one against, and the conversation reports that itself with its next
+        // size: the rules are told here only that this one is over.
+        watch.compacted(sessionId)
+        // An idle compaction is the one that changes what the next send costs,
+        // so it is the one the next send is accounted against.
+        if (record !== undefined && trigger === 'idle') idleCompacted.add(sessionId)
+      })
+      .catch((cause: unknown) => {
+        watch.compacted(sessionId)
+        onCompactionFailure(sessionId, cause)
+      })
+      .finally(() => {
+        compacting.delete(sessionId)
+        if (!disposed) emitState()
+      })
+    compacting.set(sessionId, running)
+    emitState()
+  }
+
+  /** The idle clock's starting instant, and nothing when there is no reading. */
+  function prefixInstant(at: string | undefined): { readonly lastRequestAt?: number } {
+    if (at === undefined) return {}
+    const parsed = Date.parse(at)
+    return Number.isFinite(parsed) ? { lastRequestAt: parsed } : {}
+  }
+
+  /** Everything this shell remembers about one conversation's compaction. */
+  function forgetCompaction(id: SessionId): void {
+    watch.forget(id)
+    compacting.delete(id)
+    idleCompacted.delete(id)
   }
 
   // A message this shell put into the conversation itself is announced right
@@ -635,6 +741,17 @@ export function createShell({
         // A stop, reset or removal during the bind already ended this turn,
         // and the adapter must never be asked to run work the user stopped.
         if (live.get(sessionId) !== turn) return
+        // A compaction is rewriting what this conversation's model reads, and
+        // it takes seconds: the message waits for it rather than landing on
+        // half a window. Every sender waits here — a person's send, a run's
+        // report, a monitor's wake — so no road round it exists. Awaited only
+        // where there is one, so an ordinary turn is dispatched in the tick it
+        // always was.
+        const rewriting = compacting.get(sessionId)
+        if (rewriting !== undefined) {
+          await rewriting
+          if (live.get(sessionId) !== turn) return
+        }
         turn.dispatched = true
         // Asked for here, with the turn claimed and its conversation open, so
         // what comes back belongs to the prompt on the very next line and to
@@ -875,7 +992,42 @@ export function createShell({
           ? {}
           : { cachedPrefix: { ...event.cachedPrefix, retention } })
       })
+      // Every billed request re-asks the size rules — the threshold and the
+      // window edge — which need the size and what this conversation's own
+      // last compaction produced. Both travel with the conversation, so a
+      // conversation restored at launch is judged on what it was really
+      // compacted to rather than on a blank memory. The prefix's own stamp is
+      // the instant of the last billed request and is what the idle clock
+      // counts from; a provider that reports no cache has no warm prefix to
+      // run ahead of, so it sends the sizes alone and the idle rule sits out.
+      if (store.session(event.sessionId) !== undefined) {
+        watch.saw(event.sessionId, {
+          usedTokens: event.usedTokens,
+          contextWindow: event.contextWindow,
+          ...(event.compactedTo === undefined ? {} : { compactedTo: event.compactedTo }),
+          ...prefixInstant(event.cachedPrefix?.at)
+        })
+      }
       emitState()
+      return
+    }
+
+    // The shell asked for this compaction and has already said so in the
+    // snapshot, so the adapter's own announcement adds nothing.
+    if (event.type === 'compaction_started') return
+    // Session-scoped like usage: nothing is being said to the agent, so there
+    // is no turn to correlate it with.
+    if (event.type === 'compacted') {
+      if (store.session(event.sessionId) === undefined) return
+      const written = event.compaction
+      if (written !== undefined) {
+        emit({
+          type: 'compacted',
+          sessionId: event.sessionId,
+          text: written.text,
+          record: written.record
+        })
+      }
       return
     }
 
@@ -1031,6 +1183,7 @@ export function createShell({
         }
         bindings.delete(session.id)
         usage.delete(session.id)
+        forgetCompaction(session.id)
         queues.delete(session.id)
         systemQueued.delete(session.id)
         // The panel record leaves with the session record below; this is the
@@ -1108,6 +1261,7 @@ export function createShell({
       }
       bindings.delete(id)
       usage.delete(id)
+      forgetCompaction(id)
       // A queue has nowhere to be restored to once the entry holding it is
       // gone.
       queues.delete(id)
@@ -1146,6 +1300,7 @@ export function createShell({
         // The fresh conversation has reported nothing yet, so the meter goes
         // back to saying nothing rather than keeping the old session's numbers.
         usage.delete(id)
+        forgetCompaction(id)
         queues.delete(id)
         systemQueued.delete(id)
         onSessionEnded?.(id)
@@ -1260,6 +1415,16 @@ export function createShell({
       requireSession(id)
       await ensureBound(id)
       await adapter.setLabel(id, ref, label)
+    },
+
+    async compactionSettings(): Promise<CompactionSettings> {
+      return store.state.compaction
+    },
+
+    // Normalized on the way in, so no threshold that would compact a window
+    // into itself can be stored however the field was typed into.
+    async setCompactionSettings(settings: CompactionSettings): Promise<void> {
+      store.setCompaction(readCompactionSettings(settings))
     },
 
     listModels(): Promise<readonly ModelInfo[]> {
@@ -1489,6 +1654,49 @@ export function createShell({
       await deliverSystem(sessionId, batch, 'steering')
     },
 
+    // A click in the file tree, or on a path an agent named in a message,
+    // resolved against the session's own directory, so a worktree session
+    // opens the worktree's copy of a file.
+    async openFile(
+      sessionId: SessionId,
+      path: string,
+      options: { readonly keep: boolean; readonly view: FileView }
+    ): Promise<TabId> {
+      const { directory } = requireSession(sessionId)
+      try {
+        return await panel.open(sessionId, directory, path, options)
+      } catch (cause) {
+        refuse(displaySafeMessage(cause, 'That file could not be opened.'))
+      }
+    },
+
+    // The panel is where a local app is looked at; every other address is the
+    // OS browser's. Checked here, where the tab would actually be made, rather
+    // than trusted from the renderer that asked.
+    async openAddress(
+      sessionId: SessionId,
+      address: string,
+      options: { readonly keep: boolean }
+    ): Promise<TabId> {
+      requireSession(sessionId)
+      if (!isLocalAddress(address)) {
+        refuse('Crucible opens local addresses in the panel; the rest go to your browser.')
+      }
+      return panel.openWeb(sessionId, address, options)
+    },
+
+    // The double-click, landing after the click that opened the tab: that tab
+    // is no longer the preview tab.
+    async keepTab(sessionId: SessionId, tabId: TabId): Promise<void> {
+      if (store.session(sessionId) === undefined) return
+      panel.keep(sessionId, tabId)
+    },
+
+    async setTabSource(sessionId: SessionId, tabId: TabId, source: boolean): Promise<void> {
+      if (store.session(sessionId) === undefined) return
+      panel.setSource(sessionId, tabId, source)
+    },
+
     // Nothing is pushed at the agent: it learns of the user's own panel actions
     // at its next `panel_list` or `panel_show`.
     async activateTab(sessionId: SessionId, tabId: TabId): Promise<void> {
@@ -1522,6 +1730,7 @@ export function createShell({
       disposed = true
       for (const turn of live.values()) turn.settled('stopped')
       live.clear()
+      watch.dispose()
       adapter.dispose()
     }
   }

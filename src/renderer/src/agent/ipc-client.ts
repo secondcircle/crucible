@@ -2,6 +2,7 @@ import type {
   AgentPort,
   AuthMethod,
   BashRunShare,
+  FileView,
   HistoryMatch,
   ImageAttachment,
   ModelId,
@@ -25,6 +26,7 @@ import type {
   Unsubscribe,
   WorkspaceId
 } from '../../../shared/agent/port'
+import type { CompactionSettings } from '../../../shared/compaction/settings'
 import { agentBridge } from '../bridge'
 
 // The renderer's side of the agent channel. It holds no state: correlation,
@@ -87,6 +89,10 @@ export function createIpcClient(): AgentPort {
         ? call<void>('setWorktree', sessionId)
         : call<void>('setWorktree', sessionId, worktree),
 
+    compactionSettings: () => call<CompactionSettings>('compactionSettings'),
+    setCompactionSettings: (settings: CompactionSettings) =>
+      call<void>('setCompactionSettings', settings),
+
     listModels: () => call<readonly ModelInfo[]>('listModels'),
 
     listProviders: () => call<readonly ProviderState[]>('listProviders'),
@@ -135,6 +141,16 @@ export function createIpcClient(): AgentPort {
     replyToQuestion: (sessionId: SessionId, questionId: QuestionId, reply: QuestionReply) =>
       call<void>('replyToQuestion', sessionId, questionId, reply),
 
+    openFile: (
+      sessionId: SessionId,
+      path: string,
+      options: { readonly keep: boolean; readonly view: FileView }
+    ) => call<TabId>('openFile', sessionId, path, options),
+    openAddress: (sessionId: SessionId, address: string, options: { readonly keep: boolean }) =>
+      call<TabId>('openAddress', sessionId, address, options),
+    keepTab: (sessionId: SessionId, tabId: TabId) => call<void>('keepTab', sessionId, tabId),
+    setTabSource: (sessionId: SessionId, tabId: TabId, source: boolean) =>
+      call<void>('setTabSource', sessionId, tabId, source),
     activateTab: (sessionId: SessionId, tabId: TabId) =>
       call<void>('activateTab', sessionId, tabId),
     closeTab: (sessionId: SessionId, tabId: TabId) => call<void>('closeTab', sessionId, tabId),

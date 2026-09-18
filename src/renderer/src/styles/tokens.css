@@ -10,6 +10,8 @@
   --code-deep: #0d0a0d;
   --user: #2c2230;
   --think-bg: #161018;
+  /* the source line a path:42 click asked for, a lift off the code ground */
+  --code-mark: #1c1520;
   --error-bg: #1d1113;
   /* what an overlay dims the window behind it to */
   --overlay: rgb(15 11 15 / 86%);
@@ -48,6 +50,13 @@
   --lit: #5c4436;
   /* a run graph edge at rest: visible against the pane, quiet beside a card */
   --edge: #4a3c47;
+
+  /* what a source view colors: keyword, string, comment, number, type */
+  --syntax-keyword: #c586c0;
+  --syntax-string: #ce9178;
+  --syntax-comment: #6a9955;
+  --syntax-number: #b5cea8;
+  --syntax-type: #4ec9b0;
 
   --font: -apple-system, 'Segoe UI', system-ui, sans-serif;
   --mono: ui-monospace, 'SF Mono', Menlo, monospace;

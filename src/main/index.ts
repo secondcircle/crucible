@@ -237,6 +237,9 @@ const workflowRuns = selectWorkflowRunService(
     spawnHost,
     cache,
     quota,
+    // The same switch and threshold the sidebar's sessions run under: one
+    // machine-global setting, every agent loop.
+    compaction: () => store.state.compaction,
     ...(cannedWorkspacePath === undefined ? {} : { cannedWorkspacePath }),
     // The renderer gets no path-opening capability of its own; Reveal in the
     // artifact reader asks the service, which asks this.
@@ -310,8 +313,11 @@ const { adapter, flavor } = selectAdapter(
 
 // One flavor decision governs every seam, so a fake-flavor launch reads no
 // folder, starts no process and serves canned commands.
-const workspace = selectWorkspaceService(flavor, log, (url: string) => {
-  void electronShell.openExternal(url)
+const workspace = selectWorkspaceService(flavor, log, {
+  openExternal: (url: string) => {
+    void electronShell.openExternal(url)
+  },
+  revealItem: (path: string) => electronShell.showItemInFolder(path)
 })
 const commands = selectCommandService(flavor, log, app.getAppPath())
 
@@ -397,6 +403,17 @@ const shell = withLogging(
       joined([workflowRuns.turnStart(sessionId), monitors.turnStart(sessionId)]),
     onSessionEnded: (sessionId) => monitors.release({ kind: 'session', sessionId }),
     cache,
+    // Nobody asked for this compaction either: the conversation is left as it
+    // was and the run log is the whole of the report.
+    onCompactionFailure: (sessionId, cause) => {
+      log.append({
+        source: 'main',
+        event: 'compaction_failed',
+        adapter: flavor,
+        sessionId,
+        message: cause instanceof Error ? cause.message : String(cause)
+      })
+    },
     // Nobody asked for a title, so nobody is told it failed: the run log is
     // the whole of the report.
     onTitlingFailure: (cause) => {

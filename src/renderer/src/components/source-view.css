@@ -1,0 +1,60 @@
+/* A file as source: numbered lines on the code ground, colored by kind. The
+   block is as wide as its widest line, so the panel scrolls sideways rather
+   than wrapping code. */
+.exhibit .src {
+  margin: 0;
+  padding: 10px 0;
+  min-width: 100%;
+  width: max-content;
+  background: var(--code);
+  font: 12px/1.6 var(--mono);
+  color: var(--code-ink);
+}
+
+.exhibit .src .ln {
+  display: flex;
+  white-space: pre;
+}
+
+/* The line a `path:42` click asked for. The ground it sits on is a lift off
+   the code ground; the number is what carries at a glance. */
+.exhibit .src .ln.hl {
+  background: var(--code-mark);
+}
+
+.exhibit .src .ln.hl .n {
+  color: var(--accent);
+}
+
+.exhibit .src .n {
+  flex: none;
+  width: 44px;
+  padding-right: 14px;
+  text-align: right;
+  color: var(--faint);
+  user-select: none;
+}
+
+.exhibit .src .lt {
+  padding-right: 18px;
+}
+
+.exhibit .src .tok-key {
+  color: var(--syntax-keyword);
+}
+
+.exhibit .src .tok-str {
+  color: var(--syntax-string);
+}
+
+.exhibit .src .tok-com {
+  color: var(--syntax-comment);
+}
+
+.exhibit .src .tok-num {
+  color: var(--syntax-number);
+}
+
+.exhibit .src .tok-typ {
+  color: var(--syntax-type);
+}

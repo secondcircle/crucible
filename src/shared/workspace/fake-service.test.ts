@@ -3,7 +3,12 @@
 // The flavor an agent-driven check drives: every answer is canned, so what
 // those checks rely on is pinned here.
 import { describe, expect, it } from 'vitest'
-import { CANNED_FILES, CANNED_WORKTREE_IDS, createFakeWorkspaceService } from './fake-service'
+import {
+  CANNED_FILES,
+  CANNED_FILE_STATUS,
+  CANNED_WORKTREE_IDS,
+  createFakeWorkspaceService
+} from './fake-service'
 import type { WorkspaceEvent } from './service'
 
 function watched(): {
@@ -41,6 +46,29 @@ describe('the fake workspace service', () => {
       'src/renderer/src/components/transcript.css',
       'src/renderer/src/components/Transcript.tsx'
     ])
+  })
+
+  it('answers the file tree with the same canned list, colored by canned status', async () => {
+    const { service } = watched()
+
+    const tree = await service.fileTree('/anywhere')
+
+    expect(tree).toEqual({
+      directory: '/anywhere',
+      paths: CANNED_FILES,
+      changed: CANNED_FILE_STATUS
+    })
+    // Names this repository really has, so a click in a fake-flavor tree
+    // opens a real file rather than a refusal.
+    expect(tree.paths).toContain('CONTEXT.md')
+  })
+
+  it('reveals nothing at all, and says which file it was asked about', async () => {
+    const { service } = watched()
+
+    await service.revealFile('/anywhere', 'CONTEXT.md')
+
+    expect(service.revealed).toEqual(['/anywhere/CONTEXT.md'])
   })
 
   it('calls every workspace a git one, so the worktree chip is there to drive', async () => {
@@ -127,6 +155,18 @@ describe('the fake workspace service', () => {
     if (answer.kind !== 'board') throw new Error('expected a board')
 
     expect(Date.now() - Date.parse(answer.board.collectedAt)).toBeLessThan(2000)
+  })
+
+  it('answers which paths are files from the list it lists, and reads no disk', async () => {
+    const { service } = watched()
+
+    expect(
+      await service.existingFiles('/repos/crucible', [
+        'CONTEXT.md',
+        '/repos/crucible/src/shared/agent/port.ts',
+        'notes/nothing.md'
+      ])
+    ).toEqual(['CONTEXT.md', '/repos/crucible/src/shared/agent/port.ts'])
   })
 
   it('records a link and opens nothing at all', async () => {

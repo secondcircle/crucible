@@ -121,6 +121,8 @@ function stubShell(answers: Partial<Record<string, unknown>> = {}): {
     steer: op('steer'),
     followUp: op('followUp'),
     dequeue: op('dequeue'),
+    openFile: op('openFile'),
+    openAddress: op('openAddress'),
     activateTab: op('activateTab'),
     closeTab: op('closeTab'),
     exhibit: op('exhibit'),
@@ -219,6 +221,26 @@ describe('what crosses the request channel', () => {
       { op: 'activateTab', args: ['s', 'plan'] },
       { op: 'closeTab', args: ['s', 'plan'] },
       { op: 'exhibit', args: ['s', 'plan'] }
+    ])
+  })
+
+  it('carries how a file was asked to open, and invents no line', async () => {
+    const stub = stubShell({ openFile: 'plan', openAddress: 'localhost' })
+    serveAgentChannel(stub.shell, stubWindow().window)
+
+    await request('openFile', 's', 'plan.md', { keep: true, view: { kind: 'rendered' } })
+    await request('openFile', 's', 'port.ts', { keep: false, view: { kind: 'source', line: 42 } })
+    // Anything that is not a whole positive line number names no line at all.
+    await request('openFile', 's', 'port.ts', { keep: false, view: { kind: 'source', line: '4' } })
+    await request('openFile', 's', 'port.ts', {})
+    await request('openAddress', 's', 'http://localhost:5173/', { keep: true })
+
+    expect(stub.asked).toEqual([
+      { op: 'openFile', args: ['s', 'plan.md', { keep: true, view: { kind: 'rendered' } }] },
+      { op: 'openFile', args: ['s', 'port.ts', { keep: false, view: { kind: 'source', line: 42 } }] },
+      { op: 'openFile', args: ['s', 'port.ts', { keep: false, view: { kind: 'source' } }] },
+      { op: 'openFile', args: ['s', 'port.ts', { keep: false, view: { kind: 'source' } }] },
+      { op: 'openAddress', args: ['s', 'http://localhost:5173/', { keep: true }] }
     ])
   })
 

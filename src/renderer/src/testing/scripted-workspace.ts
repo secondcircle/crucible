@@ -1,4 +1,6 @@
 import type {
+  FileStatus,
+  FileTree,
   IssueBoardAnswer,
   RunId,
   Unsubscribe,
@@ -19,8 +21,24 @@ import { rankFiles } from '../../../shared/workspace/match'
 // test is about rendering rather than about timing.
 export interface ScriptedWorkspace extends WorkspaceService {
   readonly calls: ReadonlyArray<{ readonly op: string; readonly args: readonly unknown[] }>
-  /** What `searchFiles` ranks and answers from. */
+  /** What `searchFiles` ranks and answers from, and what the tree lists. */
   files: readonly string[]
+  // Files on disk outside the session's directory, absolute: what an agent
+  // naming an installed document points at. Not listed by the tree.
+  elsewhere: readonly string[]
+  /** How git sees those files, for the tree's coloring. */
+  changed: Readonly<Record<string, FileStatus>>
+  /** The directories being watched right now, in the order they were asked for. */
+  readonly watching: readonly string[]
+  // Held where a test drives the window main's watch takes to start: set it
+  // before rendering, and no watch answers until the test settles it.
+  holdWatch?: boolean
+  /** Settles every watch waiting to start. */
+  settleWatch(): void
+  /** A change on disk, exactly as main announces one. */
+  filesChanged(directory: string): void
+  /** Every file this service was asked to reveal, and revealed nothing for. */
+  readonly revealed: readonly string[]
   /** Every run this service was asked to start, oldest first. */
   readonly started: ReadonlyArray<{ readonly runId: RunId; readonly command: string }>
   /** What `isGitWorkspace` answers for any folder. */
@@ -74,7 +92,10 @@ export function createScriptedWorkspace(files: readonly string[] = []): Scripted
   const calls: Array<{ op: string; args: readonly unknown[] }> = []
   const started: Array<{ runId: RunId; command: string }> = []
   const openedUrls: string[] = []
+  const watching: string[] = []
+  const revealed: string[] = []
   let heldIssues: (() => void) | undefined
+  const heldWatches: Array<() => void> = []
   const worktrees: Array<(created: WorktreeCreation) => void> = []
   const heldStatus: Array<() => void> = []
   const heldDisconnects: Array<() => void> = []
@@ -88,8 +109,12 @@ export function createScriptedWorkspace(files: readonly string[] = []): Scripted
   const service: ScriptedWorkspace = {
     calls,
     files,
+    elsewhere: [],
+    changed: {},
     started,
     openedUrls,
+    watching,
+    revealed,
 
     issues: new Map<string, IssueBoardAnswer>(),
 
@@ -123,6 +148,56 @@ export function createScriptedWorkspace(files: readonly string[] = []): Scripted
     searchFiles(directory: string, query: string): Promise<readonly string[]> {
       calls.push({ op: 'searchFiles', args: [directory, query] })
       return Promise.resolve(rankFiles(service.files, query))
+    },
+
+    fileTree(directory: string): Promise<FileTree> {
+      calls.push({ op: 'fileTree', args: [directory] })
+      return Promise.resolve({ directory, paths: service.files, changed: service.changed })
+    },
+
+    existingFiles(directory: string, paths: readonly string[]): Promise<readonly string[]> {
+      calls.push({ op: 'existingFiles', args: [directory, paths] })
+      const listed = new Set(service.files)
+      const outside = new Set(service.elsewhere)
+      const prefix = `${directory}/`
+      return Promise.resolve(
+        paths.filter((path) =>
+          outside.has(path)
+            ? true
+            : listed.has(path.startsWith(prefix) ? path.slice(prefix.length) : path)
+        )
+      )
+    },
+
+    watchFiles(directory: string): Promise<void> {
+      calls.push({ op: 'watchFiles', args: [directory] })
+      watching.push(directory)
+      if (service.holdWatch !== true) return Promise.resolve()
+      return new Promise<void>((resolve) => {
+        heldWatches.push(resolve)
+      })
+    },
+
+    settleWatch(): void {
+      const waiting = heldWatches.splice(0, heldWatches.length)
+      for (const settle of waiting) settle()
+    },
+
+    unwatchFiles(directory: string): Promise<void> {
+      calls.push({ op: 'unwatchFiles', args: [directory] })
+      const at = watching.indexOf(directory)
+      if (at !== -1) watching.splice(at, 1)
+      return Promise.resolve()
+    },
+
+    filesChanged(directory: string): void {
+      emit({ type: 'files_changed', directory })
+    },
+
+    revealFile(directory: string, path: string): Promise<void> {
+      calls.push({ op: 'revealFile', args: [directory, path] })
+      revealed.push(path)
+      return Promise.resolve()
     },
 
     isGitWorkspace(workspacePath: string): Promise<boolean> {

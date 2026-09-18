@@ -3,6 +3,7 @@ import { EVENT_CHANNEL, REQUEST_CHANNEL, type PortResult } from '../../shared/ag
 import type {
   AuthMethod,
   BashRunShare,
+  FileView,
   ImageAttachment,
   PortEvent,
   PromptOptions,
@@ -10,6 +11,7 @@ import type {
   QueuedKind,
   SessionWorktree
 } from '../../shared/agent/port'
+import { readCompactionSettings } from '../../shared/compaction/settings'
 import type { Shell } from '../shell/shell'
 import { displaySafeMessage } from './adapter-error'
 
@@ -195,6 +197,27 @@ async function invoke(shell: Shell, request: unknown): Promise<unknown> {
     return asked.summarize === true
   }
 
+  /** Anything but a true `keep` is the single click, which is the common one. */
+  function keep(position: number): { readonly keep: boolean } {
+    const asked = (given[position] ?? {}) as { keep?: unknown }
+    return { keep: asked.keep === true }
+  }
+
+  // How a file was asked to open. Source unless the renderer said rendered,
+  // and a line only where one was genuinely named: a line number that is not a
+  // whole positive number is no line at all.
+  function view(position: number): FileView {
+    const asked = ((given[position] ?? {}) as { view?: unknown }).view
+    const { kind, line } = (typeof asked === 'object' && asked !== null ? asked : {}) as {
+      kind?: unknown
+      line?: unknown
+    }
+    if (kind === 'rendered') return { kind: 'rendered' }
+    return typeof line === 'number' && Number.isInteger(line) && line > 0
+      ? { kind: 'source', line }
+      : { kind: 'source' }
+  }
+
   switch (op) {
     case 'snapshot':
       return shell.snapshot()
@@ -220,6 +243,12 @@ async function invoke(shell: Shell, request: unknown): Promise<unknown> {
       return shell.resumeSession(text(0), text(1))
     case 'setWorktree':
       return shell.setWorktree(text(0), worktree(1))
+    case 'compactionSettings':
+      return shell.compactionSettings()
+    // Read as whatever it turns out to be: the shell normalizes it, so a
+    // threshold nobody could have typed cannot be stored by sending it.
+    case 'setCompactionSettings':
+      return shell.setCompactionSettings(readCompactionSettings(given[0]))
     case 'listModels':
       return shell.listModels()
     case 'setModel':
@@ -272,6 +301,14 @@ async function invoke(shell: Shell, request: unknown): Promise<unknown> {
       return shell.dequeue(text(0), kind(1), text(2))
     case 'replyToQuestion':
       return shell.replyToQuestion(text(0), text(1), questionReply(2))
+    case 'openFile':
+      return shell.openFile(text(0), text(1), { ...keep(2), view: view(2) })
+    case 'openAddress':
+      return shell.openAddress(text(0), text(1), keep(2))
+    case 'keepTab':
+      return shell.keepTab(text(0), text(1))
+    case 'setTabSource':
+      return shell.setTabSource(text(0), text(1), given[2] === true)
     case 'activateTab':
       return shell.activateTab(text(0), text(1))
     case 'closeTab':

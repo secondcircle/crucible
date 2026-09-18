@@ -72,9 +72,28 @@ export async function invoke(service: WorkspaceService, request: unknown): Promi
     return given[position] === undefined ? undefined : text(position)
   }
 
+  /** A list of paths, or a refusal: anything in it that is not text is not one. */
+  function texts(position: number): readonly string[] {
+    const value = given[position]
+    if (!Array.isArray(value) || value.some((entry) => typeof entry !== 'string')) {
+      throw new Error(`${op} needs a list of paths where it was given none.`)
+    }
+    return value as readonly string[]
+  }
+
   switch (op) {
     case 'searchFiles':
       return service.searchFiles(text(0), text(1))
+    case 'fileTree':
+      return service.fileTree(text(0))
+    case 'existingFiles':
+      return service.existingFiles(text(0), texts(1))
+    case 'watchFiles':
+      return service.watchFiles(text(0))
+    case 'unwatchFiles':
+      return service.unwatchFiles(text(0))
+    case 'revealFile':
+      return service.revealFile(text(0), text(1))
     case 'isGitWorkspace':
       return service.isGitWorkspace(text(0))
     case 'createWorktree':

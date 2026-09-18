@@ -9,6 +9,11 @@ import type {
   ThinkingLevel,
   WorkspaceId
 } from '../../shared/agent/port'
+import {
+  DEFAULT_COMPACTION_SETTINGS,
+  readCompactionSettings,
+  type CompactionSettings
+} from '../../shared/compaction/settings'
 import type { Flavor } from '../agent/select-adapter'
 import type { StoredPanel, StoredPanelTab } from '../panel/model'
 
@@ -21,6 +26,8 @@ const VERSION = 1
 export interface StoredWorkspace {
   readonly id: WorkspaceId
   readonly path: string
+  /** ISO; absent on a workspace nothing has ever been used in. */
+  readonly lastUsedAt?: string
 }
 
 export interface StoredSession {
@@ -67,12 +74,16 @@ export interface ShellStoreState {
   readonly activeSessionByWorkspace: Readonly<Record<WorkspaceId, SessionId>>
   /** What a new session starts on. */
   readonly lastModel?: ModelId
+  // Machine-global, like the file it lives in: one switch and one threshold
+  // governing every agent loop this installation starts.
+  readonly compaction: CompactionSettings
 }
 
 const EMPTY: ShellStoreState = {
   workspaces: [],
   sessions: [],
-  activeSessionByWorkspace: {}
+  activeSessionByWorkspace: {},
+  compaction: DEFAULT_COMPACTION_SETTINGS
 }
 
 export interface ShellStore {
@@ -90,7 +101,12 @@ export interface ShellStore {
   updateSession(id: SessionId, patch: Partial<Omit<StoredSession, 'id' | 'workspaceId'>>): void
   removeSession(id: SessionId): void
   activateSession(id: SessionId): void
+  // Records that something was used in this workspace, now. Monotonic: a stamp
+  // never moves backwards, so a clock that steps back cannot move a workspace
+  // up the sidebar. The only writer of `lastUsedAt`.
+  recordUse(id: WorkspaceId): void
   setLastModel(model: ModelId): void
+  setCompaction(settings: CompactionSettings): void
 }
 
 export type StoreWriteFailure = (cause: unknown) => void
@@ -216,8 +232,26 @@ export function createShellStore(
       })
     },
 
+    recordUse(id: WorkspaceId): void {
+      const workspace = state.workspaces.find((candidate) => candidate.id === id)
+      if (workspace === undefined) return
+      const at = new Date().toISOString()
+      const held = workspace.lastUsedAt
+      if (held !== undefined && Date.parse(held) >= Date.parse(at)) return
+      save({
+        ...state,
+        workspaces: state.workspaces.map((candidate) =>
+          candidate.id === id ? { ...candidate, lastUsedAt: at } : candidate
+        )
+      })
+    },
+
     setLastModel(model: ModelId): void {
       save({ ...state, lastModel: model })
+    },
+
+    setCompaction(settings: CompactionSettings): void {
+      save({ ...state, compaction: settings })
     }
   }
 }
@@ -236,7 +270,7 @@ function load(path: string): ShellStoreState {
   const file = parsed as Record<string, unknown>
   if (file.version !== VERSION) return EMPTY
 
-  const workspaces = asArray<StoredWorkspace>(file.workspaces).filter(
+  const found = asArray<StoredWorkspace>(file.workspaces).filter(
     (workspace) => typeof workspace?.id === 'string' && typeof workspace?.path === 'string'
   )
   const sessions = asArray<StoredSession>(file.sessions)
@@ -245,7 +279,7 @@ function load(path: string): ShellStoreState {
         typeof session?.id === 'string' &&
         typeof session?.workspaceId === 'string' &&
         typeof session?.createdAt === 'string' &&
-        workspaces.some((workspace) => workspace.id === session.workspaceId)
+        found.some((workspace) => workspace.id === session.workspaceId)
     )
     // Unreadable panel data, or a flavor this build cannot vouch for, loads as
     // absent: a lost tab is recoverable, a launch that will not start is not.
@@ -282,6 +316,20 @@ function load(path: string): ShellStoreState {
         ...((session as { fresh?: unknown }).fresh === true ? { fresh: true } : {})
       }
     })
+  // `lastUsedAt` is a field an older record simply lacks, so the version is not
+  // bumped over it — an unknown version discards the whole file. Seeded once
+  // from the sessions already on disk, by the same rule the field holds, so the
+  // first launch after the update does not show every workspace as never used.
+  const workspaces: StoredWorkspace[] = found.map((workspace) => {
+    const stored =
+      typeof workspace.lastUsedAt === 'string' ? workspace.lastUsedAt : undefined
+    const lastUsedAt = stored ?? seededUse(workspace.id, sessions)
+    return {
+      id: workspace.id,
+      path: workspace.path,
+      ...(lastUsedAt === undefined ? {} : { lastUsedAt })
+    }
+  })
   const activeSessionByWorkspace =
     typeof file.activeSessionByWorkspace === 'object' && file.activeSessionByWorkspace !== null
       ? (file.activeSessionByWorkspace as Record<WorkspaceId, SessionId>)
@@ -294,12 +342,33 @@ function load(path: string): ShellStoreState {
     activeWorkspaceId: workspaces.some((workspace) => workspace.id === file.activeWorkspaceId)
       ? (file.activeWorkspaceId as WorkspaceId)
       : workspaces[0]?.id,
-    lastModel: typeof file.lastModel === 'string' ? file.lastModel : undefined
+    lastModel: typeof file.lastModel === 'string' ? file.lastModel : undefined,
+    // A record written before the setting existed reads as the default, which
+    // is what every installation runs until somebody changes it.
+    compaction: readCompactionSettings(file.compaction)
   }
 }
 
 function asArray<T>(value: unknown): T[] {
   return Array.isArray(value) ? (value as T[]) : []
+}
+
+// The latest activity among a workspace's stored sessions, which is the most a
+// record written before workspaces carried their own stamp can say. A workspace
+// whose sessions were created and never messaged has nothing to seed from and
+// stays never used.
+function seededUse(
+  id: WorkspaceId,
+  sessions: readonly StoredSession[]
+): string | undefined {
+  let latest: string | undefined
+  for (const session of sessions) {
+    if (session.workspaceId !== id) continue
+    const at = session.lastActivityAt
+    if (at === undefined || Number.isNaN(Date.parse(at))) continue
+    if (latest === undefined || Date.parse(at) > Date.parse(latest)) latest = at
+  }
+  return latest
 }
 
 // A patch value of `undefined` takes the field off rather than leaving a hole
@@ -330,19 +399,27 @@ function readTokenFlavor(session: unknown): Flavor | undefined {
   return FLAVORS.includes(tokenFlavor as Flavor) ? (tokenFlavor as Flavor) : undefined
 }
 
-const KINDS: readonly ExhibitKind[] = ['html', 'markdown']
+const KINDS: readonly ExhibitKind[] = ['html', 'markdown', 'source', 'image', 'binary']
 
 function readPanel(value: unknown): StoredPanel | undefined {
   if (typeof value !== 'object' || value === null) return undefined
-  const { tabs, activeTabId, turn } = value as {
+  const { tabs, activeTabId, previewTabId, turn } = value as {
     tabs?: unknown
     activeTabId?: unknown
+    previewTabId?: unknown
     turn?: unknown
   }
   if (!Array.isArray(tabs) || typeof turn !== 'number') return undefined
   if (activeTabId !== null && typeof activeTabId !== 'string') return undefined
   if (!tabs.every(isPanelTab)) return undefined
-  return { tabs: tabs as StoredPanelTab[], activeTabId, turn }
+  return {
+    tabs: tabs as StoredPanelTab[],
+    activeTabId,
+    // A file written before the preview tab existed has none, which is the
+    // same state as a session that never opened one.
+    previewTabId: typeof previewTabId === 'string' ? previewTabId : null,
+    turn
+  }
 }
 
 function isPanelTab(value: unknown): boolean {

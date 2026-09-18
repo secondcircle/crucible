@@ -86,6 +86,12 @@ export function withLogging(shell: Shell, log: LogSink, adapter: string): Shell 
       shell.setWorktree(sessionId, worktree)
     ),
 
+    // Read-only like the snapshot, and read whenever the section opens.
+    compactionSettings: () => shell.compactionSettings(),
+    setCompactionSettings: op('setCompactionSettings', (settings) =>
+      shell.setCompactionSettings(settings)
+    ),
+
     listModels: op('listModels', () => shell.listModels()),
     setModel: op('setModel', (sessionId, model) => shell.setModel(sessionId, model)),
     setThinkingLevel: op('setThinkingLevel', (sessionId, level) =>
@@ -152,6 +158,16 @@ export function withLogging(shell: Shell, log: LogSink, adapter: string): Shell 
       shell.replyToQuestion(sessionId, questionId, reply)
     ),
 
+    openFile: op('openFile', (sessionId, path, options) =>
+      shell.openFile(sessionId, path, options)
+    ),
+    openAddress: op('openAddress', (sessionId, address, options) =>
+      shell.openAddress(sessionId, address, options)
+    ),
+    keepTab: op('keepTab', (sessionId, tabId) => shell.keepTab(sessionId, tabId)),
+    setTabSource: op('setTabSource', (sessionId, tabId, source) =>
+      shell.setTabSource(sessionId, tabId, source)
+    ),
     activateTab: op('activateTab', (sessionId, tabId) => shell.activateTab(sessionId, tabId)),
     closeTab: op('closeTab', (sessionId, tabId) => shell.closeTab(sessionId, tabId)),
     exhibit: op(

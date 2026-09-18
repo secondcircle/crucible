@@ -86,6 +86,23 @@ function stubService(): StubService {
       if (query === 'refuse me') throw new Error('That folder could not be read.')
       return ['src/shared/workspace/service.ts']
     },
+    async fileTree(directory: string) {
+      asked.push({ op: 'fileTree', args: [directory] })
+      return { directory, paths: ['src/shared/workspace/service.ts'], changed: {} }
+    },
+    async existingFiles(directory: string, paths: readonly string[]) {
+      asked.push({ op: 'existingFiles', args: [directory, paths] })
+      return paths.filter((path) => path.endsWith('.ts'))
+    },
+    async watchFiles(directory: string) {
+      asked.push({ op: 'watchFiles', args: [directory] })
+    },
+    async unwatchFiles(directory: string) {
+      asked.push({ op: 'unwatchFiles', args: [directory] })
+    },
+    async revealFile(directory: string, path: string) {
+      asked.push({ op: 'revealFile', args: [directory, path] })
+    },
     async isGitWorkspace(workspacePath: string) {
       asked.push({ op: 'isGitWorkspace', args: [workspacePath] })
       return workspacePath !== '/tmp/not-a-repo'
@@ -168,6 +185,24 @@ describe('what crosses the workspace channel', () => {
 
     expect(answer).toEqual({ ok: true, value: ['src/shared/workspace/service.ts'] })
     expect(stub.asked).toEqual([{ op: 'searchFiles', args: ['/repos/crucible', 'port'] }])
+  })
+
+  it('asks which paths are files, and refuses a list that is not one', async () => {
+    const answer = await request({
+      op: 'existingFiles',
+      args: ['/repos/crucible', ['CONTEXT.md', 'src/shared/workspace/service.ts']]
+    })
+
+    expect(answer).toEqual({ ok: true, value: ['src/shared/workspace/service.ts'] })
+    expect(await request({ op: 'existingFiles', args: ['/repos/crucible', [7]] })).toMatchObject({
+      ok: false
+    })
+    expect(stub.asked).toEqual([
+      {
+        op: 'existingFiles',
+        args: ['/repos/crucible', ['CONTEXT.md', 'src/shared/workspace/service.ts']]
+      }
+    ])
   })
 
   it('starts and stops a run by the id the service minted', async () => {

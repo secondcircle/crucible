@@ -1,6 +1,9 @@
 import { execFile, spawn } from 'node:child_process'
+import { watch, type FSWatcher } from 'node:fs'
+import { resolve } from 'node:path'
 import { rankFiles } from '../../shared/workspace/match'
 import type {
+  FileTree,
   IssueBoardAnswer,
   RunId,
   Unsubscribe,
@@ -16,7 +19,7 @@ import type {
 } from '../../shared/workspace/research'
 import type { CommandOutcome, CommandRunner } from './command-runner'
 import { collectIssues } from './collect-issues'
-import { listFiles } from './files'
+import { existingFiles, fileTree, listFiles } from './files'
 import { createResearchOperations } from './research'
 import { createResearchProcesses, type ResearchProcesses } from './research-processes'
 import { bashLocation, killTree } from '../platform/exec'
@@ -34,6 +37,31 @@ interface Run {
   readonly kill: () => void
 }
 
+interface Watch {
+  readonly watcher: FSWatcher
+  refs: number
+  settling?: ReturnType<typeof setTimeout>
+  /** True once the watch has delivered anything, which is the only proof it runs. */
+  live: boolean
+  /** The window's own timer, dropped with the watch that opened it. */
+  starting?: ReturnType<typeof setTimeout>
+}
+
+// A build writes hundreds of files in a second, and each of them is one event.
+// Long enough to arrive as one change, short enough that watching an agent
+// work still feels live.
+const SETTLE_MS = 120
+
+// A recursive watch is not running when `watch()` returns. macOS arms it on
+// the FSEvents thread and drops everything written before it gets there; where
+// there is no recursive watch to ask the OS for, Node walks the tree itself,
+// which takes as long as the tree is deep. Measured here on a loaded machine,
+// a file written in the same millisecond is lost outright, and the watch wakes
+// tens of milliseconds later — seconds, when the machine is busy enough — with
+// nothing to say about it. Long enough to cover that, short enough that a tree
+// left stale by it corrects itself while the person is still looking at it.
+const STARTING_MS = 2000
+
 /** No more output than a repository's branches or pull requests can fill. */
 const MAX_OUTPUT = 8 * 1024 * 1024
 
@@ -43,6 +71,34 @@ const COLLECTION_ENV = {
   GIT_TERMINAL_PROMPT: '0',
   GIT_OPTIONAL_LOCKS: '0',
   GH_PROMPT_DISABLED: '1'
+}
+
+// git churns its own directory constantly — an index lock per command — and
+// nothing under it is listed, so its noise is not a change to the tree.
+function insideGit(filename: string | null): boolean {
+  return filename !== null && /^\.git([/\\]|$)/.test(filename)
+}
+
+function startWatch(
+  directory: string,
+  changed: (filename: string | null) => void
+): FSWatcher | undefined {
+  function listen(recursive: boolean): FSWatcher | undefined {
+    try {
+      const watcher = watch(directory, { recursive }, (_event, filename) => {
+        changed(filename)
+      })
+      // A watch that dies takes itself down rather than throwing out of an
+      // event: the tree goes back to refreshing when something asks it to.
+      watcher.on('error', () => watcher.close())
+      return watcher
+    } catch {
+      return undefined
+    }
+  }
+  // Depth is the whole point, but a platform that refuses a recursive watch is
+  // better served by a shallow one than by none.
+  return listen(true) ?? listen(false)
 }
 
 export function spawnRunner(): CommandRunner {
@@ -67,11 +123,14 @@ export function spawnRunner(): CommandRunner {
 
 export function createWorkspaceService({
   openExternal,
+  revealItem,
   runner = spawnRunner(),
   research = createResearchProcesses()
 }: {
   /** The OS browser, which only main may reach. */
   readonly openExternal: (url: string) => void
+  /** The platform's file manager, likewise. */
+  readonly revealItem: (path: string) => void
   readonly runner?: CommandRunner
   // Its own process seam, not the collector's runner: the research calls turn
   // on a distinction that runner throws away, and one of them waits on a person.
@@ -79,6 +138,7 @@ export function createWorkspaceService({
 }): RealWorkspaceService {
   const listeners = new Set<WorkspaceEventListener>()
   const runs = new Map<RunId, Run>()
+  const watches = new Map<string, Watch>()
   // One collection per workspace at a time: a second caller joins the first
   // rather than starting a second `gh` stampede.
   const collectingIssues = new Map<string, Promise<IssueBoardAnswer>>()
@@ -86,6 +146,14 @@ export function createWorkspaceService({
 
   function emit(event: WorkspaceEvent): void {
     for (const listener of [...listeners]) listener(event)
+  }
+
+  // One announcement for a burst, whether the burst is the watcher's events or
+  // the one the starting window owes: a settling timer already in flight is
+  // the same change, said twice.
+  function announce(directory: string, held: Watch): void {
+    clearTimeout(held.settling)
+    held.settling = setTimeout(() => emit({ type: 'files_changed', directory }), SETTLE_MS)
   }
 
   const operations = createResearchOperations({
@@ -96,6 +164,66 @@ export function createWorkspaceService({
   return {
     async searchFiles(directory: string, query: string): Promise<readonly string[]> {
       return rankFiles(await listFiles(directory), query)
+    },
+
+    fileTree(directory: string): Promise<FileTree> {
+      return fileTree(directory)
+    },
+
+    existingFiles(directory: string, paths: readonly string[]): Promise<readonly string[]> {
+      return existingFiles(directory, paths)
+    },
+
+    // Nothing here writes, and nothing waits: the directory is the user's, and
+    // an earlier version that touched its own timestamps to make the watcher
+    // speak moved its ctime — `utimes` does, whatever values it is handed.
+    //
+    // What is left is to say so. A watch that has not delivered a single event
+    // by the time its starting window is over announces one change, because a
+    // directory nothing happened in and a directory whose events were dropped
+    // look exactly alike from here. That costs a quiet workspace one extra
+    // listing; without it a file written in the window is one the tree never
+    // hears about, and nothing re-lists after.
+    async watchFiles(directory: string): Promise<void> {
+      const already = watches.get(directory)
+      if (already !== undefined) {
+        already.refs += 1
+        return
+      }
+      // A folder that cannot be watched is not a folder to fail over: the tree
+      // still lists and still refreshes when something else asks it to.
+      const watcher = startWatch(directory, (filename) => {
+        const held = watches.get(directory)
+        if (held === undefined) return
+        // Anything at all proves the watch is running, .git's own churn included.
+        held.live = true
+        if (insideGit(filename)) return
+        announce(directory, held)
+      })
+      if (watcher === undefined) return
+      const held: Watch = { watcher, refs: 1, live: false }
+      // Registered with no await before it, so a second caller finds the first
+      // watch rather than starting one of its own.
+      watches.set(directory, held)
+      held.starting = setTimeout(() => {
+        if (watches.get(directory) !== held || held.live) return
+        announce(directory, held)
+      }, STARTING_MS)
+    },
+
+    async unwatchFiles(directory: string): Promise<void> {
+      const held = watches.get(directory)
+      if (held === undefined) return
+      held.refs -= 1
+      if (held.refs > 0) return
+      clearTimeout(held.settling)
+      clearTimeout(held.starting)
+      held.watcher.close()
+      watches.delete(directory)
+    },
+
+    async revealFile(directory: string, path: string): Promise<void> {
+      revealItem(resolve(directory, path))
     },
 
     isGitWorkspace(workspacePath: string): Promise<boolean> {
@@ -221,6 +349,12 @@ export function createWorkspaceService({
     dispose(): void {
       for (const run of runs.values()) run.kill()
       runs.clear()
+      for (const held of watches.values()) {
+        clearTimeout(held.settling)
+        clearTimeout(held.starting)
+        held.watcher.close()
+      }
+      watches.clear()
       operations.dispose()
     }
   }

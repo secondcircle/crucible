@@ -185,7 +185,11 @@
   margin-bottom: 2px;
 }
 
+/* A div rather than a button, so the path in its summary can be a control of
+   its own; the expand button below covers the row, so clicking anywhere on it
+   still folds the call open. */
 .toolhead {
+  position: relative;
   display: flex;
   gap: 8px;
   align-items: center;
@@ -219,6 +223,24 @@
 */
 .tool.ask.ok .toolhead {
   border-left-color: var(--warn);
+}
+
+/* The row's own target, laid over it rather than wrapped around it. It draws
+   nothing: the row it covers is what a reader sees, and the focus ring it
+   takes traces the row's own edge. */
+.toolexpand {
+  position: absolute;
+  inset: 0;
+  cursor: pointer;
+  background: none;
+  border: none;
+  border-radius: 6px;
+  padding: 0;
+}
+
+/* Above the cover, so the pointer reaches the file rather than the expand. */
+.toolhead .pathlink {
+  position: relative;
 }
 
 .toolname {
@@ -306,6 +328,11 @@
   max-width: var(--column);
   margin: 0 auto 16px;
   padding: 10px 14px;
+  /* A skeleton line carries a path, a command or a stretch of what somebody
+     typed, any of which can be one unbreakable run of characters. Without this
+     one of them pushes the card past the column and scrolls the transcript
+     sideways. */
+  overflow-wrap: anywhere;
   border: 1px solid color-mix(in srgb, var(--thinking) 45%, transparent);
   border-radius: var(--radius);
   background: var(--think-bg);
@@ -319,6 +346,16 @@
   letter-spacing: 0.08em;
   color: var(--thinking);
   margin-bottom: 6px;
+}
+
+/* The compaction's own facts, on the tag row rather than in the summary: the
+   summary is what the model reads, and these are about the rewrite. */
+.summarycard .sumfacts {
+  margin-left: 8px;
+  color: var(--faint);
+  text-transform: none;
+  letter-spacing: 0;
+  font: 11px var(--mono);
 }
 
 /* errors are cards in the transcript, never toasts */

@@ -1,4 +1,7 @@
 import { createElement, memo, type ReactNode } from 'react'
+import { isLocalAddress } from '../../../shared/agent/local-address'
+import { useNamedPath } from '../files/path-links'
+import { AddressButton, PathButton } from './PathLink'
 import './markdown.css'
 
 // Written by hand rather than pulled in so that no string from an agent can
@@ -169,12 +172,12 @@ function inline(text: string): ReactNode[] {
     if (match.index > index) out.push(text.slice(index, match.index))
     const [whole, , code, strong, strongToo, emphasis, emphasisToo, label, href] = match
 
-    if (code !== undefined) out.push(<code key={key++}>{code}</code>)
+    if (code !== undefined) out.push(<CodeSpan key={key++} text={code} />)
     else if (strong !== undefined) out.push(<strong key={key++}>{strong}</strong>)
     else if (strongToo !== undefined) out.push(<strong key={key++}>{strongToo}</strong>)
     else if (emphasis !== undefined) out.push(<em key={key++}>{emphasis}</em>)
     else if (emphasisToo !== undefined) out.push(<em key={key++}>{emphasisToo}</em>)
-    else if (href !== undefined) out.push(link(label, href, key++))
+    else if (href !== undefined) out.push(<Link key={key++} label={label} href={href} />)
     else out.push(whole)
 
     index = match.index + whole.length
@@ -183,13 +186,45 @@ function inline(text: string): ReactNode[] {
   return out
 }
 
-/** An address the OS browser can be handed, or the text it was written as. */
-function link(label: string, href: string, key: number): ReactNode {
-  const safe = /^(https?:|mailto:)/i.test(href)
-  if (!safe) return `[${label}](${href})`
+// A path in backticks is a file the moment the disk says it is one; every
+// other code span is the code span it always was.
+function CodeSpan({ text }: { readonly text: string }): React.JSX.Element {
+  const named = useNamedPath(text)
+  if (named === undefined) return <code>{text}</code>
   return (
-    <a key={key} href={href} target="_blank" rel="noreferrer noopener">
-      {label === '' ? href : label}
+    <PathButton named={named} look="code">
+      {text}
+    </PathButton>
+  )
+}
+
+// Three doors and no fourth: the context panel for a file this agent named
+// and for a local address, the OS browser for every other web address, and
+// the text as written for anything else — nothing else is ever handed out.
+function Link({
+  label,
+  href
+}: {
+  readonly label: string
+  readonly href: string
+}): React.JSX.Element {
+  const named = useNamedPath(href)
+  const shown = label === '' ? href : label
+
+  if (named !== undefined) {
+    return (
+      <PathButton named={named} look="link">
+        {shown}
+      </PathButton>
+    )
+  }
+  // The panel is what a page served on this machine is for; every other
+  // address keeps going to the browser.
+  if (isLocalAddress(href)) return <AddressButton address={href}>{shown}</AddressButton>
+  if (!/^(https?:|mailto:)/i.test(href)) return <>{`[${label}](${href})`}</>
+  return (
+    <a href={href} target="_blank" rel="noreferrer noopener">
+      {shown}
     </a>
   )
 }

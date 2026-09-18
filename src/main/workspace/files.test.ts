@@ -5,11 +5,12 @@
 // used to read every directory and every .gitignore synchronously, on the
 // main thread, once per keystroke. These pin what it lists, in what order,
 // and that it still yields between reads.
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { execFileSync } from 'node:child_process'
+import { mkdirSync, mkdtempSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { listFiles, walk } from './files'
+import { fileTree, listFiles, walk } from './files'
 
 const scratch: string[] = []
 
@@ -93,5 +94,101 @@ describe('listing a workspace git cannot answer for', () => {
 
     expect(await walking).toHaveLength(200)
     expect(order[0]).toBe('timer')
+  })
+})
+
+/** A real repository, because the tree's ignore rules and colors are git's. */
+function tempRepo(files: Readonly<Record<string, string>>): string {
+  const root = tempTree(files)
+  for (const args of [
+    ['init', '-q'],
+    ['config', 'user.email', 'nobody@example.invalid'],
+    ['config', 'user.name', 'Nobody'],
+    ['add', '-A'],
+    ['commit', '-qm', 'first']
+  ]) {
+    execFileSync('git', args, { cwd: root, stdio: 'ignore' })
+  }
+  return root
+}
+
+describe('what the file tree lists', () => {
+  it('hides what git ignores, shows dotfiles, and never shows .git', async () => {
+    const root = tempRepo({
+      '.gitignore': 'node_modules/\n',
+      '.crucible/workflows/build.ts': '',
+      'node_modules/left/index.js': '',
+      'src/Shell.tsx': ''
+    })
+
+    const tree = await fileTree(root)
+
+    expect(tree.directory).toBe(root)
+    expect(tree.paths).toEqual(['.crucible/workflows/build.ts', '.gitignore', 'src/Shell.tsx'])
+  })
+
+  it('says which files git sees as modified and which as untracked', async () => {
+    const root = tempRepo({ 'src/Shell.tsx': 'first\n', 'kept.ts': '' })
+    writeFileSync(join(root, 'src/Shell.tsx'), 'changed\n', 'utf8')
+    writeFileSync(join(root, 'src/new.ts'), 'fresh\n', 'utf8')
+
+    const tree = await fileTree(root)
+
+    expect(tree.changed).toEqual({ 'src/Shell.tsx': 'modified', 'src/new.ts': 'untracked' })
+  })
+
+  it('names the changes of a folder inside a repository by that folder’s own paths', async () => {
+    const root = tempRepo({ 'src/inner/kept.ts': 'first\n', 'outside.ts': '' })
+    writeFileSync(join(root, 'src/inner/kept.ts'), 'changed\n', 'utf8')
+    writeFileSync(join(root, 'outside.ts'), 'changed too\n', 'utf8')
+
+    const tree = await fileTree(join(root, 'src'))
+
+    expect(tree.paths).toEqual(['inner/kept.ts'])
+    expect(tree.changed).toEqual({ 'inner/kept.ts': 'modified' })
+  })
+
+  it('leaves a folder that is no repository plain, and still lists it', async () => {
+    const tree = await fileTree(tempTree({ 'a.ts': '', 'b/c.ts': '' }))
+
+    expect(tree.paths).toEqual(['a.ts', 'b/c.ts'])
+    expect(tree.changed).toEqual({})
+  })
+
+  // Review reproduction (review-1): the brief promises "the tree updates when
+  // files appear or disappear", and VS Code's explorer, the ruled coloring
+  // model, lists the disk — a deleted file drops out. `git ls-files --cached`
+  // keeps a tracked file the agent just deleted, so the tree shows a phantom
+  // row, amber-M, that errors with "File not found" when clicked.
+  it('drops a tracked file that was deleted from disk', async () => {
+    const root = tempRepo({ 'kept.ts': '', 'doomed.ts': 'about to go\n' })
+    rmSync(join(root, 'doomed.ts'))
+
+    const tree = await fileTree(root)
+
+    expect(tree.paths).toEqual(['kept.ts'])
+    // No row, so no color, and no dot on whatever folder held it.
+    expect(tree.changed).toEqual({})
+  })
+
+  // What an agent renaming a file leaves behind: the old path in the index and
+  // gone from disk, the new one untracked. Only the new one is a file.
+  it('shows a renamed file at its new path alone', async () => {
+    const root = tempRepo({ 'src/old-name.ts': 'body\n' })
+    renameSync(join(root, 'src/old-name.ts'), join(root, 'src/new-name.ts'))
+
+    const tree = await fileTree(root)
+
+    expect(tree.paths).toEqual(['src/new-name.ts'])
+    expect(tree.changed).toEqual({ 'src/new-name.ts': 'untracked' })
+  })
+
+  // The same listing answers the composer's `@file` search, which has no use
+  // for a file that is not there either.
+  it('keeps a deleted file out of the listing the search reads', async () => {
+    const root = tempRepo({ 'kept.ts': '', 'doomed.ts': '' })
+    rmSync(join(root, 'doomed.ts'))
+
+    await expect(listFiles(root)).resolves.toEqual(['kept.ts'])
   })
 })

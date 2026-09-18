@@ -1,0 +1,253 @@
+/* The sidebar's Files face. It takes the column the sessions had, so nothing
+   outside the sidebar moves when the face swaps. */
+.side .seg {
+  display: flex;
+  margin: 0 12px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  overflow: hidden;
+  font-size: 12px;
+}
+
+.side .seg button {
+  flex: 1;
+  background: none;
+  border: none;
+  color: var(--faint);
+  padding: 5px 0;
+}
+
+.side .seg button:hover {
+  color: var(--dim);
+}
+
+.side .seg button.on {
+  background: var(--panel2);
+  color: var(--ink);
+}
+
+.side .seg button kbd {
+  margin-left: 6px;
+  font: 10px var(--mono);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 0 4px;
+  color: var(--faint);
+}
+
+.filetree {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex: 1;
+}
+
+.filetree .troot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 14px;
+  font-size: 11px;
+  color: var(--faint);
+}
+
+.filetree .troot b {
+  color: var(--dim);
+  font: 12px var(--mono);
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The one thing that says this is not the checkout, in the run color, which is
+   what a worktree wears everywhere else. */
+.filetree .troot .wt {
+  flex: none;
+  color: var(--run);
+  font: 10.5px var(--mono);
+  border: 1px solid var(--run);
+  border-radius: 9px;
+  padding: 0 6px;
+  max-width: 60%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.filetree .filter {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 2px 12px 8px;
+  padding: 4px 9px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--panel);
+  color: var(--faint);
+  font-size: 12px;
+}
+
+.filetree .filter input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  background: none;
+  color: var(--ink);
+  font: inherit;
+  outline: none;
+}
+
+.filetree .filter input::placeholder {
+  color: var(--faint);
+}
+
+.filetree .filter kbd {
+  font: 10px var(--mono);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 0 4px;
+}
+
+.filetree .rows {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding-bottom: 10px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--line) transparent;
+  outline: none;
+}
+
+.filetree .nothing {
+  padding: 8px 14px;
+  color: var(--faint);
+  font-size: 12px;
+}
+
+.filetree .row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2.5px 10px 2.5px 12px;
+  font-size: 12.5px;
+  color: var(--dim);
+  white-space: nowrap;
+  cursor: default;
+  position: relative;
+  /* Rows never wrap and never shrink their name: the column scrolls sideways
+     rather than folding a path in half. */
+  user-select: none;
+}
+
+.filetree .row:hover {
+  background: var(--panel);
+}
+
+.filetree .row.dir {
+  color: var(--ink);
+}
+
+/* The file being shown in the panel, marked the way the sidebar marks the
+   session being looked at: a filled row with a lit edge. */
+.filetree .row.on {
+  background: var(--panel2);
+  color: var(--ink);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+.filetree .row .c {
+  flex: none;
+  width: 12px;
+  text-align: center;
+  font-size: 10px;
+  color: var(--faint);
+}
+
+/* Wide enough for the extensions a repository is mostly made of, and free to
+   grow for the rare long one: the mark is never cut, and never drawn over the
+   name beside it. */
+.filetree .row .i {
+  flex: none;
+  min-width: 24px;
+  text-align: center;
+  font: 9.5px var(--mono);
+  color: var(--faint);
+}
+
+.filetree .row .name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* The status slot sits at the row's right edge, and is as wide as the tools
+   that take it on hover: a name is cut in the same place whether the pointer
+   is over the row or not, and the tools never appear over the name band. */
+.filetree .row .st,
+.filetree .rowtools {
+  flex: none;
+  width: 38px;
+  margin-left: auto;
+  padding-left: 6px;
+}
+
+.filetree .row .st {
+  text-align: right;
+  font: 10.5px var(--mono);
+  color: inherit;
+}
+
+/* Git status, as VS Code colors it: amber for modified, green for untracked,
+   and a folder wearing the dot of what it holds. */
+.filetree .row.modified {
+  color: var(--warn);
+}
+
+.filetree .row.untracked {
+  color: var(--ok);
+}
+
+.filetree .row.dir.holds .st {
+  color: var(--warn);
+}
+
+.filetree .rowtools {
+  display: none;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 2px;
+}
+
+.filetree .row:hover .rowtools,
+.filetree .row:focus-within .rowtools {
+  display: flex;
+}
+
+/* They take the status mark's place on hover rather than pushing the name:
+   nothing in the row moves under the cursor. */
+.filetree .row:hover .st,
+.filetree .row:focus-within .st {
+  display: none;
+}
+
+.filetree .rowtools button {
+  border: none;
+  background: none;
+  color: var(--faint);
+  font-size: 11px;
+  line-height: 1;
+  padding: 2px 3px;
+  border-radius: 4px;
+}
+
+.filetree .rowtools button:hover {
+  color: var(--accent2);
+  background: var(--panel2);
+}
+
+/* The copy said so: the tick holds for the flash and then the button is a
+   copy button again. */
+.filetree .rowtools button.copied {
+  color: var(--ok);
+}

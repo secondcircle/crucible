@@ -1,0 +1,37 @@
+/* A path the disk has answered for. It reads as what it sits in — a code span,
+   a link, a word in a tool chain row header — and says it is clickable by the
+   underline that appears under the pointer. A code span nobody can open looks
+   exactly as it always did. */
+.pathlink {
+  font: inherit;
+  background: none;
+  border: none;
+  padding: 0;
+  color: inherit;
+  text-align: inherit;
+  text-decoration: underline;
+  text-decoration-color: transparent;
+  text-underline-offset: 2px;
+  border-radius: 4px;
+}
+
+.pathlink:hover {
+  text-decoration-color: currentcolor;
+}
+
+/* Inside a message, where the path was written in backticks. */
+.pathlink.code {
+  font: 12px var(--mono);
+  background: var(--code);
+  padding: 1px 5px;
+  color: var(--accent2);
+}
+
+.pathlink.link {
+  color: var(--accent2);
+}
+
+/* Inside a tool chain row header, whose summary is already dim and mono. */
+.pathlink.plain:hover {
+  color: var(--ink);
+}

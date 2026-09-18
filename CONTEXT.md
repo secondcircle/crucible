@@ -159,6 +159,21 @@ address — keyed by path or URL so re-showing the same one refreshes it in
 place. Per-session, like the panel itself.
 _Avoid_: pane, exhibit slot, window.
 
+**File tree**:
+The sidebar column's second face: the folder tree of the active session's
+working directory, swapped in place of the workspace and session list by ⌘E
+and swapped back the same way. Read-only, filtered by typing, colored by git
+status; a click opens a file in the context panel.
+_Avoid_: explorer, file browser, file viewer (that is what the tree plus
+the tab together do, not the tree's name), files panel.
+
+**Preview tab**:
+The one context panel tab a single click in the file tree reuses: the next
+single click replaces its file, a double-click keeps it as an ordinary tab.
+At most one per session, italic in the tab strip, and never a tab the agent
+showed.
+_Avoid_: temporary tab, transient tab, peek.
+
 **Issue board**:
 The workspace-scoped view of the issues you could pick up in that repository,
 read beside a pane showing one of them in full, and the place work on an issue
@@ -517,3 +532,34 @@ own "Waiting on" label: the description, the check's last output, time waited,
 cadence and timeout, and a ✕ that stops it. Click opens its detail — the
 reason, the command, the timing and the last output.
 _Avoid_: monitor badge, wait pill, monitor card (there is no transcript card).
+
+**Compaction**:
+Crucible's own rewrite of what a model sees of a conversation once it grows
+past the threshold or sits idle before its cache lapses: a trajectory summary,
+a skeleton, and the recent span. Written by Crucible, never by π's built-in
+compaction, which is switched off. The session file keeps everything; only the
+model's view shrinks.
+_Avoid_: context pruning (one part of it), summarization (one part of it), π
+compaction, auto-compact (as a noun).
+
+**Trajectory summary**:
+The model-written part of a compaction: where the conversation stands — the
+goal, standing decisions, what was tried and abandoned, what is in flight,
+what comes next, the files that matter now. Rewritten whole at every
+compaction over the previous one; summaries never stack.
+_Avoid_: history summary, recap, compaction summary (π's field name).
+
+**Skeleton**:
+The compacted span with its bulk removed: user and assistant words verbatim,
+thinking gone, each tool call one line naming its handle, each result one
+line naming its size. Every dropped thing is restorable from disk or by
+re-running. Pruned by the model's judgment at each later compaction and held
+under a budget, so it cannot grow without bound.
+_Avoid_: masked history, stubs, digest.
+
+**Recent span**:
+The tail of the conversation a compaction never touches, kept verbatim behind
+the skeleton. A size the implementation owns and no setting reaches, capped
+against the model's own window so a small one is not mostly recent span, cut
+at a user-message boundary.
+_Avoid_: keep-recent (π's setting), tail window, hot context.

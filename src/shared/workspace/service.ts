@@ -12,6 +12,10 @@ export type WorkspaceEvent =
   | { readonly type: 'run_ended'; readonly runId: RunId; readonly exitCode?: number }
   // What the research CLI printed while a connect attempt waits on a person.
   | { readonly type: 'research_output'; readonly chunk: Redacted }
+  // Something under a watched directory appeared, changed or went away. It
+  // names no file: what changed is read again rather than patched, so a
+  // missed event cannot leave a tree disagreeing with the disk.
+  | { readonly type: 'files_changed'; readonly directory: string }
 
 /** The events one bash run produces: the ones a run view is built from. */
 export type RunEvent = Extract<WorkspaceEvent, { readonly runId: RunId }>
@@ -22,6 +26,23 @@ export type Unsubscribe = () => void
 
 /** At most 50 paths answer a search, which is what the popover can show. */
 export const FILE_RESULT_LIMIT = 50
+
+/** How git sees one file. A folder holding either of them is marked too. */
+export type FileStatus = 'modified' | 'untracked'
+
+// What the file tree lists. Files alone, because the folders are the paths'
+// own: two facts about one directory cannot disagree about which folders
+// exist.
+export interface FileTree {
+  /** The folder listed, absolute, exactly as it was asked for. */
+  readonly directory: string
+  // Every file under it, directory-relative, `/`-separated and sorted.
+  // Gitignored entries are absent, dotfiles are present, `.git` never is.
+  readonly paths: readonly string[]
+  // The changed ones, by the same relative path. Empty for a folder that is
+  // not a repository, which is what leaves every row plain.
+  readonly changed: Readonly<Record<string, FileStatus>>
+}
 
 // The issue board's vocabulary. An issue is one unit of tracked work on the
 // issue host, whatever that host calls it (CONTEXT.md).
@@ -128,6 +149,28 @@ export interface WorkspaceService {
   // Relative to the directory it is given, gitignore-aware, and ordered the
   // same way every time. The directory is the session's, worktree included.
   searchFiles(directory: string, query: string): Promise<readonly string[]>
+
+  // Everything the file tree draws for one directory, read fresh. Follows the
+  // session's directory, worktree included, exactly as the search does.
+  fileTree(directory: string): Promise<FileTree>
+
+  // Which of these paths name a file on disk, answered in the order they were
+  // asked and leaving out everything that is not one: a folder, a path that is
+  // not there, a path that cannot be read. A relative path resolves against
+  // `directory`, the session's own, worktree included; an absolute one is read
+  // where it points. What decides whether a path an agent named is clickable.
+  existingFiles(directory: string, paths: readonly string[]): Promise<readonly string[]>
+
+  // Watches a directory for entries appearing, changing and disappearing.
+  // Repeated calls for one directory are the same watch; the last unwatch
+  // stops it.
+  watchFiles(directory: string): Promise<void>
+  unwatchFiles(directory: string): Promise<void>
+
+  // Shows the file in the platform's file manager, never opening it. A
+  // relative path resolves against `directory`, which is how the tree's own
+  // paths reach it.
+  revealFile(directory: string, path: string): Promise<void>
 
   /** Whether the folder is inside a git working tree. A worktree counts. */
   isGitWorkspace(workspacePath: string): Promise<boolean>

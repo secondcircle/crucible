@@ -33,6 +33,12 @@ const transcriptItems = (): string[] =>
 
 const chainRow = (): HTMLElement => screen.getByRole('button', { name: /^Tool chain/ })
 
+// A call row's expand is a button laid over the row rather than wrapped around
+// it, so the path in its summary can be a control of its own. What the row
+// says is in the element the button covers.
+const callRow = (name: string): HTMLElement =>
+  screen.getByRole('button', { name }).closest('.toolhead') as HTMLElement
+
 const chainRows = (): HTMLElement[] => screen.getAllByRole('button', { name: /^Tool chain/ })
 
 describe('tool chains', () => {
@@ -211,7 +217,7 @@ describe('drilling into a chain', () => {
 
     fireEvent.click(chainRow())
     const call = screen.getByRole('button', { name: 'bash npm test' })
-    expect(call).toHaveTextContent('done')
+    expect(callRow('bash npm test')).toHaveTextContent('done')
     expect(screen.queryByText(/Tests\s+42 passed/)).toBeNull()
 
     fireEvent.click(call)
@@ -228,7 +234,7 @@ describe('drilling into a chain', () => {
     fireEvent.click(chainRow())
     act(() => port.toolOutput('s1', 'c1', 'Test Files  3 passed\n'))
 
-    expect(screen.getByRole('button', { name: 'bash npm test' })).toHaveTextContent('running')
+    expect(callRow('bash npm test')).toHaveTextContent('running')
     // While it runs, the output is shown without asking.
     expect(screen.getByText(/Test Files\s+3 passed/)).toBeInTheDocument()
   })
@@ -237,7 +243,9 @@ describe('drilling into a chain', () => {
     await twoCalls()
 
     fireEvent.click(chainRow())
-    const [first, second] = screen.getAllByRole('button', { name: /^(bash|read) / })
+    const [first, second] = screen
+      .getAllByRole('button', { name: /^(bash|read) / })
+      .map((call) => call.closest('.toolhead') as HTMLElement)
 
     expect(first.className).toBe(second.className)
   })
@@ -367,15 +375,13 @@ describe('a skill read in a chain', () => {
     })
     fireEvent.click(chainRow())
 
-    const head = screen.getByRole('button', { name: 'skill writing-agent-prompts' })
+    const head = callRow('skill writing-agent-prompts')
     expect(head.querySelector('.toolname')?.textContent).toBe('skill')
     expect(head.querySelector('.toolbadge')?.textContent).toBe('skill')
     // The summary is the skill's name. No path appears anywhere on the row.
     expect(head.querySelector('.toolsummary')?.textContent).toBe('writing-agent-prompts')
 
-    const supporting = screen.getByRole('button', {
-      name: 'skill writing-agent-prompts · scope-boundaries.md'
-    })
+    const supporting = callRow('skill writing-agent-prompts · scope-boundaries.md')
     expect(supporting.querySelector('.toolunder')?.textContent).toBe(' · scope-boundaries.md')
   })
 

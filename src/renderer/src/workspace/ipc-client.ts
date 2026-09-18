@@ -4,6 +4,7 @@ import type {
   ResearchStatus
 } from '../../../shared/workspace/research'
 import type {
+  FileTree,
   IssueBoardAnswer,
   RunId,
   Unsubscribe,
@@ -33,6 +34,12 @@ export function createWorkspaceClient(): WorkspaceService {
   return {
     searchFiles: (directory: string, query: string) =>
       call<readonly string[]>('searchFiles', directory, query),
+    fileTree: (directory: string) => call<FileTree>('fileTree', directory),
+    existingFiles: (directory: string, paths: readonly string[]) =>
+      call<readonly string[]>('existingFiles', directory, paths),
+    watchFiles: (directory: string) => call<void>('watchFiles', directory),
+    unwatchFiles: (directory: string) => call<void>('unwatchFiles', directory),
+    revealFile: (directory: string, path: string) => call<void>('revealFile', directory, path),
     isGitWorkspace: (workspacePath: string) =>
       call<boolean>('isGitWorkspace', workspacePath),
     createWorktree: (workspacePath: string) =>

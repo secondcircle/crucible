@@ -1,7 +1,8 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef } from 'react'
 import type { CachedPrefix } from '../../../shared/agent/port'
 import { idleMs } from '../cache/expiry'
 import { compactTokens, idleText, rebillText, retentionText } from '../cache/format'
+import { SummarizingDialog } from './SummarizingDialog'
 import './cache-expiry.css'
 import './overlay.css'
 
@@ -41,13 +42,6 @@ export function CacheExpiryChoice({
   const tokens = compactTokens(prefix.tokens)
   const rebill = rebillText(prefix.rebillDollars)
 
-  // A backdrop click cannot dismiss a summary that is already spending money
-  // — stopping it is Escape's decision alone — but a click that lands on
-  // nothing teaches the user that clicks go nowhere, so the footer that names
-  // the way out lights up. A count rather than a flag, so a second click
-  // replays the light.
-  const [refused, setRefused] = useState(0)
-
   // Focus goes to the dialog rather than to a button: with a button focused
   // the browser turns Enter into a click of it, and one press would send
   // twice.
@@ -55,18 +49,24 @@ export function CacheExpiryChoice({
     box.current?.focus()
   }, [])
 
-  const title = summarizing
-    ? 'Summarizing the conversation'
-    : 'The cache for this conversation has expired'
+  // The wait after the summarize door is the same wait a compaction puts up,
+  // and it is the same dialog: one shape, one way out.
+  if (summarizing) {
+    return (
+      <SummarizingDialog
+        title="Summarizing the conversation"
+        subtitle={
+          note ?? `Reading ${tokens} tokens once. Your message goes out the moment this lands.`
+        }
+        footer="cancel — the conversation is left exactly as it was"
+      />
+    )
+  }
+
+  const title = 'The cache for this conversation has expired'
 
   return (
-    <div
-      className="overlaybg"
-      onMouseDown={() => {
-        if (summarizing) setRefused((clicks) => clicks + 1)
-        else onDismiss()
-      }}
-    >
+    <div className="overlaybg" onMouseDown={onDismiss}>
       <div
         className="dialog expirydialog"
         role="dialog"
@@ -76,7 +76,6 @@ export function CacheExpiryChoice({
         ref={box}
         onMouseDown={(clicked) => clicked.stopPropagation()}
         onKeyDown={(pressed) => {
-          if (summarizing) return
           if (pressed.metaKey || pressed.ctrlKey || pressed.altKey) return
           if (pressed.key === 'Enter') {
             pressed.preventDefault()
@@ -92,90 +91,69 @@ export function CacheExpiryChoice({
         <div className="ehead">
           <h3>{title}</h3>
           <p className="esub">
-            {summarizing
-              ? (note ??
-                `Reading ${tokens} tokens once. Your message goes out the moment this lands.`)
-              : 'Sending now re-bills the whole conversation as new input. Nothing is wrong — it has just been sitting longer than the cache lives.'}
+            Sending now re-bills the whole conversation as new input. Nothing is wrong — it has
+            just been sitting longer than the cache lives.
           </p>
         </div>
 
-        {summarizing ? (
-          // A bar that claims no precision and an estimate that says it is
-          // one: the wait is π's, and Crucible knows nothing about its
-          // progress.
-          <div className="ework">
-            <span className="spin" aria-hidden="true" />
-            <span className="ebar" aria-hidden="true">
-              <i />
-            </span>
-            <span className="eeta">~15s</span>
+        <div className="efacts">
+          <div className="efact">
+            <span className="k">Idle</span>
+            <b className="warn">{idleText(idleMs(prefix, now))}</b>
           </div>
-        ) : (
-          <>
-            <div className="efacts">
-              <div className="efact">
-                <span className="k">Idle</span>
-                <b className="warn">{idleText(idleMs(prefix, now))}</b>
-              </div>
-              <div className="efact">
-                <span className="k">In context</span>
-                <b>{tokens}</b>
-              </div>
-              <div className="efact">
-                <span className="k">Re-bill</span>
-                <b className="warn">~{rebill}</b>
-              </div>
-            </div>
+          <div className="efact">
+            <span className="k">In context</span>
+            <b>{tokens}</b>
+          </div>
+          <div className="efact">
+            <span className="k">Re-bill</span>
+            <b className="warn">~{rebill}</b>
+          </div>
+        </div>
 
-            <div className="edoors">
-              {/* The default, because the message was already typed and that
-                  was the intent: the dialog informs rather than herds. */}
-              <button className="edoor primary" onClick={onSendAnyway}>
-                <span className="eic" aria-hidden="true">
-                  ▶
-                </span>
-                <span className="etext">
-                  <span className="et">
-                    Send anyway <kbd>⏎</kbd>
-                  </span>
-                  <span className="ed">
-                    Keep every message. Pay to re-cache the prefix now, and carry all {tokens} on
-                    every turn from here.
-                  </span>
-                </span>
-                <span className="eprice">+{rebill}</span>
-              </button>
+        <div className="edoors">
+          {/* The default, because the message was already typed and that was
+              the intent: the dialog informs rather than herds. */}
+          <button className="edoor primary" onClick={onSendAnyway}>
+            <span className="eic" aria-hidden="true">
+              ▶
+            </span>
+            <span className="etext">
+              <span className="et">
+                Send anyway <kbd>⏎</kbd>
+              </span>
+              <span className="ed">
+                Keep every message. Pay to re-cache the prefix now, and carry all {tokens} on
+                every turn from here.
+              </span>
+            </span>
+            <span className="eprice">+{rebill}</span>
+          </button>
 
-              <button className="edoor" onClick={onSummarize}>
-                <span className="eic" aria-hidden="true">
-                  ↯
-                </span>
-                <span className="etext">
-                  <span className="et">
-                    Summarize, then continue <kbd>S</kbd>
-                  </span>
-                  <span className="ed">
-                    Read the conversation once, carry a summary forward, and send your message
-                    against a small base. The full history stays in the session tree.
-                  </span>
-                </span>
-                {/* The summary's size is not knowable beforehand, so the tag
-                    says the order of magnitude and nothing more. */}
-                <span className="eprice good">~2k after</span>
-              </button>
-            </div>
-          </>
-        )}
+          <button className="edoor" onClick={onSummarize}>
+            <span className="eic" aria-hidden="true">
+              ↯
+            </span>
+            <span className="etext">
+              <span className="et">
+                Summarize, then continue <kbd>S</kbd>
+              </span>
+              <span className="ed">
+                Read the conversation once, carry a summary forward, and send your message
+                against a small base. The full history stays in the session tree.
+              </span>
+            </span>
+            {/* The summary's size is not knowable beforehand, so the tag says
+                the order of magnitude and nothing more. */}
+            <span className="eprice good">~2k after</span>
+          </button>
+        </div>
 
-        {/* Keyed by the count so a repeat click remounts the footer and the
-            one-shot light runs again. */}
-        <div className={refused > 0 ? 'efoot lit' : 'efoot'} key={refused}>
+        <div className="efoot">
           <kbd>esc</kbd>
-          {summarizing
-            ? 'cancel — the conversation is left exactly as it was'
-            : 'back to the composer, message kept'}
+          back to the composer, message kept
           <span className="espacer" />
-          {summarizing ? null : <span>retention {retentionText(prefix.retention)}</span>}
+          <span>retention {retentionText(prefix.retention)}</span>
         </div>
       </div>
     </div>

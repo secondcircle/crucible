@@ -1,5 +1,10 @@
-// This module imports nothing on purpose: it is the one module the renderer
-// shares with main, so any import here could smuggle a π SDK type across.
+// This module imports nothing that imports anything, on purpose: it is the one
+// module the renderer shares with main, so any import here could smuggle a π
+// SDK type across. The two below are Crucible's own leaf vocabulary, carried
+// by the port because the port is what states them.
+
+import type { CompactionRecord } from '../compaction/record'
+import type { CompactionSettings } from '../compaction/settings'
 
 export type WorkspaceId = string
 
@@ -27,6 +32,12 @@ export interface WorkspaceState {
   readonly name: string
   /** An OS fact, never a π storage fact. */
   readonly path: string
+  // ISO of the last moment something was used in one of this workspace's
+  // sessions. Absent means nothing ever has been, which is what puts a
+  // workspace at the bottom of the sidebar's list. A fact about the workspace
+  // and not a roll-up of its sessions: forgetting a session does not unwind
+  // what happened in it.
+  readonly lastUsedAt?: string
 }
 
 // π's two kinds, adopted verbatim: steering redirects the live turn at the
@@ -80,7 +91,10 @@ export interface QueueState {
 
 export type TabId = string
 
-export type ExhibitKind = 'html' | 'markdown' | 'url'
+// What a tab shows. The first three are what an agent may show; the last
+// three are what a click in the file tree can land on, because a folder holds
+// more than documents.
+export type ExhibitKind = 'html' | 'markdown' | 'url' | 'source' | 'image' | 'binary'
 
 interface PanelTabBase {
   readonly id: TabId
@@ -108,11 +122,45 @@ export type PanelTab =
       /** The full http(s) address, scheme included. */
       readonly address: string
     })
+  // Text of any kind, shown as source: numbered lines, colored, as written.
+  | (PanelTabBase & {
+      readonly kind: 'source'
+      readonly path: string
+      // Where the tab's toggle flips to, when this file has a rendered view at
+      // all. Absent means source is the only way to read it.
+      readonly renders?: 'markdown' | 'html'
+      // The line a `path:42` named, 1-based and highlighted in the view.
+      // Absent when nothing named one.
+      readonly line?: number
+    })
+  | (PanelTabBase & {
+      readonly kind: 'image'
+      readonly path: string
+    })
+  // Nothing to show but how big it is, which is why the size is a fact of the
+  // tab rather than something the body could carry.
+  | (PanelTabBase & {
+      readonly kind: 'binary'
+      readonly path: string
+      readonly bytes: number
+    })
+
+// How a file opens in the panel: as source — numbered, colored, on the line a
+// `path:42` named — or in the view its kind renders, which is the rendered
+// markdown or HTML `panel_show` gives and source for everything else. A line
+// belongs to source alone: nothing numbers the lines of a rendered document.
+export type FileView =
+  | { readonly kind: 'source'; readonly line?: number }
+  | { readonly kind: 'rendered' }
 
 export interface PanelState {
   /** Show order, oldest first. Never empty: an empty panel is an absent one. */
   readonly tabs: readonly PanelTab[]
   readonly activeTabId: TabId
+  // The preview tab, when this session has one: the tab a single click in the
+  // file tree reuses. At most one, always one of `tabs`, and never a tab the
+  // agent showed.
+  readonly previewTabId?: TabId
 }
 
 export type QuestionId = string
@@ -208,6 +256,14 @@ export interface SessionState {
   // The context panel's tabs, folded in exactly as the queue is. Absent when
   // the session has no tabs, which is what makes the region vanish.
   readonly panel?: PanelState
+  // A compaction is running on this conversation. Not the same as `working`:
+  // nothing is being said to the agent, and a send made now waits for it
+  // rather than joining it. Absent whenever none is.
+  readonly compacting?: true
+  // An idle compaction dealt with this conversation and nothing has been sent
+  // since. What makes the next send go straight through however long it sat,
+  // and what has the miss it may pay recorded as one that was accounted for.
+  readonly idleCompacted?: true
 }
 
 // What Crucible knows about one fact of a cache miss. `'unknown'` is never
@@ -331,8 +387,15 @@ export type TranscriptItem =
       readonly exitCode?: number
     }
   // The context a jump-with-summary or a compaction carried forward: what
-  // the conversation is standing on now, shown so nobody starts blind.
-  | { readonly kind: 'summary'; readonly text: string }
+  // the conversation is standing on now, shown so nobody starts blind. The
+  // messages a compaction replaced stay in the transcript above it: only the
+  // model's view of them changed.
+  | {
+      readonly kind: 'summary'
+      readonly text: string
+      /** Present for a compaction; absent for a branch summary. */
+      readonly compaction?: CompactionRecord
+    }
   // The seam, immediately above the assistant message that paid for it, so a
   // reopened conversation shows its misses where they happened.
   | { readonly kind: 'cacheMiss'; readonly miss: CacheMissFacts }
@@ -510,6 +573,16 @@ export type PortEvent =
       readonly turnId: TurnId
       readonly miss: CacheMissFacts
     }
+  // A compaction finished on this conversation. The `state` event before it
+  // already carried the session with its `compacting` gone; this names what
+  // the model reads now, so an open transcript shows the block where it
+  // happened without re-fetching the whole history.
+  | {
+      readonly type: 'compacted'
+      readonly sessionId: SessionId
+      readonly text: string
+      readonly record: CompactionRecord
+    }
   // π scheduled another attempt at a branch summary a jump is waiting on.
   // Session-scoped like `usage`, with no turn id, because a jump is not a
   // turn.
@@ -605,6 +678,11 @@ export interface AgentPort {
   // either way.
   setWorktree(sessionId: SessionId, worktree?: SessionWorktree): Promise<void>
 
+  // The machine-global compaction setting: one switch and one threshold, read
+  // by every agent loop Crucible starts and edited in one place.
+  compactionSettings(): Promise<CompactionSettings>
+  setCompactionSettings(settings: CompactionSettings): Promise<void>
+
   listModels(): Promise<readonly ModelInfo[]>
   setModel(sessionId: SessionId, model: ModelId): Promise<void>
   setThinkingLevel(sessionId: SessionId, level: ThinkingLevel): Promise<void>
@@ -666,6 +744,37 @@ export interface AgentPort {
     reply: QuestionReply
   ): Promise<void>
 
+  // A click in the file tree, or on a path an agent named in a message. The
+  // path is the session's directory's own, relative or absolute. `keep: false`
+  // is the single click, which reuses the session's preview tab; `keep: true`
+  // opens an ordinary tab straight away, which is what Enter on a row does.
+  // Rejects display-safely when the file cannot be shown.
+  openFile(
+    sessionId: SessionId,
+    path: string,
+    options: { readonly keep: boolean; readonly view: FileView }
+  ): Promise<TabId>
+
+  // A click on a localhost address an agent named in a message: it opens as a
+  // web tab in the session's panel rather than in the OS browser, on the same
+  // terms a path does. Rejects display-safely for any other address.
+  openAddress(
+    sessionId: SessionId,
+    address: string,
+    options: { readonly keep: boolean }
+  ): Promise<TabId>
+
+  // The double-click: the tab the click before it opened stops being the
+  // preview tab and stays where it is. Naming the tab rather than the path is
+  // what makes the gesture one decision — the click opens, the double-click
+  // keeps that same tab. A tab that is not the preview tab is a no-op.
+  keepTab(sessionId: SessionId, tabId: TabId): Promise<void>
+
+  // The tab's source/rendered toggle. Setting `source` shows any text tab as
+  // source; clearing it puts a source tab back to the view its kind renders,
+  // and does nothing for a file that has none.
+  setTabSource(sessionId: SessionId, tabId: TabId, source: boolean): Promise<void>
+
   /** User clicked a tab. Unknown ids are a harmless no-op. */
   activateTab(sessionId: SessionId, tabId: TabId): Promise<void>
   /** User closed a tab. Unknown ids are a harmless no-op. */
@@ -674,7 +783,8 @@ export interface AgentPort {
   // location a tab carries is what the panel displays, never what it reads by.
   exhibit(sessionId: SessionId, tabId: TabId): Promise<{ readonly body: string }>
 
-  // Stop what this session is doing: the live turn, and a summarizing jump
-  // waiting on π's summary. Harmless when there is nothing to stop.
+  // Stop what this session is doing: the live turn, a summarizing jump waiting
+  // on π's summary, and a running compaction. Harmless when there is nothing
+  // to stop.
   cancel(sessionId: SessionId): Promise<void>
 }

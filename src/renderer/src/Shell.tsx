@@ -15,6 +15,7 @@ import type {
   SessionState,
   SessionTree as Tree,
   ShellSnapshot,
+  TabId,
   ThinkingLevel,
   WorkspaceId
 } from '../../shared/agent/port'
@@ -50,6 +51,7 @@ import type {
 import { useIssueBoards } from './board/use-boards'
 import { BashDrawer, type RunView } from './components/BashDrawer'
 import { CacheExpiryChoice } from './components/CacheExpiryChoice'
+import { SummarizingDialog } from './components/SummarizingDialog'
 import { CacheHealthView } from './components/CacheHealthView'
 import { IssueBoard, type IssueSession } from './components/IssueBoard'
 import { type Attachment, Composer, useElapsedSeconds } from './components/Composer'
@@ -78,6 +80,9 @@ import { useQuota } from './quota/use-quota'
 import { runActivity } from './runs/activity'
 import { monitorActivity } from './monitors/activity'
 import { useClock } from './clock'
+import { rows, sidebarModel } from './sidebar/model'
+import { memoryFoldedStore, type FoldedStore } from './sidebar/folded-store'
+import { useFolded } from './sidebar/use-folded'
 import { parkedRuns, parkedWalk } from './schedules/board'
 import { useAuth } from './settings/use-auth'
 import {
@@ -93,11 +98,22 @@ import {
   finishedAsking,
   forgetGone,
   nextAsking,
+  railOrder,
   questionAsking,
   withMark,
   withoutMark,
   type Marks
 } from './state/needs-you'
+import { faceOf, withFace, type SidebarFace, type SidebarFaces } from './sidebar/face'
+import { filtering, insideTree, toggleFolder, wholePath, type Expanded } from './files/tree'
+import { useWatchedFiles } from './files/use-files'
+import {
+  PathLinksContext,
+  targetKey,
+  usePathLinks,
+  type ClickTarget
+} from './files/path-links'
+import type { FilesFace } from './components/FileTree'
 import { escapeRung, type EscapeRung, type EscapeState } from './state/escape'
 import {
   forgetEmptyPanels,
@@ -145,6 +161,15 @@ interface Choice {
   readonly summarizing?: boolean
 }
 
+// A send made while the session's conversation was being compacted. The
+// message waits for the compaction rather than cancelling it, and goes out the
+// moment it lands. The draft is untouched meanwhile, so Escape leaves the
+// message exactly where the user typed it.
+interface CompactionWait {
+  readonly sessionId: SessionId
+  readonly text: string
+}
+
 type Confirm =
   | { readonly kind: 'reset'; readonly sessionId: SessionId }
   | { readonly kind: 'thinking'; readonly sessionId: SessionId; readonly level: ThinkingLevel }
@@ -164,6 +189,9 @@ const CHAT_AWAY: React.CSSProperties = { display: 'none' }
 /** A confirmation, not an error: it says what just happened and goes away. */
 const TOAST_MS = 3200
 
+/** One empty set for every workspace nobody has opened a folder in. */
+const EMPTY_FOLDERS: Expanded = new Set<string>()
+
 const JUMPED =
   'Jumped — the transcript now shows the path to this point; your message is back in the composer.'
 
@@ -182,6 +210,7 @@ export function Shell({
   schedules: scheduleService,
   monitors: monitorService,
   exhibitKeys,
+  folded,
   instance
 }: {
   readonly port: AgentPort
@@ -220,11 +249,17 @@ export function Shell({
   // it everything works as it does with it, minus Escape leaving a maximized
   // panel from inside the page.
   readonly exhibitKeys?: ExhibitKeysService
+  // Where the sidebar's folded workspaces survive a restart. Absent means they
+  // are not remembered at all, which is what a component test wants.
+  readonly folded?: FoldedStore
   // Which state directory this window runs against, as main worked it out at
   // creation. Absent in the installed app, which shows no badge.
   readonly instance?: string
 }): React.JSX.Element {
   const [state, dispatch] = useReducer(reduce, NOTHING_YET)
+  // One store for the life of the window, so folding a workspace does not
+  // reach for storage that changed under it mid-launch.
+  const foldedStore = useMemo(() => folded ?? memoryFoldedStore(), [folded])
   const quotaHold = useQuota(quota)
   const refreshQuota = quotaHold.refresh
   // The counter as main holds it, repainted whenever a miss lands anywhere.
@@ -275,6 +310,11 @@ export function Shell({
   // The cache expiry choice. Per session like everything else here: what one
   // session asked about puts nothing on another session's screen.
   const [choice, setChoice] = useState<Choice | undefined>(undefined)
+  // A send that arrived mid-compaction, per session like the choice above it.
+  // The ref beside it is what the port's own subscription reads: the
+  // subscription is set up once and never sees a later render's state.
+  const [compactionWait, setCompactionWait] = useState<CompactionWait | undefined>(undefined)
+  const waitingOnCompaction = useRef<CompactionWait | undefined>(undefined)
   // What the model ring just switched to, shown before the port has confirmed
   // it. Dropped when the snapshot agrees, and dropped again if the call fails.
   const [ringed, setRinged] = useState<
@@ -321,6 +361,18 @@ export function Shell({
   const [runs, setRuns] = useState<Readonly<Record<SessionId, RunView>>>({})
   const [panelViews, setPanelViews] = useState<PanelViews>({})
   const [panelWidth, setPanelWidth] = useState<number | undefined>(undefined)
+  // The sidebar column's face, and what the file tree is showing, both per
+  // workspace and both for this launch alone: where you were in one workspace
+  // is a fact about this sitting.
+  const [faces, setFaces] = useState<SidebarFaces>({})
+  const [openFolders, setOpenFolders] = useState<Readonly<Record<WorkspaceId, Expanded>>>({})
+  const [fileFilters, setFileFilters] = useState<Readonly<Record<WorkspaceId, string>>>({})
+  // Folders closed by hand while a filter is on, where every folder that
+  // matched is open to begin with. Kept apart from the remembered set, and
+  // dropped when the filter changes: arranging a filtered tree is not
+  // arranging the whole one, and clearing the filter must give back the tree
+  // the user left.
+  const [closedInFilter, setClosedInFilter] = useState<Readonly<Record<WorkspaceId, Expanded>>>({})
   // Whether each workspace is a git working tree, as the workspace service
   // answered. Absent until the answer arrives, which is why nothing flashes.
   const [gitWorkspaces, setGitWorkspaces] = useState<Readonly<Record<WorkspaceId, boolean>>>({})
@@ -370,6 +422,9 @@ export function Shell({
   // `document.hasFocus()`: at mount the window has not been shown yet, and a
   // window nobody has left is a window the user is at.
   const windowFocused = useRef(true)
+  // The same fact as state, for what has to re-render when the user comes
+  // back: the panel, which holds a guest's attach until then.
+  const [inFront, setInFront] = useState(true)
   /** Sessions with a send under way, still waiting on its expansion. */
   const sending = useRef<Set<SessionId>>(new Set())
   // Which press of the summarize door owns each session's summarize state:
@@ -493,6 +548,23 @@ export function Shell({
   const place = panelPlace(panel, panelViewOf(shownViews, activeSessionId))
   // Closed unless the caret is in a token the service has already answered for.
   const shownFiles = fileToken !== undefined && files?.of === fileToken ? files.paths : undefined
+
+  // Which face the sidebar column is showing, and the tree it draws on the
+  // Files one: the active session's working directory, worktree included.
+  const sidebarFace = faceOf(faces, activeWorkspaceId)
+  const shownTab = panel?.tabs.find((tab) => tab.id === panel.activeTabId)
+  const shownFilePath = shownTab === undefined || shownTab.kind === 'url' ? undefined : shownTab.path
+  // The session's directory is watched for as long as the session is up, not
+  // only while the tree or a file tab is showing it. Chat reads the disk too
+  // now: a path an agent names is a link exactly while it is a file, and the
+  // reader who is doing nothing but reading is the one the agent is writing
+  // files for. The tree is still drawn only on its own face — the watch and
+  // the listing are two things.
+  const {
+    changes: filesChanged,
+    epoch: filesEpoch,
+    listing: treeListing
+  } = useWatchedFiles(service, sessionDirectory, sidebarFace === 'files')
   const run = activeSessionId === undefined ? undefined : runs[activeSessionId]
   const allRuns: readonly RunRecord[] = useMemo(() => runsSnapshot?.runs ?? [], [runsSnapshot])
   // Every workspace's runs count, because the rail lists every workspace's
@@ -756,6 +828,30 @@ export function Shell({
   // shown, counted and walked is what the snapshot still holds.
   const asking = useMemo(() => forgetGone(marks, snapshot.sessions), [marks, snapshot.sessions])
   const waitingCount = askingCount(snapshot.sessions, asking)
+  // The sidebar's order, its dots and what Collapse idle must spare, computed
+  // once per render against the idle clock. Once, because the eye and the Tab
+  // walk read the same object: two computations against two clocks could
+  // disagree the moment a workspace crosses the 24-hour line. The clock is
+  // what makes that crossing show without anybody clicking anything.
+  const listNow = useClock(false)
+  const sidebar = useMemo(
+    () =>
+      sidebarModel({
+        snapshot,
+        runs: allRuns,
+        runActivity: railRuns,
+        needsYou: asking,
+        now: listNow
+      }),
+    [snapshot, allRuns, railRuns, asking, listNow]
+  )
+  const folding = useFolded(foldedStore, snapshot.workspaces)
+  // What Tab walks: the sidebar's own order, workspace by workspace. A folded
+  // workspace's sessions are in it exactly as an open one's are.
+  const rail = useMemo(
+    () => railOrder(rows(sidebar.ordered), snapshot.sessions),
+    [sidebar.ordered, snapshot.sessions]
+  )
   // Landing on a session is the whole of what clears its mark, whether the
   // user typed anything there or not. Hovering it and scrolling past it do
   // not: a mark any glance-like signal clears is a mark nobody trusts.
@@ -831,6 +927,8 @@ export function Shell({
   // The cache expiry choice belongs to the session that raised it: landing
   // anywhere else dismisses it, so it can only ever be on screen there.
   const choiceShown = choice !== undefined && choice.sessionId === activeSessionId
+  const compactionWaitShown =
+    compactionWait !== undefined && compactionWait.sessionId === activeSessionId
   const occupied =
     issuesOpen ||
     schedulesShown ||
@@ -990,6 +1088,20 @@ export function Shell({
         arrive(event.snapshot.activeSessionId)
       }
       if (event.type === 'state') askedNow.current = event.snapshot.sessions
+      // The message that waited for a compaction goes out the moment the
+      // session stops compacting, landed or failed: either way the window is
+      // settled and the send is an ordinary one from there.
+      if (event.type === 'state') {
+        const waiting = waitingOnCompaction.current
+        if (
+          waiting !== undefined &&
+          event.snapshot.sessions.find((one) => one.id === waiting.sessionId)?.compacting !== true
+        ) {
+          waitingOnCompaction.current = undefined
+          setCompactionWait(undefined)
+          sendLatest.current(waiting.sessionId, waiting.text)
+        }
+      }
       // A question is a needs-you the moment it is asked, and the snapshot
       // above already carries it.
       if (event.type === 'question_asked') asked(event.sessionId, event.questionId)
@@ -1086,12 +1198,14 @@ export function Shell({
   useEffect(() => {
     function onFocus(): void {
       windowFocused.current = true
+      setInFront(true)
       const looking = railNow.current.activeSessionId
       if (looking === undefined) return
       setMarks((current) => withoutMark(current, looking))
     }
     function onBlur(): void {
       windowFocused.current = false
+      setInFront(false)
     }
     window.addEventListener('focus', onFocus)
     window.addEventListener('blur', onBlur)
@@ -1142,9 +1256,10 @@ export function Shell({
   // only thing that ties a chunk to the session it came from.
   useEffect(() => {
     return service.onEvent((event) => {
-      // The research CLI's own output belongs to the Research section, which
-      // listens for itself; nothing here is a run.
-      if (event.type === 'research_output') return
+      // The research CLI's own output belongs to the Research section and a
+      // change on disk to the file tree, both of which listen for themselves;
+      // nothing here is a run.
+      if (event.type !== 'run_output' && event.type !== 'run_ended') return
       const sessionId = owners.current[event.runId]
       if (sessionId === undefined) {
         // The id has not come back from `startRun` yet; nothing is thrown away.
@@ -1268,6 +1383,7 @@ export function Shell({
     () => ({
       loginOpen: liveLogin !== undefined,
       expiryChoiceOpen: choice !== undefined,
+      compactionWaitOpen: compactionWait !== undefined,
       confirmOpen: confirm !== undefined,
       popoverOpen: popover !== 'none',
       commandPopoverOpen: browsingCommands,
@@ -1288,6 +1404,7 @@ export function Shell({
     [
       liveLogin,
       choice,
+      compactionWait,
       confirm,
       popover,
       browsingCommands,
@@ -1311,6 +1428,18 @@ export function Shell({
         case 'closeLogin':
           closeLogin()
           return
+
+        // The compaction is stopped and the message stays in the composer,
+        // exactly as it was typed: nothing was cleared while it waited.
+        case 'cancelCompaction': {
+          if (compactionWait === undefined) return
+          const { sessionId } = compactionWait
+          waitingOnCompaction.current = undefined
+          setCompactionWait(undefined)
+          void port.cancel(sessionId).catch((cause: unknown) => report(cause, sessionId))
+          box.current?.focus()
+          return
+        }
 
         case 'answerExpiryChoice': {
           if (choice === undefined) return
@@ -1401,6 +1530,7 @@ export function Shell({
     [
       closeLogin,
       choice,
+      compactionWait,
       jumps,
       port,
       report,
@@ -1527,6 +1657,116 @@ export function Shell({
     return () => document.removeEventListener('keydown', onKeyDown)
   }, [line, liveLogin, confirm, choice, occupied, place])
 
+  // ⌘E swaps the sidebar column between its two faces, and swaps it back. The
+  // chord is claimed only where there is a folder to show; with no workspace
+  // open it is left to the OS.
+  useEffect(() => {
+    function onKeyDown(pressed: KeyboardEvent): void {
+      if (pressed.key !== 'e' && pressed.key !== 'E') return
+      if (!chordPressed(pressed) || pressed.shiftKey || pressed.altKey) return
+      const workspaceId = activeWorkspaceId
+      if (workspaceId === undefined) return
+      pressed.preventDefault()
+      setFaces((current) =>
+        withFace(
+          current,
+          workspaceId,
+          faceOf(current, workspaceId) === 'files' ? 'sessions' : 'files'
+        )
+      )
+    }
+    document.addEventListener('keydown', onKeyDown)
+    return () => document.removeEventListener('keydown', onKeyDown)
+  }, [activeWorkspaceId])
+
+  // The open the last click issued, so the double-click that may follow it
+  // names the tab that click opened rather than the path. The session is kept
+  // with it: a tab id means nothing in another session's panel.
+  const opening = useRef<{
+    readonly sessionId: SessionId
+    readonly of: string
+    readonly tab: Promise<TabId | undefined>
+  }>(undefined)
+
+  // Answers the tab, or nothing where the open failed and was reported: a
+  // caller waiting on it has one thing to check rather than two.
+  const openedInPanel = useCallback(
+    (sessionId: SessionId, target: ClickTarget, keep: boolean): Promise<TabId | undefined> => {
+      const opened =
+        target.kind === 'file'
+          ? port.openFile(sessionId, target.path, { keep, view: target.view })
+          : port.openAddress(sessionId, target.address, { keep })
+      return opened.catch((cause: unknown) => {
+        report(cause, sessionId)
+        return undefined
+      })
+    },
+    [port, report]
+  )
+
+  // A click in the file tree, or on a path or a local address an agent named
+  // in a message. The tab is the session's, so a window with no session has
+  // nowhere to put one and says so.
+  const openInPanel = useCallback(
+    (target: ClickTarget, options: { readonly keep: boolean }): void => {
+      const sessionId = railNow.current.activeSessionId
+      if (sessionId === undefined) {
+        report(new Error('Open a session first — a file opens in that session’s context panel.'))
+        return
+      }
+      // Remembered so the double-click that may follow keeps this very tab.
+      // A double-click is a click and then a second press, never two opens.
+      opening.current = {
+        sessionId,
+        of: targetKey(target),
+        tab: openedInPanel(sessionId, target, options.keep)
+      }
+    },
+    [report, openedInPanel]
+  )
+
+  // The second press of a double-click. It keeps the tab the click before it
+  // opened, which is why it waits for that open rather than opening the path
+  // again: one gesture, one outcome, whatever order the disk answers in.
+  const keepInPanel = useCallback(
+    (target: ClickTarget): void => {
+      const sessionId = railNow.current.activeSessionId
+      // The click that came first has already said there is nowhere to put it.
+      if (sessionId === undefined) return
+      const clicked = opening.current
+      const tab =
+        clicked?.of === targetKey(target) && clicked.sessionId === sessionId
+          ? clicked.tab
+          : openedInPanel(sessionId, target, true)
+      void tab
+        .then((tabId) => (tabId === undefined ? undefined : port.keepTab(sessionId, tabId)))
+        .catch((cause: unknown) => report(cause, sessionId))
+    },
+    [port, report, openedInPanel]
+  )
+
+  // A single click on a path in a message previews it, exactly as a single
+  // click in the tree does; the view it opens in is the path's own business.
+  const openFromMessage = useCallback(
+    (target: ClickTarget): void => openInPanel(target, { keep: false }),
+    [openInPanel]
+  )
+
+  // Whether a path an agent named is a file, and what a click on one does.
+  // Resolved against the session's own directory, worktree included.
+  const pathLinks = usePathLinks({
+    service,
+    directory: sessionDirectory,
+    // What takes an answer back. The epoch rather than the count of changes,
+    // because the watch follows the session on screen: while another session
+    // is being read this one's directory moves unwatched, and only the epoch
+    // says so. It is also why the watch above is not conditional on the file
+    // tree being up.
+    epoch: filesEpoch,
+    open: openFromMessage,
+    keep: keepInPanel
+  })
+
   // ⌘I, on exactly the same terms: claimed where there is an issue board to
   // open, and left to the OS where there is not.
   useEffect(() => {
@@ -1623,7 +1863,7 @@ export function Shell({
       // it is open, which is the whole of the parked walk's second half.
       if (issuesOpen || treeOpen || resumeOpen) return
       pressed.preventDefault()
-      const next = nextAsking(snapshot, asking)
+      const next = nextAsking(rail, asking)
       // Sessions first, in rail order, and every one of them before any run.
       if (next !== undefined) {
         // Cleared here rather than on arrival, so the pip is gone in the frame
@@ -1643,7 +1883,7 @@ export function Shell({
     document.addEventListener('keydown', onKeyDown)
     return () => document.removeEventListener('keydown', onKeyDown)
   }, [
-    snapshot,
+    rail,
     asking,
     activateSession,
     liveLogin,
@@ -1792,11 +2032,23 @@ export function Shell({
     if (id === undefined) return
     const text = draft.trim()
     if (text === '') return
+    // A compaction is rewriting what this conversation's model reads. The
+    // message waits for it rather than racing it: sending into a window that
+    // is being replaced would put the turn on whichever half won.
+    if (session?.compacting === true) {
+      const waiting = { sessionId: id, text }
+      waitingOnCompaction.current = waiting
+      setCompactionWait(waiting)
+      return
+    }
     // The cache expiry choice, decided in the frame of the gesture and before
     // anything is expanded, cleared or sent. Only a send that would start a
     // turn can meet it: a live turn's cache is warm, and nothing the run
     // delivers comes through here at all.
-    const prefix = session?.cachedPrefix
+    // An idle compaction already dealt with this conversation's idleness, so
+    // the send goes straight through however long it then sat: what it writes
+    // is the small compacted prefix, not the whole conversation.
+    const prefix = session?.idleCompacted === true ? undefined : session?.cachedPrefix
     const at = Date.now()
     if (!working && prefix !== undefined && prefixExpired(prefix, at)) {
       setChoice({ sessionId: id, prefix, text, at })
@@ -2592,6 +2844,52 @@ export function Shell({
     closeRegion()
   }
 
+  // Everything the Files face draws and every gesture it offers. Absent where
+  // there is no folder to show, and then the column is the sessions alone.
+  const filesFace: FilesFace | undefined =
+    activeWorkspaceId === undefined || sessionDirectory === undefined
+      ? undefined
+      : {
+          name: active?.name ?? sessionDirectory,
+          ...(session?.worktree === undefined
+            ? {}
+            : { worktree: folderName(session.worktree.path) }),
+          ...(treeListing === undefined ? {} : { listing: treeListing }),
+          expanded: openFolders[activeWorkspaceId] ?? EMPTY_FOLDERS,
+          filter: fileFilters[activeWorkspaceId] ?? '',
+          collapsed: closedInFilter[activeWorkspaceId] ?? EMPTY_FOLDERS,
+          ...(shownFilePath === undefined
+            ? {}
+            : whereInTree(sessionDirectory, shownFilePath)),
+          onFilter: (text) => {
+            setFileFilters((current) => ({ ...current, [activeWorkspaceId]: text }))
+            setClosedInFilter((current) => ({ ...current, [activeWorkspaceId]: EMPTY_FOLDERS }))
+          },
+          // The same gesture answers in whichever tree is on screen, and is
+          // remembered only for that one: the filtered tree's folds go with
+          // the filter, the whole tree's outlive it.
+          onToggleFolder: (path) => {
+            const fold = filtering(fileFilters[activeWorkspaceId] ?? '')
+              ? setClosedInFilter
+              : setOpenFolders
+            fold((current) => ({
+              ...current,
+              [activeWorkspaceId]: toggleFolder(current[activeWorkspaceId] ?? EMPTY_FOLDERS, path)
+            }))
+          },
+          // Everything the tree opens opens as source: browsing a folder is
+          // reading what is in the files.
+          onOpen: (path, options) =>
+            openInPanel({ kind: 'file', path, view: { kind: 'source' } }, options),
+          onKeep: (path) => keepInPanel({ kind: 'file', path, view: { kind: 'source' } }),
+          // The whole path, which is what the panel header's copy hands over
+          // for the same file.
+          onCopyPath: (path) =>
+            void navigator.clipboard?.writeText(wholePath(sessionDirectory, path)).catch(report),
+          onReveal: (path) => void service.revealFile(sessionDirectory, path).catch(report),
+          onLeave: () => setFaces((current) => withFace(current, activeWorkspaceId, 'sessions'))
+        }
+
   function confirmed(): void {
     if (confirm === undefined) return
     const asked = confirm
@@ -2622,6 +2920,8 @@ export function Shell({
     >
       <Sidebar
         snapshot={snapshot}
+        model={sidebar}
+        folding={folding}
         needsYou={asking}
         runActivity={railRuns}
         waiting={railWaits}
@@ -2634,6 +2934,16 @@ export function Shell({
         onResume={() => occupy({ kind: 'resume' })}
         onOpenSettings={() => occupy({ kind: 'settings', section: 'providers' })}
         settingsOpen={settingsOpen}
+        files={
+          filesFace === undefined || activeWorkspaceId === undefined
+            ? undefined
+            : {
+                face: sidebarFace,
+                onFace: (face: SidebarFace) =>
+                  setFaces((current) => withFace(current, activeWorkspaceId, face)),
+                tree: filesFace
+              }
+        }
         cache={
           cacheService === undefined
             ? undefined
@@ -2720,13 +3030,18 @@ export function Shell({
                 </button>
               </div>
             ) : (
-              <Transcript
-                items={items}
-                sessionId={session.id}
-                invocations={shownInvocations}
-                missJump={missJump}
-                shown={place !== 'maximized'}
-              />
+              // A path an agent named is clickable here and nowhere else: not
+              // in an exhibit, not in an issue's body, not in a run node's
+              // transcript, none of which is this session's chat.
+              <PathLinksContext.Provider value={pathLinks}>
+                <Transcript
+                  items={items}
+                  sessionId={session.id}
+                  invocations={shownInvocations}
+                  missJump={missJump}
+                  shown={place !== 'maximized'}
+                />
+              </PathLinksContext.Provider>
             )}
 
             {toast === undefined || toast.sessionId !== activeSessionId ? null : (
@@ -2847,8 +3162,15 @@ export function Shell({
                   }
             }
             port={port}
+            changed={filesChanged}
+            inFront={inFront}
             onCopyLocation={(location) =>
               void navigator.clipboard?.writeText(location).catch(report)
+            }
+            onReveal={
+              sessionDirectory === undefined
+                ? undefined
+                : (path) => void service.revealFile(sessionDirectory, path).catch(report)
             }
             onCollapse={() =>
               setPanelViews((current) => withPanelView(current, activeSessionId, 'collapsed'))
@@ -2868,7 +3190,7 @@ export function Shell({
         {/* The overlay region: one host for every overlay. It is here at all
             only while something is in it, and everything in it is anchored to
             it, so no overlay can reach the sidebar or either bar. */}
-        {occupied || confirm !== undefined || choiceShown ? (
+        {occupied || confirm !== undefined || choiceShown || compactionWaitShown ? (
           <div className="region">
             {issuesOpen ? (
               <IssueBoard
@@ -3046,6 +3368,16 @@ export function Shell({
               />
             )}
 
+            {/* A send that arrived while this session was compacting: the
+                same wait the summarize door puts up, and the same way out. */}
+            {compactionWaitShown ? (
+              <SummarizingDialog
+                title="Compacting the conversation"
+                subtitle="Rewriting what the agent reads. Your message goes out the moment this lands."
+                footer="cancel — the conversation is left exactly as it was"
+              />
+            ) : null}
+
             {/* The choice a send raised, above whatever it was raised over,
                 and only ever on the session that raised it. */}
             {choiceShown && choice !== undefined ? (
@@ -3094,6 +3426,17 @@ function known(monitors: readonly LiveMonitor[], id: MonitorId): boolean {
 
 function messageOf(cause: unknown): string {
   return cause instanceof Error ? cause.message : String(cause)
+}
+
+/** The current row, where the file on screen is one of the tree's own. */
+function whereInTree(directory: string, path: string): { readonly activePath?: string } {
+  const inside = insideTree(directory, path)
+  return inside === undefined ? {} : { activePath: inside }
+}
+
+/** The last segment of a path: what the root row's worktree mark names. */
+function folderName(path: string): string {
+  return path.split(/[/\\]/).filter((part) => part !== '').at(-1) ?? path
 }
 
 // Pure, because React may replay a state update: what a chunk or an ending

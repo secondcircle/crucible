@@ -5,6 +5,7 @@ import type {
   AuthPromptKind,
   AuthPromptOption,
   BashRunShare,
+  FileView,
   HistoryMatch,
   ImageAttachment,
   ModelId,
@@ -37,6 +38,12 @@ import type {
   TurnId,
   WorkspaceId
 } from '../../../shared/agent/port'
+import { isLocalAddress } from '../../../shared/agent/local-address'
+import type { CompactionRecord } from '../../../shared/compaction/record'
+import {
+  DEFAULT_COMPACTION_SETTINGS,
+  type CompactionSettings
+} from '../../../shared/compaction/settings'
 import { composeAnswerBatch, type AnsweredQuestion } from '../../../shared/questions/wording'
 
 // Answers operations the way main does but streams nothing by itself, so a
@@ -103,6 +110,11 @@ export interface ScriptedPort extends AgentPort {
   readonly exhibits: Map<TabId, string>
   /** Set where a test wants a read main could not carry out. */
   exhibitRefusal?: string
+  // Paths `openFile` answers for as binary files, by size in bytes: nothing
+  // here reads a disk, so what is not text is said rather than sniffed.
+  readonly binaries: Map<string, number>
+  /** Set where a test wants a file main could not open. */
+  openFileRefusal?: string
   // A show the way main announces one: the tab lands in the snapshot, the
   // `state` event goes out, and `panel_shown` follows it.
   showTab(sessionId: SessionId, tab: PanelTab): void
@@ -112,6 +124,13 @@ export interface ScriptedPort extends AgentPort {
   // the `state` event goes out, and `question_asked` follows it.
   askQuestion(sessionId: SessionId, question: Question): void
   questionsOf(sessionId: SessionId): QuestionLine | undefined
+
+  /** What `compactionSettings` answers with, and what a write leaves behind. */
+  compaction: CompactionSettings
+  // A compaction the way main announces one: the session is marked while it
+  // runs, and the block lands where the conversation stands.
+  compactionStarted(sessionId: SessionId): void
+  compacted(sessionId: SessionId, text: string, record: CompactionRecord): void
 
   /** What `listProviders` answers with; a test may change it between calls. */
   providers: readonly ProviderState[]
@@ -228,13 +247,71 @@ export function createScriptedPort(initial: Partial<ShellSnapshot> = {}): Script
     return snapshot.sessions.find((candidate) => candidate.id === sessionId)?.panel
   }
 
+  /** Where the session works: its worktree, or its workspace's checkout. */
+  function directoryOf(sessionId: SessionId): string {
+    const session = snapshot.sessions.find((candidate) => candidate.id === sessionId)
+    const workspace = snapshot.workspaces.find(
+      (candidate) => candidate.id === session?.workspaceId
+    )
+    return session?.worktree?.path ?? workspace?.path ?? ''
+  }
+
+  // Where a click's tab lands, for a file and for an address alike: the tab
+  // that is already open, refreshed, or a new one in the preview slot —
+  // exactly as main's model places one.
+  function placeTab(
+    sessionId: SessionId,
+    location: string,
+    keep: boolean,
+    mint: (tabs: readonly PanelTab[]) => PanelTab,
+    // What a click does to a tab that is already open. Leaving how it is being
+    // shown alone is the default, exactly as main leaves it.
+    refresh: (tab: PanelTab) => PanelTab = (tab) => ({ ...tab, shownAt: NOW })
+  ): TabId {
+    const panel = panelOf(sessionId)
+    const tabs = [...(panel?.tabs ?? [])]
+    const already = tabs.find((tab) => locationOf(tab) === location)
+    if (already !== undefined) {
+      setPanel(
+        sessionId,
+        tabs.map((tab) => (tab.id === already.id ? refresh(tab) : tab)),
+        already.id,
+        keep && panel?.previewTabId === already.id ? undefined : panel?.previewTabId
+      )
+      emitState()
+      return already.id
+    }
+    const opened = mint(tabs)
+    // The preview tab is one slot: a single click puts the new file where the
+    // old one was, exactly as main's model does.
+    const previewAt = tabs.findIndex((tab) => tab.id === panel?.previewTabId)
+    if (!keep && previewAt !== -1) tabs.splice(previewAt, 1, opened)
+    else tabs.push(opened)
+    setPanel(sessionId, tabs, opened.id, keep ? panel?.previewTabId : opened.id)
+    emitState()
+    return opened.id
+  }
+
   // Absent rather than empty, exactly as main folds it: an empty panel is no
   // panel at all.
-  function setPanel(sessionId: SessionId, tabs: readonly PanelTab[], activeTabId: TabId): void {
+  function setPanel(
+    sessionId: SessionId,
+    tabs: readonly PanelTab[],
+    activeTabId: TabId,
+    previewTabId?: TabId
+  ): void {
+    // A preview tab that is no longer open is no longer the preview tab, which
+    // is the one rule main's model keeps for this field.
+    const preview = tabs.some((tab) => tab.id === previewTabId) ? previewTabId : undefined
     changeSession(sessionId, (session) => {
       const rest: SessionState = { ...session }
       delete (rest as { panel?: PanelState }).panel
-      return tabs.length === 0 ? rest : { ...rest, panel: { tabs, activeTabId } }
+      return tabs.length === 0
+        ? rest
+        : {
+            ...rest,
+            panel: { tabs, activeTabId, ...(preview === undefined ? {} : { previewTabId: preview }) }
+          }
     })
   }
 
@@ -321,15 +398,32 @@ export function createScriptedPort(initial: Partial<ShellSnapshot> = {}): Script
   let heldWorktree: (() => void) | undefined
   let login: { resolve: () => void; reject: (cause: Error) => void } | undefined
 
+  // The one thing a compaction shows in the snapshot while it runs, folded
+  // exactly as main folds it.
+  function markCompacting(sessionId: SessionId, running: boolean): void {
+    snapshot = {
+      ...snapshot,
+      sessions: snapshot.sessions.map((session) => {
+        if (session.id !== sessionId) return session
+        const rest = { ...session }
+        delete rest.compacting
+        return running ? { ...rest, compacting: true as const } : rest
+      })
+    }
+    emitState()
+  }
+
   const port: ScriptedPort = {
     calls,
     models: [],
     history: [],
+    compaction: DEFAULT_COMPACTION_SETTINGS,
     providers: [],
     usage: new Map(),
     transcripts: new Map(),
     trees: new Map(),
     exhibits: new Map(),
+    binaries: new Map(),
     folder: null,
     shareOutcome: 'delivered',
 
@@ -611,6 +705,22 @@ export function createScriptedPort(initial: Partial<ShellSnapshot> = {}): Script
       settle?.(outcome)
     },
 
+    compactionSettings: () => record('compactionSettings', [], port.compaction),
+    setCompactionSettings(settings: CompactionSettings): Promise<void> {
+      calls.push({ op: 'setCompactionSettings', args: [settings] })
+      port.compaction = settings
+      return Promise.resolve()
+    },
+
+    compactionStarted(sessionId: SessionId): void {
+      markCompacting(sessionId, true)
+    },
+
+    compacted(sessionId: SessionId, text: string, record: CompactionRecord): void {
+      markCompacting(sessionId, false)
+      emit({ type: 'compacted', sessionId, text, record })
+    },
+
     listModels: () => record('listModels', [], port.models),
 
     listProviders: () => record('listProviders', [], port.providers),
@@ -757,7 +867,7 @@ export function createScriptedPort(initial: Partial<ShellSnapshot> = {}): Script
       if (panel === undefined || !panel.tabs.some((tab) => tab.id === tabId)) {
         return Promise.resolve()
       }
-      setPanel(sessionId, panel.tabs, tabId)
+      setPanel(sessionId, panel.tabs, tabId, panel.previewTabId)
       emitState()
       return Promise.resolve()
     },
@@ -773,7 +883,75 @@ export function createScriptedPort(initial: Partial<ShellSnapshot> = {}): Script
       const active = tabs.some((tab) => tab.id === panel.activeTabId)
         ? panel.activeTabId
         : (tabs.at(-1)?.id ?? '')
-      setPanel(sessionId, tabs, active)
+      setPanel(sessionId, tabs, active, panel.previewTabId)
+      emitState()
+      return Promise.resolve()
+    },
+
+    setTabSource(sessionId: SessionId, tabId: TabId, source: boolean): Promise<void> {
+      calls.push({ op: 'setTabSource', args: [sessionId, tabId, source] })
+      const panel = panelOf(sessionId)
+      if (panel === undefined) return Promise.resolve()
+      setPanel(
+        sessionId,
+        panel.tabs.map((tab) => flipped(tab, tabId, source)),
+        panel.activeTabId,
+        panel.previewTabId
+      )
+      emitState()
+      return Promise.resolve()
+    },
+
+    openFile(
+      sessionId: SessionId,
+      path: string,
+      options: { readonly keep: boolean; readonly view: FileView }
+    ): Promise<TabId> {
+      calls.push({ op: 'openFile', args: [sessionId, path, options] })
+      if (port.openFileRefusal !== undefined) {
+        return Promise.reject(new Error(port.openFileRefusal))
+      }
+      // Resolved against the session's own directory, as main resolves it, so
+      // a tab names the file rather than the click.
+      const resolved = path.startsWith('/') ? path : `${directoryOf(sessionId)}/${path}`
+      return Promise.resolve(
+        placeTab(
+          sessionId,
+          resolved,
+          options.keep,
+          (tabs) => openedTab(port, resolved, tabs, options.view),
+          (tab) => onLine(tab, options.view)
+        )
+      )
+    },
+
+    openAddress(
+      sessionId: SessionId,
+      address: string,
+      options: { readonly keep: boolean }
+    ): Promise<TabId> {
+      calls.push({ op: 'openAddress', args: [sessionId, address, options] })
+      if (!isLocalAddress(address)) {
+        return Promise.reject(
+          new Error('Crucible opens local addresses in the panel; the rest go to your browser.')
+        )
+      }
+      return Promise.resolve(
+        placeTab(sessionId, address, options.keep, (tabs) => ({
+          id: mintTabId(webTitle(address), tabs),
+          title: webTitle(address),
+          shownAt: NOW,
+          kind: 'url',
+          address
+        }))
+      )
+    },
+
+    keepTab(sessionId: SessionId, tabId: TabId): Promise<void> {
+      calls.push({ op: 'keepTab', args: [sessionId, tabId] })
+      const panel = panelOf(sessionId)
+      if (panel === undefined || panel.previewTabId !== tabId) return Promise.resolve()
+      setPanel(sessionId, panel.tabs, panel.activeTabId, undefined)
       emitState()
       return Promise.resolve()
     },
@@ -943,6 +1121,92 @@ export function oneSession(
     ],
     activeSessionId: 's1'
   }
+}
+
+const IMAGE_EXTENSIONS = ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.ico', '.avif', '.svg']
+
+// The toggle as main works it: the kind a tab renders is where it goes back
+// to, and a tab with no rendered view does not move at all.
+function flipped(tab: PanelTab, tabId: TabId, source: boolean): PanelTab {
+  if (tab.id !== tabId) return tab
+  if (source) {
+    if (tab.kind !== 'markdown' && tab.kind !== 'html') return tab
+    return { ...tab, kind: 'source', renders: tab.kind }
+  }
+  if (tab.kind !== 'source' || tab.renders === undefined) return tab
+  const { renders, ...rest } = tab
+  return { ...rest, kind: renders }
+}
+
+/** Where a tab's exhibit is: the file it names, or the address it loads. */
+function locationOf(tab: PanelTab): string {
+  return tab.kind === 'url' ? tab.address : tab.path
+}
+
+/** The name without its extension, slugged, and unique among the open tabs. */
+function mintTabId(title: string, open: readonly PanelTab[]): TabId {
+  const base =
+    title
+      .replace(/\.[^.]+$/, '')
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '') || 'tab'
+  let id = base
+  for (let n = 2; open.some((tab) => tab.id === id); n += 1) id = `${base}-${n}`
+  return id
+}
+
+/** The last piece of the address's path, or its host, as main names one. */
+function webTitle(address: string): string {
+  const url = new URL(address)
+  return url.pathname.split('/').filter((part) => part !== '').at(-1) ?? url.hostname
+}
+
+// A click that named a line brings the tab it lands on to source to show it,
+// exactly as main does; a click that named none says nothing about the view.
+function onLine(tab: PanelTab, view: FileView): PanelTab {
+  const shown = { ...tab, shownAt: NOW }
+  if (view.kind !== 'source' || view.line === undefined) return shown
+  if (shown.kind === 'markdown' || shown.kind === 'html') {
+    return { ...shown, kind: 'source', renders: shown.kind, line: view.line }
+  }
+  return shown.kind === 'source' ? { ...shown, line: view.line } : shown
+}
+
+// A tab minted from a path the way main mints one for a click: the title is
+// the file's name, the id is that name without its extension and slugged, and
+// the kind follows the extension and the view the click asked for.
+function openedTab(
+  port: ScriptedPort,
+  path: string,
+  open: readonly PanelTab[],
+  view: FileView
+): PanelTab {
+  const title = path.split('/').at(-1) ?? path
+  const carried = { id: mintTabId(title, open), title, shownAt: NOW }
+  const lower = title.toLowerCase()
+  const line = view.kind === 'source' ? view.line : undefined
+  const onIt = line === undefined ? {} : { line }
+  // Named by however much of the path a test cared to write down: nothing
+  // here reads a disk, so what is not text is said rather than sniffed.
+  const bytes = [...port.binaries].find(([named]) => path.endsWith(named))?.[1]
+  if (bytes !== undefined) return { ...carried, kind: 'binary', path, bytes }
+  if (IMAGE_EXTENSIONS.some((extension) => lower.endsWith(extension))) {
+    return { ...carried, kind: 'image', path }
+  }
+  // A click in the tree opens source and carries the toggle to the rendered
+  // view; a click in a message opens what the file renders, exactly as main
+  // mints it.
+  const renders = lower.endsWith('.md') || lower.endsWith('.markdown')
+    ? 'markdown'
+    : lower.endsWith('.html') || lower.endsWith('.htm')
+      ? 'html'
+      : undefined
+  if (renders !== undefined && view.kind === 'rendered') {
+    return { ...carried, kind: renders, path }
+  }
+  if (renders !== undefined) return { ...carried, kind: 'source', path, renders, ...onIt }
+  return { ...carried, kind: 'source', path, ...onIt }
 }
 
 /** A label change the way an adapter applies one: the tree is read back. */
