@@ -7,6 +7,7 @@
 import { describe, expect, it } from 'vitest'
 import type { RunNode } from '../../../shared/workflows/run'
 import { cardFace, edgeState, graphCount, layOutGraph } from './graph'
+import { nodeProgress } from './format'
 
 function nodeOf(id: string, parents: string[] = [], overrides: Partial<RunNode> = {}): RunNode {
   return {
@@ -663,6 +664,34 @@ describe('the graph header count', () => {
         nodeOf('gate\u00b7r2', ['gate\u00b7r1'])
       ])
     ).toBe('1 node · 2 revisions · 1 done')
+  })
+
+  // Reproduction for review-1's finding. The graph header and the header
+  // strip above it count the same thing for the same reader, an inch apart.
+  // Once a revision exists they disagree: the graph says "2 nodes · 1
+  // revision" and the strip says "2/3 nodes", counting the revision as a node
+  // of its own. Section 4 of the mock keeps the strip on the node count
+  // (`$4.20 · 3 / 6 nodes` beside `6 nodes · 1 revision`). Drive it with
+  // `npm run dev`: open the failed run `b1n7` and click Start node over.
+  it('counts the same nodes the header strip counts', () => {
+    const nodes = [
+      nodeOf('planner'),
+      nodeOf('builder', ['planner'], { status: 'failed' }),
+      nodeOf('builder\u00b7r1', ['builder'])
+    ]
+    const run = {
+      id: 'b1n7',
+      workflow: 'build',
+      status: 'running' as const,
+      workspacePath: '/repos/crucible',
+      workspaceName: 'crucible',
+      inputs: {},
+      nodes,
+      createdAt: '2026-08-21T10:00:00.000Z',
+      startedAt: '2026-08-21T10:00:00.000Z'
+    }
+    const counted = (said: string): string => said.match(/(\d+) nodes?/)?.[1] ?? ''
+    expect(counted(nodeProgress(run))).toBe(counted(graphCount(nodes)))
   })
 })
 

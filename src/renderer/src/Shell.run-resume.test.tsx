@@ -5,7 +5,7 @@
 // failed, cancelled, interrupted — with only the first sentence and the tint
 // telling them apart, and the transcript marked where the node stopped and
 // where a resume picked it up again.
-import { act, fireEvent, render, screen, within } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 import type { ShellSnapshot, TranscriptItem } from '../../shared/agent/port'
 import {
@@ -289,6 +289,36 @@ describe('a cancelled run', () => {
     expect(said?.querySelector('.acts')?.textContent).toContain(
       'Start node over runs the cancelled node — fixer-1 — again from its prompt'
     )
+  })
+})
+
+describe('one vocabulary over every stop', () => {
+  // Reproduction for review-1's finding. Both briefs rule that failed,
+  // cancelled and interrupted "differ only in the banner's first sentence and
+  // tint", and the mock's sections 1 and 2 print the same acts sentence for
+  // both, naming the node and never the stop. The built banner spells the
+  // run's status into every act sentence ("the failed node", "the cancelled
+  // node"), which is a second difference — and on a run with more than one
+  // stopped node it puts the run's word on records that stopped another way.
+  it('says the same thing about the two acts, whichever stop it was', async () => {
+    const acts = async (run: RunRecord): Promise<string> => {
+      await openRun([run])
+      const said = banner()?.querySelector('.acts')?.textContent ?? ''
+      cleanup()
+      return said
+    }
+    const failed = await acts(runOf())
+    const cancelled = await acts(
+      runOf({
+        status: 'cancelled',
+        error: undefined,
+        nodes: runOf().nodes.map((node) =>
+          node.id === 'fixer-1' ? { ...node, error: undefined } : node
+        )
+      })
+    )
+
+    expect(cancelled).toBe(failed)
   })
 })
 

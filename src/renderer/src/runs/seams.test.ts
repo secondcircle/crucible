@@ -70,6 +70,35 @@ describe('the rule where a node stopped', () => {
     })
   })
 
+  // Reproduction for review-1's finding. `stoppedNodes` returns every node the
+  // engine will put back to work, which on a run with parallel nodes is not
+  // only the node the stop caught: a node that failed an hour earlier, with
+  // its own recorded error, is in that list too. Taking the word from the run
+  // then tells the reader their cancel killed a node that died on its own,
+  // and dates the cancel to when that node died. The fake flavor ships this
+  // exact record (`cannedUnattended`: `spec-audit` failed, `builder` blocked)
+  // — cancel that run in `npm run dev` and `spec-audit` reads
+  // "cancelled here · 57m ago" under its own failure message.
+  it('does not call a node cancelled when it failed on its own before the cancel', () => {
+    const run = runOf(
+      { status: 'cancelled', endedAt: '2026-08-21T13:59:40.000Z' },
+      // Released by the cancel, seconds ago: this one the cancel did stop.
+      nodeOf({ id: 'builder', endedAt: '2026-08-21T13:59:40.000Z' }),
+      // Dead on its own an hour before anybody clicked Cancel.
+      nodeOf({
+        id: 'spec-audit',
+        error: 'the audit ran out of context re-reading the spec, twice',
+        endedAt: '2026-08-21T13:03:00.000Z'
+      })
+    )
+    const audit = transcriptWithSeams(run, run.nodes[1], SAID, NOW).at(-1) as {
+      readonly text: string
+      readonly tone: string
+    }
+    expect(audit.text).not.toContain('cancelled')
+    expect(audit.tone).not.toBe('cancelled')
+  })
+
   it('draws nothing on a run that can still move itself', () => {
     const running = runOf({ status: 'running' }, nodeOf({ status: 'running', endedAt: undefined }))
     expect(rules(transcriptWithSeams(running, running.nodes[0], SAID, NOW))).toEqual([])
