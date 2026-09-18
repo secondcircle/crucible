@@ -877,6 +877,154 @@ describe('an interrupted run', () => {
     // Never a session that no longer exists.
     expect(banner?.textContent).toContain('reporting to whichever session adopts it')
   })
+
+  // Reproduction for review-2's finding. The engine continues a stopped node
+  // from its last turn in its own session (engine.interrupted.test.ts:
+  // 'continues the cut node in its own session'), and every other surface —
+  // the interruption notice, the resume tool's answer, the authoring doc —
+  // says so. This banner is the one place that still promises the old act:
+  // a re-run "from that node's beginning", i.e. a re-spend that will not
+  // happen. It states what the primary button will do, so it must not state
+  // the opposite of what the button does.
+  it('does not claim Resume re-runs a node whose own session is on disk', async () => {
+    await open([
+      interrupted({
+        nodes: [
+          {
+            id: 'gate-alignment',
+            status: 'interrupted',
+            parents: [],
+            reads: [],
+            artifacts: [],
+            cost: 3.2,
+            sessionToken: '/state/workflow-runs/45c8/sessions/1.jsonl'
+          }
+        ]
+      })
+    ])
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Open run' }))
+      await settled()
+    })
+    const banner = screen.getByLabelText('Run 45c8').querySelector('.rvwhy')
+    expect(banner?.textContent).not.toContain('from that node\u2019s beginning')
+    // What the click will actually do, in the words every other surface uses.
+    expect(banner?.textContent).toContain(
+      'Resume continues the interrupted node \u2014 gate-alignment \u2014 from its last turn, in ' +
+        'the same worktree, reporting to the same session, so nothing it already spent is spent ' +
+        'again.'
+    )
+  })
+
+  // The other half of the same rule: a record written before sessions outlived
+  // the app has no session to continue, and the banner says that instead of
+  // promising a continuation it cannot make.
+  it('says a node with no session on disk runs again from its prompt', async () => {
+    await open([interrupted()])
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Open run' }))
+      await settled()
+    })
+
+    const banner = screen.getByLabelText('Run 45c8').querySelector('.rvwhy')
+    expect(banner?.textContent).toContain(
+      'Resume runs the interrupted node \u2014 gate-alignment \u2014 again from its prompt, in ' +
+        'the same worktree, reporting to the same session: no session of its own is on disk to ' +
+        'continue from.'
+    )
+    expect(banner?.textContent).not.toContain('continues')
+  })
+
+  // Reproduction for review-3's finding. A clean restart leaves the base
+  // record `interrupted` for good and puts the work on `·r1`
+  // (engine.interrupted.test.ts: 'completes a node for good'). Quit again
+  // before ·r1 finishes and the run holds two interrupted records — both
+  // with session tokens — for one node. The engine performs one act on
+  // resume: it continues the furthest record of the chain
+  // (engine.ts runNode: `chainOf(id).at(-1)`); the base record's session is
+  // never reopened. `resumePlan` splits per record instead of per chain, so
+  // the banner promises two continuations where one will happen. One node,
+  // one act: the superseded base record is not a second node.
+  it('does not promise to continue the record a clean restart superseded', async () => {
+    await open([
+      interrupted({
+        nodes: [
+          {
+            id: 'gate-alignment',
+            status: 'interrupted',
+            parents: [],
+            reads: [],
+            artifacts: [],
+            cost: 3.2,
+            sessionToken: '/state/workflow-runs/45c8/sessions/1.jsonl'
+          },
+          {
+            id: 'gate-alignment·r1',
+            status: 'interrupted',
+            parents: ['gate-alignment'],
+            reads: [],
+            artifacts: [],
+            cost: 1.1,
+            sessionToken: '/state/workflow-runs/45c8/sessions/2.jsonl'
+          }
+        ]
+      })
+    ])
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Open run' }))
+      await settled()
+    })
+    const banner = screen.getByLabelText('Run 45c8').querySelector('.rvwhy')
+    expect(banner?.textContent).not.toContain('interrupted nodes')
+    // One node, one act, named as the record the engine will actually reopen.
+    expect(banner?.textContent).toContain(
+      'Resume continues the interrupted node \u2014 gate-alignment\u00b7r1 \u2014 from its last ' +
+        'turn, in the same worktree, reporting to the same session, so nothing it already spent ' +
+        'is spent again.'
+    )
+  })
+
+  // The same root, the other way round: a quit during a held-open node’s
+  // revision leaves the base record complete and ·r1 interrupted with no
+  // session of its own (an in-session revision records no token). The engine
+  // replays the completion and the workflow’s re-issued revise() continues the
+  // node through the base record’s session — so the banner must not tell the
+  // human a node is about to be re-run from its prompt.
+  it('does not promise a from-the-prompt re-run of a revision the engine replays', async () => {
+    await open([
+      interrupted({
+        nodes: [
+          {
+            id: 'gate-alignment',
+            status: 'complete',
+            parents: [],
+            reads: [],
+            artifacts: [],
+            summary: 'approved',
+            cost: 3.2,
+            sessionToken: '/state/workflow-runs/45c8/sessions/1.jsonl'
+          },
+          {
+            id: 'gate-alignment\u00b7r1',
+            status: 'interrupted',
+            parents: ['gate-alignment'],
+            reads: [],
+            artifacts: [],
+            cost: 0.4
+          }
+        ]
+      })
+    ])
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Open run' }))
+      await settled()
+    })
+    const banner = screen.getByLabelText('Run 45c8').querySelector('.rvwhy')
+    expect(banner?.textContent).not.toContain('again from')
+    expect(banner?.textContent).toContain(
+      'Resume puts this run back to work in the same worktree, reporting to the same session.'
+    )
+  })
 })
 
 describe('investigating a run', () => {

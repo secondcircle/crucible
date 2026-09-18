@@ -1,12 +1,8 @@
-import type {
-  NodeSpec,
-  OpenNode,
-  PlannedNode,
-  RunContext,
-  WorkflowDef
-} from '../authoring'
+import type { NodeSpec, OpenNode, PlannedNode, WorkflowDef } from '../authoring'
 import {
   createRpc,
+  effectOver,
+  type EngineContext,
   type HostRequests,
   type MainRequests,
   type Message,
@@ -42,7 +38,7 @@ export interface WorkflowHost {
    * the workflow returned; rejects with what it threw, or with the host's
    * death if it died first.
    */
-  run(ctx: RunContext): Promise<Record<string, unknown> | undefined>
+  run(ctx: EngineContext): Promise<Record<string, unknown> | undefined>
   /** Stops the process where it stands. Everything in flight rejects. */
   kill(): void
 }
@@ -65,11 +61,11 @@ export function createWorkflowHost(
 
   // Only the context of a running `run()` can answer the file's requests;
   // before and after, a request from the host is a file misbehaving.
-  let serving: RunContext | undefined
+  let serving: EngineContext | undefined
   const opened = new Map<number, OpenNode>()
   let nextHandle = 1
 
-  const ctx = (): RunContext => {
+  const ctx = (): EngineContext => {
     if (serving === undefined) throw new Error('the workflow made a ctx call outside run()')
     return serving
   }
@@ -109,6 +105,11 @@ export function createWorkflowHost(
         return undefined
       },
       ask: (question) => ctx().ask(question),
+      recordedEffect: ({ id }) => ctx().recordedEffect(id),
+      recordEffect: async ({ id, value }) => {
+        await ctx().recordEffect(id, value)
+        return undefined
+      },
       derive: async ({ path, fromNodeId }) => {
         await ctx().derive(path, fromNodeId)
         return undefined
@@ -192,9 +193,12 @@ export function inProcessHost(def: WorkflowDef): WorkflowHost {
       const check = def.schedule?.check
       return check === undefined ? true : Boolean(await check({ workspacePath }))
     },
-    async run(ctx) {
+    async run(engine) {
       alive()
-      const outputs = await def.run(ctx)
+      // The authoring context, made here exactly as the forked host makes it
+      // on the far side of the wire: the stand-in must offer the workflow
+      // the same `ctx`, effect and all.
+      const outputs = await def.run({ ...engine, effect: effectOver(engine) })
       return outputs === null || outputs === undefined ? undefined : outputs
     },
     kill() {

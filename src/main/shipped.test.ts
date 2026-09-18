@@ -493,6 +493,23 @@ describe('the shipped workflow-authoring doc', () => {
     expect(text).toMatch(/empty\s+list means none at all/)
     expect(text).toMatch(/matching no skill is ignored/)
   })
+
+  // A resume re-executes run() over the record, so an author who does not
+  // know which of their own lines run again writes a workflow that merges
+  // twice or re-runs a five-minute gate.
+  it('says plainly what a resume replays and what it executes again', () => {
+    const text = doc()
+    expect(text).toContain('`ctx.effect(id, produce)`')
+    expect(text).toMatch(/executes? your `run\(\)` again from the top/)
+    // The four things handed back, and the line that says the rest is not.
+    expect(text).toMatch(/node that completed is handed back/)
+    expect(text).toMatch(/continues in its own session, from its last\s+turn/)
+    expect(text).toMatch(/`ctx.ask` that was answered hands back that answer/)
+    expect(text).toMatch(/Everything else in `run\(\)` runs again, for real/)
+    // The gate is the example, shown both ways round.
+    expect(text).toContain('make check')
+    expect(text).toContain("ctx.effect('gate-1'")
+  })
 })
 
 describe('the shipped worktrees doc', () => {

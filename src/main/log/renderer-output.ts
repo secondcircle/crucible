@@ -18,6 +18,28 @@ import type { LogSink } from './sink'
  *
  * The forwarding lives as long as the `webContents` it is attached to, which is
  * a window's lifetime; there is nothing to dispose, so nothing is returned.
+ *
+ * ## `Uncaught Error: Invalid guestInstanceId: <n>`
+ *
+ * A line that shows up here, `sourceId: node:electron/js2c/isolated_bundle`,
+ * once per session switch or context panel tab activation — 98 of them over
+ * one six-day life of 0.1.22. It is Electron's own: the browser process throws
+ * it from `guest-view-manager` when the renderer's `<webview>` implementation
+ * calls a method or reads a property on a guest that has already been
+ * detached, which is what unmounting the element does.
+ *
+ * It was chased on 09-17 because a leaked guest per switch would be a leaked
+ * renderer process per switch, and the app had gone black. It is not a leak:
+ * driven through 16 tab flips and 12 session switches, the debug port's target
+ * list holds exactly one guest while an html exhibit is shown and none a second
+ * after it stops being shown, and the DOM agrees (`Shell.panel.test.tsx` holds
+ * that count). Crucible's own code touches a guest in one place, the panel's
+ * refresh, and only while it is mounted.
+ *
+ * So: noise, and it is forwarded like everything else rather than filtered,
+ * because a sink that hides lines is a sink nobody can trust. If it ever
+ * arrives *with* a rising guest count behind it, that is a different bug and
+ * the count is how you will know.
  */
 export function forwardRendererOutput(webContents: WebContents, log: LogSink): void {
   webContents.on('console-message', (details) => {

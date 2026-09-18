@@ -161,6 +161,8 @@ function hangingSessions(): {
       let release: (() => void) | undefined
       let taskPrompt = ''
       return {
+        // Nothing to reopen: what this fake is about is a turn that hangs.
+        token: () => undefined,
         async prompt(text: string): Promise<void> {
           prompts.push(text.split('\n')[0])
           turn += 1

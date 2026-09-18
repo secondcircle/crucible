@@ -147,8 +147,26 @@ export interface RunContext {
    * Ask the orchestrator. `reason` reaches its agent verbatim, so it is
    * prompt text; the answer comes back verbatim too. The run parks with no
    * timeout and stays `running`: `paused` is what a human did to a run.
+   *
+   * Answers are recorded: a resumed run is handed back what it was already
+   * told rather than asking the same question twice.
    */
   ask(question: { reason: string; artifacts?: Record<string, string> }): Promise<string>
+  /**
+   * Do something once per run, whatever happens to the run in between:
+   * `produce` executes the first time, its result is recorded under `id`,
+   * and a resumed run is handed that result back instead of executing it
+   * again. For the work between nodes that must not happen twice — a gate
+   * that takes five minutes, a merge, a commit hash the rest of the run is
+   * measured against.
+   *
+   * The result must survive a JSON round trip, because that is how it is
+   * kept; what comes back is the round-tripped value on the first run as
+   * well as on a replay, so the two cannot differ. Each `id` may be recorded
+   * once per run: reuse one and the run fails, exactly as two nodes sharing
+   * an id do.
+   */
+  effect<T>(id: string, produce: () => T | Promise<T>): Promise<T>
   /**
    * Register a file the WORKFLOW wrote (a split, a merge, an extract) as
    * produced by `fromNodeId`, so nodes reading it infer a real parent instead

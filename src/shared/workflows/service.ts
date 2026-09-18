@@ -5,7 +5,7 @@
 import type { SessionId, TranscriptItem, Unsubscribe } from '../agent/port'
 import type { RunTools } from '../agent/run-tools'
 import type { ArtifactKind } from './artifacts'
-import type { RunRecord, WorkflowRunId } from './run'
+import type { ResumeKind, RunRecord, WorkflowRunId } from './run'
 
 /** One artifact as the artifact reader receives it. */
 export interface ArtifactView {
@@ -41,10 +41,12 @@ export interface WorkflowRunService {
   // The run view's mechanical buttons. Everything conversational goes through
   // the orchestrator instead.
   pause(runId: WorkflowRunId): Promise<void>
-  // Total over the two stopped states: a paused run un-pauses, an interrupted
-  // one re-runs the node the app quit cut down, from that node's beginning, in
-  // the same worktree. Every other status is refused with a sentence.
-  resume(runId: WorkflowRunId): Promise<void>
+  // Total over every stop short of completion, paused included: the node the
+  // run stopped on continues from its last turn, in the same worktree, and
+  // what the run already did is handed back from its record. `clean-restart`
+  // runs that node again from its prompt instead. A complete or running run
+  // is refused with a sentence.
+  resume(runId: WorkflowRunId, kind?: ResumeKind): Promise<void>
   cancel(runId: WorkflowRunId): Promise<void>
 
   // Clears a run that asks for attention it no longer deserves: it changes

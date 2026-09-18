@@ -2,7 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import type { TranscriptItem } from '../../../shared/agent/port'
 import {
   currentNode,
-  interruptedNodes,
+  resumePlan,
   runCost,
   runIsLive,
   type RunArtifact,
@@ -476,8 +476,15 @@ function sameOrder(held: readonly string[], next: readonly string[]): boolean {
 }
 
 // What the quit did and what Resume will do about it, stated before the click
-// rather than discovered after it. Present exactly while the run is
-// interrupted — resuming re-renders the column without it.
+// rather than discovered after it. What it will do is not one act: the same
+// `resumePlan` the engine and the interruption notice read splits the cut
+// nodes into the ones that continue from their last turn and the ones with no
+// session left, and each half is described as what it is — so the sentence
+// above the button can never promise a re-spend the click will not make. It
+// names one act per node and not per record: a record a clean restart
+// superseded is not a second node, and the engine will never reopen it.
+// Present exactly while the run is interrupted — resuming re-renders the
+// column without it.
 function InterruptedBanner({
   run,
   toSession
@@ -486,25 +493,58 @@ function InterruptedBanner({
   /** Whether the recorded orchestrator session is still there to report to. */
   readonly toSession: boolean
 }): React.JSX.Element {
-  const cut = interruptedNodes(run).map((node) => node.id)
+  const { continued, restarted } = resumePlan(run, 'continue')
+  // Never a session that no longer exists: a run with none parks until one
+  // adopts it.
+  const where = toSession ? 'the same session' : 'whichever session adopts it'
   return (
     <div className="rvwhy" role="status">
-      <b>Crucible quit while this run was working.</b> Its worktree is left as it stands. Resume
-      re-runs the{' '}
-      {cut.length === 1 ? 'interrupted node' : 'interrupted nodes'}
-      {cut.length === 0 ? ' ' : ' — '}
-      {cut.map((id, at) => (
-        <span key={id}>
-          {at === 0 ? null : ', '}
-          <code>{id}</code>
-        </span>
-      ))}
-      {cut.length === 0 ? '' : ' — '}
-      from that node’s beginning, in the same worktree, reporting to{' '}
-      {/* Never a session that no longer exists: a run with none parks until
-          one adopts it. */}
-      {toSession ? 'the same session' : 'whichever session adopts it'}.
+      <b>Crucible quit while this run was working.</b> Its worktree is left as it stands.
+      {continued.length === 0 ? null : (
+        <>
+          {' '}
+          Resume continues the {nodeWord(continued)} {nodeNames(continued)} from{' '}
+          {possessive(continued)} last turn, in the same worktree, reporting to {where}, so nothing{' '}
+          {continued.length === 1 ? 'it' : 'they'} already spent is spent again.
+        </>
+      )}
+      {restarted.length === 0 ? null : (
+        <>
+          {' '}
+          {continued.length === 0 ? 'Resume runs' : 'It runs'} the {nodeWord(restarted)}{' '}
+          {nodeNames(restarted)} again from {possessive(restarted)} prompt, in the same worktree
+          {continued.length === 0 ? <>, reporting to {where}</> : null}: no session of{' '}
+          {possessive(restarted)} own is on disk to continue from.
+        </>
+      )}
+      {continued.length + restarted.length === 0 ? (
+        <> Resume puts this run back to work in the same worktree, reporting to {where}.</>
+      ) : null}
     </div>
+  )
+}
+
+function nodeWord(nodes: readonly RunNode[]): string {
+  return nodes.length === 1 ? 'interrupted node' : 'interrupted nodes'
+}
+
+function possessive(nodes: readonly RunNode[]): string {
+  return nodes.length === 1 ? 'its' : 'their'
+}
+
+/** The node ids as code chips, em-dashed off the phrase that named them. */
+function nodeNames(nodes: readonly RunNode[]): React.JSX.Element {
+  return (
+    <>
+      —{' '}
+      {nodes.map((node, at) => (
+        <span key={node.id}>
+          {at === 0 ? null : ', '}
+          <code>{node.id}</code>
+        </span>
+      ))}{' '}
+      —
+    </>
   )
 }
 

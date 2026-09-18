@@ -4,9 +4,11 @@ import { artifactKind, artifactName, recordNamesPath } from './artifacts'
 import {
   dismissRefusal,
   INTERRUPTED_MESSAGE,
-  interruptedNodes,
   resumeRefusal,
+  runCanResume,
   runMessageHeader,
+  stoppedNodes,
+  type ResumeKind,
   type RunArtifact,
   type RunNode,
   type RunRecord,
@@ -117,6 +119,7 @@ interface LiveNode {
   contextPercent?: number
   cost?: number
   waitingOn?: { monitorId: string; description: string; since: string }
+  sessionToken?: string
 }
 
 interface LiveRun {
@@ -891,20 +894,23 @@ export function createFakeWorkflowRunService({
     })
   }
 
-  // The interrupted run's own resume walk: the reverted node runs again on the
-  // beat, writing what it declared, and the rest of the graph follows until
-  // the run completes and says so — the whole resume arc, watchable and free.
+  // The resumed run's own walk: the node it stopped on picks up where it
+  // stood on the beat, writing what it declared, and the rest of the graph
+  // follows until the run completes and says so — the whole resume arc,
+  // watchable and free.
   function walkResumed(run: LiveRun): void {
-    const next = run.nodes.findIndex((node) => node.status === 'pending')
+    const next = run.nodes.findIndex(
+      (node) => node.status === 'pending' || node.status === 'running'
+    )
     if (next < 0) {
       finish(run)
       return
     }
     const node = run.nodes[next]
     node.status = 'running'
-    node.startedAt = nowIso()
+    node.startedAt ??= nowIso()
     node.lastActivityAt = nowIso()
-    node.now = 'reading the worktree it left behind…'
+    node.now = 'picking up where it stopped…'
     changed()
     beat(run, () => {
       node.status = 'complete'
@@ -915,7 +921,7 @@ export function createFakeWorkflowRunService({
       // Added to what this node already burned, never replacing it: the money
       // the first attempt spent was really spent.
       node.cost = Number(((node.cost ?? 0) + 0.28).toFixed(2))
-      node.summary = `Re-ran ${node.id} from its beginning after the app quit; nothing was sent anywhere.`
+      node.summary = `Continued ${node.id} after the app quit; nothing was sent anywhere.`
       node.artifacts = node.artifacts.map((artifact) => {
         files?.write(artifact.path, CANNED_BODIES[artifactName(artifact.path)] ?? CANNED_BODY)
         return { ...artifact, writtenAt: nowIso() }
@@ -925,9 +931,9 @@ export function createFakeWorkflowRunService({
     })
   }
 
-  // Total over the two stopped states, refusing every other one with the live
-  // service's own sentence.
-  function resumeRun(runId: WorkflowRunId): void {
+  // Total over every stop short of completion, refusing the rest with the
+  // live service's own sentence.
+  function resumeRun(runId: WorkflowRunId, kind: ResumeKind = 'continue'): void {
     const run = requireRun(runId)
     if (run.status === 'paused') {
       paused.delete(runId)
@@ -935,23 +941,26 @@ export function createFakeWorkflowRunService({
       changed()
       return
     }
-    if (run.status !== 'interrupted') throw new Error(resumeRefusal(runId, run.status))
-    // The record goes back to working and every cut node back to the ghost the
-    // plan drew, keeping what it spent — the engine's own reversion.
+    if (!runCanResume(run as RunRecord)) throw new Error(resumeRefusal(runId, run.status))
+    // The record goes back to working with every stopped node's own record
+    // kept, spend and all — the engine's own shape. A clean restart is the
+    // other act: the node starts over, so what it had written is unwritten.
     run.status = 'running'
     delete run.error
     delete run.endedAt
     delete run.dismissedAt
-    for (const node of run.nodes) {
-      if (node.status !== 'interrupted') continue
-      node.status = 'pending'
-      node.artifacts = node.artifacts.map(({ name, path, desc }) => ({ name, path, desc }))
+    for (const stopped of stoppedNodes(run as RunRecord)) {
+      const node = run.nodes.find((candidate) => candidate.id === stopped.id)
+      if (node === undefined) continue
+      node.status = 'running'
+      node.lastActivityAt = nowIso()
       delete node.error
-      delete node.summary
-      delete node.startedAt
       delete node.endedAt
-      delete node.lastActivityAt
-      delete node.now
+      if (kind === 'clean-restart') {
+        node.artifacts = node.artifacts.map(({ name, path, desc }) => ({ name, path, desc }))
+        delete node.summary
+        node.startedAt = nowIso()
+      }
     }
     changed()
     walkResumed(run)
@@ -1044,11 +1053,13 @@ export function createFakeWorkflowRunService({
       return `Answer delivered to run ${runId}; it resumes from here.`
     },
 
-    async resume(_sessionId: SessionId, runId: string): Promise<string> {
-      // Named before the act: resuming reverts the cut nodes to ghosts.
-      const cut = interruptedNodes(requireRun(runId) as RunRecord).map((node) => node.id)
-      resumeRun(runId)
-      return resumeAnswer(requireRun(runId) as RunRecord, cut)
+    async resume(_sessionId: SessionId, runId: string, kind?: ResumeKind): Promise<string> {
+      // Copied before the act: once the run is working, where it stopped is
+      // no longer on the record to name.
+      const before = requireRun(runId) as RunRecord
+      const stopped = { ...before, nodes: before.nodes.map((node) => ({ ...node })) }
+      resumeRun(runId, kind)
+      return resumeAnswer(requireRun(runId) as RunRecord, stopped, kind)
     }
   }
 
@@ -1072,8 +1083,8 @@ export function createFakeWorkflowRunService({
       changed()
     },
 
-    async resume(runId: WorkflowRunId): Promise<void> {
-      resumeRun(runId)
+    async resume(runId: WorkflowRunId, kind?: ResumeKind): Promise<void> {
+      resumeRun(runId, kind)
     },
 
     async dismiss(runId: WorkflowRunId): Promise<void> {
@@ -1373,7 +1384,8 @@ function cannedFailed(
 
 // A build the app quit out from under, shaped like the approved mock's row:
 // four nodes done, the gate cut down mid-flight, an orchestrator that is owed
-// the news, and $3.62 already spent. Resume re-runs the cut node alone.
+// the news, and $3.62 already spent. Resume continues the cut node alone, from
+// its last turn: its session is on disk below.
 function cannedInterrupted(
   workspace: CannedWorkspace,
   artifactDir: (runId: WorkflowRunId) => string,
@@ -1472,13 +1484,15 @@ function cannedInterrupted(
         startedAt: hoursAgo(1.3),
         endedAt: hoursAgo(0.9)
       },
-      // The node the quit cut down: what it declared is still unwritten, and
-      // its error is the one sentence the sweep writes.
+      // The node the quit cut down: what it declared is still unwritten, its
+      // error is the one sentence the sweep writes, and its session is on
+      // disk — which is what a resume continues from.
       {
         id: 'gate-alignment',
         status: 'interrupted',
         parents: ['t2-review'],
         model: 'anthropic/claude-opus-5:high',
+        sessionToken: `${runDir(CANNED_INTERRUPTED_ID)}/sessions/gate-alignment.jsonl`,
         reads: [read(intent), read(changes), read(tests)],
         artifacts: [
           {

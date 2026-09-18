@@ -18,6 +18,7 @@ import {
   git,
   loaderOf,
   outputPath,
+  recordsOnDisk,
   rig,
   scriptedSessions,
   startRequest,
@@ -96,7 +97,7 @@ describe('the engine end to end', () => {
   })
 
   it('runs a workflow in its own worktree and reports completion to the orchestrator', async () => {
-    const { engine, repo, stateDir, delivered } = rig({ solo: oneNode }, () => {
+    const launched = rig({ solo: oneNode }, () => {
       return (prompt, tools) => {
         // The node's work: a repo change and its declared artifact.
         writeFileSync(join(tools.cwd, 'made-by-node.txt'), 'work\n')
@@ -105,6 +106,7 @@ describe('the engine end to end', () => {
       }
     })
 
+    const { engine, repo, delivered } = launched
     const task = join(repo, 'task.md')
     writeFileSync(task, 'the task\n')
     const started = await engine.start(startRequest(repo, 'solo', { prompt: task }))
@@ -139,7 +141,7 @@ describe('the engine end to end', () => {
     expect(ending?.text).toContain(run.branch ?? '')
 
     // The record outlives the engine: a fresh store loads it whole.
-    const reloaded = createRunStore(stateDir).load()
+    const reloaded = recordsOnDisk(launched)
     expect(reloaded[0].id).toBe(run.id)
     expect(reloaded[0].status).toBe('complete')
   })
@@ -194,7 +196,7 @@ describe('the engine end to end', () => {
   })
 
   it('records a node\u2019s cache miss against the run, and tells nobody', async () => {
-    const { engine, repo, stateDir, delivered, recorded } = rig({ solo: oneNode }, () => {
+    const missed = rig({ solo: oneNode }, () => {
       return (prompt, tools) => {
         tools.cacheMiss({
           provider: 'anthropic',
@@ -216,6 +218,7 @@ describe('the engine end to end', () => {
         tools.complete({ summary: 'did the thing' })
       }
     })
+    const { engine, repo, delivered, recorded } = missed
     const task = join(repo, 'task.md')
     writeFileSync(task, 'the task\n')
     const started = await engine.start(startRequest(repo, 'solo', { prompt: task }))
@@ -237,7 +240,7 @@ describe('the engine end to end', () => {
 
     // The chip's mark: the run counts it, and the record outlives the engine.
     expect(run.nodes[0].cacheMisses).toBe(1)
-    expect(createRunStore(stateDir).load()[0].nodes[0].cacheMisses).toBe(1)
+    expect(recordsOnDisk(missed)[0].nodes[0].cacheMisses).toBe(1)
 
     // A miss inside a run never becomes a message to the orchestrator: what
     // it says is what it always says, and nothing about cache is in it.
@@ -287,14 +290,17 @@ describe('the engine end to end', () => {
   })
 
   it('cancel unwinds the run and says so to the orchestrator', async () => {
-    const { engine, repo, delivered } = rig({ solo: oneNode }, () => () => {
+    const { engine, repo, delivered, sessions } = rig({ solo: oneNode }, () => () => {
       // Never completes: the run only ends because somebody cancels it.
     })
     const task = join(repo, 'task.md')
     writeFileSync(task, 'the task\n')
     const started = await engine.start(startRequest(repo, 'solo', { prompt: task }))
 
-    await until(() => engine.runs()[0].nodes[0]?.status === 'running')
+    // The node is live once its session has been prompted; what status the
+    // record shows by then is this test's business only in that it is not
+    // settled.
+    await until(() => sessions.prompts.length > 0)
     engine.cancel(started.id)
     await until(() => engine.runs()[0].status === 'cancelled')
     expect(delivered.at(-1)?.text).toContain('cancelled')
@@ -432,6 +438,9 @@ describe('the engine end to end', () => {
       ],
       createdAt: '2026-01-01T00:00:00.000Z'
     })
+    // The store writes off the caller's thread; the launch that wrote this
+    // record is gone, and a quit is what put it on disk.
+    store.flush()
 
     const engine = createWorkflowEngine({
       loader: loaderOf({}),
@@ -454,6 +463,7 @@ describe('the engine end to end', () => {
     // Its orchestrator has not heard, and the record says so until it does.
     expect(run.noticePending).toBe(true)
     // Written through, so the next launch reads the settled record.
+    store.flush()
     expect(store.load()[0].status).toBe('interrupted')
 
     // And it is a record, not a ghost: the live-only operations say so
@@ -852,7 +862,8 @@ describe('dismissing and adopting a run', () => {
   })
 
   it('stamps a settled run once, and the stamp outlives the launch', async () => {
-    const { engine, stateDir } = await finishedRun()
+    const settled = await finishedRun()
+    const { engine } = settled
     const runId = engine.runs()[0].id
 
     engine.dismiss(runId)
@@ -866,7 +877,7 @@ describe('dismissing and adopting a run', () => {
     expect(engine.runs()[0].status).toBe('complete')
     expect(existsSync(engine.runs()[0].worktreePath ?? '')).toBe(true)
 
-    const reloaded = createRunStore(stateDir).load()
+    const reloaded = recordsOnDisk(settled)
     expect(reloaded[0].dismissedAt).toBe(stamped)
   })
 
@@ -905,12 +916,13 @@ describe('dismissing and adopting a run', () => {
   })
 
   it('hands a settled run over too, and writes the new owner down', async () => {
-    const { engine, stateDir } = await finishedRun()
+    const settled = await finishedRun()
+    const { engine } = settled
     const runId = engine.runs()[0].id
 
     engine.adopt(runId, 'investigator-9')
     expect(engine.runs()[0].sessionId).toBe('investigator-9')
-    expect(createRunStore(stateDir).load()[0].sessionId).toBe('investigator-9')
+    expect(recordsOnDisk(settled)[0].sessionId).toBe('investigator-9')
 
     // A run already owned by that session is a quiet no-op.
     engine.adopt(runId, 'investigator-9')
@@ -919,7 +931,8 @@ describe('dismissing and adopting a run', () => {
   })
 
   it('carries the run directory on every record, backfilling the old ones', async () => {
-    const { engine, stateDir } = await finishedRun()
+    const settled = await finishedRun()
+    const { engine, stateDir } = settled
     const runId = engine.runs()[0].id
     expect(engine.runs()[0].dir).toBe(join(stateDir, runId))
 
@@ -941,7 +954,7 @@ describe('dismissing and adopting a run', () => {
       })
     )
 
-    const loaded = createRunStore(stateDir).load()
+    const loaded = recordsOnDisk(settled)
     expect(loaded.find((run) => run.id === 'old1')?.dir).toBe(older)
     expect(loaded.find((run) => run.id === runId)?.dir).toBe(join(stateDir, runId))
   })
@@ -1013,15 +1026,16 @@ describe('a run with no orchestrator', () => {
   })
 
   it('parks on a failure, and keeps the marker across the store', async () => {
-    const { engine, repo, stateDir, delivered } = rig({ solo: noInputs }, () => () => {
+    const parked = rig({ solo: noInputs }, () => () => {
       throw new Error('the node blew up')
     })
+    const { engine, repo, delivered } = parked
 
     await engine.start(scheduledRequest(repo, 'solo'))
     await until(() => engine.runs()[0].status === 'failed')
 
     expect(delivered).toEqual([])
-    const reloaded = createRunStore(stateDir).load()[0]
+    const reloaded = recordsOnDisk(parked)[0]
     expect(reloaded.scheduled).toBe(true)
     expect(reloaded.sessionId).toBeUndefined()
     expect(reloaded.status).toBe('failed')

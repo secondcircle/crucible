@@ -24,6 +24,14 @@ export interface NodeBlocker {
 export interface NodeSessionRequest {
   /** The run's worktree: where the node's tools work. */
   readonly cwd: string
+  // Where this run keeps its node sessions, so one survives the app quitting
+  // and can be reopened. Crucible's own directory; nothing of π's.
+  readonly sessionDir: string
+  // Reopen the session this token names rather than starting a fresh one:
+  // the node carries on from its last turn, with everything it had said and
+  // been told. A token the factory cannot open is an error, and the engine
+  // falls back to running the node again from its prompt.
+  readonly resumeToken?: string
   /** "provider/model-id:thinkingLevel". */
   readonly model: string
   /** The node's role text; the factory appends the standing prompt itself. */
@@ -62,6 +70,10 @@ export interface NodeSessionStats {
 }
 
 export interface NodeSession {
+  // What this session can be reopened from, opaque to everything above the
+  // factory that made it. Absent when the session leaves nothing behind —
+  // then a node that stops can only be run again from its prompt.
+  token(): string | undefined
   /** One turn: resolves when the turn ends, however it ends. Never rejects
    *  for model trouble — a failed turn ends quietly and the loop nudges. */
   prompt(text: string): Promise<void>

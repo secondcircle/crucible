@@ -6,9 +6,12 @@
 // mangled call arrived as a plausible object with the verdict silently
 // missing, failed one engine turn later with less to go on, and burned the
 // node's retries (run 779a died exactly this way).
-import { describe, expect, it } from 'vitest'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { afterEach, describe, expect, it } from 'vitest'
 import { toTranscript, type StoredMessage } from '../agent/sdk-transcript'
-import { completeNodeParameters, toolCallCount } from './sdk-node-session'
+import { completeNodeParameters, reopenable, toolCallCount } from './sdk-node-session'
 
 describe('completeNodeParameters', () => {
   it('leaves verdict optional and untyped when the node declares no schema', () => {
@@ -102,5 +105,38 @@ describe('toolCallCount', () => {
   it('counts a failed call, and counts no bash run or summary as a call', () => {
     expect(toolCallCount(conversation)).toBe(2)
     expect(toolCallCount(messages())).toBe(0)
+  })
+})
+
+// Resume continues a node in its own session, so the factory is handed the
+// token the node's record carries. A token that names nothing would open as
+// a blank conversation and lose the node its task, so it is refused here and
+// the engine runs the node again from its prompt instead.
+describe('reopening a node session', () => {
+  const scratch: string[] = []
+  afterEach(() => {
+    for (const dir of scratch.splice(0)) rmSync(dir, { recursive: true, force: true })
+  })
+
+  function tempFile(body: string): string {
+    const dir = mkdtempSync(join(tmpdir(), 'crucible-node-session-'))
+    scratch.push(dir)
+    const path = join(dir, 'session.jsonl')
+    writeFileSync(path, body, 'utf8')
+    return path
+  }
+
+  it('accepts a session file with something in it', () => {
+    const path = tempFile('{"type":"session"}\n')
+    expect(reopenable(path)).toBe(path)
+  })
+
+  it('refuses a file that is gone, naming it', () => {
+    expect(() => reopenable('/nowhere/session.jsonl')).toThrow('/nowhere/session.jsonl')
+  })
+
+  it('refuses an empty file, which would open as a conversation with no task', () => {
+    const path = tempFile('')
+    expect(() => reopenable(path)).toThrow('empty')
   })
 })

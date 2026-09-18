@@ -268,7 +268,7 @@ const RUN_ANSWERED_DELTAS: readonly string[] = [
 // deliberate act, and this is the sentence that reports it.
 const RUN_RESUMED_DELTAS: readonly string[] = [
   'That run was cut down by an app quit, and the work is still wanted, so I resumed it: ',
-  'the interrupted node re-runs from its beginning in the same worktree. ',
+  'the interrupted node continues from its last turn in the same worktree. ',
   'Its completion arrives here. (Scripted: no cost.)'
 ]
 

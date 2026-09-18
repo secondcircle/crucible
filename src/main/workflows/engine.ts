@@ -5,9 +5,13 @@ import type { SessionId, TranscriptItem } from '../../shared/agent/port'
 import {
   dismissRefusal,
   INTERRUPTED_MESSAGE,
+  nodeChain,
   resumeRefusal,
+  runCanResume,
   runMessageHeader,
+  type ResumeKind,
   type RunArtifact,
+  type RunEffect,
   type RunNodeStatus,
   type RunRecord,
   type RunStatus,
@@ -17,14 +21,8 @@ import { interruptionNotice } from '../../shared/workflows/status'
 import type { MonitorOwner } from '../../shared/monitors/monitor'
 import type { NodeMonitors } from '../../shared/monitors/service'
 import { lostMonitorsNotice } from '../../shared/monitors/wording'
-import type {
-  NodeResult,
-  NodeSpec,
-  OpenNode,
-  PlannedNode,
-  ReviseOptions,
-  RunContext
-} from './authoring'
+import type { NodeResult, NodeSpec, OpenNode, PlannedNode, ReviseOptions } from './authoring'
+import type { EngineContext, RecordedEffect } from './host/protocol'
 import type { CacheRecorder } from '../cache/ledger'
 import { narrowSkills, type SkillService } from '../skills/service'
 import type { WorkflowHost, WorkflowManifest } from './host/host'
@@ -49,13 +47,28 @@ const DEFAULT_TOOLS = ['read', 'bash', 'edit', 'write', 'grep', 'find', 'ls']
 const NUDGE_LIMIT = 2
 const VALIDATION_RETRY_LIMIT = 3
 
-// What a revision of a replayed node opens with. The session that held the
-// node's context died with the process, so feedback cannot re-enter it: a
-// fresh agent is told what it is picking up and where the prior work is.
-const REPLAY_REVISION_NOTICE =
-  'You are picking this node up in a fresh session: Crucible quit while this run was working, ' +
-  'so the earlier conversation is gone, while the worktree and the artifacts hold the work that ' +
-  'was already done. Read what is there before you change it.'
+// What a continued node hears first. Its own session is reopened, so
+// everything it did is above this line; the only news is the gap.
+const CONTINUED_NOTICE =
+  'Crucible quit while this run was working, and the run has now been resumed. This is the same ' +
+  'session: everything above is yours, and the worktree is as you left it. Check what is already ' +
+  'on disk before redoing anything.'
+
+// What a node run again from its prompt hears, when its own session could
+// not be reopened. A clean restart asked for by name says the same thing:
+// the transcript that stopped stays readable, and this agent has none of it.
+const RESTART_NOTICE =
+  'You are picking this node up in a fresh session: the earlier attempt stopped and its ' +
+  'conversation is not available, while the worktree and the artifacts hold the work that was ' +
+  'already done. Read what is there before you change it.'
+
+/**
+ * A recorded session that would not reopen — no factory that keeps them, a
+ * record written before they were kept, a file since deleted. Thrown where
+ * the session opens and caught where the node starts, which is the one place
+ * that can still choose to run the node again instead.
+ */
+class SessionGone extends Error {}
 
 export interface StartRunRequest {
   readonly workspacePath: string
@@ -78,12 +91,14 @@ export interface WorkflowEngine {
   /** Resolves at kickoff; the run continues in the background. */
   start(request: StartRunRequest): Promise<RunRecord>
   pause(runId: WorkflowRunId): void
-  // Total over the two stopped states: a paused run un-pauses, an interrupted
-  // one re-runs the node the quit cut down, from its beginning, in the same
-  // worktree, replaying what already completed at no cost. Every other status
-  // is refused with a sentence. Resolves once the run is working again; the
-  // run itself continues in the background.
-  resume(runId: WorkflowRunId): Promise<void>
+  // Total over every stop short of completion, paused included. The stopped
+  // node continues from its last turn in its own session, in the same
+  // worktree; everything the run already did — completed nodes, answered
+  // check-ins, recorded effects — is handed back from the record at no cost.
+  // `clean-restart` is the other act: the stopped node runs again from its
+  // prompt, as a revision, with no memory of the attempt that stopped.
+  // Resolves once the run is working again; the run continues in background.
+  resume(runId: WorkflowRunId, kind?: ResumeKind): Promise<void>
   cancel(runId: WorkflowRunId): void
   // Every run of this session that is owed an interruption notice says it now,
   // through the ordinary delivery path. Called by the run service's turn-start
@@ -163,6 +178,7 @@ interface LiveNode {
   cost?: number
   cacheMisses?: number
   waitingOn?: { monitorId: string; description: string; since: string }
+  sessionToken?: string
 }
 
 interface LiveRun {
@@ -188,6 +204,7 @@ interface LiveRun {
   }
   waiting?: boolean
   nodes: LiveNode[]
+  effects?: RunEffect[]
   outputs?: Record<string, unknown>
   error?: string
   after?: string
@@ -504,11 +521,19 @@ export function createWorkflowEngine(options: EngineOptions): WorkflowEngine {
     return run as RunRecord
   }
 
-  // `replay` is what a resumed run brings: the record already holds nodes a
-  // previous life completed, and those are handed back rather than run again.
-  // A first run replays nothing, so nothing about it changes.
-  async function execute(handle: Handle, manifest: WorkflowManifest, replay = false): Promise<void> {
+  // What a resumed run brings: the record already holds what a previous life
+  // did, and `run()` executes again over it. Nodes it completed are handed
+  // back, effects and check-in answers it recorded are handed back, and the
+  // node it stopped on carries on in its own session — unless this is a clean
+  // restart, which runs that node again from its prompt as a revision. A
+  // first run replays nothing, so nothing about it changes.
+  async function execute(
+    handle: Handle,
+    manifest: WorkflowManifest,
+    resumed?: ResumeKind
+  ): Promise<void> {
     const { run, host } = handle
+    const replay = resumed !== undefined
     const artifacts = store.artifactDir(run.id)
     const cwd = run.worktreePath ?? run.workspacePath
 
@@ -533,25 +558,38 @@ export function createWorkflowEngine(options: EngineOptions): WorkflowEngine {
     // the whole point of resuming.
     const taken = new Set<string>()
 
-    const recordOf = (nodeId: string): LiveNode | undefined =>
-      run.nodes.find((candidate) => candidate.id === nodeId)
+    // What a previous life recorded under a key of its own, to be handed back
+    // instead of done again, and the keys this execution has written. A first
+    // run replays nothing and records everything.
+    const recordedEffects = new Map<string, RunEffect>(
+      (replay ? (run.effects ?? []) : []).map((effect) => [effect.key, effect])
+    )
+    // Every effect id this execution has claimed, whether its value came off
+    // the record or out of the work, and the subset it has written. One id,
+    // once per run: an id that replays is still claimed, so a workflow asking
+    // for one twice fails on a resumed run exactly as it does on a first one.
+    const effectsClaimed = new Set<string>()
+    const effectsRecorded = new Set<string>()
+    // Check-ins carry no id of their own, so the key is their order in the
+    // run: `run()` re-executes from the top, and the nth check-in of a
+    // resumed run is the nth check-in of the life before it. The · is the
+    // engine's own marker in ids, so no workflow's effect id collides.
+    let asks = 0
 
-    // The furthest completed record of a held-open node's revision chain:
-    // `id`, then `id·rN` by highest N. What a replayed handle's result is.
+    // Every record one node's session has taken: `id`, then `id·rN` in
+    // order. One session, several records, which is what a revision is. The
+    // rule lives in shared/workflows/run.ts, where the surfaces read it, so
+    // what a run view or an orchestrator is told about a node is worked out
+    // from the same records this is about to act on.
+    function chainOf(id: string): readonly LiveNode[] {
+      return nodeChain(run.nodes, id)
+    }
+
+    /** The furthest completed record of that chain: a replayed handle's result. */
     function furthestComplete(id: string): LiveNode | undefined {
-      const revised = run.nodes
-        .filter(
-          (candidate) =>
-            candidate.status === 'complete' && candidate.id.startsWith(`${id}·r`)
-        )
-        .map((candidate) => ({
-          node: candidate,
-          round: Number(candidate.id.slice(id.length + 2))
-        }))
-        .filter((candidate) => Number.isFinite(candidate.round))
-        .sort((left, right) => left.round - right.round)
-      const base = recordOf(id)
-      return revised.at(-1)?.node ?? (base?.status === 'complete' ? base : undefined)
+      return chainOf(id)
+        .filter((candidate) => candidate.status === 'complete')
+        .at(-1)
     }
 
     /** The next free revision id of a node: `<id>·rN`. */
@@ -577,6 +615,9 @@ export function createWorkflowEngine(options: EngineOptions): WorkflowEngine {
       readonly firstMessage: string
       /** Explicit for a revision; read from the plan and the reads otherwise. */
       readonly parents?: readonly string[]
+      // Reopen this session rather than start one: the node carries on from
+      // its last turn. A token that will not open throws `SessionGone`.
+      readonly resume?: string
       readonly onHold?: (opened: OpenNode) => void
     }
 
@@ -605,26 +646,92 @@ export function createWorkflowEngine(options: EngineOptions): WorkflowEngine {
 
       // A resumed run replays what the previous life completed. Anything else
       // — a node the quit cut down, one that failed, one this definition never
-      // ran before — runs for real, exactly as a first run would.
-      const recorded = !replay
-        ? undefined
-        : onHold === undefined
-          ? recordOf(id)
-          : furthestComplete(id)
-      if (recorded?.status === 'complete') {
+      // ran before — goes back to work below.
+      //
+      // The record chain is the single answer to "is this node done", for a
+      // plain node exactly as for a held-open one. A clean restart leaves the
+      // base record `interrupted` for good and puts the completion on a
+      // revision, so a check that read the base alone would send finished
+      // work back to a paid session.
+      const recorded = replay ? furthestComplete(id) : undefined
+      if (recorded !== undefined) {
         return replayed(id, recorded, spec, outputPaths, onHold)
       }
+      // Nothing of this node completed, so what goes back to work is the
+      // furthest record its session took — a revision, if the stop caught
+      // one mid-flight.
+      const furthest = replay ? chainOf(id).at(-1) : undefined
 
       const lost = monitors?.takeLost(nodeOwner(id)) ?? []
+      const task = [
+        composeTaskPrompt(spec, outputPaths),
+        ...(lost.length === 0 ? [] : [lostMonitorsNotice(lost)])
+      ].join('\n\n')
+      const fresh = (): Promise<NodeResult> =>
+        liveNode({
+          id,
+          recordId: id,
+          spec,
+          outputPaths,
+          firstMessage: task,
+          ...(onHold === undefined ? {} : { onHold })
+        })
+
+      // A node that never started, on a resumed run or not, is simply run. A
+      // complete record is never stopped: whichever record of the chain
+      // carried the completion, it was replayed above.
+      const stopped =
+        furthest === undefined ||
+        furthest.status === 'pending' ||
+        furthest.status === 'complete'
+          ? undefined
+          : furthest
+      if (stopped === undefined) return fresh()
+
+      // The node the stop cut down. Its own session holds its work, so it
+      // continues from its last turn, keeping its record and its spend.
+      if (resumed === 'continue' && stopped.sessionToken !== undefined) {
+        try {
+          return await liveNode({
+            id,
+            recordId: stopped.id,
+            spec,
+            outputPaths,
+            firstMessage: [CONTINUED_NOTICE, ...(lost.length === 0 ? [] : [lostMonitorsNotice(lost)])].join(
+              '\n\n'
+            ),
+            resume: stopped.sessionToken,
+            ...(onHold === undefined ? {} : { onHold })
+          })
+        } catch (cause) {
+          if (!(cause instanceof SessionGone)) throw cause
+          log?.({
+            event: 'node_session_unreadable',
+            runId: run.id,
+            nodeId: stopped.id,
+            message: cause.message
+          })
+        }
+      }
+
+      // A clean restart, or a stopped node with no session to reopen: run
+      // again from the prompt, under a revision id, so the transcript of the
+      // attempt that stopped stays readable beside it.
+      const restartId = nextRevisionId(id)
+      log?.({
+        event: 'node_clean_restart',
+        runId: run.id,
+        nodeId: stopped.id,
+        recordId: restartId,
+        asked: resumed === 'clean-restart'
+      })
       return liveNode({
         id,
-        recordId: id,
+        recordId: restartId,
         spec,
         outputPaths,
-        firstMessage:
-          lost.length === 0
-            ? composeTaskPrompt(spec, outputPaths)
-            : [composeTaskPrompt(spec, outputPaths), lostMonitorsNotice(lost)].join('\n\n'),
+        parents: [...new Set([stopped.id, ...stopped.parents])],
+        firstMessage: [task, RESTART_NOTICE].join('\n\n'),
         ...(onHold === undefined ? {} : { onHold })
       })
     }
@@ -655,11 +762,12 @@ export function createWorkflowEngine(options: EngineOptions): WorkflowEngine {
     }
 
     /**
-     * The handle a replayed `openNode` hands back. `revise()` cannot re-enter
-     * the session that held this node's context — it died with the process —
-     * so the first one opens a fresh revision node told what it is picking up,
-     * and every later one goes into that session through the ordinary
-     * machinery. `close()` has nothing of its own to release.
+     * The handle a replayed `openNode` hands back. The first `revise()`
+     * reopens the session the node's record names — same context, a new
+     * revision record — and every later one goes into that session through
+     * the ordinary machinery. A record with no session to reopen gets a
+     * fresh one, told what it is picking up. `close()` has nothing of its
+     * own to release.
      */
     function replayedHandle(
       id: string,
@@ -677,25 +785,60 @@ export function createWorkflowEngine(options: EngineOptions): WorkflowEngine {
         async revise(message: string, opts?: ReviseOptions): Promise<NodeResult> {
           if (live !== undefined) return live.revise(message, opts)
           const revisionId = nextRevisionId(id)
-          const opened = await new Promise<OpenNode>((resolve, reject) => {
-            track(
-              liveNode({
-                id,
-                recordId: revisionId,
-                spec,
-                outputPaths,
-                parents: [
-                  ...new Set([record.id, ...keptParents(run, revisionId, opts?.from ?? [])])
-                ],
-                firstMessage: [
-                  composeTaskPrompt(spec, outputPaths),
-                  REPLAY_REVISION_NOTICE,
-                  message
-                ].join('\n\n'),
-                onHold: resolve
+          const parents = [
+            ...new Set([record.id, ...keptParents(run, revisionId, opts?.from ?? [])])
+          ]
+          const open = (token?: string): Promise<OpenNode> =>
+            new Promise<OpenNode>((resolve, reject) => {
+              track(
+                liveNode({
+                  id,
+                  recordId: revisionId,
+                  spec,
+                  outputPaths,
+                  parents,
+                  firstMessage:
+                    token === undefined
+                      ? [composeTaskPrompt(spec, outputPaths), RESTART_NOTICE, message].join('\n\n')
+                      : [CONTINUED_NOTICE, message].join('\n\n'),
+                  ...(token === undefined ? {} : { resume: token }),
+                  onHold: resolve
+                })
+              ).catch(reject)
+            })
+          // Opening without a token is a from-the-prompt re-run, which the
+          // direct path logs and this one owes the log too: the record has no
+          // session to reopen (every record written before sessions outlived
+          // the app), or the one it named would not open. Nobody asked for
+          // it, so `asked` is false.
+          const restarting = (): void => {
+            log?.({
+              event: 'node_clean_restart',
+              runId: run.id,
+              nodeId: record.id,
+              recordId: revisionId,
+              asked: false
+            })
+          }
+          let opened: OpenNode
+          if (record.sessionToken === undefined) {
+            restarting()
+            opened = await open()
+          } else {
+            try {
+              opened = await open(record.sessionToken)
+            } catch (cause) {
+              if (!(cause instanceof SessionGone)) throw cause
+              log?.({
+                event: 'node_session_unreadable',
+                runId: run.id,
+                nodeId: record.id,
+                message: cause.message
               })
-            ).catch(reject)
-          })
+              restarting()
+              opened = await open()
+            }
+          }
           live = opened
           return opened.result
         },
@@ -723,11 +866,17 @@ export function createWorkflowEngine(options: EngineOptions): WorkflowEngine {
 
       // The record this session's first turn takes over: the plan's ghost, or
       // — on a resumed run — whatever the previous life left under this id
-      // and never completed. One record per id, whichever life wrote it.
-      const slot = run.nodes.findIndex(
-        (candidate) => candidate.id === job.recordId && candidate.status !== 'complete'
-      )
+      // and never completed. One record per id, whichever life wrote it, so
+      // the slot is found by id alone: a second record under one id is a
+      // state `chainOf`, `nextRevisionId`, the transcript store and the run
+      // graph all take to be impossible. A complete record is nobody's to
+      // take over — that work is replayed, not redone — and this throws
+      // before a session is opened, so the refusal costs nothing.
+      const slot = run.nodes.findIndex((candidate) => candidate.id === job.recordId)
       const held = slot >= 0 ? run.nodes[slot] : undefined
+      if (held?.status === 'complete') {
+        throw new Error(`node "${job.recordId}" is already complete in this run`)
+      }
       // The spec's own declaration wins the moment the node starts; failing
       // that the plan's forecast stands, because a record rebuilt from
       // inference alone would erase edges the workflow already got right.
@@ -749,14 +898,86 @@ export function createWorkflowEngine(options: EngineOptions): WorkflowEngine {
       for (const path of Object.values(outputPaths)) producerByArtifact.set(path, job.recordId)
 
       // What the previous life already burned under this id. Kept, so a
-      // re-run adds to it rather than erasing money that was really spent; a
-      // revision starts its own record and carries nothing.
-      let carried = { cost: held?.cost ?? 0, cacheMisses: held?.cacheMisses ?? 0 }
+      // continued node adds to it rather than erasing money that was really
+      // spent; a revision starts its own record and carries nothing.
+      let carried = {
+        cost: held?.cost ?? 0,
+        cacheMisses: held?.cacheMisses ?? 0,
+        toolCalls: held?.toolCalls ?? 0
+      }
 
       const model = await modelFor(spec.model ?? defaultModel, { runId: run.id, nodeId: id })
 
-      // The record currently carrying this session; revisions swap it.
-      let node: LiveNode = {
+      // --- the two injected tools ----------------------------------------
+      let completion: { summary: string; verdict?: unknown } | undefined
+      let blockerRaised: { reason: string; details?: string; artifact?: string } | undefined
+
+      // Resolved against the run's own worktree, so the project-local origin
+      // is the branch this run is working on.
+      const nodeSkills = narrowSkills((await skills?.resolve(cwd)) ?? [], spec.skills)
+
+      // The record currently carrying this session; revisions swap it. It is
+      // assigned below, once there is a session to carry.
+      let node: LiveNode
+
+      // Opened before the record is touched, so a session that will not
+      // reopen leaves the stopped node exactly as it stood and the caller can
+      // restart it instead.
+      const session: NodeSession = await sessions
+        .start({
+          cwd,
+          model,
+          sessionDir: store.sessionDir(run.id),
+          ...(job.resume === undefined ? {} : { resumeToken: job.resume }),
+          rolePrompt: nodeRolePrompt(id, run.workflow, cwd),
+          tools: spec.tools ?? DEFAULT_TOOLS,
+          skills: nodeSkills,
+          ...(monitors === undefined ? {} : { monitors: monitors.tools(owner, cwd) }),
+          ...(spec.verdict === undefined ? {} : { verdictSchema: spec.verdict }),
+          onComplete(done) {
+            completion = {
+              summary: done.summary,
+              ...(done.verdict === undefined ? {} : { verdict: done.verdict })
+            }
+            return 'Completion recorded. End your turn now.'
+          },
+          onBlocker(blocker) {
+            blockerRaised = blocker
+            return 'Blocker recorded. End your turn and wait for a response.'
+          },
+          // A miss inside a run marks the chip and enters the ledger. It never
+          // becomes a message to the orchestrator: nobody is asked
+          // about it, and the evidence is read later.
+          onCacheMiss(miss) {
+            node.cacheMisses = (node.cacheMisses ?? 0) + 1
+            save(run)
+            void cache?.append({
+              at: nowIso(),
+              source: {
+                kind: 'run',
+                runId: run.id,
+                workflow: run.workflow,
+                node: node.id,
+                // The workspace the run belongs to, not the worktree it works in.
+                workspace: run.workspacePath
+              },
+              provider: miss.provider,
+              model: miss.model,
+              ...(miss.thinkingLevel === undefined ? {} : { thinkingLevel: miss.thinkingLevel }),
+              tokensRebilled: miss.tokensRebilled,
+              dollarsRebilled: miss.dollarsRebilled,
+              gapMs: miss.gapMs,
+              changed: miss.changed
+            })
+          }
+        })
+        .catch((cause: unknown) => {
+          if (job.resume === undefined) throw cause
+          throw new SessionGone(cause instanceof Error ? cause.message : String(cause))
+        })
+
+      const token = session.token()
+      node = {
         id: job.recordId,
         status: 'running',
         parents,
@@ -767,68 +988,19 @@ export function createWorkflowEngine(options: EngineOptions): WorkflowEngine {
           desc: 'input'
         })),
         artifacts: declaredArtifacts(),
-        startedAt: nowIso(),
-        // The carried money is on the record from the re-run's first instant,
-        // not from its first stats capture: a node that blocks before it
-        // reports any activity never gets one, and until then the record
-        // would claim the previous life spent nothing.
+        startedAt: held?.startedAt ?? nowIso(),
+        // The carried money is on the record from the first instant, not from
+        // the first stats capture: a node that blocks before it reports any
+        // activity never gets one, and until then the record would claim the
+        // previous life spent nothing.
         ...(carried.cost === 0 ? {} : { cost: round4(carried.cost) }),
-        ...(carried.cacheMisses === 0 ? {} : { cacheMisses: carried.cacheMisses })
+        ...(carried.cacheMisses === 0 ? {} : { cacheMisses: carried.cacheMisses }),
+        ...(carried.toolCalls === 0 ? {} : { toolCalls: carried.toolCalls }),
+        ...(token === undefined ? {} : { sessionToken: token })
       }
       if (slot >= 0) run.nodes[slot] = node
       else run.nodes.push(node)
       save(run)
-
-      // --- the two injected tools ----------------------------------------
-      let completion: { summary: string; verdict?: unknown } | undefined
-      let blockerRaised: { reason: string; details?: string; artifact?: string } | undefined
-
-      // Resolved against the run's own worktree, so the project-local origin
-      // is the branch this run is working on.
-      const nodeSkills = narrowSkills((await skills?.resolve(cwd)) ?? [], spec.skills)
-
-      const session: NodeSession = await sessions.start({
-        cwd,
-        model,
-        rolePrompt: nodeRolePrompt(id, run.workflow, cwd),
-        tools: spec.tools ?? DEFAULT_TOOLS,
-        skills: nodeSkills,
-        ...(monitors === undefined ? {} : { monitors: monitors.tools(owner, cwd) }),
-        ...(spec.verdict === undefined ? {} : { verdictSchema: spec.verdict }),
-        onComplete(done) {
-          completion = { summary: done.summary, ...(done.verdict === undefined ? {} : { verdict: done.verdict }) }
-          return 'Completion recorded. End your turn now.'
-        },
-        onBlocker(blocker) {
-          blockerRaised = blocker
-          return 'Blocker recorded. End your turn and wait for a response.'
-        },
-        // A miss inside a run marks the chip and enters the ledger. It never
-        // becomes a message to the orchestrator: nobody is asked
-        // about it, and the evidence is read later.
-        onCacheMiss(miss) {
-          node.cacheMisses = (node.cacheMisses ?? 0) + 1
-          save(run)
-          void cache?.append({
-            at: nowIso(),
-            source: {
-              kind: 'run',
-              runId: run.id,
-              workflow: run.workflow,
-              node: node.id,
-              // The workspace the run belongs to, not the worktree it works in.
-              workspace: run.workspacePath
-            },
-            provider: miss.provider,
-            model: miss.model,
-            ...(miss.thinkingLevel === undefined ? {} : { thinkingLevel: miss.thinkingLevel }),
-            tokensRebilled: miss.tokensRebilled,
-            dollarsRebilled: miss.dollarsRebilled,
-            gapMs: miss.gapMs,
-            changed: miss.changed
-          })
-        }
-      })
 
       let abortedTurn: 'pause' | 'watchdog' | undefined
 
@@ -841,8 +1013,13 @@ export function createWorkflowEngine(options: EngineOptions): WorkflowEngine {
 
       // One session can back several node records (the original plus its
       // revisions); each record reports its own delta of the session totals.
-      let statBase = { toolCalls: 0, cost: 0 }
-      let sessionStats = { toolCalls: 0, cost: 0 }
+      // A reopened session reports what it spent before the quit too, so its
+      // base is taken the moment it opens and the record's own carried
+      // figures stand: nothing is counted twice, whichever way the session
+      // accounts for its past.
+      const opened = job.resume === undefined ? undefined : session.stats()
+      let statBase = { toolCalls: opened?.toolCalls ?? 0, cost: opened?.cost ?? 0 }
+      let sessionStats = { ...statBase }
 
       // The first observation, never the last write: a stamp is set once and
       // never removed, so a file deleted after the fact does not un-write it.
@@ -853,16 +1030,27 @@ export function createWorkflowEngine(options: EngineOptions): WorkflowEngine {
         }
       }
 
-      const captureStats = (): void => {
+      // `final` is for the last capture of a session: the transcript is read
+      // here rather than when the store gets round to writing it, because the
+      // session is about to go away. Every other capture hands the store a
+      // way to read it later, so a node reporting activity ten times a second
+      // costs ten cheap calls and one write.
+      const captureStats = (final = false): void => {
         stampWritten()
         const stats = session.stats()
         sessionStats = { toolCalls: stats.toolCalls, cost: stats.cost ?? 0 }
-        node.toolCalls = Math.max(0, sessionStats.toolCalls - statBase.toolCalls)
+        node.toolCalls = carried.toolCalls + Math.max(0, sessionStats.toolCalls - statBase.toolCalls)
         if (stats.cost !== undefined) {
           node.cost = round4(carried.cost + Math.max(0, stats.cost - statBase.cost))
         }
         if (stats.contextPercent !== undefined) node.contextPercent = stats.contextPercent
-        store.writeTranscript(run.id, node.id, session.transcript())
+        const recordId = node.id
+        if (final) {
+          const items = session.transcript()
+          store.writeTranscript(run.id, recordId, () => items)
+        } else {
+          store.writeTranscript(run.id, recordId, () => session.transcript())
+        }
       }
 
       let snapshotTimer: ReturnType<typeof setTimeout> | undefined
@@ -882,11 +1070,13 @@ export function createWorkflowEngine(options: EngineOptions): WorkflowEngine {
         const revisionParents = [
           ...new Set([node.id, ...keptParents(run, revisionId, from ?? [])])
         ]
-        captureStats()
+        // The record being left behind gets its last transcript now: what
+        // this session says from here belongs to the revision.
+        captureStats(true)
         statBase = { ...sessionStats }
         // A revision is its own record from zero: what the record it follows
         // burned stays on that record.
-        carried = { cost: 0, cacheMisses: 0 }
+        carried = { cost: 0, cacheMisses: 0, toolCalls: 0 }
         const previous = node
         node = {
           id: revisionId,
@@ -934,7 +1124,7 @@ export function createWorkflowEngine(options: EngineOptions): WorkflowEngine {
         offActivity()
         clearInterval(watchdog)
         if (snapshotTimer !== undefined) clearTimeout(snapshotTimer)
-        captureStats()
+        captureStats(true)
         session.dispose()
         save(run)
       }
@@ -1114,6 +1304,7 @@ export function createWorkflowEngine(options: EngineOptions): WorkflowEngine {
               delete node.now
               captureStats()
               save(run)
+
               reviseWaiter?.resolve(result)
               reviseWaiter = undefined
               parked = true
@@ -1266,12 +1457,43 @@ export function createWorkflowEngine(options: EngineOptions): WorkflowEngine {
       }
     }
 
+    /** One key, once per run: asking for it twice is the workflow's mistake. */
+    function claimEffect(key: string): void {
+      if (effectsClaimed.has(key)) throw new Error(`duplicate effect id "${key}"`)
+      effectsClaimed.add(key)
+    }
+
+    /** What this run recorded under a key, for a resumed run to be handed. */
+    function recordedEffect(key: string): RecordedEffect {
+      claimEffect(key)
+      const already = recordedEffects.get(key)
+      if (already === undefined) return { replayed: false }
+      log?.({ event: 'effect_replayed', runId: run.id, key })
+      return { replayed: true, value: already.value }
+    }
+
+    /** The second half of an effect: the value the work just produced. */
+    function recordEffect(key: string, value: unknown): void {
+      if (effectsRecorded.has(key)) throw new Error(`duplicate effect id "${key}"`)
+      // Claimed already by the lookup half that precedes it; claimed here for
+      // a caller that skipped that half.
+      if (!effectsClaimed.has(key)) claimEffect(key)
+      effectsRecorded.add(key)
+      run.effects = [...(run.effects ?? []), { key, value, at: nowIso() }]
+      save(run)
+    }
+
     /** A workflow-level question. The run stays `running` while parked. */
     async function ask(question: {
       reason: string
       artifacts?: Record<string, string>
     }): Promise<string> {
       if (cancelAsked()) throw new Error('the run was cancelled')
+      // A check-in the run already had answered is not asked again: the
+      // orchestrator answered it once, and on a resume it is handed back.
+      const key = `·ask·${(asks += 1)}`
+      const already = recordedEffect(key)
+      if (already.replayed) return String(already.value)
       run.question = { reason: question.reason, raisedAt: nowIso() }
       const pending = awaitAnswer(handle)
       save(run)
@@ -1295,11 +1517,12 @@ export function createWorkflowEngine(options: EngineOptions): WorkflowEngine {
         run.question.answeredAt = nowIso()
         run.question.answer = answer
       }
+      recordEffect(key, answer)
       save(run)
       return answer
     }
 
-    const ctx: RunContext = {
+    const ctx: EngineContext = {
       inputs: run.inputs,
       artifactDir: artifacts,
       cwd,
@@ -1309,6 +1532,12 @@ export function createWorkflowEngine(options: EngineOptions): WorkflowEngine {
           track(runNode(id, spec, resolve)).catch(reject)
         }),
       ask,
+      async recordedEffect(id) {
+        return recordedEffect(id)
+      },
+      async recordEffect(id, value) {
+        recordEffect(id, value)
+      },
       derive: async (path, fromNodeId) => {
         if (!run.nodes.some((candidate) => candidate.id === fromNodeId)) {
           throw new Error(`derive("${path}"): no node "${fromNodeId}" in this run`)
@@ -1465,25 +1694,31 @@ export function createWorkflowEngine(options: EngineOptions): WorkflowEngine {
   const resuming = new Set<WorkflowRunId>()
 
   /**
-   * Total over the two stopped states. A paused run un-pauses. An interrupted
-   * one re-runs the node the quit cut down, from that node's beginning, in the
-   * same worktree, reporting to the same orchestrator; everything the previous
-   * life completed is replayed from the record at no cost. Every other status
-   * is refused, and so is a missing worktree or a workflow that no longer
-   * resolves — all before anything can cost money.
+   * Total over every stop short of completion — interrupted, failed,
+   * cancelled — and over paused, which un-pauses. The stopped node continues
+   * from its last turn in its own session, in the same worktree, reporting to
+   * the same orchestrator; completed nodes, answered check-ins and recorded
+   * effects are handed back from the record at no cost. A clean restart runs
+   * the stopped node again from its prompt instead, as a revision, so the
+   * transcript of the attempt that stopped stays readable. A complete or
+   * already-running run is refused, and so is a missing worktree or a
+   * workflow that no longer resolves — all before anything can cost money.
    */
-  async function resumeRun(runId: WorkflowRunId): Promise<void> {
+  async function resumeRun(runId: WorkflowRunId, kind: ResumeKind = 'continue'): Promise<void> {
     const run = requireRecord(runId)
     if (run.status === 'paused') {
       const handle = handles.get(runId)
-      if (handle === undefined) throw new Error(`The run "${runId}" is not live.`)
-      if (handle.desired !== 'paused') return
-      handle.desired = 'running'
-      handle.run.status = 'running'
-      save(handle.run)
-      return
+      // A paused run whose engine went away is a stopped run like any other,
+      // and is put back to work below rather than refused.
+      if (handle !== undefined) {
+        if (handle.desired !== 'paused') return
+        handle.desired = 'running'
+        handle.run.status = 'running'
+        save(handle.run)
+        return
+      }
     }
-    if (run.status !== 'interrupted') throw new Error(resumeRefusal(runId, run.status))
+    if (!runCanResume(run)) throw new Error(resumeRefusal(runId, run.status))
     if (handles.has(runId) || resuming.has(runId)) {
       throw new Error(resumeRefusal(runId, 'running'))
     }
@@ -1495,8 +1730,8 @@ export function createWorkflowEngine(options: EngineOptions): WorkflowEngine {
       if (run.worktreePath === undefined || !existsSync(run.worktreePath)) {
         throw new Error(
           `The run "${runId}" cannot resume: its worktree is gone ` +
-            `(${run.worktreePath ?? 'none was recorded'}). Resume re-runs the interrupted node ` +
-            'in the same worktree and never makes a new one.'
+            `(${run.worktreePath ?? 'none was recorded'}). Resume puts the node it stopped on ` +
+            'back to work in the same worktree and never makes a new one.'
         )
       }
       // The loader's own error stands: which workflow file is missing or
@@ -1517,9 +1752,9 @@ export function createWorkflowEngine(options: EngineOptions): WorkflowEngine {
       delete run.endedAt
       // A run that is working again must show, whatever the user cleared.
       delete run.dismissedAt
-      for (const node of run.nodes) {
-        if (node.status === 'interrupted') revertToGhost(node)
-      }
+      // Nothing is reverted here: a stopped node's own record is what its
+      // resume continues from, and `runNode` decides node by node whether
+      // it carries on or is restarted.
 
       const handle: Handle = {
         run,
@@ -1534,9 +1769,9 @@ export function createWorkflowEngine(options: EngineOptions): WorkflowEngine {
       }
       handles.set(runId, handle)
       save(run)
-      log?.({ event: 'run_resumed', runId, workflow: run.workflow, branch: run.branch })
+      log?.({ event: 'run_resumed', runId, workflow: run.workflow, branch: run.branch, kind })
 
-      void execute(handle, resolved.manifest, true).catch((cause: unknown) => {
+      void execute(handle, resolved.manifest, kind).catch((cause: unknown) => {
         handle.host.kill()
         run.status = 'failed'
         run.error = cause instanceof Error ? cause.message : String(cause)
@@ -1581,7 +1816,7 @@ export function createWorkflowEngine(options: EngineOptions): WorkflowEngine {
       for (const interrupt of [...handle.pauseInterrupts]) interrupt()
     },
 
-    resume: resumeRun,
+    resume: (runId, kind) => resumeRun(runId, kind),
 
     cancel: cancelRun,
 
@@ -1657,6 +1892,9 @@ export function createWorkflowEngine(options: EngineOptions): WorkflowEngine {
         void releaseLiveNodes(handle, 'quitting')
         handle.host.kill()
       }
+      // The app is going away, so what the store was going to write next it
+      // writes now: a resume reads whatever is on disk at this moment.
+      store.flush()
     }
   }
 }
@@ -1670,25 +1908,6 @@ function latestNodeStop(run: LiveRun): string | undefined {
     .filter((at): at is string => at !== undefined)
   if (stamps.length === 0) return undefined
   return stamps.reduce((latest, at) => (Date.parse(at) > Date.parse(latest) ? at : latest))
-}
-
-// An interrupted node back to the pending ghost the plan first drew: same id,
-// same parents, its declared artifacts unwritten. What it already spent stays
-// on the record — the money was really spent, and the re-run adds to it — and
-// everything the dead session said about itself goes.
-function revertToGhost(node: LiveNode): void {
-  node.status = 'pending'
-  node.artifacts = node.artifacts.map(({ name, path, desc }) => ({ name, path, desc }))
-  delete node.error
-  delete node.summary
-  delete node.verdict
-  delete node.startedAt
-  delete node.endedAt
-  delete node.lastActivityAt
-  delete node.now
-  delete node.waitingOn
-  delete node.toolCalls
-  delete node.contextPercent
 }
 
 /**

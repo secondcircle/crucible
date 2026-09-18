@@ -1,4 +1,5 @@
 import type { SessionId } from './port'
+import type { ResumeKind } from '../workflows/run'
 
 // Both adapters build their run tools from these definitions, so the five
 // tools cannot drift into meaning different things in the two flavors. The
@@ -99,17 +100,28 @@ export const RUN_TOOLS: readonly RunToolDefinition[] = [
     name: 'crucible_resume',
     label: 'Resume Run',
     description:
-      'Resume an interrupted run. A run is interrupted when Crucible quit while it was working: ' +
-      'its progress stopped where it stood, its worktree and artifacts are intact, and nothing ' +
-      'about it moves again until somebody deliberately resumes it.\n\n' +
-      'Resuming re-runs the node the quit cut down, from that node’s beginning, in the same ' +
-      'worktree, reporting to this session as before — which re-spends whatever that node had ' +
-      'already burned. Completed nodes are not re-run and cost nothing.\n\n' +
+      'Put a stopped run back to work — interrupted by a quit, failed, cancelled or paused. ' +
+      'Whatever stopped it, its worktree and artifacts are intact and nothing about it moves ' +
+      'again until somebody deliberately resumes it.\n\n' +
+      'Resuming continues the node it stopped on from that node’s last turn, in its own ' +
+      'session and the same worktree, reporting to this session as before. Nothing already ' +
+      'burned is spent twice: completed nodes, answered check-ins and recorded results are ' +
+      'handed back from the record.\n\n' +
       'Resume when the user asks, or when this conversation’s own judgment says the work is ' +
       'still wanted. Never as a reflex to seeing an interruption message: the run sits at no ' +
-      'cost, so bring it to the user whenever the spend is theirs to weigh. A paused run ' +
-      'un-pauses through here too.',
-    parameters: [{ name: 'runId', description: 'The interrupted run to resume' }]
+      'cost, so bring it to the user whenever the spend is theirs to weigh.',
+    parameters: [
+      { name: 'runId', description: 'The stopped run to resume' },
+      {
+        name: 'how',
+        description:
+          '"continue" (the default) carries the stopped node on from its last turn. ' +
+          '"clean-restart" runs it again from its prompt with no memory of the attempt that ' +
+          'stopped — for a node that died in a loop, where continuing would resume the loop. ' +
+          'The earlier transcript stays readable either way.',
+        optional: true
+      }
+    ]
   }
 ]
 
@@ -137,5 +149,5 @@ export interface RunTools {
   answer(sessionId: SessionId, runId: string, message: string): Promise<string>
   // No session check, exactly as `answer` has none: the deliberate call is the
   // authorization, and the run goes on reporting to its recorded orchestrator.
-  resume(sessionId: SessionId, runId: string): Promise<string>
+  resume(sessionId: SessionId, runId: string, kind?: ResumeKind): Promise<string>
 }
