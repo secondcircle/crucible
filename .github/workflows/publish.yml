@@ -46,6 +46,24 @@ jobs:
         run: node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/publish-version.ts
 
       # Scoped packages default to private, and this one is public by ruling.
-      - run: npm publish --access public
+      #
+      # The registry's `latest` lags a publish by minutes behind its CDN, so a
+      # second push serialised behind a first can be told the version the first
+      # just shipped is still free (run 35250112710 chose 0.1.22 two and a half
+      # minutes after 0.1.22 landed). The PUT is the one answer that cannot be
+      # stale: a 409 means step over that version and try again. Any other
+      # failure is a failure.
+      - name: Publish, stepping past a version the registry already holds
+        run: |
+          for attempt in 1 2 3; do
+            if out=$(npm publish --access public 2>&1); then
+              echo "$out"
+              exit 0
+            fi
+            echo "$out"
+            grep -q 'E409' <<<"$out" || exit 1
+            npm version patch --no-git-tag-version
+          done
+          exit 1
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
