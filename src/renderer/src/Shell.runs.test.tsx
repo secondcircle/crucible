@@ -934,6 +934,49 @@ describe('an interrupted run', () => {
     )
     expect(banner?.textContent).not.toContain('continues')
   })
+
+  // Reproduction for review-3's finding. A clean restart leaves the base
+  // record `interrupted` for good and puts the work on `·r1`
+  // (engine.interrupted.test.ts: 'completes a node for good'). Quit again
+  // before ·r1 finishes and the run holds two interrupted records — both
+  // with session tokens — for one node. The engine performs one act on
+  // resume: it continues the furthest record of the chain
+  // (engine.ts runNode: `chainOf(id).at(-1)`); the base record's session is
+  // never reopened. `resumePlan` splits per record instead of per chain, so
+  // the banner promises two continuations where one will happen. One node,
+  // one act: the superseded base record is not a second node.
+  it('does not promise to continue the record a clean restart superseded', async () => {
+    await open([
+      interrupted({
+        nodes: [
+          {
+            id: 'gate-alignment',
+            status: 'interrupted',
+            parents: [],
+            reads: [],
+            artifacts: [],
+            cost: 3.2,
+            sessionToken: '/state/workflow-runs/45c8/sessions/1.jsonl'
+          },
+          {
+            id: 'gate-alignment·r1',
+            status: 'interrupted',
+            parents: ['gate-alignment'],
+            reads: [],
+            artifacts: [],
+            cost: 1.1,
+            sessionToken: '/state/workflow-runs/45c8/sessions/2.jsonl'
+          }
+        ]
+      })
+    ])
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Open run' }))
+      await settled()
+    })
+    const banner = screen.getByLabelText('Run 45c8').querySelector('.rvwhy')
+    expect(banner?.textContent).not.toContain('interrupted nodes')
+  })
 })
 
 describe('investigating a run', () => {
