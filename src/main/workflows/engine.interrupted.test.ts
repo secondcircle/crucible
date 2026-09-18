@@ -1011,6 +1011,80 @@ describe('resume and held-open nodes', () => {
     expect(notice?.text).not.toContain('runs again from its prompt')
     expect(notice?.text).not.toContain('no session left')
   })
+
+  // A record written before sessions outlived the app carries no
+  // `sessionToken` anywhere — main recorded none. Resumed over one, the
+  // engine replays the review's completion, and the re-issued revise() finds
+  // no session to reopen (`replayedHandle.revise` reads the complete
+  // record's token), so it runs the revision again from its prompt in a
+  // fresh session. The notice composed from that same record must say that
+  // act, the way the restarted branch already does for a stopped node with
+  // no token — not promise a continuation the engine cannot make.
+  it('does not promise a pre-token record a continuation the engine cannot make', async () => {
+    const before = rig({ gated: reviewing }, (nodeId) =>
+      nodeId === 'review'
+        ? (_prompt, tools, turn) => {
+            if (turn === 1) {
+              writeFileSync(outputPath(tools.taskPrompt, 'review.md'), 'changes required\n')
+              tools.complete({ summary: 'reviewed once' })
+              return
+            }
+            tools.activity('looking again…')
+            tools.block({ reason: 'which way?' })
+          }
+        : (_prompt, tools) => tools.complete({ summary: 'fixed it' })
+    )
+    const intent = join(before.repo, 'intent.md')
+    writeFileSync(intent, 'the intent\n')
+    const started = await before.engine.start(startRequest(before.repo, 'gated', { intent }))
+    await until(() => before.engine.runs()[0].waiting === true)
+    const blocked = (): { cost?: number } | undefined =>
+      before.engine.runs()[0].nodes.find((node) => node.status === 'blocked')
+    await until(() => blocked()?.cost !== undefined)
+
+    // The quit, then the record as 0.1.22 wrote it: no session tokens at all.
+    before.store.flush()
+    const runPath = join(before.stateDir, started.id, 'run.json')
+    const written = JSON.parse(readFileSync(runPath, 'utf8')) as {
+      nodes: Record<string, unknown>[]
+    }
+    for (const node of written.nodes) delete node.sessionToken
+    writeFileSync(runPath, JSON.stringify(written))
+
+    // Not `relaunch`: that flushes again, and this launch must read the
+    // record exactly as the old app left it.
+    const after = rig(
+      { gated: reviewing },
+      (nodeId) =>
+        nodeId === 'review'
+          ? (_prompt, tools) => {
+              writeFileSync(outputPath(tools.taskPrompt, 'review.md'), 'approved\n')
+              tools.complete({ summary: 'reviewed again' })
+            }
+          : (_prompt, tools) => tools.complete({ summary: 'fixed it' }),
+      { repo: before.repo, stateDir: before.stateDir }
+    )
+    const swept = after.engine.runs()[0]
+    expect(swept.status).toBe('interrupted')
+    expect(swept.nodes.find((node) => node.id === 'review')?.status).toBe('complete')
+    expect(swept.nodes.find((node) => node.id === 'review')?.sessionToken).toBeUndefined()
+    expect(swept.nodes.find((node) => node.id === 'review·r1')?.status).toBe('interrupted')
+
+    after.engine.deliverNotices('orchestrator-1')
+    const notice = after.delivered.find((message) => message.text.includes('was interrupted'))
+    expect(notice).toBeDefined()
+
+    // What the click it describes actually does: one session request, no
+    // token to reopen — a fresh attempt from the prompt.
+    await after.engine.resume(started.id)
+    await until(() => after.engine.runs()[0].status === 'complete')
+    expect(after.sessions.requests).toHaveLength(1)
+    expect(after.sessions.requests[0].resumeToken).toBeUndefined()
+
+    // So the notice must not have promised the opposite act.
+    expect(notice?.text).not.toContain('continues in the session')
+    expect(notice?.text).toContain('runs again from its prompt')
+  })
 })
 
 describe('the interruption notice', () => {
