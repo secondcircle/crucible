@@ -7,7 +7,7 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'n
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import type { LoadedSkill, SkillService } from '../skills/service'
-import type { PlannedNode, WorkflowDef } from './authoring'
+import { artifactPaths, type PlannedNode, type WorkflowDef } from './authoring'
 import { createWorkflowEngine, type WorkflowEngine } from './engine'
 import { createWorkflowLoader } from './loader'
 import type { NodeSessionFactory } from './node-session'
@@ -35,10 +35,11 @@ const oneNode: WorkflowDef = {
   inputs: { prompt: 'the task file' },
   plan: () => [{ id: 'work' }],
   run: async (ctx) => {
+    const outputs = { report: { file: 'report.md', desc: 'what happened' } }
     const result = await ctx.node('work', {
-      prompt: 'do the thing',
+      prompt: `do the thing; write ${artifactPaths(ctx, outputs).report}`,
       reads: [ctx.inputs.prompt],
-      outputs: { report: { file: 'report.md', desc: 'what happened' } }
+      outputs
     })
     return { summary: result.summary }
   }
@@ -55,21 +56,76 @@ const judged: WorkflowDef = {
   inputs: { prompt: 'the task file' },
   plan: () => [{ id: 'judge' }, { id: 'work', parents: ['judge'] }],
   run: async (ctx) => {
+    const review = { review: { file: 'review.md', desc: 'the review' } }
     await ctx.node('judge', {
-      prompt: 'judge the thing',
+      prompt: `judge the thing; write ${artifactPaths(ctx, review).review}`,
       reads: [ctx.inputs.prompt],
-      outputs: { review: { file: 'review.md', desc: 'the review' } },
+      outputs: review,
       verdict: judgedSchema
     })
+    const report = { report: { file: 'report.md', desc: 'what happened' } }
     const result = await ctx.node('work', {
-      prompt: 'do the thing',
-      outputs: { report: { file: 'report.md', desc: 'what happened' } }
+      prompt: `do the thing; write ${artifactPaths(ctx, report).report}`,
+      outputs: report
     })
     return { summary: result.summary }
   }
 }
 
 describe('the engine end to end', () => {
+  // The rule a workflow author relies on: what the file says is what the node
+  // is told. Reads, outputs and a verdict schema are all declared here so
+  // that none of them can leak into either prompt.
+  it('sends the system prompt and the task exactly as the workflow wrote them, and nothing else', async () => {
+    const SYSTEM = 'You are the judge.\n\n  Indented, with a trailing newline.\n'
+    const TASK = '# Judge\n\nRead the task and write the review to {{path}}.\n\n\nThree blank lines above.\n'
+    const verbatim: WorkflowDef = {
+      description: 'two nodes, one with a system prompt and one without',
+      inputs: { prompt: 'the task file' },
+      run: async (ctx) => {
+        const review = { review: { file: 'review.md', desc: 'the review' } }
+        const paths = artifactPaths(ctx, review)
+        await ctx.node('judge', {
+          system: SYSTEM,
+          prompt: TASK.replace('{{path}}', paths.review),
+          reads: [ctx.inputs.prompt],
+          outputs: review,
+          verdict: judgedSchema
+        })
+        const result = await ctx.node('work', { prompt: 'do the thing' })
+        return { summary: result.summary }
+      }
+    }
+    const told: Record<string, string> = {}
+    const { engine, repo, sessions } = rig({ verbatim }, (nodeId) => (prompt, tools) => {
+      told[nodeId] = prompt
+      if (nodeId === 'judge') {
+        writeFileSync(outputPath(prompt, 'review.md'), 'looks right\n')
+        tools.complete({ summary: 'judged', verdict: { verdict: 'approved' } })
+        return
+      }
+      tools.complete({ summary: 'done' })
+    })
+
+    const task = join(repo, 'task.md')
+    writeFileSync(task, 'the task\n')
+    await engine.start(startRequest(repo, 'verbatim', { prompt: task }))
+    await until(() => engine.runs()[0].status === 'complete')
+
+    const artifacts = engine.runs()[0].nodes[0].artifacts
+    expect(told.judge).toBe(TASK.replace('{{path}}', artifacts[0].path))
+    expect(told.work).toBe('do the thing')
+    // The system prompt is the workflow's own text or nothing; the engine
+    // writes neither a role nor a standing prompt for a node.
+    expect(sessions.requests.map((request) => request.system)).toEqual([SYSTEM, undefined])
+    expect(sessions.requests.map((request) => request.nodeId)).toEqual(['judge', 'work'])
+    // Nothing of what the appendix used to say reached either prompt.
+    for (const text of [told.judge, told.work, SYSTEM]) {
+      expect(text).not.toMatch(/complete_node|Required output|Input files|worker node/)
+      expect(text).not.toContain(task)
+    }
+  })
+
   it("hands a node's declared verdict schema to its session, and only then", async () => {
     const { engine, repo, sessions } = rig({ judged }, (nodeId) => {
       return (prompt, tools) => {
@@ -483,10 +539,11 @@ describe('choosing the model a node runs', () => {
     inputs: { prompt: 'the task file' },
     plan: () => [{ id: 'work', model: FABLE }],
     run: async (ctx) => {
+      const outputs = { report: { file: 'report.md', desc: 'what happened' } }
       const result = await ctx.node('work', {
-        prompt: 'do the thing',
+        prompt: `do the thing; write ${artifactPaths(ctx, outputs).report}`,
         model: FABLE,
-        outputs: { report: { file: 'report.md', desc: 'what happened' } }
+        outputs
       })
       return { summary: result.summary }
     }
@@ -553,9 +610,10 @@ describe('what the record says a node follows', () => {
       { id: 'delta', parents: ['beta'] }
     ],
     run: async (ctx) => {
+      const note = { note: { file: 'alpha.md', desc: 'a note' } }
       const alpha = await ctx.node('alpha', {
-        prompt: 'write the note',
-        outputs: { note: { file: 'alpha.md', desc: 'a note' } }
+        prompt: `write the note at ${artifactPaths(ctx, note).note}`,
+        outputs: note
       })
       // Declares nothing: the plan said what it follows and that stands.
       await ctx.node('beta', { prompt: 'follow alpha' })
@@ -705,17 +763,20 @@ describe('what the record says about artifacts', () => {
       }
     ],
     run: async (ctx) => {
+      const work = {
+        report: { file: 'report.md', desc: 'what happened' },
+        notes: { file: 'notes.md', desc: 'what was learned' }
+      }
+      const workPaths = artifactPaths(ctx, work)
       await ctx.node('work', {
-        prompt: 'do the thing',
+        prompt: `do the thing; write ${workPaths.report} and ${workPaths.notes}`,
         reads: [ctx.inputs.prompt],
-        outputs: {
-          report: { file: 'report.md', desc: 'what happened' },
-          notes: { file: 'notes.md', desc: 'what was learned' }
-        }
+        outputs: work
       })
+      const after = { summary: { file: 'summary.md', desc: 'the gist' } }
       await ctx.node('after', {
-        prompt: 'sum it up',
-        outputs: { summary: { file: 'summary.md', desc: 'the gist' } }
+        prompt: `sum it up at ${artifactPaths(ctx, after).summary}`,
+        outputs: after
       })
     }
   }
@@ -988,9 +1049,10 @@ describe('a run with no orchestrator', () => {
     inputs: {},
     plan: () => [{ id: 'work' }],
     run: async (ctx) => {
+      const outputs = { report: { file: 'report.md', desc: 'what happened' } }
       const result = await ctx.node('work', {
-        prompt: 'do the thing',
-        outputs: { report: { file: 'report.md', desc: 'what happened' } }
+        prompt: `do the thing; write ${artifactPaths(ctx, outputs).report}`,
+        outputs
       })
       return { summary: result.summary }
     }
@@ -1238,16 +1300,17 @@ describe('the engine over a real workflow host', () => {
   // answer differently the second time.
   it("awaits a node's check in the host and rejects the completion it faults", async () => {
     const loader = realLoader(`
-      import { workflow } from 'crucible:workflow'
+      import { artifactPaths, workflow } from 'crucible:workflow'
       let asked = 0
       export default workflow({
         description: 'checks its node asynchronously',
         inputs: {},
         plan: () => [{ id: 'work' }],
         run: async (ctx) => {
+          const outputs = { report: { file: 'report.md', desc: 'what happened' } }
           const done = await ctx.node('work', {
-            prompt: 'do the thing',
-            outputs: { report: { file: 'report.md', desc: 'what happened' } },
+            prompt: 'do the thing; write ' + artifactPaths(ctx, outputs).report,
+            outputs,
             check: async (outputs) => {
               await new Promise((resolve) => setTimeout(resolve, 10))
               asked += 1

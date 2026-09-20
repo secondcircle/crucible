@@ -1,7 +1,23 @@
 import { spawn } from 'node:child_process'
-import { workflow, type OutputSpec, type PlannedNode } from 'crucible:workflow'
+import { artifactPaths, workflow, type OutputSpec, type PlannedNode } from 'crucible:workflow'
 
 const DOCUMENT_MODEL = 'anthropic/claude-fable-5:high'
+
+/**
+ * Every node's system prompt. A node is told exactly what its workflow
+ * writes: this, and the task prompt below it. Nothing else says that nobody
+ * is watching, so this does; how a node finishes is carried by the
+ * `complete_node` and `raise_blocker` tools' own descriptions.
+ */
+export const NODE_SYSTEM = `\
+You are one node of an automated workflow run, working in a git worktree of a
+repository with no interactive user. Nobody reads what you write as you work,
+and a question typed into a message is never answered: work from the task
+autonomously, verify every claim you make by running tools rather than
+asserting it, and when something you cannot resolve stands in the way, raise
+it with the raise_blocker tool and wait for the answer. The task names the
+files you must write and where; you are finished only when they are written
+and you have called complete_node.`
 
 /**
  * Shipped inside the workflow rather than read from beside it: a workspace
@@ -158,7 +174,7 @@ async function commit(cwd: string, message: string): Promise<void> {
   if (!done.ok) throw new Error(`adr-audit: git commit failed: ${done.out}`)
 }
 
-export const auditPrompt = (): string => `\
+export const auditPrompt = (findings: string): string => `\
 # Audit the decision record
 
 **Goal**: make \`docs/adr/\` in this worktree record what is currently decided
@@ -206,16 +222,17 @@ reusing a number, renaming a file, inventing a rationale, editing anything
 outside \`docs/adr/\`, and touching \`.crucible/align/\` or
 \`.crucible/runs/\`.
 
-**Your findings file**: one entry per ADR file that was present when you
-started, giving its disposition and your reasoning, plus the relational
-findings you drew on. Write it for the user and for the agent that turns it
-into a report. The bar: a change the user cannot evaluate from this record
+**Your findings file**, written to \`${findings}\`: one entry per ADR file
+that was present when you started, giving its disposition and your reasoning,
+plus the relational findings you drew on. Write it for the user and for the
+agent that turns it into a report. The bar: a change the user cannot evaluate from this record
 alone is a defect, because a kept ADR leaves no diff at all and your reasoning
 exists nowhere else.
 
-**Your verdict** counts the four dispositions. They partition the files that
-were in the folder when you started, so every file has exactly one and the
-four numbers sum to the folder's starting size.
+**Your verdict**, the \`verdict\` argument of complete_node, counts the four
+dispositions as \`kept\`, \`edited\`, \`flagged\` and \`deleted\`. They
+partition the files that were in the folder when you started, so every file
+has exactly one and the four numbers sum to the folder's starting size.
 
 **An absent or empty \`docs/adr/\`** is a legitimate outcome, not an error:
 every count is zero and the findings say so plainly.
@@ -224,7 +241,7 @@ every count is zero and the findings say so plainly.
 leaves behind. The repository's glossary is \`CONTEXT.md\` at the root; use
 its terms exactly.`
 
-export const sweepPrompt = (): string => `\
+export const sweepPrompt = (findings: string): string => `\
 # Strip the citations
 
 **Goal**: remove every reference to one specific ADR from everywhere in this
@@ -279,27 +296,32 @@ prints is yours to do and changing what the rule matches is not.
 they go in the findings either way, so the user can see the call and disagree
 with it.
 
-**Your findings file**: one entry per site you edited, naming the file, the
-reference you removed or reworded, and what the text says now. The report is
+**Your findings file**, written to \`${findings}\`: one entry per site you
+edited, naming the file, the reference you removed or reworded, and what the
+text says now. The report is
 built from it and the user has to be able to evaluate every removal without
 opening the file it came from. Finding nothing is a legitimate outcome. Say so
 plainly.
 
-**Your verdict** is \`removed\`: how many citation sites you removed or
-reworded.
+**Your verdict**, the \`verdict\` argument of complete_node, is \`removed\`:
+how many citation sites you removed or reworded.
 
 **Context**: you are in a worktree of this repository, on the branch this run
 leaves behind. The repository's glossary is \`CONTEXT.md\` at the root; use
 its terms exactly.`
 
-export const reportPrompt = (auditFindings: string, sweepFindings: string): string => `\
+export const reportPrompt = (
+  auditFindings: string,
+  sweepFindings: string,
+  report: string
+): string => `\
 # Report on the audit
 
-**Goal**: write the one document the user reads to judge this run: what was
-deleted, folded, strengthened, flagged and left alone in \`docs/adr/\`, and
-every citation the sweep stripped from the rest of the worktree. Your inputs
-are the audit's findings at \`${auditFindings}\` and the sweep's findings at
-\`${sweepFindings}\`.
+**Goal**: write the one document the user reads to judge this run, to
+\`${report}\`: what was deleted, folded, strengthened, flagged and left alone
+in \`docs/adr/\`, and every citation the sweep stripped from the rest of the
+worktree. Your inputs are the audit's findings at \`${auditFindings}\` and the
+sweep's findings at \`${sweepFindings}\`.
 
 **Why it matters**: the report is the point as much as the diff. The user has
 to be able to judge whether this run's opinions were any good without
@@ -359,10 +381,19 @@ export default workflow({
     }
   ],
   run: async (ctx) => {
+    // Resolved up front so each prompt can name the file its node writes:
+    // nothing but the prompt tells a node where its outputs go.
+    const paths = artifactPaths(ctx, {
+      auditFindings: AUDIT_FINDINGS,
+      sweepFindings: SWEEP_FINDINGS,
+      report: REPORT
+    })
+
     // The audit takes no inputs and follows nothing, so declaring either would
     // be an invented edge.
     const audit = await ctx.node('audit', {
-      prompt: auditPrompt(),
+      system: NODE_SYSTEM,
+      prompt: auditPrompt(paths.auditFindings),
       outputs: { findings: AUDIT_FINDINGS },
       verdict: AUDIT_VERDICT,
       model: DOCUMENT_MODEL
@@ -372,7 +403,8 @@ export default workflow({
     // The citation ban holds whatever the audit decided, so this edge is
     // ordering alone: one worktree, and commits that tell the run in order.
     const sweep = await ctx.node('sweep', {
-      prompt: sweepPrompt(),
+      system: NODE_SYSTEM,
+      prompt: sweepPrompt(paths.sweepFindings),
       from: ['audit'],
       outputs: { findings: SWEEP_FINDINGS },
       verdict: SWEEP_VERDICT,
@@ -381,7 +413,8 @@ export default workflow({
     await commit(ctx.cwd, 'adr-audit: sweep')
 
     const report = await ctx.node('report', {
-      prompt: reportPrompt(audit.outputs.findings, sweep.outputs.findings),
+      system: NODE_SYSTEM,
+      prompt: reportPrompt(audit.outputs.findings, sweep.outputs.findings, paths.report),
       from: ['audit', 'sweep'],
       reads: [audit.outputs.findings, sweep.outputs.findings],
       outputs: { report: REPORT },

@@ -14,7 +14,7 @@ import type { MainWorkflowRunService } from '../../shared/workflows/service'
 import type { CacheRecorder } from '../cache/ledger'
 import type { Flavor } from '../agent/select-adapter'
 import type { LogSink } from '../log/sink'
-import { readShippedStandingPrompt, shippedSkillsPath, shippedWorkflowLibPath } from '../shipped'
+import { shippedSkillsPath, shippedWorkflowLibPath } from '../shipped'
 import { createSkillService, userSkillsPath } from '../skills/service'
 import { createWorkflowEngine } from './engine'
 import type { SpawnHost } from './host/host'
@@ -167,7 +167,6 @@ export function selectWorkflowRunService(
     loader,
     store,
     sessions: createSdkNodeSessionFactory({
-      standingPrompt: readShippedStandingPrompt(wiring.appPath),
       agentDir: join(wiring.stateDir, 'workflow-agent'),
       ...(wiring.compaction === undefined ? {} : { compaction: wiring.compaction }),
       onCompactionFailure: (cause) => {

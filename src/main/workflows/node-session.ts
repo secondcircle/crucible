@@ -8,6 +8,11 @@ import type { LoadedSkill } from '../skills/service'
 // The SDK factory backs it with π; tests hand in scripted sessions, so the
 // whole node loop — nudges, validation, blockers, revisions — runs against
 // fakes and `npm test` constructs no SDK session at all.
+//
+// Nothing in a request is prompt text the engine wrote. The system prompt is
+// the workflow's, verbatim or absent; the task arrives through `prompt()`,
+// verbatim; how a node finishes is carried by the descriptions of the two
+// injected tools, which belong to the tools and not to any prompt.
 
 export interface NodeCompletion {
   readonly summary: string
@@ -34,8 +39,15 @@ export interface NodeSessionRequest {
   readonly resumeToken?: string
   /** "provider/model-id:thinkingLevel". */
   readonly model: string
-  /** The node's role text; the factory appends the standing prompt itself. */
-  readonly rolePrompt: string
+  // The node this session is for, by its id in the run. For logs and for
+  // fakes that script one node differently from another; it reaches no
+  // prompt.
+  readonly nodeId: string
+  // The workflow's own system prompt for this node, sent whole and
+  // unchanged. Absent means the model's stock system prompt and nothing of
+  // Crucible's on top; either way the runtime still appends what the
+  // worktree's AGENTS.md files say.
+  readonly system?: string
   /** Built-in tool names the node gets, complete_node and raise_blocker aside. */
   readonly tools: readonly string[]
   // The node's own monitor tools, mounted beside complete_node and

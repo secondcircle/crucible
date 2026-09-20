@@ -1,5 +1,10 @@
 import { spawn } from "node:child_process";
-import { workflow, type PlannedNode } from "crucible:workflow";
+import {
+  artifactPaths,
+  workflow,
+  type OutputSpec,
+  type PlannedNode,
+} from "crucible:workflow";
 
 // Intent document to built code, the short way: one builder, then a review
 // loop until a reviewer approves. Between every agent that touches the tree
@@ -18,6 +23,32 @@ import { workflow, type PlannedNode } from "crucible:workflow";
 
 const REVIEW_MODEL = "anthropic/claude-fable-5:high";
 const CODE_MODEL = "anthropic/claude-opus-5:high";
+
+/**
+ * Every node's system prompt. A node is told exactly what this file writes:
+ * this, and its task prompt. Nothing else says that nobody is watching, so
+ * this does; how a node finishes is carried by the `complete_node` and
+ * `raise_blocker` tools' own descriptions, and each task prompt names the
+ * files its node writes.
+ */
+export const NODE_SYSTEM = `\
+You are one node of an automated workflow run, working in a git worktree of a
+repository with no interactive user. Nobody reads what you write as you work,
+and a question typed into a message is never answered: work from the task
+autonomously, verify every claim you make by running tools rather than
+asserting it, and when something you cannot resolve stands in the way, raise
+it with the raise_blocker tool and wait for the answer. Where the task names
+a file to write, you are finished only when it is written; either way you
+finish by calling complete_node.`;
+
+const reviewOf = (round: number): OutputSpec => ({
+  file: `review-${round}.md`,
+  desc: "the branch judged against the intent document",
+});
+
+/** Paths as a prompt lists them. */
+const listed = (paths: readonly string[]): string =>
+  paths.map((path) => `\`${path}\``).join(", ");
 
 /** Three refusals in a row is where a loop stops being worth trusting unwatched. */
 const ROUNDS_PER_CHECK_IN = 3;
@@ -248,6 +279,8 @@ decisions live in \`docs/adr/\`.${standingCorrections(corrections)}`;
 export const reviewerPrompt = (
   target: string,
   intent: string,
+  review: string,
+  earlierReviews: readonly string[],
   corrections: string[] = [],
 ): string => `\
 # Review the branch
@@ -255,8 +288,13 @@ export const reviewerPrompt = (
 **Goal**: judge what this branch has built against the intent document at
 \`${intent}\`, and deliver one verdict: \`approved\` when nothing must change
 before a human decides this branch's fate, \`changes-required\` when something
-must, with the findings written down where the agent who repairs them can
-work from them.
+must, with the findings written down at \`${review}\`, where the agent who
+repairs them can work from them.${
+  earlierReviews.length === 0
+    ? ""
+    : ` The earlier rounds of this review, ${listed(earlierReviews)}, show what has already
+been asked; a finding that persists has to read as persisting.`
+}
 
 **Why you matter**: you are the only judgment this run makes. There is no
 later gate: coverage against the intent document, correctness of the interior,
@@ -302,6 +340,10 @@ names. Read the mocks it cites: a user-visible surface is judged against them.
 - Your review is plain markdown, read by the fixer and the reviews after
   yours.
 
+**Your verdict** is the \`verdict\` argument of complete_node: an object with
+\`verdict\`, one of \`approved\` and \`changes-required\`, and \`reason\`, a
+string.
+
 **Context**: you are in a worktree of this repository, on the branch under
 judgment. The glossary is \`CONTEXT.md\` at the root; the repository's decisions
 live in \`docs/adr/\`.${standingCorrections(corrections)}`;
@@ -310,6 +352,7 @@ export const fixerPrompt = (
   target: string,
   intent: string,
   latestReview: string,
+  earlierReviews: readonly string[],
   checkOutput: string | undefined,
   corrections: string[] = [],
 ): string => `\
@@ -317,8 +360,12 @@ export const fixerPrompt = (
 
 **Goal**: resolve what the reviews of this branch found, so the next review
 can approve the work. The latest review, \`${latestReview}\`, is the standing
-judgment and comes first; earlier ones show what has already been asked and
-what may have been missed twice.
+judgment and comes first${
+  earlierReviews.length === 0
+    ? "."
+    : `; the earlier ones, ${listed(earlierReviews)}, show what has already been
+asked and what may have been missed twice.`
+}
 
 **Why you**: you arrive with a fresh context because the agents who wrote this
 code could not see what the reviewer saw. The branch is the only record of
@@ -398,12 +445,7 @@ export default workflow({
       id: "review-1",
       model: REVIEW_MODEL,
       parents: ["builder"],
-      outputs: {
-        review: {
-          file: "review-1.md",
-          desc: "the branch judged against the intent document",
-        },
-      },
+      outputs: { review: reviewOf(1) },
     },
   ],
   run: async (ctx) => {
@@ -423,6 +465,7 @@ export default workflow({
         if (checked.green) return;
         const id = `${label}-check-fixer-${attempt}`;
         await ctx.node(id, {
+          system: NODE_SYSTEM,
           prompt: checkFixerPrompt(checked.out, corrections),
           from: [head],
           model: CODE_MODEL,
@@ -433,6 +476,7 @@ export default workflow({
     }
 
     await ctx.node("builder", {
+      system: NODE_SYSTEM,
       prompt: builderPrompt(intent),
       reads: [intent],
       model: CODE_MODEL,
@@ -443,16 +487,19 @@ export default workflow({
     const reviews: string[] = [];
     let sinceCheckIn = 0;
     for (let round = 1; ; round++) {
+      const output = { review: reviewOf(round) };
       const review = await ctx.node(`review-${round}`, {
-        prompt: reviewerPrompt(target, intent, corrections),
+        system: NODE_SYSTEM,
+        prompt: reviewerPrompt(
+          target,
+          intent,
+          artifactPaths(ctx, output).review,
+          reviews,
+          corrections,
+        ),
         from: [head],
         reads: [intent, ...reviews],
-        outputs: {
-          review: {
-            file: `review-${round}.md`,
-            desc: "the branch judged against the intent document",
-          },
-        },
+        outputs: output,
         verdict: VERDICT,
         model: REVIEW_MODEL,
       });
@@ -501,10 +548,12 @@ export default workflow({
 
       const fixer = `fixer-${round}`;
       await ctx.node(fixer, {
+        system: NODE_SYSTEM,
         prompt: fixerPrompt(
           target,
           intent,
           review.outputs.review,
+          reviews.slice(0, -1),
           standing.green ? undefined : standing.out,
           corrections,
         ),

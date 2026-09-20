@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process'
 import { join } from 'node:path'
-import { workflow, type OutputSpec, type PlannedNode } from 'crucible:workflow'
+import { artifactPaths, workflow, type OutputSpec, type PlannedNode } from 'crucible:workflow'
 
 // Orchestrator guidance: this run audits the main process for anything that
 // can hold its event loop, fixes what is safe to fix in place, and leaves a
@@ -78,6 +78,23 @@ payloads that carry more than the receiver reads.`
 
 type Area = keyof typeof AREAS
 
+/**
+ * Every node's system prompt. A node is told exactly what this file writes:
+ * this, and its task prompt. Nothing else says that nobody is watching, so
+ * this does; how a node finishes is carried by the `complete_node` and
+ * `raise_blocker` tools' own descriptions, and each task prompt names the
+ * files its node writes.
+ */
+const NODE_SYSTEM = `\
+You are one node of an automated workflow run, working in a git worktree of a
+repository with no interactive user. Nobody reads what you write as you work,
+and a question typed into a message is never answered: work from the task
+autonomously, verify every claim you make by running tools rather than
+asserting it, and when something you cannot resolve stands in the way, raise
+it with the raise_blocker tool and wait for the answer. The task names the
+files you must write and where; you are finished only when they are written
+and you have called complete_node.`
+
 const CONTEXT = `\
 **Context you cannot find in the code**: on a Mac the app shows the beachball
 for long stretches, intermittently, and nobody has caught it in the act.
@@ -100,12 +117,13 @@ parent checkout are from before it existed. The repository's glossary is
 which launches are forbidden to you. Never launch, read from or write to the
 installed app or its state.`
 
-const auditPrompt = (area: Area): string => `\
+const auditPrompt = (area: Area, findings: string): string => `\
 # Find what holds the main thread: ${area}
 
-**Goal**: a findings file naming every place in your slice where the main
-process's event loop can be held, with evidence of how long and how often,
-ranked so that a reader with an hour fixes the right thing first.
+**Goal**: a findings file at \`${findings}\` naming every place in your slice
+where the main process's event loop can be held, with evidence of how long
+and how often, ranked so that a reader with an hour fixes the right thing
+first.
 
 **Why it matters**: ${CONTEXT.replace('**Context you cannot find in the code**: ', '')}
 
@@ -145,7 +163,9 @@ This is the shape of one entry, about a different subject:
 > board open and invalidate on the watcher; safe in place, the parse is pure.
 
 **Done** is the findings file written, with every finding carrying a
-location and a trigger, and a verdict counting the findings by fix shape.`
+location and a trigger, and a verdict counting the findings by fix shape:
+the \`verdict\` argument of complete_node is an object with the numbers
+\`inPlace\`, \`timing\` and \`structural\`.`
 
 const AUDIT_VERDICT = {
   type: 'object',
@@ -157,13 +177,13 @@ const AUDIT_VERDICT = {
   }
 }
 
-const fixPrompt = (findings: readonly string[]): string => `\
+const fixPrompt = (findings: readonly string[], fixes: string): string => `\
 # Take the main thread back
 
 **Goal**: apply every fix from the four findings files that is safe to
 make in this worktree, so that what remains on the main thread is either
 bounded and rare or genuinely needs a different process, and write the
-fixes file that accounts for every finding either way.
+fixes file, at \`${fixes}\`, that accounts for every finding either way.
 
 **Why it matters**: ${CONTEXT.replace('**Context you cannot find in the code**: ', '')}
 
@@ -210,13 +230,13 @@ fixes file written, and the worktree committed in stages whose messages a
 reader could follow. The mechanical gate runs after you finish and sends
 its failures back to you.`
 
-const reportPrompt = (findings: readonly string[], fixes: string): string => `\
+const reportPrompt = (findings: readonly string[], fixes: string, report: string): string => `\
 # Write the report
 
-**Goal**: one HTML page a human reads in five minutes that says what held
-the main thread, what this run fixed and how it proved the fix, what it
-measured and left, and what only a structural change would cure, ranked by
-how much of the beachball it would buy back.
+**Goal**: one HTML page at \`${report}\` that a human reads in five minutes
+and that says what held the main thread, what this run fixed and how it
+proved the fix, what it measured and left, and what only a structural change
+would cure, ranked by how much of the beachball it would buy back.
 
 **Why it matters**: the human has been staring at a spinner for weeks and
 is deciding whether to move the agent host into its own process. The report
@@ -292,10 +312,13 @@ export default workflow({
   ],
   run: async (ctx) => {
     const areas = Object.keys(AREAS) as Area[]
+    // Nothing but a prompt tells a node where its output goes, so every
+    // output is resolved before its node starts and named in the prompt.
     const audits = await Promise.all(
       areas.map((area) =>
         ctx.node(`audit-${area}`, {
-          prompt: auditPrompt(area),
+          system: NODE_SYSTEM,
+          prompt: auditPrompt(area, artifactPaths(ctx, { findings: findingsOutput(area) }).findings),
           outputs: { findings: findingsOutput(area) },
           verdict: AUDIT_VERDICT
         })
@@ -304,7 +327,8 @@ export default workflow({
     const findings = audits.map((audit) => audit.outputs.findings)
 
     const fixer = await ctx.openNode('fix', {
-      prompt: fixPrompt(findings),
+      system: NODE_SYSTEM,
+      prompt: fixPrompt(findings, artifactPaths(ctx, { fixes: FIXES }).fixes),
       reads: findings,
       outputs: { fixes: FIXES }
     })
@@ -329,7 +353,8 @@ export default workflow({
     }
 
     const report = await ctx.node('report', {
-      prompt: reportPrompt(findings, fixed.outputs.fixes),
+      system: NODE_SYSTEM,
+      prompt: reportPrompt(findings, fixed.outputs.fixes, artifactPaths(ctx, { report: REPORT }).report),
       reads: [...findings, fixed.outputs.fixes],
       outputs: { report: REPORT },
       tools: ['read', 'write', 'bash', 'grep', 'find', 'ls']

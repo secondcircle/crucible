@@ -744,13 +744,15 @@ describe('the shipped standing prompt', () => {
   })
 
   // A question in prose is the failure this section exists to end, so the
-  // prompt has to name both channels and rule the message out by name.
-  it('routes every question through the asking tool, in a session and in a node', () => {
+  // prompt has to name the channel and rule the message out by name. Only
+  // the session's channel: a workflow node never receives this prompt, and
+  // its own channel is described by the tool that is it.
+  it('routes every question through the asking tool', () => {
     const text = standing()
-    expect(text).toContain('`crucible_ask` in a Crucible session')
-    expect(text).toContain('`raise_blocker` in a workflow node')
+    expect(text).toContain('`crucible_ask`')
+    expect(text).not.toContain('raise_blocker')
     expect(text).toMatch(/Never type the question into a message/)
-    expect(text).toMatch(/whether you keep\s+working afterwards or end your turn/)
+    expect(text).toMatch(/whether\s+you keep working afterwards or end your turn/)
   })
 
   it('tells the message to note a waiting decision, not carry it', () => {
