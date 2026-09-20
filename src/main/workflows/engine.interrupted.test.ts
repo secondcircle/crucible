@@ -41,12 +41,12 @@ const gated: WorkflowDef = {
   ],
   run: async (ctx) => {
     const planned = await ctx.node('planner', {
-      prompt: 'write the spec',
+      prompt: `write the spec; write ${join(ctx.artifactDir, 'spec.md')}`,
       reads: [ctx.inputs.intent],
       outputs: { spec: { file: 'spec.md', desc: 'the Spec' } }
     })
     const gate = await ctx.node('gate', {
-      prompt: 'judge the branch',
+      prompt: `judge the branch; write ${join(ctx.artifactDir, 'verdict.md')}`,
       reads: [planned.outputs.spec],
       outputs: { verdict: { file: 'verdict.md', desc: 'the verdict' } }
     })
@@ -379,7 +379,7 @@ describe('resume', () => {
       ...gated,
       run: async (ctx) => {
         await ctx.node('planner', {
-          prompt: 'write the spec',
+          prompt: `write the spec; write ${join(ctx.artifactDir, 'spec.md')}`,
           reads: [ctx.inputs.intent],
           outputs: { spec: { file: 'spec.md', desc: 'the Spec' } }
         })
@@ -423,7 +423,7 @@ describe('resume over every stop', () => {
     plan: (): PlannedNode[] => [{ id: 'work' }],
     run: async (ctx) => {
       const done = await ctx.node('work', {
-        prompt: 'do the work',
+        prompt: `do the work; write ${join(ctx.artifactDir, 'report.md')}`,
         reads: [ctx.inputs.intent],
         outputs: { report: { file: 'report.md', desc: 'the report' } }
       })
@@ -608,17 +608,17 @@ describe('a clean restart', () => {
       ],
       run: async (ctx) => {
         const planned = await ctx.node('planner', {
-          prompt: 'write the spec',
+          prompt: `write the spec; write ${join(ctx.artifactDir, 'spec.md')}`,
           reads: [ctx.inputs.intent],
           outputs: { spec: { file: 'spec.md', desc: 'the Spec' } }
         })
         const gate = await ctx.node('gate', {
-          prompt: 'judge the branch',
+          prompt: `judge the branch; write ${join(ctx.artifactDir, 'verdict.md')}`,
           reads: [planned.outputs.spec],
           outputs: { verdict: { file: 'verdict.md', desc: 'the verdict' } }
         })
         const built = await ctx.node('builder', {
-          prompt: 'build it',
+          prompt: `build it; write ${join(ctx.artifactDir, 'report.md')}`,
           reads: [gate.outputs.verdict],
           outputs: { report: { file: 'report.md', desc: 'the report' } }
         })
@@ -693,7 +693,7 @@ describe('what a resumed run does not do again', () => {
       plan: (): PlannedNode[] => [{ id: 'planner' }, { id: 'gate', parents: ['planner'] }],
       run: async (ctx) => {
         await ctx.node('planner', {
-          prompt: 'write the spec',
+          prompt: `write the spec; write ${join(ctx.artifactDir, 'spec.md')}`,
           reads: [ctx.inputs.intent],
           outputs: { spec: { file: 'spec.md', desc: 'the Spec' } }
         })
@@ -746,7 +746,7 @@ describe('what a resumed run does not do again', () => {
           return { ok: true, at: `run ${gateRuns}` }
         })
         const done = await ctx.node('work', {
-          prompt: `fix what the gate said: ${JSON.stringify(checked)}`,
+          prompt: `fix what the gate said: ${JSON.stringify(checked)}; write ${join(ctx.artifactDir, 'report.md')}`,
           reads: [ctx.inputs.intent],
           outputs: { report: { file: 'report.md', desc: 'the report' } }
         })
@@ -844,7 +844,7 @@ describe('resume and held-open nodes', () => {
     plan: (): PlannedNode[] => [{ id: 'review' }, { id: 'fixer', parents: ['review'] }],
     run: async (ctx) => {
       const review = await ctx.openNode('review', {
-        prompt: 'review the branch',
+        prompt: `review the branch; write ${join(ctx.artifactDir, 'review.md')}`,
         outputs: { review: { file: 'review.md', desc: 'the review' } }
       })
       await ctx.node('fixer', { prompt: 'fix what the review found' })

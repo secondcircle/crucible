@@ -6,7 +6,6 @@ import type {
 import type { ObservedCacheMiss } from '../../shared/agent/adapter'
 import type { CacheMissFacts, TranscriptItem, Unsubscribe } from '../../shared/agent/port'
 // Spelled with extensions so plain Node can load this module too.
-import { composeSystemPrompt } from '../agent/system-prompt.ts'
 import { monitorPiTools } from '../agent/monitor-pi-tools.ts'
 import { shrinkingReadTool } from '../agent/shrink-images.ts'
 import {
@@ -46,8 +45,12 @@ import type {
 
 // A node is a π session with two injected tools and no interactive user: an
 // in-memory settings manager and a session kept in the run's own directory,
-// so nothing of π's state is read or written, and a full prompt override
-// composed of the node's role and the standing prompt.
+// so nothing of π's state is read or written. Its system prompt is the
+// workflow's own text when the node has one, and π's stock prompt when it
+// does not; Crucible composes nothing on top of either. π's own prompt files
+// (`.pi/SYSTEM.md`, `.pi/APPEND_SYSTEM.md`) stay unread as they do for every
+// Crucible agent, and its project context files (AGENTS.md and ancestors)
+// arrive as they do for every agent π runs.
 //
 // The session is on disk because a node has to outlive the app quitting: its
 // token goes on the node's record, and a resume reopens it so the node
@@ -56,8 +59,6 @@ import type {
 type Sdk = typeof import('@earendil-works/pi-coding-agent')
 
 export interface SdkNodeSessionOptions {
-  /** Appended to every node's role prompt, like every agent Crucible starts. */
-  readonly standingPrompt: string
   /** A scratch agent dir for π's resource loader; nothing durable lives in it. */
   readonly agentDir: string
   // The machine-global compaction setting, read per decision. A node is an
@@ -68,7 +69,6 @@ export interface SdkNodeSessionOptions {
 }
 
 export function createSdkNodeSessionFactory({
-  standingPrompt,
   agentDir,
   compaction = () => DEFAULT_COMPACTION_SETTINGS,
   onCompactionFailure = () => {}
@@ -104,8 +104,7 @@ export function createSdkNodeSessionFactory({
         nodeTool(
           'complete_node',
           'Complete Node',
-          "Declare this node's work finished. Only call when every required output file is " +
-            'written. Include `verdict` when the task declares a verdict schema.',
+          COMPLETE_NODE_DESCRIPTION,
           completeNodeParameters(request.verdictSchema),
           (params) => {
             const given = (params ?? {}) as { summary?: string; verdict?: unknown }
@@ -118,9 +117,7 @@ export function createSdkNodeSessionFactory({
         nodeTool(
           'raise_blocker',
           'Raise Blocker',
-          'Alert the orchestrating agent that something abnormal prevents doing this task ' +
-            'properly (broken environment, malformed inputs, missing access). Work pauses until ' +
-            'a response arrives.',
+          RAISE_BLOCKER_DESCRIPTION,
           {
             type: 'object',
             required: ['reason'],
@@ -195,8 +192,10 @@ export function createSdkNodeSessionFactory({
         // and never re-read, because a node is one task start to finish.
         noSkills: true,
         skillsOverride: () => ({ skills: forPi(skills), diagnostics: [] }),
-        systemPromptOverride: () =>
-          composeSystemPrompt({ role: request.rolePrompt, standing: standingPrompt }),
+        // The workflow's text, or nothing: `undefined` here is how π is told
+        // to build its stock prompt. The base π hands in is a `.pi/SYSTEM.md`
+        // it may have found, which stays ignored either way.
+        systemPromptOverride: () => request.system,
         appendSystemPromptOverride: () => [],
         extensionFactories: [
           compactionExtension({
@@ -602,6 +601,27 @@ function liveness(
   }
   return null
 }
+
+// The whole of what a node is told about finishing. It rides the request's
+// tools parameter, so it reaches a node whatever its workflow put in the
+// prompts, and it is the tool's own text rather than something the engine
+// wrote into the conversation. Exported so the wording can be pinned.
+export const COMPLETE_NODE_DESCRIPTION =
+  "The only way this node finishes. Ending a message is not completion: a node that stops " +
+  'talking without calling this is nudged, then reported as stalled. Call it once every ' +
+  "declared output file is written with real, complete content and the task's work is " +
+  'actually done; the run validates the outputs and rejects the call, in this same ' +
+  'conversation, when one is missing or empty or fails its check. `summary` is what the run ' +
+  'shows of your work. `verdict` is required when a schema is declared: pass it as a plain ' +
+  'JSON object matching that schema, never as a JSON-encoded string.'
+
+export const RAISE_BLOCKER_DESCRIPTION =
+  'Park this node on a question or a problem only somebody outside it can settle: a broken ' +
+  'environment, malformed or missing inputs, missing access, a decision the task does not ' +
+  'give you the authority to make. Nobody reads your messages, so a question written in ' +
+  'plain text is never answered; this tool is the one channel. After calling it, end your ' +
+  'turn and wait: the answer arrives as your next message, and you continue from there. Do ' +
+  'not improvise around a problem this should carry.'
 
 /**
  * The complete_node parameter schema. A node that declares a verdict schema

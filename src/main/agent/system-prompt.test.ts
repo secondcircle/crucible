@@ -1,7 +1,8 @@
 // @vitest-environment node
 //
-// The module is pure, so what every Crucible agent is told can be pinned here
-// without constructing an adapter or spending anything.
+// The module is pure, so what a session's agent is told can be pinned here
+// without constructing an adapter or spending anything. Workflow nodes never
+// pass through it: their system prompt is the workflow's, verbatim or absent.
 import { describe, expect, it } from 'vitest'
 import { composeSystemPrompt, DOCS_INDEX_PLACEHOLDER } from './system-prompt'
 
@@ -20,11 +21,11 @@ describe('composing an agent\u2019s system prompt', () => {
   })
 
   it('appends the standing prompt whatever the role says', () => {
-    const orchestrator = 'You run a workflow. You never touch files.'
+    const reviewer = 'You review pull requests. You never touch files.'
 
-    const composed = composeSystemPrompt({ role: orchestrator, standing: STANDING })
+    const composed = composeSystemPrompt({ role: reviewer, standing: STANDING })
 
-    expect(composed.startsWith(orchestrator)).toBe(true)
+    expect(composed.startsWith(reviewer)).toBe(true)
     expect(composed.endsWith(STANDING)).toBe(true)
   })
 

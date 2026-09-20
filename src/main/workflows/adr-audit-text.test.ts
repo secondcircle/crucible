@@ -18,10 +18,15 @@ const APP = join(import.meta.dirname, '..', '..', '..')
 interface AdrAuditModule {
   default: WorkflowDef
   ADR_DOCTRINE: string
-  auditPrompt(): string
-  sweepPrompt(): string
-  reportPrompt(auditFindings: string, sweepFindings: string): string
+  NODE_SYSTEM: string
+  auditPrompt(findings: string): string
+  sweepPrompt(findings: string): string
+  reportPrompt(auditFindings: string, sweepFindings: string, report: string): string
 }
+
+const AUDIT_FINDINGS = '/runs/40/audit-findings.md'
+const SWEEP_FINDINGS = '/runs/40/sweep-findings.md'
+const REPORT = '/runs/40/report.html'
 
 let mod: AdrAuditModule
 
@@ -52,11 +57,35 @@ function everythingEmitted(): Record<string, string> {
   return {
     description: mod.default.description,
     doctrine: mod.ADR_DOCTRINE,
-    audit: mod.auditPrompt(),
-    sweep: mod.sweepPrompt(),
-    report: mod.reportPrompt('/runs/40/audit-findings.md', '/runs/40/sweep-findings.md')
+    system: mod.NODE_SYSTEM,
+    audit: mod.auditPrompt(AUDIT_FINDINGS),
+    sweep: mod.sweepPrompt(SWEEP_FINDINGS),
+    report: mod.reportPrompt(AUDIT_FINDINGS, SWEEP_FINDINGS, REPORT)
   }
 }
+
+// A node is told nothing its workflow does not write, so the workflow has to
+// say where each output goes and how a node finishes; here is where it does.
+describe('what every node is told, now that nothing else tells it', () => {
+  it('has a system prompt saying nobody is watching, and naming both tools', () => {
+    const text = mod.NODE_SYSTEM
+    says(text, 'no interactive user')
+    says(text, 'raise_blocker')
+    says(text, 'complete_node')
+    expect(flat(text)).toMatch(/verify every claim/i)
+  })
+
+  it('names the file each node writes, by its resolved path', () => {
+    says(mod.auditPrompt(AUDIT_FINDINGS), `written to \`${AUDIT_FINDINGS}\``)
+    says(mod.sweepPrompt(SWEEP_FINDINGS), `written to \`${SWEEP_FINDINGS}\``)
+    says(mod.reportPrompt(AUDIT_FINDINGS, SWEEP_FINDINGS, REPORT), `to \`${REPORT}\``)
+  })
+
+  it('names the verdict fields, since no schema is pasted into the prompt any more', () => {
+    says(mod.auditPrompt(AUDIT_FINDINGS), '`kept`, `edited`, `flagged` and `deleted`')
+    says(mod.sweepPrompt(SWEEP_FINDINGS), 'is `removed`')
+  })
+})
 
 describe('the doctrine adr-audit ships', () => {
   it('states what the folder is for, and that the old convention is not coming back', () => {
@@ -104,14 +133,14 @@ describe('the doctrine adr-audit ships', () => {
   })
 
   it('reaches both the agents that enforce it', () => {
-    says(mod.auditPrompt(), mod.ADR_DOCTRINE, 'the audit gets the doctrine')
-    says(mod.sweepPrompt(), mod.ADR_DOCTRINE, 'the sweep gets the doctrine')
+    says(mod.auditPrompt(AUDIT_FINDINGS), mod.ADR_DOCTRINE, 'the audit gets the doctrine')
+    says(mod.sweepPrompt(SWEEP_FINDINGS), mod.ADR_DOCTRINE, 'the sweep gets the doctrine')
   })
 })
 
 describe('what the audit is told', () => {
   it('gives it four operations and the limit on each', () => {
-    const prompt = mod.auditPrompt()
+    const prompt = mod.auditPrompt(AUDIT_FINDINGS)
 
     says(prompt, '**Delete** an ADR that no longer describes a live decision')
     says(prompt, 'only under the deletion precondition')
@@ -125,7 +154,7 @@ describe('what the audit is told', () => {
 
   it('forbids authoring, renumbering and every edit outside the folder', () => {
     says(
-      mod.auditPrompt(),
+      mod.auditPrompt(AUDIT_FINDINGS),
       '**Forbidden**: authoring a new ADR, splitting one into two, renumbering, reusing a ' +
         'number, renaming a file, inventing a rationale, editing anything outside `docs/adr/`, ' +
         'and touching `.crucible/align/` or `.crucible/runs/`.'
@@ -133,7 +162,7 @@ describe('what the audit is told', () => {
   })
 
   it('demands findings a user can judge the kept ADRs from, and counts that partition', () => {
-    const prompt = mod.auditPrompt()
+    const prompt = mod.auditPrompt(AUDIT_FINDINGS)
 
     says(prompt, 'one entry per ADR file that was present when you started')
     says(prompt, 'relational findings')
@@ -143,13 +172,13 @@ describe('what the audit is told', () => {
   })
 
   it('rules an empty folder a result rather than an error', () => {
-    says(mod.auditPrompt(), 'is a legitimate outcome, not an error')
+    says(mod.auditPrompt(AUDIT_FINDINGS), 'is a legitimate outcome, not an error')
   })
 })
 
 describe('what the sweep is told', () => {
   it('names both files whose citations are not citations', () => {
-    const prompt = mod.sweepPrompt()
+    const prompt = mod.sweepPrompt(SWEEP_FINDINGS)
 
     says(prompt, '`src/shared/workspace/fake-service.ts`')
     says(prompt, '`docs/design/mock-h-queue-and-chains.html`')
@@ -157,11 +186,11 @@ describe('what the sweep is told', () => {
   })
 
   it('names the two directories nothing may edit', () => {
-    says(mod.sweepPrompt(), '`.crucible/align/` and `.crucible/runs/`')
+    says(mod.sweepPrompt(SWEEP_FINDINGS), '`.crucible/align/` and `.crucible/runs/`')
   })
 
   it('scopes the search to text, and spares the generic pointers', () => {
-    const prompt = mod.sweepPrompt()
+    const prompt = mod.sweepPrompt(SWEEP_FINDINGS)
 
     says(prompt, '**In scope**')
     expect(flat(prompt)).toMatch(/lint messages among them/i)
@@ -171,7 +200,7 @@ describe('what the sweep is told', () => {
   })
 
   it('has citations deleted rather than repointed, and logic left alone', () => {
-    const prompt = mod.sweepPrompt()
+    const prompt = mod.sweepPrompt(SWEEP_FINDINGS)
 
     says(prompt, 'deleted, never rewritten to point somewhere else')
     says(prompt, 'A sentence that is nothing but the citation goes entirely')
@@ -182,14 +211,14 @@ describe('what the sweep is told', () => {
 
 describe('what the report is told', () => {
   it('carries the paths of both findings files it is built from', () => {
-    const prompt = mod.reportPrompt('/runs/40/audit-findings.md', '/runs/40/sweep-findings.md')
+    const prompt = mod.reportPrompt(AUDIT_FINDINGS, SWEEP_FINDINGS, REPORT)
 
     says(prompt, '`/runs/40/audit-findings.md`')
     says(prompt, '`/runs/40/sweep-findings.md`')
   })
 
   it('requires every section, present even when it is empty', () => {
-    const prompt = mod.reportPrompt('/a.md', '/b.md')
+    const prompt = mod.reportPrompt('/a.md', '/b.md', '/c.html')
 
     for (const section of [
       '**The verdict at a glance**',
@@ -206,7 +235,7 @@ describe('what the report is told', () => {
   })
 
   it('holds the report to being judgeable on its own, and to changing nothing', () => {
-    const prompt = mod.reportPrompt('/a.md', '/b.md')
+    const prompt = mod.reportPrompt('/a.md', '/b.md', '/c.html')
 
     says(prompt, 'A change the user cannot evaluate from the report alone is a defect')
     says(prompt, 'verifying a findings claim against the diff is cheap, verify it')
@@ -234,7 +263,7 @@ describe('the enforcer is clean of what it treats', () => {
 
   it('still points at the folder, which is what sends an agent to look', () => {
     expect(mod.ADR_DOCTRINE).toContain('`docs/adr/`')
-    expect(mod.auditPrompt()).toContain('`docs/adr/`')
-    expect(mod.sweepPrompt()).toContain('`docs/adr/`')
+    expect(mod.auditPrompt(AUDIT_FINDINGS)).toContain('`docs/adr/`')
+    expect(mod.sweepPrompt(SWEEP_FINDINGS)).toContain('`docs/adr/`')
   })
 })

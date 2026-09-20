@@ -13,6 +13,7 @@ import { memoryMonitorStore } from '../monitors/store'
 import type { CheckResult, CheckRunner } from '../monitors/check-runner'
 import {
   cleanupScratch,
+  outputPath,
   relaunch,
   rig,
   scriptedSessions,
@@ -111,7 +112,7 @@ const oneNode: WorkflowDef = {
   plan: () => [{ id: 'work' }],
   run: async (ctx) => {
     const result = await ctx.node('work', {
-      prompt: 'do the thing',
+      prompt: `do the thing; write ${join(ctx.artifactDir, 'report.md')}`,
       tools: ['read', 'bash'],
       outputs: { report: { file: 'report.md', desc: 'what happened' } }
     })
@@ -133,8 +134,7 @@ function repoRig(
     () => (prompt, tools) => {
       prompts.push(prompt)
       if (turns(prompt) === 'complete') {
-        const report = /- (\S+) — report:/.exec(tools.taskPrompt)?.[1]
-        if (report !== undefined) writeFileSync(report, 'done\n')
+        writeFileSync(outputPath(tools.taskPrompt, 'report.md'), 'done\n')
         tools.complete({ summary: 'finished' })
       }
     },
@@ -176,8 +176,7 @@ function hangingSessions(): {
             return
           }
           if (turn === 2) return
-          const report = /- (\S+) — report:/.exec(taskPrompt)?.[1]
-          if (report !== undefined) writeFileSync(report, 'done\n')
+          writeFileSync(outputPath(taskPrompt, 'report.md'), 'done\n')
           request.onComplete({ summary: 'finished' })
         },
         async abort(): Promise<void> {

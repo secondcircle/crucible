@@ -90,8 +90,11 @@ interface Script {
 
 interface Dispatch {
   readonly id: string
+  readonly system: string | undefined
   readonly prompt: string
   readonly reads: readonly string[]
+  /** Output name -> the path the fake wrote it to. */
+  readonly outputs: Readonly<Record<string, string>>
   /** What the node declared it follows, which is what the graph draws. */
   readonly from: readonly string[] | undefined
   readonly model: string | undefined
@@ -141,10 +144,18 @@ function driver(repo: string, script: Script = {}): Driver {
         if (!existsSync(read)) throw new Error(`node "${id}": required input missing: ${read}`)
       }
       events.push(`node:${id}`)
+      const outputs: Record<string, string> = {}
+      for (const [name, output] of Object.entries(spec.outputs ?? {})) {
+        const path = join(artifactDir, output.file)
+        writeFileSync(path, `<!doctype html><title>${id}</title>${output.desc}\n`)
+        outputs[name] = path
+      }
       nodes.push({
         id,
+        system: spec.system,
         prompt: spec.prompt,
         reads: [...(spec.reads ?? [])],
+        outputs,
         from: spec.from === undefined ? undefined : [...spec.from],
         model: spec.model,
         head: git(repo, 'log', '-1', '--format=%s'),
@@ -154,12 +165,6 @@ function driver(repo: string, script: Script = {}): Driver {
       const written = script.edits?.[id]
       if (written !== undefined) writeFileSync(join(repo, written), `work of ${id}\n`)
 
-      const outputs: Record<string, string> = {}
-      for (const [name, output] of Object.entries(spec.outputs ?? {})) {
-        const path = join(artifactDir, output.file)
-        writeFileSync(path, `<!doctype html><title>${id}</title>${output.desc}\n`)
-        outputs[name] = path
-      }
       const verdict =
         spec.verdict === undefined
           ? undefined
@@ -554,6 +559,77 @@ describe('the design review loop, between the planner and the builder', () => {
     for (const dispatch of rig.nodes.filter((node) => !node.id.startsWith('spec-'))) {
       expect(dispatch.prompt, dispatch.id).not.toContain('DESIGN RULING')
     }
+  })
+})
+
+// A node is told exactly what the workflow writes, so the workflow has to say
+// where each output goes and which earlier rounds to read; nothing else does.
+describe('what every node is told, now that nothing else tells it', () => {
+  it('gives every node one system prompt, saying nobody is watching', async () => {
+    const rig = await build(tempRepo(), {
+      verdicts: { 'spec-review-1': 'changes-required', 'review-1': 'changes-required', ...gateRefusals(1) }
+    })
+
+    const systems = new Set(rig.nodes.map((node) => node.system))
+    expect(systems.size).toBe(1)
+    const [system] = [...systems]
+    expect(system).toMatch(/no interactive user/)
+    expect(system).toContain('raise_blocker')
+    expect(system).toContain('complete_node')
+  })
+
+  it('names the file each output-bearing node writes, by its resolved path', async () => {
+    const rig = await build(tempRepo(), {
+      verdicts: { 'spec-review-1': 'changes-required', 'review-1': 'changes-required', ...gateRefusals(1) }
+    })
+
+    const withOutputs = rig.nodes.filter((node) => Object.keys(node.outputs).length > 0)
+    expect(withOutputs.map((node) => node.id)).toEqual([
+      'planner',
+      'spec-review-1',
+      'spec-review-2',
+      'review-1',
+      'review-2',
+      'gate-alignment-1',
+      'gate-comments-1',
+      'gate-alignment-2',
+      'gate-comments-2'
+    ])
+    for (const node of withOutputs) {
+      for (const path of Object.values(node.outputs)) {
+        expect(node.prompt, node.id).toContain(`\`${path}\``)
+      }
+    }
+  })
+
+  it('tells a second round which earlier rounds to read, and a first round nothing of the kind', async () => {
+    const rig = await build(tempRepo(), {
+      verdicts: { 'spec-review-1': 'changes-required', 'review-1': 'changes-required', ...gateRefusals(1) }
+    })
+    const written = (id: string): string => rig.node(id).outputs.review ?? rig.node(id).outputs.report
+
+    for (const first of ['spec-review-1', 'spec-fixer-1', 'review-1', 'fixer-1', 'gate-alignment-1', 'gate-fixer-1']) {
+      expect(rig.prompt(first), first).not.toMatch(/[Ee]arlier rounds?[^.]*`/)
+    }
+    expect(rig.prompt('spec-review-2')).toContain(`\`${written('spec-review-1')}\``)
+    expect(rig.prompt('review-2')).toContain(`\`${written('review-1')}\``)
+    expect(rig.prompt('gate-alignment-2')).toContain(`\`${written('gate-alignment-1')}\``)
+    // Every path a prompt names is one the node also declared it reads.
+    for (const id of ['spec-review-2', 'review-2', 'gate-alignment-2']) {
+      const named = [...rig.prompt(id).matchAll(/`(\/[^`]+)`/g)].map((match) => match[1])
+      const readable = new Set([...rig.node(id).reads, ...Object.values(rig.node(id).outputs)])
+      for (const path of named) expect(readable.has(path), `${id} names ${path}`).toBe(true)
+    }
+  })
+
+  it('names the two reports the verdict weighs, since no input list is appended any more', async () => {
+    const rig = await build(tempRepo())
+
+    const prompt = rig.prompt('gate-verdict-1')
+    expect(prompt).toContain(`\`${rig.node('gate-alignment-1').outputs.report}\``)
+    expect(prompt).toContain(`\`${rig.node('gate-comments-1').outputs.report}\``)
+    expect(prompt).not.toContain('listed among your inputs')
+    expect(prompt).toMatch(/verdict.*complete_node/)
   })
 })
 
