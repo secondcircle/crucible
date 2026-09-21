@@ -1,4 +1,5 @@
 import type { RunNode } from '../../../shared/workflows/run'
+import { runOrder } from './flow'
 
 const ROUND = /-(\d+)$/
 
@@ -49,39 +50,6 @@ export function readLoops(nodes: readonly RunNode[]): LoopReading {
     spots[at] = read.spots[place]
   })
   return { spots, loops: read.loops }
-}
-
-function runOrder(nodes: readonly RunNode[]): number[] {
-  const held = new Set(nodes.map((node) => node.id))
-  const walked = new Set<string>()
-  const ready = (node: RunNode): boolean =>
-    node.parents.every(
-      (parent) => parent === node.id || !held.has(parent) || walked.has(parent)
-    )
-
-  const taken = nodes.map(() => false)
-  const order: number[] = []
-  while (order.length < nodes.length) {
-    let pick = -1
-    let first = -1
-    for (let at = 0; at < nodes.length; at++) {
-      if (taken[at]) continue
-      if (first === -1) first = at
-      if (!ready(nodes[at])) continue
-      if (pick === -1 || ranBefore(nodes[at], nodes[pick])) pick = at
-    }
-    const next = pick === -1 ? first : pick
-    taken[next] = true
-    walked.add(nodes[next].id)
-    order.push(next)
-  }
-  return order
-}
-
-function ranBefore(node: RunNode, than: RunNode): boolean {
-  if (node.startedAt === undefined) return false
-  if (than.startedAt === undefined) return true
-  return node.startedAt < than.startedAt
 }
 
 function readAlong(nodes: readonly RunNode[]): LoopReading {

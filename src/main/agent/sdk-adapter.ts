@@ -86,7 +86,8 @@ import {
 import { sanitizeTitle, TITLE_INSTRUCTION, titleInput } from './sdk-titler.ts'
 import { branchSummaryExtension } from './sdk-branch-summary.ts'
 import {
-  applyRecentSpan,
+  PI_COMPACTION_SETTINGS,
+  autoCompactionEvent,
   askOnWarmCache,
   compactionExtension,
   previousCompaction,
@@ -96,7 +97,11 @@ import {
 } from './sdk-compaction.ts'
 import type { CompactionRecord } from '../../shared/compaction/record.ts'
 import type { CompactionTrigger } from '../../shared/compaction/record.ts'
-import { RECENT_SPAN_TOKENS } from '../../shared/compaction/window.ts'
+import {
+  DEFAULT_COMPACTION_SETTINGS,
+  type CompactionSettings
+} from '../../shared/compaction/settings.ts'
+import { piCompactionSettings } from '../../shared/compaction/trigger.ts'
 import {
   BASH_RUN_TYPE,
   branchHistory,
@@ -203,7 +208,8 @@ export function createSdkAdapter({
   systemPrompt,
   openExternal,
   log,
-  askCompaction
+  askCompaction,
+  compactionSettings = () => DEFAULT_COMPACTION_SETTINGS
 }: {
   // The same model the fake's scripts call and the same model the shell reads:
   // the tools registered below are its three behaviors and nothing more.
@@ -241,6 +247,10 @@ export function createSdkAdapter({
     signal: AbortSignal,
     warm: CompactionDeps['ask']
   ) => Promise<string>
+  // The machine-global compaction setting, read whenever π's own check is
+  // re-armed: a session's turn compacts between tool rounds at the size this
+  // says, and the shell's between-turn rules read the same setting.
+  readonly compactionSettings?: () => CompactionSettings
 }): ConversationAdapter {
   const agentDir = crucibleAgentDir(homedir())
   const listeners = new Set<AdapterEventListener>()
@@ -373,13 +383,10 @@ export function createSdkAdapter({
       extensions: [],
       steeringMode: 'all',
       followUpMode: 'all',
-      // π's own auto-compaction is off in every loop Crucible starts: Crucible
-      // decides when a conversation compacts and writes the compaction itself,
-      // so π's threshold can never fire and π's summary can never reach the
-      // window. `keepRecentTokens` is still π's, because π finds the cut point
-      // for the compactions Crucible asks for; `applyRecentSpan` re-states it
-      // against the model's own window before each one.
-      compaction: { enabled: false, keepRecentTokens: RECENT_SPAN_TOKENS }
+      // π's compaction settings are re-derived per conversation by
+      // `armPiCompaction`; until then π checks nothing. π's own summarizer
+      // never runs either way: the hook below answers every compaction.
+      compaction: PI_COMPACTION_SETTINGS
     })
     const resourceLoader = new pi.DefaultResourceLoader({
       cwd: workspacePath,
@@ -433,8 +440,6 @@ export function createSdkAdapter({
           },
           trigger: () => sessions.get(sessionId)?.compacting?.trigger ?? 'threshold',
           toItems: (messages) => toTranscript(messages as readonly StoredMessage[]),
-          sizeOf: pi.estimateTokens,
-          contextWindow: () => sessions.get(sessionId)?.session.model?.contextWindow,
           failed: (message) => {
             const live = sessions.get(sessionId)?.compacting
             if (live !== undefined) live.failure = message
@@ -858,6 +863,26 @@ export function createSdkAdapter({
         observeMessage(sessionId, turnId, bound, event.message as StoredMessage)
       }
 
+      // A compaction π started between two tool rounds of this turn. The
+      // manual one is `compact()` below, which announces itself; this one is
+      // announced here so the transcript shows the same block and the shell
+      // hears the same events whichever way it was asked for.
+      const auto = autoCompactionEvent(event)
+      if (auto?.kind === 'started') {
+        bound.compacting = { trigger: auto.trigger }
+        emit({ type: 'compaction_started', sessionId })
+      } else if (auto?.kind === 'ended') {
+        const written = bound.compacting?.written
+        bound.compacting = undefined
+        emit({
+          type: 'compacted',
+          sessionId,
+          ...(written === undefined
+            ? {}
+            : { compaction: { text: written.text, record: written.stored.record } })
+        })
+      }
+
       // The three moments the context genuinely moved: an answer landed with
       // its own token count, a tool result was appended after it, or a
       // compaction threw most of the conversation away. Deltas are skipped
@@ -1128,6 +1153,7 @@ export function createSdkAdapter({
   // every read, so this is worth asking for whenever the conversation grows —
   // on the bind, after each answer and tool result, and once the turn is over.
   function reportUsage(sessionId: SessionId, bound: Bound): void {
+    armPiCompaction(bound)
     const usage = bound.session.getContextUsage()
     // Nothing at all rather than a guess when π reports nothing: right after a
     // compaction it genuinely does not know yet.
@@ -1172,6 +1198,23 @@ export function createSdkAdapter({
 
     bound.reported = next
     emit({ type: 'usage', sessionId, ...next })
+  }
+
+  // π checks a conversation's size between one tool round and the next, and
+  // that check is the one place a compaction can land while an agent works.
+  // Its settings are re-derived here at every moment the size or the
+  // conversation's own last compaction can have moved, so the check inside a
+  // turn fires at the size the shell's rules would fire at between turns.
+  function armPiCompaction(bound: Bound): void {
+    const compactedTo = previousCompaction(bound.session.sessionManager.getBranch())?.record
+      .tokensAfter
+    const window = bound.session.model?.contextWindow
+    bound.session.settingsManager.applyOverrides({
+      compaction: piCompactionSettings(compactionSettings(), {
+        ...(window === undefined ? {} : { contextWindow: window }),
+        ...(compactedTo === undefined ? {} : { compactedTo })
+      })
+    })
   }
 
   // Keyed on the conversation file's revision, so the Usage pane's sweep over
@@ -1262,6 +1305,7 @@ export function createSdkAdapter({
         carriedBlock: held(request.workspacePath).block
       }
       sessions.set(request.sessionId, bound)
+      armPiCompaction(bound)
       // A conversation that came back is already holding context, and it is
       // holding it before anyone prompts it again: without this the meter
       // reads as a dash from launch until the next turn ends. A fresh
@@ -1751,9 +1795,6 @@ export function createSdkAdapter({
       bound.compacting = live
       emit({ type: 'compaction_started', sessionId })
       try {
-        // Read against the model the conversation is on right now: the ring
-        // can have moved it to a narrower window since the session opened.
-        applyRecentSpan(bound.session)
         await bound.session.compact()
       } catch (cause) {
         // π throws for its own refusals too — "Nothing to compact", a cancel —

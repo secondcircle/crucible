@@ -342,10 +342,22 @@ _Avoid_: blocked (π's word for an interactive run's wait), stuck, orphaned.
 The drawn picture of a run's nodes and the edges between them, layered
 top-down in the run view's left pane, with loops laid out left to right: what
 followed what, what fanned out in parallel, what was sent back for revision.
-A pannable, zoomable canvas that opens fit and centered. An edge means the
-work of one node reached another, and carries no text; a node states what it
-follows rather than having it inferred.
-_Avoid_: the flow, the graph rail, the DAG view, pipeline diagram.
+A pannable, zoomable canvas that opens fit and centered. An edge means one
+thing only: that node ran next, as the node itself declared. It carries no
+text, and reading a file another node wrote is never an edge — dataflow is
+the artifact rail's. A planned node that has not started sits below
+everything that has run, never where a plan's forecast would put it.
+_Avoid_: the flow, the graph rail, the DAG view, pipeline diagram, dependency
+edge (for a file read).
+
+**Step block**:
+In the run graph, a stretch of consecutive nodes about one piece of work whose
+name appears in each of their ids (`builder-x`, `review-x-1`, `fixer-x-1`),
+drawn inside a faint labelled outline. Inferred from ids alone, like a loop;
+blocks stack down the main line in the order they ran, and the loops inside a
+block fan right as loops do everywhere.
+_Avoid_: stage, group, phase, swimlane, slice (the slicer's word for the plan
+entry, not the drawn thing).
 
 **Loop**:
 In the run graph, a stretch of nodes whose base name recurs with rising round
@@ -539,10 +551,12 @@ _Avoid_: monitor badge, wait pill, monitor card (there is no transcript card).
 
 **Compaction**:
 Crucible's own rewrite of what a model sees of a conversation once it grows
-past the threshold or sits idle before its cache lapses: a trajectory summary,
-a skeleton, and the recent span. Written by Crucible, never by π's built-in
-compaction, which is switched off. The session file keeps everything; only the
-model's view shrinks.
+past the threshold or sits idle before its cache lapses: a trajectory summary
+and a skeleton, standing for everything up to the moment the compaction was
+asked for. Fires between tool rounds inside a turn as well as between turns,
+so a workflow node's one long turn compacts too. Nothing of that span stays verbatim; what arrives after it does.
+Written by Crucible, never by π's built-in compaction, which is switched off.
+The session file keeps everything; only the model's view shrinks.
 _Avoid_: context pruning (one part of it), summarization (one part of it), π
 compaction, auto-compact (as a noun).
 
@@ -560,13 +574,11 @@ call one line naming its handle and its result's size, each message Crucible
 sent in the user's role (a run's report, a wake, an answer batch) one line
 naming what it announced. Every dropped thing is restorable from disk, by
 re-running, or from the run's record. Pruned by the model's judgment at each
-later compaction and held under a budget, so it cannot grow without bound;
-only the user's words are never trimmed mechanically.
+later compaction, and by nothing else: no size rule trims it.
 _Avoid_: masked history, stubs, digest.
 
 **Recent span**:
-The tail of the conversation a compaction never touches, kept verbatim behind
-the skeleton. A size the implementation owns and no setting reaches, capped
-against the model's own window so a small one is not mostly recent span, cut
-at a user-message boundary.
-_Avoid_: keep-recent (π's setting), tail window, hot context.
+_Retired._ Nothing of a compacted span is kept verbatim: the compaction
+stands for everything up to the ask, and only what arrives after it is
+verbatim. Do not describe a compaction as keeping a tail.
+_Avoid_: recent span, keep-recent (π's setting), tail window, hot context.

@@ -303,7 +303,10 @@ const { adapter, flavor } = selectAdapter(
     // A login's browser is opened here; the renderer gets no such capability.
     openExternal: (url: string) => {
       void electronShell.openExternal(url)
-    }
+    },
+    // The same setting the shell's between-turn rules read, so a turn's own
+    // check between tool rounds fires at the same size.
+    compactionSettings: () => store.state.compaction
   },
   app.isPackaged,
   workflowRuns.tools,

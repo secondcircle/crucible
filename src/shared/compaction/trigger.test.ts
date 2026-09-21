@@ -2,8 +2,10 @@ import { describe, expect, it } from 'vitest'
 import { LONG_CACHE_TTL_MS } from '../cache/ttl'
 import { MIN_THRESHOLD_K, thresholdTokens, type CompactionSettings } from './settings'
 import {
+  compactionDue,
   idleCompactionDelayMs,
   idleTrigger,
+  piCompactionSettings,
   sizeTrigger
 } from './trigger'
 import { compactedWindowTokens, SMALLEST_WORTH_COMPACTING } from './window'
@@ -34,7 +36,7 @@ describe('what a conversation’s size calls for', () => {
   // The floor is the smallest threshold the field accepts, so a conversation
   // under it is one nobody could have asked to compact. It is what a
   // compaction leaves, doubled: at the lowest threshold anybody can type, a
-  // compaction that meets its budgets lands at half of it.
+  // compaction that meets its expectation lands at half of it.
   it('leaves a conversation too small to gain anything alone', () => {
     const lowest: CompactionSettings = { enabled: true, thresholdK: MIN_THRESHOLD_K }
     expect(thresholdTokens(lowest)).toBe(SMALLEST_WORTH_COMPACTING)
@@ -46,7 +48,7 @@ describe('what a conversation’s size calls for', () => {
   // The size alone is half the question. A compaction is a whole-context
   // request and a broken prefix, so it has to win back a window worth that:
   // measured against what this conversation's own last compaction produced,
-  // not against the budgets it could not meet.
+  // not against an expectation it could not meet.
   it('waits for growth a compaction could take away, not for the threshold alone', () => {
     const over = { usedTokens: 210_000, contextWindow: 1_000_000 }
     expect(sizeTrigger(ON, { ...over, compactedTo: 190_000 })).toBeUndefined()
@@ -90,7 +92,7 @@ describe('what a conversation’s size calls for', () => {
   })
 
   // Below the edge the floor still holds, measured against the window it has:
-  // a quarter of a 32k model is the recent span a compaction would keep, and
+  // a quarter of a 32k model is what a compaction is expected to leave, and
   // twice that is the least worth rewriting.
   it('leaves a small model’s short conversation alone', () => {
     expect(sizeTrigger(ON, { usedTokens: 12_000, contextWindow: 32_768 })).toBeUndefined()
@@ -143,5 +145,66 @@ describe('the idle rule', () => {
     const facts = { lastRequestAt: 0, usedTokens: 120_000, retention: '1h' as const }
     expect(idleTrigger(ON, { ...facts, compactedTo: 110_000 }, 51 * 60 * 1000)).toBeUndefined()
     expect(idleTrigger(ON, { ...facts, compactedTo: 55_000 }, 51 * 60 * 1000)).toBe('idle')
+  })
+})
+
+// A workflow node is one long turn. The rules above are asked between turns,
+// so for a node they are never asked at all: it grows to the model's window
+// and errors there. π has a check of its own between one tool round and the
+// next, and these arm it at the size the rules above would fire at, derived
+// from them rather than written beside them.
+describe('π’s check inside a turn', () => {
+  const wide = { contextWindow: 1_000_000 }
+
+  it('is due at exactly the size the between-turn rule fires at', () => {
+    for (const size of [
+      wide,
+      { ...wide, compactedTo: 150_000 },
+      { contextWindow: 200_000 },
+      { contextWindow: 32_768 },
+      { contextWindow: 32_768, compactedTo: 30_000 }
+    ]) {
+      const due = compactionDue(ON, size)
+      if (due === undefined) continue
+      expect(sizeTrigger(ON, { ...size, usedTokens: due })).toBeDefined()
+      expect(sizeTrigger(ON, { ...size, usedTokens: due - 1 })).toBeUndefined()
+    }
+  })
+
+  it('fires at the threshold on a wide window', () => {
+    expect(compactionDue(ON, wide)).toBe(200_000)
+    expect(piCompactionSettings(ON, wide)).toEqual({
+      enabled: true,
+      reserveTokens: 800_001,
+      keepRecentTokens: 0
+    })
+  })
+
+  // The same "worth its model call" rule: a conversation sitting near what its
+  // own last compaction produced is not compacted again at the threshold.
+  it('waits for growth a compaction could take away, like the rule between turns', () => {
+    expect(compactionDue(ON, { ...wide, compactedTo: 150_000 })).toBe(300_000)
+  })
+
+  it('fires at the window edge with the switch off', () => {
+    expect(compactionDue(OFF, { contextWindow: 200_000 })).toBe(200_000 - 16_384)
+    expect(piCompactionSettings(OFF, { contextWindow: 200_000 }).enabled).toBe(true)
+  })
+
+  it('arms nothing where π has no window to check against', () => {
+    expect(piCompactionSettings(ON, {})).toEqual({ enabled: false, keepRecentTokens: 0 })
+  })
+
+  // Once as a last resort means once, inside a turn as between them.
+  it('arms nothing where the last compaction already landed at the edge', () => {
+    expect(compactionDue(OFF, { contextWindow: 200_000, compactedTo: 190_000 })).toBeUndefined()
+    expect(piCompactionSettings(OFF, { contextWindow: 200_000, compactedTo: 190_000 })).toEqual({
+      enabled: false,
+      keepRecentTokens: 0
+    })
+  })
+
+  it('never keeps a tail: the hook ages everything out', () => {
+    expect(piCompactionSettings(ON, wide).keepRecentTokens).toBe(0)
   })
 })

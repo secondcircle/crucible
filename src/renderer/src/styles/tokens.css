@@ -50,6 +50,9 @@
   --lit: #5c4436;
   /* a run graph edge at rest: visible against the pane, quiet beside a card */
   --edge: #4a3c47;
+  /* the outline around a step block: fainter than any card's border, so the
+     cards inside it stay the thing being read */
+  --step-block: #33282f;
 
   /* what a source view colors: keyword, string, comment, number, type */
   --syntax-keyword: #c586c0;

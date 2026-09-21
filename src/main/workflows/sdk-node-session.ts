@@ -24,7 +24,9 @@ import {
 } from '../agent/sdk-transcript.ts'
 import {
   askOnWarmCache,
+  autoCompactionEvent,
   compactionExtension,
+  PI_COMPACTION_SETTINGS,
   previousCompaction,
   storedCompactionOf
 } from '../agent/sdk-compaction.ts'
@@ -33,8 +35,8 @@ import {
   type CompactionSettings
 } from '../../shared/compaction/settings.ts'
 import type { CompactionTrigger } from '../../shared/compaction/record.ts'
+import { piCompactionSettings } from '../../shared/compaction/trigger.ts'
 import { createCompactionWatch } from '../../shared/compaction/watch.ts'
-import { recentSpanTokens } from '../../shared/compaction/window.ts'
 import { retentionInForce } from '../cache/retention.ts'
 import { forPi, type LoadedSkill } from '../skills/service.ts'
 import type {
@@ -178,14 +180,8 @@ export function createSdkNodeSessionFactory({
       const settings = pi.SettingsManager.inMemory()
       // π's own auto-compaction is off here for the same reason it is off in a
       // session: Crucible decides when a loop compacts and writes what the
-      // model reads afterwards. The span π keeps verbatim is sized against
-      // this node's model, which unlike a session's cannot change under it.
-      settings.applyOverrides({
-        compaction: {
-          enabled: false,
-          keepRecentTokens: recentSpanTokens(model.contextWindow)
-        }
-      })
+      // model reads afterwards.
+      settings.applyOverrides({ compaction: PI_COMPACTION_SETTINGS })
       const resourceLoader = new pi.DefaultResourceLoader({
         cwd: request.cwd,
         agentDir,
@@ -219,8 +215,6 @@ export function createSdkNodeSessionFactory({
             },
             trigger: () => live.trigger,
             toItems: (messages) => toTranscript(messages),
-            sizeOf: pi.estimateTokens,
-            contextWindow: () => held.session?.model?.contextWindow,
             failed: onCompactionFailure
             // Nothing to hand the compaction to as it is written: a node's run
             // view builds its transcript from the entries, and what the
@@ -453,6 +447,7 @@ export function wrapNodeSession(
   // so on a provider that caches nothing it must not run at all. That is the
   // same fact, from the same scan, that a session reports across the port.
   function noteSize(): void {
+    armPiCompaction()
     const usage = session.getContextUsage()
     if (usage?.tokens == null) return
     const prefix = scanCacheMisses(
@@ -468,11 +463,32 @@ export function wrapNodeSession(
     })
   }
 
+  // The one place a compaction can land while a node works: π's own check
+  // between one tool round and the next, armed here at the size Crucible's
+  // rules give it. A node is one long turn, so the watch above — which only
+  // fires between turns — would otherwise never fire for it, and the node
+  // would grow to the model's window and error there.
+  function armPiCompaction(): void {
+    const compactedTo = previousCompaction(session.sessionManager.getBranch())?.record.tokensAfter
+    const window = session.model?.contextWindow
+    session.settingsManager.applyOverrides({
+      compaction: piCompactionSettings(compaction.settings(), {
+        ...(window === undefined ? {} : { contextWindow: window }),
+        ...(compactedTo === undefined ? {} : { compactedTo })
+      })
+    })
+  }
+  armPiCompaction()
+
   const unsubscribe = session.subscribe((event) => {
     if (event.type === 'message_end' && event.message.role === 'assistant') {
       observe(event.message as StoredMessage)
       noteSize()
     }
+    // A compaction π started between two tool rounds is recorded the way the
+    // watch's own is, so the run's record names its trigger.
+    const auto = autoCompactionEvent(event)
+    if (auto?.kind === 'started') compaction.begin(auto.trigger)
     const now = liveness(event as Record<string, unknown>, inflight)
     if (now === null) return
     for (const listener of [...activityListeners]) listener(now)

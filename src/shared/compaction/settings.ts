@@ -21,9 +21,8 @@ export const DEFAULT_COMPACTION_SETTINGS: CompactionSettings = {
 
 // The smallest size a compaction does anything at, in the unit the field is
 // typed in. It is the window arithmetic's own number rather than a second one
-// beside it: a compaction leaves the recent span, the skeleton and the summary
-// behind, and one is worth its model call when it takes away at least as much
-// as it leaves. A lower minimum would be a field that accepts a number it does
+// beside it: a compaction leaves the summary and the skeleton behind, and one
+// is worth its model call when it takes away at least as much as it leaves. A lower minimum would be a field that accepts a number it does
 // not honor — and, worse, one whose compactions land above the threshold that
 // asked for them, so the conversation asks again on the next turn and every
 // turn after.

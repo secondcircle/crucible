@@ -2,13 +2,13 @@ import type { TranscriptItem } from '../agent/port'
 import { compactionInstruction, readCompactionReply } from './prompt.ts'
 import {
   pruneSkeleton,
+  reclassifySkeleton,
   renderSkeleton,
   skeletonOf,
   skeletonTokens,
-  trimSkeleton,
   type SkeletonLine
 } from './skeleton.ts'
-import { estimateTokens, skeletonBudgetTokens } from './window.ts'
+import { estimateTokens } from './window.ts'
 
 // A compaction, whole: what to ask the model for, and what the model's answer
 // becomes. Everything that decides what the window looks like afterwards is
@@ -29,12 +29,15 @@ export interface CompactionPlan {
 }
 
 // The previous skeleton is carried whole: it is already in the model's window,
-// numbered, and the newly aged lines continue its numbering.
+// numbered, and the newly aged lines continue its numbering. Carried as this
+// build reads it, not as the build that stored it did: a line's kind decides
+// how the model is told to treat it, and an older build's kinds are not this
+// one's.
 export function planCompaction(
   previous: CompactionState | undefined,
   aged: readonly TranscriptItem[]
 ): CompactionPlan {
-  const carried = previous?.skeleton ?? []
+  const carried = reclassifySkeleton(previous?.skeleton ?? [])
   const fresh = skeletonOf(aged)
   return {
     instruction: compactionInstruction({ aged: fresh, carried: carried.length }),
@@ -49,30 +52,26 @@ export interface SettledCompaction {
 }
 
 // The model's answer turned into the window. Absent when the model wrote no
-// account at all: a compaction without one would leave the agent with a list
-// of handles and no idea what it was doing, so the caller fails instead and
-// the conversation is left as it was.
+// account, or not all of one: a compaction without an account would leave the
+// agent with a list of handles and no idea what it was doing, and one with a
+// cut account would replace a whole account with its first paragraphs. The
+// caller fails instead and the conversation is left as it was.
 //
-// The account is kept whole, however long the model ran. It was asked for a
-// length, and the budget in `window.ts` assumes it kept to one, but nothing
-// the model writes is cut: the end of an account is where what comes next and
-// the files that matter live, and a build before this one sliced exactly that
-// off a summary that ran long. The skeleton is what the mechanical rules size,
-// and only the parts of it that can be got back from disk.
+// Nothing the model wrote is cut and nothing it kept is trimmed. The account
+// is kept whole however long it ran: its end is where what comes next and the
+// files that matter live. The skeleton is what the model left after striking
+// what it judged dead, and no rule of size second-guesses it. A build before
+// this one trimmed the skeleton to a budget, oldest first, sparing the user's
+// lines; on a skeleton whose protected lines alone were over the budget that
+// dropped every reply and every call and left a list of nothing but what had
+// been said to the agent.
 export function settleCompaction(
   plan: CompactionPlan,
-  reply: string,
-  // The model's own window, where the caller knows it: the skeleton has to fit
-  // inside what the compaction just made room in, and on a small model the
-  // wide-window budget is most of it.
-  contextWindow?: number
+  reply: string
 ): SettledCompaction | undefined {
   const { trajectory, strike } = readCompactionReply(reply)
   if (trajectory === '') return undefined
-  const skeleton = trimSkeleton(
-    pruneSkeleton(plan.lines, strike),
-    skeletonBudgetTokens(contextWindow)
-  )
+  const skeleton = pruneSkeleton(plan.lines, strike)
   return {
     text: compactionText(trajectory, skeleton),
     state: { skeleton }
@@ -101,4 +100,3 @@ function compactionText(trajectory: string, skeleton: readonly SkeletonLine[]): 
   }
   return parts.join('\n\n')
 }
-

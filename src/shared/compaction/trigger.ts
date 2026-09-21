@@ -54,8 +54,8 @@ export function sizeTrigger(
   if (window > 0) {
     const edge = window - windowEdgeReserveTokens(window)
     // Once as a last resort means once. A conversation whose own compaction
-    // landed at the edge is one compacting cannot move: it would keep the same
-    // recent span, write the same skeleton and come back to the same edge, and
+    // landed at the edge is one compacting cannot move: it would write the
+    // same account and the same skeleton and come back to the same edge, and
     // the turns it bought would each cost a full context. Where the last one
     // did get it clear, growing back to the edge is growth a compaction can
     // take away again.
@@ -110,4 +110,43 @@ export function idleTrigger(
   // make would re-bill the conversation rather than read it.
   if (waited < delay || waited >= cacheTtlMs(facts.retention)) return undefined
   return 'idle'
+}
+
+// The smallest size at which `sizeTrigger` fires for this conversation, or
+// nothing where no size would. Derived from the predicate rather than written
+// beside it, so the two cannot disagree: the candidates are the only points
+// at which the predicate's answer can change, and the first that fires is
+// the answer.
+export function compactionDue(
+  settings: CompactionSettings,
+  size: Omit<ContextSize, 'usedTokens'>
+): number | undefined {
+  const window = size.contextWindow ?? 0
+  const candidates = [
+    thresholdTokens(settings),
+    smallestWorthCompacting(size.contextWindow, size.compactedTo),
+    ...(window > 0 ? [window - windowEdgeReserveTokens(window)] : [])
+  ].sort((left, right) => left - right)
+  return candidates.find((used) => sizeTrigger(settings, { ...size, usedTokens: used }) !== undefined)
+}
+
+// π's own compaction settings, arranged so π's check inside a turn fires at
+// exactly the size Crucible's rules fire at between turns. π checks between
+// one tool round and the next — `tokens > contextWindow - reserveTokens` —
+// and that is the one place a compaction can land while an agent works.
+// A workflow node is one long turn: without this, a node grows to the
+// model's window and errors there, because nothing between turns ever runs.
+// The tail π keeps is zero; the hook ages out everything regardless.
+export function piCompactionSettings(
+  settings: CompactionSettings,
+  size: Omit<ContextSize, 'usedTokens'>
+): { readonly enabled: boolean; readonly reserveTokens?: number; readonly keepRecentTokens: 0 } {
+  const window = size.contextWindow ?? 0
+  const due = compactionDue(settings, size)
+  // π cannot check a window it does not know, and a conversation no size
+  // would compact is left to π's own overflow handling, which the same hook
+  // also answers.
+  if (window <= 0 || due === undefined) return { enabled: false, keepRecentTokens: 0 }
+  // `>` in π against `>=` here: one token of reserve more.
+  return { enabled: true, reserveTokens: Math.max(1, window - due + 1), keepRecentTokens: 0 }
 }

@@ -94,6 +94,23 @@ export function RunGraph({
             transform: `translate(${placement.at.x}px, ${placement.at.y}px) scale(${placement.scale})`
           }}
         >
+          {/* Behind the lines and the cards: the stretch of nodes one step of
+              the run was built and reviewed in, named on its own edge. */}
+          {layout.blocks.map((block) => (
+            <div
+              key={`${block.name}@${block.x},${block.y}`}
+              className="sblock"
+              style={{
+                left: block.x,
+                top: block.y,
+                width: block.width,
+                height: block.height
+              }}
+            >
+              <span className="lb">step · {block.name}</span>
+            </div>
+          ))}
+
           {/* No text, no hover, no click: what passed between two nodes is
               the artifact rail's job, and a line says only that it did. */}
           <svg
@@ -151,7 +168,33 @@ export function RunGraph({
           })}
         </div>
       </div>
+
+      <Legend />
     </section>
+  )
+}
+
+/** What each line means, in the line that means it. */
+const LINE_KINDS: readonly { readonly className: string; readonly text: string }[] = [
+  { className: 'e', text: 'ran next' },
+  { className: 'e lit', text: 'next to / from the selected node' },
+  { className: 'e flowing', text: 'running now' },
+  { className: 'e future', text: 'planned, not started' }
+]
+
+/** The four line kinds, named where the lines are: nothing else says so. */
+function Legend(): React.JSX.Element {
+  return (
+    <div className="glegend">
+      {LINE_KINDS.map((kind) => (
+        <span className="i" key={kind.text}>
+          <svg width="26" height="12" aria-hidden="true">
+            <path className={kind.className} d="M1,6 L25,6" />
+          </svg>
+          {kind.text}
+        </span>
+      ))}
+    </div>
   )
 }
 

@@ -537,9 +537,6 @@ export function createWorkflowEngine(options: EngineOptions): WorkflowEngine {
     const pauseAsked = (): boolean => handle.desired === 'paused'
     const cancelAsked = (): boolean => handle.cancelRequested
 
-    /** Artifact path → id of the node that declared it as an output. */
-    const producerByArtifact = new Map<string, string>()
-
     const track = (promise: Promise<NodeResult>): Promise<NodeResult> => {
       handle.pending.add(promise)
       const drop = (): void => {
@@ -740,9 +737,6 @@ export function createWorkflowEngine(options: EngineOptions): WorkflowEngine {
       outputPaths: Record<string, string>,
       onHold?: (opened: OpenNode) => void
     ): NodeResult {
-      // Fed exactly as a fresh node feeds it, so edges inferred from artifact
-      // dataflow come out the same on a resumed run as on a first one.
-      for (const path of Object.values(outputPaths)) producerByArtifact.set(path, record.id)
       const result: NodeResult = {
         outputs: outputPaths,
         verdict: record.verdict,
@@ -868,9 +862,10 @@ export function createWorkflowEngine(options: EngineOptions): WorkflowEngine {
       if (held?.status === 'complete') {
         throw new Error(`node "${job.recordId}" is already complete in this run`)
       }
-      // The spec's own declaration wins the moment the node starts; failing
-      // that the plan's forecast stands, because a record rebuilt from
-      // inference alone would erase edges the workflow already got right.
+      // What the node ran after, and only that: the spec's own declaration
+      // the moment the node starts, failing that the plan's forecast. Reading
+      // a file another node wrote adds nothing here — a run's edges are what
+      // its nodes declare, and dataflow is what `reads` records.
       const forecast = held?.parents ?? []
       const declared =
         job.parents !== undefined
@@ -878,15 +873,7 @@ export function createWorkflowEngine(options: EngineOptions): WorkflowEngine {
           : spec.from === undefined
             ? forecast
             : keptParents(run, job.recordId, spec.from)
-      // Reading an artifact may reveal an edge nobody declared; it never
-      // takes one away, so this is a union in every case.
-      const inferred = (spec.reads ?? [])
-        .map((path) => producerByArtifact.get(path))
-        .filter((producer): producer is string => producer !== undefined)
-      const parents = [...new Set([...declared, ...inferred])].filter(
-        (parent) => parent !== job.recordId
-      )
-      for (const path of Object.values(outputPaths)) producerByArtifact.set(path, job.recordId)
+      const parents = [...new Set(declared)].filter((parent) => parent !== job.recordId)
 
       // What the previous life already burned under this id. Kept, so a
       // continued node adds to it rather than erasing money that was really
@@ -1284,9 +1271,6 @@ export function createWorkflowEngine(options: EngineOptions): WorkflowEngine {
             if (problems.length === 0) {
               node.verdict = completion.verdict
               node.summary = completion.summary
-              for (const path of Object.values(outputPaths)) {
-                producerByArtifact.set(path, node.id)
-              }
               const result: NodeResult = {
                 outputs: outputPaths,
                 verdict: completion.verdict,
@@ -1569,11 +1553,13 @@ export function createWorkflowEngine(options: EngineOptions): WorkflowEngine {
       async recordEffect(id, value) {
         recordEffect(id, value)
       },
+      // Names a file the workflow itself wrote as coming from a node. It puts
+      // no edge on the record — a node's edges are the ones it declares — and
+      // holds the workflow to naming a node that exists.
       derive: async (path, fromNodeId) => {
         if (!run.nodes.some((candidate) => candidate.id === fromNodeId)) {
           throw new Error(`derive("${path}"): no node "${fromNodeId}" in this run`)
         }
-        producerByArtifact.set(path, fromNodeId)
       },
       // Resolved now, through the origin ladder, so an unknown name fails the
       // staging run rather than a successor nobody is watching (Q25).

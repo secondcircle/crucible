@@ -108,10 +108,10 @@ describe('the size rules', () => {
     expect(fired).toHaveLength(1)
   })
 
-  // A compaction takes the recent span as it finds it, and the skeleton may
-  // not drop what the user said. One that lands still over the threshold — a
-  // conversation whose words alone are bigger than the setting — would keep
-  // the same span and report the same size on every pass. The guard is not
+  // The skeleton may not drop what the user said unless the model strikes
+  // it. A compaction that lands still over the threshold — a conversation
+  // whose words alone are bigger than the setting — would write the same
+  // skeleton and report the same size on every pass. The guard is not
   // "has it grown": one token of growth is growth, and the turn after a
   // compaction always has some, so a build that asked that would compact on
   // every turn from there on, forever.

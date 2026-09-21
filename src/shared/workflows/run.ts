@@ -123,7 +123,8 @@ export interface NodeWait {
 export interface RunNode {
   readonly id: string
   readonly status: RunNodeStatus
-  /** Node ids this node depends on (producers of the artifacts it reads). */
+  // The nodes this one ran after, as it declared them: what the run graph
+  // draws a line for. A file this node read is never one of these.
   readonly parents: readonly string[]
   /** "provider/model-id:thinkingLevel". */
   readonly model?: string

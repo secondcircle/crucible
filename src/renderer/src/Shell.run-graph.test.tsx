@@ -9,6 +9,7 @@ import { act, fireEvent, render, screen, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it } from 'vitest'
 import type { ShellSnapshot } from '../../shared/agent/port'
 import type { RunNode, RunRecord } from '../../shared/workflows/run'
+import { layOutGraph } from './runs/graph'
 import { Shell } from './Shell'
 import { createScriptedCommands } from './testing/scripted-commands'
 import { createScriptedPort } from './testing/scripted-port'
@@ -46,7 +47,7 @@ function nodeOf(id: string, parents: string[], overrides: Partial<RunNode> = {})
   }
 }
 
-/** A build mid-flight: a fan-out walked, a fan-in ahead of the walk. */
+/** A build mid-flight: a fan-out walked, and a gate node nobody has started. */
 function runOf(overrides: Partial<RunRecord> = {}): RunRecord {
   return {
     id: 'en42',
@@ -78,6 +79,42 @@ function runOf(overrides: Partial<RunRecord> = {}): RunRecord {
     createdAt: '2026-08-21T10:00:00.000Z',
     startedAt: '2026-08-21T10:00:00.000Z',
     ...overrides
+  }
+}
+
+/** The same run once the node nobody had started has run. */
+const walkedOn = (): RunNode[] =>
+  runOf().nodes.map((node) =>
+    node.id === 'gate-alignment-1'
+      ? {
+          ...node,
+          status: 'complete' as const,
+          startedAt: '2026-08-21T10:20:00.000Z',
+          endedAt: '2026-08-21T10:24:00.000Z'
+        }
+      : node
+  )
+
+/** A build whose ids name the steps they were cut into. */
+function stepRunOf(): RunRecord {
+  const ran = (id: string, parents: string[], minute: number): RunNode =>
+    nodeOf(id, parents, {
+      startedAt: `2026-08-21T10:${String(minute).padStart(2, '0')}:00.000Z`,
+      endedAt: `2026-08-21T10:${String(minute + 5).padStart(2, '0')}:00.000Z`
+    })
+  return {
+    ...runOf(),
+    nodes: [
+      ran('slicer', [], 0),
+      ran('builder-account-shell', ['slicer'], 10),
+      ran('review-account-shell-1', ['builder-account-shell'], 20),
+      ran('builder-settings-pane', ['review-account-shell-1'], 30),
+      {
+        ...ran('review-settings-pane-1', ['builder-settings-pane'], 40),
+        status: 'running',
+        endedAt: undefined
+      }
+    ]
   }
 }
 
@@ -121,31 +158,35 @@ const cardFor = (id: string): HTMLElement => {
 }
 
 /** One edge's classes, by the pair of nodes it joins. */
-function edgeClass(from: string, to: string): string {
+function edgeClass(from: string, to: string, record: readonly RunNode[] = runOf().nodes): string {
   const paths = [...document.querySelectorAll<SVGPathElement>('.cstage svg path')]
-  const layout = [...document.querySelectorAll<HTMLElement>('.nd')]
   expect(paths.length).toBeGreaterThan(0)
-  expect(layout.length).toBeGreaterThan(0)
-  const at = edgeIndex(from, to)
+  // The lines are drawn in the layout's own order, which is the record's:
+  // the same pure function the pane draws from says which one this is.
+  const at = layOutGraph(record).edges.findIndex(
+    (edge) => edge.from === from && edge.to === to
+  )
+  if (at === -1) throw new Error(`no edge ${from}→${to}`)
   return paths[at].getAttribute('class') ?? ''
-}
-
-// The edges are drawn in record order, parents in the order the node names
-// them, which is what the pure layout promises and what this reads back.
-function edgeIndex(from: string, to: string): number {
-  const record = runOf().nodes
-  let at = 0
-  for (const node of record) {
-    for (const parent of node.parents) {
-      if (parent === from && node.id === to) return at
-      at += 1
-    }
-  }
-  throw new Error(`no edge ${from}→${to}`)
 }
 
 const detailHeader = (): string =>
   document.querySelector('.detail .dhead .n')?.textContent ?? ''
+
+/** What the layout put on an element, which is all jsdom lays out. */
+function boxOf(element: HTMLElement): {
+  left: number
+  top: number
+  width: number
+  height: number
+} {
+  return {
+    left: Number.parseFloat(element.style.left),
+    top: Number.parseFloat(element.style.top),
+    width: Number.parseFloat(element.style.width),
+    height: Number.parseFloat(element.style.height)
+  }
+}
 
 /** A window of a known width, since jsdom lays nothing out on its own. */
 async function widen(width: number): Promise<void> {
@@ -194,8 +235,9 @@ describe('the drawn graph', () => {
         cardFor(id)
       )
     }
-    // Five edges: two down the trunk, a fan-out of two, a fan-in of two.
-    expect(document.querySelectorAll('.cstage svg path')).toHaveLength(5)
+    // Four lines, one per node that ran next: the trunk, the fan-out of two,
+    // and the dashed one down to the node nobody has started.
+    expect(document.querySelectorAll('.cstage svg path')).toHaveLength(4)
     // Every card is placed by the layout, never by the flow of the document.
     expect(cardFor('builder').style.top).not.toBe(cardFor('planner').style.top)
   })
@@ -226,7 +268,8 @@ describe('the drawn graph', () => {
       await settled()
     })
 
-    // Ahead of the walk: either end still pending.
+    // Ahead of the walk: either end still pending. The planned node hangs off
+    // the node running now, wherever the plan forecast it.
     expect(edgeClass('review-code', 'gate-alignment-1')).toContain('future')
     // Being walked: the child has started and not settled.
     expect(edgeClass('builder', 'review-code')).toContain('flowing')
@@ -234,20 +277,10 @@ describe('the drawn graph', () => {
     expect(edgeClass('planner', 'builder')).toBe('e')
 
     await act(async () => {
-      const moved = runOf()
-      workflowRuns.setRuns([
-        {
-          ...moved,
-          nodes: moved.nodes.map((node) =>
-            node.id === 'gate-alignment-1'
-              ? { ...node, status: 'complete' as const, startedAt: '2026-08-21T10:20:00.000Z' }
-              : node
-          )
-        }
-      ])
+      workflowRuns.setRuns([{ ...runOf(), nodes: walkedOn() }])
       await settled()
     })
-    expect(edgeClass('review-code', 'gate-alignment-1')).toBe('e')
+    expect(edgeClass('review-code', 'gate-alignment-1', walkedOn())).toBe('e')
   })
 
   it('holds the marching line still while the node below it is parked', async () => {
@@ -283,6 +316,48 @@ describe('the drawn graph', () => {
     expect(edgeClass('builder', 'review-code')).toContain('lit')
     // One step out is not lineage: it keeps the state it had.
     expect(edgeClass('review-code', 'gate-alignment-1')).toContain('future')
+  })
+
+  it('names the four line kinds at the foot of the pane, permanently', async () => {
+    await openRun()
+
+    const legend = graph().querySelector('.glegend')
+    expect(legend).not.toBeNull()
+    expect(legend?.textContent).toBe(
+      'ran nextnext to / from the selected noderunning nowplanned, not started'
+    )
+    // Each kind is shown in the line it names, so the strip reads as the
+    // drawing does: shape and dash, not colour alone.
+    expect(
+      [...(legend?.querySelectorAll('path') ?? [])].map((line) => line.getAttribute('class'))
+    ).toEqual(['e', 'e lit', 'e flowing', 'e future'])
+  })
+
+  it('outlines each step’s stretch of nodes, named on its edge', async () => {
+    await openRun([stepRunOf()])
+
+    const blocks = [...document.querySelectorAll<HTMLElement>('.cstage .sblock')]
+    expect(blocks.map((block) => block.textContent)).toEqual([
+      'step · account-shell',
+      'step · settings-pane'
+    ])
+    // Each outline stands around the cards of its own step and clear of the
+    // cards of every other.
+    const inside = (block: HTMLElement, id: string): boolean => {
+      const box = boxOf(block)
+      const card = boxOf(cardFor(id))
+      return (
+        card.left >= box.left &&
+        card.top >= box.top &&
+        card.left + card.width <= box.left + box.width &&
+        card.top + card.height <= box.top + box.height
+      )
+    }
+    expect(inside(blocks[0], 'builder-account-shell')).toBe(true)
+    expect(inside(blocks[0], 'review-account-shell-1')).toBe(true)
+    expect(inside(blocks[0], 'builder-settings-pane')).toBe(false)
+    expect(inside(blocks[1], 'builder-settings-pane')).toBe(true)
+    expect(inside(blocks[1], 'slicer')).toBe(false)
   })
 
   it('counts the nodes in the header, dropping what is zero', async () => {

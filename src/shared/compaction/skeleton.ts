@@ -10,7 +10,7 @@ import { estimateTokens } from './window.ts'
 // sent on its own behalf becomes one line naming what it announced.
 //
 // Lines are kept as data rather than as text so a later compaction can strike
-// them by number and a budget can count them, and they are rendered the same
+// them by number and the transcript can count them, and they are rendered the same
 // way every time so the numbering the model reads in the window is the
 // numbering it strikes against.
 
@@ -74,16 +74,16 @@ export function skeletonOf(items: readonly TranscriptItem[]): readonly SkeletonL
           break
         }
         if (spokenByCrucible(text)) {
-          lines.push({ kind: 'notice', text: clipHandle(text), tokens: estimateTokens(text) })
+          lines.push(noticeLine(text))
           break
         }
         // Verbatim, whatever the length. What the person said is the one
         // thing a compaction cannot get back: a file can be re-read and a
         // command re-run, but a brief the user typed in the first minute lives
         // only in the session file and the transcript, neither of which the
-        // model can reach afterwards. The budget below and the model's own
-        // strike list are what hold the size down; a cut here would be a size
-        // policy nobody could see, applied before anything was asked.
+        // model can reach afterwards. The model's own strike list is what
+        // holds the size down; a cut here would be a size policy nobody could
+        // see, applied before anything was asked.
         lines.push({ kind: 'user', text })
         break
       }
@@ -121,6 +121,29 @@ export function skeletonOf(items: readonly TranscriptItem[]): readonly SkeletonL
     }
   }
   return lines
+}
+
+function noticeLine(text: string): SkeletonLine {
+  return { kind: 'notice', text: clipHandle(text), tokens: estimateTokens(text) }
+}
+
+// A skeleton as an earlier compaction stored it, read the way this build
+// classifies. The `notice` kind is newer than the first skeletons: a build
+// before it stored every run report, check-in and answer batch as the
+// person's own words, and the skeleton is carried whole from one compaction
+// into the next, so those lines were carried as `user` — offered to the model
+// under the rule that protects the person's brief, so never struck — for as
+// long as the conversation lived. One session's skeleton was 90 lines of
+// nothing but them, 31k tokens. Re-read here, once per compaction, so the
+// stored shape catches up with the build that reads it.
+export function reclassifySkeleton(lines: readonly SkeletonLine[]): readonly SkeletonLine[] {
+  return lines.map((line) => {
+    if (line.kind !== 'user') return line
+    // The same reading `skeletonOf` gives a fresh one: the envelope goes,
+    // what the person typed stays as their words.
+    if (isAnswerBatch(line.text)) return { kind: 'user', text: answersLine(line.text) }
+    return spokenByCrucible(line.text) ? noticeLine(line.text) : line
+  })
 }
 
 // The agent's reply keeps its opening paragraph and no more. A reply opens
@@ -190,8 +213,18 @@ export function skeletonLineText(line: SkeletonLine): string {
 // compaction. `startAt` continues an earlier block's numbering, so newly aged
 // lines can be offered on their own beside a skeleton the model is already
 // reading in its window.
+//
+// One line is one line: a person's message is copied verbatim, and a blank
+// line inside it would end the markdown list, so every line after it renders
+// renumbered from 1 and the model strikes by a number the reader never saw.
 export function renderSkeleton(lines: readonly SkeletonLine[], startAt = 1): string {
-  return lines.map((line, index) => `${startAt + index}. ${skeletonLineText(line)}`).join('\n')
+  return lines
+    .map((line, index) => `${startAt + index}. ${oneLine(skeletonLineText(line))}`)
+    .join('\n')
+}
+
+function oneLine(text: string): string {
+  return text.replace(/\s*\n\s*/g, ' ')
 }
 
 export function skeletonTokens(lines: readonly SkeletonLine[]): number {
@@ -205,29 +238,6 @@ export function pruneSkeleton(
 ): readonly SkeletonLine[] {
   const dead = new Set(strike)
   return lines.filter((_line, index) => !dead.has(index + 1))
-}
-
-// The mechanical last word on size, run after the model has pruned. It drops
-// the oldest lines that are not the person's words, because age is as good a
-// judge of anything else here as the model is: a handle it drops is still on
-// disk, a notice is still on its record, and a reply's opening was restated
-// in the summary. It never drops a user message: only the model, naming it,
-// may do that. A skeleton of nothing but user messages therefore stays over
-// budget, which is the right way round.
-export function trimSkeleton(
-  lines: readonly SkeletonLine[],
-  budget: number
-): readonly SkeletonLine[] {
-  const kept = [...lines]
-  let total = skeletonTokens(kept)
-  for (let index = 0; index < kept.length && total > budget; index += 1) {
-    const line = kept[index]
-    if (line === undefined || line.kind === 'user') continue
-    total -= estimateTokens(skeletonLineText(line)) + 4
-    kept.splice(index, 1)
-    index -= 1
-  }
-  return kept
 }
 
 function count(tokens: number): string {
