@@ -236,9 +236,11 @@ Whatever is installed here — `git`, `gh`, `firecrawl` — a node can run, and
 no spec declares it. A tool that has to be connected (firecrawl is, under
 Settings → Research) is connected once per machine, and that reaches runs
 too; `research.md` beside this file has the details.
-  - `check(outputs)` — deterministic lint over the output paths; returned
-    problems go back into the same agent session as a rejection. Runs in
-    your host, and may return a promise.
+  - `check(outputs, verdict)` — deterministic lint over the output paths;
+    returned problems go back into the same agent session as a rejection.
+    `verdict` is the node's verdict once it matched the declared shape
+    (undefined otherwise), so a lint can hold a document to the word the
+    agent gave. Runs in your host, and may return a promise.
 - `ctx.openNode(id, spec)` — like `node()`, but the session is held open so
   feedback can re-enter the same context: `opened.revise(message, { from })`
   appends a revision node (`id·r1`, `id·r2`, …) and resolves with the next

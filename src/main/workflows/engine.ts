@@ -1203,17 +1203,7 @@ export function createWorkflowEngine(options: EngineOptions): WorkflowEngine {
           }
         }
         stampWritten()
-        if (spec.check !== undefined) {
-          // The file's own function, run where the file lives; a host that
-          // dies under it rejects, which reads as the check throwing.
-          try {
-            problems.push(...(await spec.check(outputPaths)))
-          } catch (cause) {
-            problems.push(
-              `deterministic check threw: ${cause instanceof Error ? cause.message : String(cause)}`
-            )
-          }
-        }
+        let verdict: unknown = undefined
         if (spec.verdict !== undefined) {
           // Tolerant decode: some models pass the verdict as a JSON-encoded
           // string. Unwrap before validating.
@@ -1234,7 +1224,22 @@ export function createWorkflowEngine(options: EngineOptions): WorkflowEngine {
                 `verdict does not match the declared schema: ${mismatches.slice(0, 3).join('; ')}. ` +
                   'Pass `verdict` as a plain JSON object argument, not a JSON-encoded string.'
               )
+            } else {
+              verdict = completion.verdict
             }
+          }
+        }
+        if (spec.check !== undefined) {
+          // The file's own function, run where the file lives; a host that
+          // dies under it rejects, which reads as the check throwing. It is
+          // handed the verdict only once the verdict validated, so a lint can
+          // hold a document to the word the agent gave.
+          try {
+            problems.push(...(await spec.check(outputPaths, verdict)))
+          } catch (cause) {
+            problems.push(
+              `deterministic check threw: ${cause instanceof Error ? cause.message : String(cause)}`
+            )
           }
         }
         return problems

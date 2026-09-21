@@ -1377,4 +1377,54 @@ describe('the engine over a real workflow host', () => {
     expect(engine.runs()[0].nodes[0].summary).toBe('attempt 2')
     expect(engine.runs()[0].outputs).toEqual({ summary: 'attempt 2', checks: 2 })
   })
+
+  // The check is handed the verdict once it validated, so a lint can hold a
+  // document to the word the agent gave: here a report that must name
+  // screens exactly when the verdict says there are some. A rejection on
+  // that ground goes back into the same session like any other lint.
+  it("hands a node's validated verdict to its check", async () => {
+    const loader = realLoader(`
+      import { artifactPaths, workflow } from 'crucible:workflow'
+      import { readFileSync } from 'node:fs'
+      const seen = []
+      export default workflow({
+        description: 'lints a document against its verdict',
+        inputs: {},
+        plan: () => [{ id: 'work' }],
+        run: async (ctx) => {
+          const outputs = { report: { file: 'report.md', desc: 'what happened' } }
+          const done = await ctx.node('work', {
+            prompt: 'write ' + artifactPaths(ctx, outputs).report,
+            outputs,
+            verdict: { type: 'object', required: ['screens'], properties: { screens: { enum: ['yes', 'no'] } } },
+            check: (outputs, verdict) => {
+              seen.push(verdict)
+              const none = readFileSync(outputs.report, 'utf8').includes('None.')
+              return verdict && verdict.screens === 'no' && !none ? ['verdict says no screens; the report names some'] : []
+            }
+          })
+          return { verdict: done.verdict, seen }
+        }
+      })
+    `)
+    const { engine, repo, sessions } = rig(
+      {},
+      () => (_prompt, tools, turn) => {
+        writeFileSync(
+          outputPath(tools.taskPrompt, 'report.md'),
+          turn === 1 ? 'Screens: the register\n' : 'Screens: None.\n'
+        )
+        tools.complete({ summary: `attempt ${turn}`, verdict: { screens: 'no' } })
+      },
+      { loader }
+    )
+    await engine.start(startRequest(repo, 'hosted', {}))
+
+    await until(() => engine.runs()[0].status === 'complete')
+    expect(sessions.prompts.some((prompt) => prompt.includes('rejected'))).toBe(true)
+    expect(engine.runs()[0].outputs).toEqual({
+      verdict: { screens: 'no' },
+      seen: [{ screens: 'no' }, { screens: 'no' }]
+    })
+  })
 })

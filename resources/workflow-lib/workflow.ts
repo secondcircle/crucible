@@ -85,8 +85,11 @@ export interface NodeSpec {
    * checks on every complete_node; returned problems are delivered back into
    * the SAME agent session as a rejection, so fixes happen with full context.
    * Runs in the workflow host, where this file lives, and may be async.
+   * `verdict` is the node's verdict once it matched the declared shape, so a
+   * lint can hold a document to the word the agent gave; it is undefined
+   * when the node declares none or the one given did not validate.
    */
-  check?(outputs: Record<string, string>): string[] | Promise<string[]>
+  check?(outputs: Record<string, string>, verdict?: unknown): string[] | Promise<string[]>
 }
 
 export interface ReviseOptions {

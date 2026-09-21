@@ -74,7 +74,7 @@ export function createWorkflowHost(
   const withCheck = (spec: WireNodeSpec, nodeRequest: number): NodeSpec => {
     const { checks, ...rest } = spec
     return checks
-      ? { ...rest, check: (outputs) => rpc.request('check', { nodeRequest, outputs }) }
+      ? { ...rest, check: (outputs, verdict) => rpc.request('check', { nodeRequest, outputs, verdict }) }
       : rest
   }
 
