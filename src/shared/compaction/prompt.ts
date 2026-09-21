@@ -37,7 +37,11 @@ export function compactionInstruction({ aged, carried }: CompactionRequest): str
     'Give the numbers of the lines that no longer bear on the work — an exploration that ' +
       'went nowhere, a question your account now answers, a check whose result you have just ' +
       'written down. A line you are unsure about stays. A line carrying something the user ' +
-      'said stays unless you are certain it is spent.',
+      'said stays unless you are certain it is spent. One case is spent more often than it ' +
+      'looks: a user line that is a command’s instructions (a /command the user invoked, ' +
+      'expanded), once you have carried them out and their product is on disk. The ' +
+      'instructions were Crucible’s words; the subject the user gave with them is what ' +
+      'your account must carry before you strike the line.',
     'Answer with exactly this and nothing around it:',
     '<trajectory>\nyour account\n</trajectory>\n<strike>numbers, comma separated; ranges ' +
       'like 12-20 are fine; leave it empty if nothing is dead</strike>'

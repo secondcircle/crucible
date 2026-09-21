@@ -1684,9 +1684,13 @@ export function createWorkflowEngine(options: EngineOptions): WorkflowEngine {
   }
 
   function endingText(run: LiveRun, outcome: RunStatus, committed: boolean): string {
+    // The record's path rides the first line, because the first line is all
+    // a compaction keeps of this message: the outputs and every artifact are
+    // under it, and an agent picking the work up cold has to be told where.
     const where = [
       run.branch === undefined ? undefined : `branch ${run.branch}`,
-      run.worktreePath === undefined ? undefined : `worktree ${run.worktreePath}`
+      run.worktreePath === undefined ? undefined : `worktree ${run.worktreePath}`,
+      run.dir === undefined ? undefined : `record ${join(run.dir, 'run.json')}`
     ]
       .filter((part): part is string => part !== undefined)
       .join(' · ')
