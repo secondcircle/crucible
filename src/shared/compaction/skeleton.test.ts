@@ -212,3 +212,17 @@ describe('a skeleton an earlier build stored', () => {
     expect(skeletonTokens(reclassifySkeleton(stored))).toBeLessThan(skeletonTokens(stored) / 5)
   })
 })
+
+// The list is markdown, and a person's message is kept word for word. A blank
+// line inside one ends the list: what follows renders renumbered from 1 and
+// the second paragraph floats outside it, so the list reads as cut off and the
+// numbers the model strikes by are not the numbers the reader sees.
+describe('a line that spans paragraphs', () => {
+  it('renders as one numbered item', () => {
+    const rendered = renderSkeleton([
+      { kind: 'user', text: 'first paragraph,\n\nsecond paragraph\nthird line' },
+      { kind: 'user', text: 'next' }
+    ])
+    expect(rendered).toBe('1. [user] first paragraph, second paragraph third line\n2. [user] next')
+  })
+})

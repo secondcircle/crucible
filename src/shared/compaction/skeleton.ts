@@ -172,8 +172,18 @@ export function skeletonLineText(line: SkeletonLine): string {
 // compaction. `startAt` continues an earlier block's numbering, so newly aged
 // lines can be offered on their own beside a skeleton the model is already
 // reading in its window.
+//
+// One line is one line: a person's message is copied verbatim, and a blank
+// line inside it would end the markdown list, so every line after it renders
+// renumbered from 1 and the model strikes by a number the reader never saw.
 export function renderSkeleton(lines: readonly SkeletonLine[], startAt = 1): string {
-  return lines.map((line, index) => `${startAt + index}. ${skeletonLineText(line)}`).join('\n')
+  return lines
+    .map((line, index) => `${startAt + index}. ${oneLine(skeletonLineText(line))}`)
+    .join('\n')
+}
+
+function oneLine(text: string): string {
+  return text.replace(/\s*\n\s*/g, ' ')
 }
 
 export function skeletonTokens(lines: readonly SkeletonLine[]): number {
