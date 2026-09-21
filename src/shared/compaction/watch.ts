@@ -172,8 +172,18 @@ export function createCompactionWatch(options: CompactionWatchOptions): Compacti
     // speak again on the next report rather than now, so a compaction that
     // keeps failing is retried at the pace of the conversation rather than in
     // a loop.
+    //
+    // Facts that arrived while the compaction was out go with it. They
+    // describe the conversation as it stood before the rewrite — the turn that
+    // crossed the threshold reports its size once more as it ends, after the
+    // ask has gone out — and π reports no size at all for the rewritten one
+    // until it has answered a request, so nothing replaces them before the
+    // next turn settles. Left in place, that settle judged a 200k conversation
+    // that no longer existed and compacted a 68k one on its heels.
     compacted(id: string): void {
       asked.delete(id)
+      disarm(watched.get(id))
+      watched.delete(id)
     },
 
     settled(id: string): void {

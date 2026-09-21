@@ -8,7 +8,7 @@ import {
   trimSkeleton,
   type SkeletonLine
 } from './skeleton.ts'
-import { estimateTokens, skeletonBudgetTokens, SUMMARY_BUDGET_TOKENS } from './window.ts'
+import { estimateTokens, skeletonBudgetTokens } from './window.ts'
 
 // A compaction, whole: what to ask the model for, and what the model's answer
 // becomes. Everything that decides what the window looks like afterwards is
@@ -52,6 +52,13 @@ export interface SettledCompaction {
 // account at all: a compaction without one would leave the agent with a list
 // of handles and no idea what it was doing, so the caller fails instead and
 // the conversation is left as it was.
+//
+// The account is kept whole, however long the model ran. It was asked for a
+// length, and the budget in `window.ts` assumes it kept to one, but nothing
+// the model writes is cut: the end of an account is where what comes next and
+// the files that matter live, and a build before this one sliced exactly that
+// off a summary that ran long. The skeleton is what the mechanical rules size,
+// and only the parts of it that can be got back from disk.
 export function settleCompaction(
   plan: CompactionPlan,
   reply: string,
@@ -67,7 +74,7 @@ export function settleCompaction(
     skeletonBudgetTokens(contextWindow)
   )
   return {
-    text: compactionText(clipToBudget(trajectory, SUMMARY_BUDGET_TOKENS), skeleton),
+    text: compactionText(trajectory, skeleton),
     state: { skeleton }
   }
 }
@@ -95,11 +102,3 @@ function compactionText(trajectory: string, skeleton: readonly SkeletonLine[]): 
   return parts.join('\n\n')
 }
 
-// A model that ignored the word count is clipped rather than refused: a long
-// account is still an account, and the budget is what keeps the window from
-// being one.
-function clipToBudget(text: string, budget: number): string {
-  const limit = budget * 4
-  if (text.length <= limit) return text
-  return `${text.slice(0, limit)}…`
-}
