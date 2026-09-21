@@ -86,7 +86,7 @@ import {
 import { sanitizeTitle, TITLE_INSTRUCTION, titleInput } from './sdk-titler.ts'
 import { branchSummaryExtension } from './sdk-branch-summary.ts'
 import {
-  applyRecentSpan,
+  PI_COMPACTION_SETTINGS,
   askOnWarmCache,
   compactionExtension,
   previousCompaction,
@@ -95,7 +95,6 @@ import {
 } from './sdk-compaction.ts'
 import type { CompactionRecord } from '../../shared/compaction/record.ts'
 import type { CompactionTrigger } from '../../shared/compaction/record.ts'
-import { RECENT_SPAN_TOKENS } from '../../shared/compaction/window.ts'
 import {
   BASH_RUN_TYPE,
   branchHistory,
@@ -366,10 +365,8 @@ export function createSdkAdapter({
       // π's own auto-compaction is off in every loop Crucible starts: Crucible
       // decides when a conversation compacts and writes the compaction itself,
       // so π's threshold can never fire and π's summary can never reach the
-      // window. `keepRecentTokens` is still π's, because π finds the cut point
-      // for the compactions Crucible asks for; `applyRecentSpan` re-states it
-      // against the model's own window before each one.
-      compaction: { enabled: false, keepRecentTokens: RECENT_SPAN_TOKENS }
+      // window.
+      compaction: PI_COMPACTION_SETTINGS
     })
     const resourceLoader = new pi.DefaultResourceLoader({
       cwd: workspacePath,
@@ -419,8 +416,6 @@ export function createSdkAdapter({
             })(instruction, signal),
           trigger: () => sessions.get(sessionId)?.compacting?.trigger ?? 'threshold',
           toItems: (messages) => toTranscript(messages as readonly StoredMessage[]),
-          sizeOf: pi.estimateTokens,
-          contextWindow: () => sessions.get(sessionId)?.session.model?.contextWindow,
           failed: (message) => {
             const live = sessions.get(sessionId)?.compacting
             if (live !== undefined) live.failure = message
@@ -1737,9 +1732,6 @@ export function createSdkAdapter({
       bound.compacting = live
       emit({ type: 'compaction_started', sessionId })
       try {
-        // Read against the model the conversation is on right now: the ring
-        // can have moved it to a narrower window since the session opened.
-        applyRecentSpan(bound.session)
         await bound.session.compact()
       } catch (cause) {
         // π throws for its own refusals too — "Nothing to compact", a cancel —

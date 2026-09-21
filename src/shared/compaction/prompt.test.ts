@@ -49,10 +49,23 @@ describe('reading the model’s answer', () => {
     expect(readCompactionReply('<trajectory>x</trajectory><strike>1-99999</strike>').strike).toEqual([])
   })
 
-  it('reads an unclosed account rather than losing it', () => {
-    expect(readCompactionReply('<trajectory>Where we are, cut off').trajectory).toBe(
-      'Where we are, cut off'
-    )
+  // An account whose closing tag never came is a reply the provider cut, and
+  // what is missing is its end: what comes next and the files that matter.
+  // Accepting one replaced a 1,000-word account with its first 89 words in a
+  // real session, and the compaction after that rewrote from the fragment.
+  it('refuses an account that was cut before its closing tag', () => {
+    expect(
+      readCompactionReply(
+        '<trajectory>\nWHERE WE ARE\n\nRepo `x`, main pushed. Standing rules from the cost (~$2,080; rec'
+      ).trajectory
+    ).toBe('')
+  })
+
+  it('refuses an account cut inside the strike list as well', () => {
+    const reply = readCompactionReply('<trajectory>whole account</trajectory>\n<strike>3, 7-')
+    expect(reply.trajectory).toBe('whole account')
+    // A cut strike list strikes nothing: unsure lines stay.
+    expect(reply.strike).toEqual([])
   })
 
   it('answers with nothing where the model wrote no account at all', () => {

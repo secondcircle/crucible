@@ -191,10 +191,10 @@ describe('the threshold trigger', () => {
   it('compacts once, and not again on the size the compaction itself reports', async () => {
     const sessionId = await grown()
     await shell.setCompactionSettings({ enabled: true, thresholdK: MIN_THRESHOLD_K })
-    // One turn larger than the threshold, so the recent span the compaction
-    // keeps is over it too: the size the compaction reports on landing would
-    // call for another compaction, which would keep nothing new and report the
-    // same size again.
+    // One turn larger than the threshold, typed by the user, so the skeleton
+    // that keeps it verbatim is over it too: the size the compaction reports
+    // on landing would call for another compaction, which would write the
+    // same skeleton and report the same size again.
     await turn(sessionId, LONG)
     await settled()
     await settled()
@@ -206,8 +206,8 @@ describe('the threshold trigger', () => {
 
   // And not on the turns after it either. A conversation whose own compaction
   // could not get it under the threshold is not one a second pass can help:
-  // it would keep the same recent span, write the same skeleton and land at
-  // the same size. Every repeat is a whole-context request and a prefix
+  // it would write the same account and the same skeleton and land at the
+  // same size. Every repeat is a whole-context request and a prefix
   // written again from zero, which is the bill the idle rule exists to
   // prevent, arriving through the other trigger.
   it('leaves the conversation alone on the turns after a compaction that landed over it', async () => {
@@ -223,20 +223,15 @@ describe('the threshold trigger', () => {
     expect(compactions()).toHaveLength(1)
   })
 
-  // A conversation of one turn has no user boundary to cut at, so the
-  // compaction its size asks for writes nothing. Nothing was rewritten, so
-  // nothing is held against it: the turn that gives it a boundary compacts.
-  // Remembering the attempt as a result would leave the conversation
-  // uncompactable for good, and at the window edge that is a session that
-  // errors on every send.
-  it('compacts a conversation whose first attempt had nothing to cut at', async () => {
+  // Nothing of a compacted span stays verbatim, so a conversation of one turn
+  // needs no boundary to cut at: the turn ages out whole. A build before this
+  // one kept a tail cut at a user message and had nothing to write here, and
+  // at the window edge that was a session that errored on every send until
+  // its second turn.
+  it('compacts a conversation of a single turn', async () => {
     const sessionId = await withSession()
     await shell.setCompactionSettings({ enabled: true, thresholdK: MIN_THRESHOLD_K })
     await turn(sessionId, LONG)
-    await settled()
-    expect(compactions()).toEqual([])
-
-    await turn(sessionId, 'a short follow-up')
     await settled()
 
     expect(compactions()).toHaveLength(1)

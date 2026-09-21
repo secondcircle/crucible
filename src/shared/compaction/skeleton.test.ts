@@ -5,22 +5,53 @@ import { ANSWER_BATCH_PREFIX } from '../questions/wording'
 import { RUN_MESSAGE_PREFIX } from '../workflows/run'
 import {
   pruneSkeleton,
+  reclassifySkeleton,
   renderSkeleton,
   skeletonOf,
   skeletonTokens,
-  trimSkeleton,
   type SkeletonLine
 } from './skeleton'
 
 const SPAN: readonly TranscriptItem[] = [
   { kind: 'user', text: 'Make the retry policy the same in both clients.' },
-  { kind: 'thinking', text: 'Long private reasoning that costs tokens and says nothing later.' },
+  {
+    kind: 'thinking',
+    text: 'Long private reasoning that costs tokens and says nothing later.'
+  },
   { kind: 'assistant', markdown: 'Reading both clients first.' },
-  { kind: 'tool', name: 'read', summary: 'src/a/client.ts', ok: true, output: 'x'.repeat(4_000) },
-  { kind: 'tool', name: 'bash', summary: 'npm test', ok: false, output: 'boom' },
-  { kind: 'bashRun', command: 'git status', output: 'y'.repeat(400), exitCode: 0 },
+  {
+    kind: 'tool',
+    name: 'read',
+    summary: 'src/a/client.ts',
+    ok: true,
+    output: 'x'.repeat(4_000)
+  },
+  {
+    kind: 'tool',
+    name: 'bash',
+    summary: 'npm test',
+    ok: false,
+    output: 'boom'
+  },
+  {
+    kind: 'bashRun',
+    command: 'git status',
+    output: 'y'.repeat(400),
+    exitCode: 0
+  },
   { kind: 'summary', text: 'An earlier compaction’s own text.' },
-  { kind: 'cacheMiss', miss: { tokensRebilled: 1, dollarsRebilled: 1, gapMs: 1, modelChanged: 'no', thinkingChanged: 'no', jump: 'no', retention: '1h' } },
+  {
+    kind: 'cacheMiss',
+    miss: {
+      tokensRebilled: 1,
+      dollarsRebilled: 1,
+      gapMs: 1,
+      modelChanged: 'no',
+      thinkingChanged: 'no',
+      jump: 'no',
+      retention: '1h'
+    }
+  },
   { kind: 'error', message: 'The provider refused.' }
 ]
 
@@ -29,7 +60,13 @@ describe('the skeleton', () => {
     expect(skeletonOf(SPAN)).toEqual([
       { kind: 'user', text: 'Make the retry policy the same in both clients.' },
       { kind: 'assistant', text: 'Reading both clients first.' },
-      { kind: 'call', name: 'read', handle: 'src/a/client.ts', ok: true, tokens: 1_000 },
+      {
+        kind: 'call',
+        name: 'read',
+        handle: 'src/a/client.ts',
+        ok: true,
+        tokens: 1_000
+      },
       { kind: 'call', name: 'bash', handle: 'npm test', ok: false, tokens: 1 },
       { kind: 'bashRun', command: 'git status', tokens: 100 },
       { kind: 'error', message: 'The provider refused.' }
@@ -39,15 +76,15 @@ describe('the skeleton', () => {
   // Summaries are rewritten whole at every compaction, so an earlier one never
   // becomes part of the next skeleton.
   it('never carries an earlier summary into the skeleton', () => {
-    expect(skeletonOf(SPAN).some((line) => line.kind === 'assistant' && line.text.includes('earlier'))).toBe(
-      false
-    )
+    expect(
+      skeletonOf(SPAN).some((line) => line.kind === 'assistant' && line.text.includes('earlier'))
+    ).toBe(false)
   })
 
   // What the person said is the one thing a compaction cannot get back: the
   // session file and the transcript keep it, and the model can reach neither
-  // afterwards. Length is the budget's business and the model's, not a cut
-  // made before anything is asked.
+  // afterwards. Length is the model's business, not a cut made before
+  // anything is asked.
   it('keeps a long user message whole, however long it ran', () => {
     const spec = `Rewrite the importer. ${'The rows carry a provider, a model and a cost. '.repeat(80)}Stop once the tests pass.`
     expect(skeletonOf([{ kind: 'user', text: spec }])).toEqual([{ kind: 'user', text: spec }])
@@ -103,7 +140,12 @@ describe('the skeleton', () => {
   // list, and its first line is what identifies it.
   it('keeps a call’s handle to one line', () => {
     const [line] = skeletonOf([
-      { kind: 'bashRun', command: `git log\n${'x'.repeat(2_000)}`, output: '', exitCode: 0 }
+      {
+        kind: 'bashRun',
+        command: `git log\n${'x'.repeat(2_000)}`,
+        output: '',
+        exitCode: 0
+      }
     ])
     expect(line).toEqual({ kind: 'bashRun', command: 'git log', tokens: 0 })
   })
@@ -127,51 +169,46 @@ describe('the skeleton', () => {
   })
 })
 
-describe('the skeleton’s budget', () => {
-  const calls: readonly SkeletonLine[] = Array.from({ length: 200 }, (_unused, at) => ({
-    kind: 'call' as const,
-    name: 'read',
-    handle: `src/file-${at}.ts`,
-    ok: true,
-    tokens: 900
-  }))
+// The skeleton is carried from one compaction into the next as it was stored,
+// and the `notice` kind is newer than the first skeletons. A build before it
+// stored every run report as the person's words, and those lines rode along
+// under the protection written for the person's brief.
+describe('a skeleton an earlier build stored', () => {
+  const report = `${RUN_MESSAGE_PREFIX} 09fb (build) completed · branch crucible/run-09fb\n\nOutputs: ${'x'.repeat(5_000)}`
+  const stored: readonly SkeletonLine[] = [
+    { kind: 'user', text: report },
+    { kind: 'user', text: 'proceed' },
+    {
+      kind: 'user',
+      text: `${ANSWER_BATCH_PREFIX}. Every question you had open, answered.\n\n1. Merge?\n   Answer: yes`
+    },
+    { kind: 'assistant', text: 'Merged.' },
+    { kind: 'call', name: 'read', handle: 'a.ts', ok: true, tokens: 3 }
+  ]
 
-  it('drops the oldest lines that are not the person’s words until it fits', () => {
-    const trimmed = trimSkeleton(calls, 300)
-    expect(skeletonTokens(trimmed)).toBeLessThanOrEqual(300)
-    // The newest survive: age is the judge among tool calls.
-    expect(trimmed.at(-1)).toEqual(calls.at(-1))
+  it('is re-read with this build’s kinds: Crucible’s messages become notices', () => {
+    expect(reclassifySkeleton(stored).map((line) => line.kind)).toEqual([
+      'notice',
+      'user',
+      'notice',
+      'assistant',
+      'call'
+    ])
   })
 
-  it('trims Crucible’s notices and the agent’s replies like any other line', () => {
-    const chatter: readonly SkeletonLine[] = Array.from({ length: 100 }, (_unused, at) =>
-      at % 2 === 0
-        ? { kind: 'notice' as const, text: `⚑ Crucible run ${at} (build) is checking in:`, tokens: 900 }
-        : { kind: 'assistant' as const, text: `Approved checkpoint ${at}; nothing needed from you.`, more: 400 }
-    )
-    const trimmed = trimSkeleton([{ kind: 'user', text: 'the brief' }, ...chatter], 200)
-    expect(skeletonTokens(trimmed)).toBeLessThanOrEqual(200)
-    expect(trimmed[0]).toEqual({ kind: 'user', text: 'the brief' })
+  it('gives a re-read notice the shape a fresh one has', () => {
+    const [line] = reclassifySkeleton(stored)
+    expect(line).toEqual(skeletonOf([{ kind: 'user', text: report }])[0])
   })
 
-  // Only the model, naming one, may drop a user message. A skeleton that
-  // cannot fit without doing so stays over budget instead.
-  it('never drops a user message to make room', () => {
-    const said: readonly SkeletonLine[] = Array.from({ length: 50 }, (_unused, at) => ({
-      kind: 'user' as const,
-      text: `Something the person asked for, number ${at}.`
-    }))
-    expect(trimSkeleton(said, 10)).toEqual(said)
+  it('leaves the person’s own words and every other kind exactly as stored', () => {
+    expect(reclassifySkeleton(stored).slice(1, 2)).toEqual(stored.slice(1, 2))
+    expect(reclassifySkeleton(stored).slice(3)).toEqual(stored.slice(3))
   })
 
-  it('keeps every user message while trimming the calls around them', () => {
-    const mixed: readonly SkeletonLine[] = [
-      { kind: 'user', text: 'first ask' },
-      ...calls,
-      { kind: 'user', text: 'second ask' }
-    ]
-    const trimmed = trimSkeleton(mixed, 200)
-    expect(trimmed.filter((line) => line.kind === 'user')).toHaveLength(2)
-    expect(trimmed.length).toBeLessThan(mixed.length)
+  // Kept as the person's words, the two reports were 6k characters of
+  // skeleton; as notices they are two lines.
+  it('is a fraction of its stored size once re-read', () => {
+    expect(skeletonTokens(reclassifySkeleton(stored))).toBeLessThan(skeletonTokens(stored) / 5)
   })
 })

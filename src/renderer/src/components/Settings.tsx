@@ -147,8 +147,7 @@ export function Settings({
 }
 
 // One switch and one number, for every agent loop this machine runs. The
-// recent span and the idle minutes are not here on purpose: they are the
-// implementation's, and the idle minutes are derived from the retention.
+// idle minutes are not here on purpose: they are derived from the retention.
 function CompactionPane({ port }: { readonly port: AgentPort }): React.JSX.Element {
   const [settings, setSettings] = useState<CompactionSettings | undefined>(undefined)
   // What the field holds while it is being typed into, which is not yet a

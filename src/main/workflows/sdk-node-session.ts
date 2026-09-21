@@ -25,6 +25,7 @@ import {
 import {
   askOnWarmCache,
   compactionExtension,
+  PI_COMPACTION_SETTINGS,
   previousCompaction,
   storedCompactionOf
 } from '../agent/sdk-compaction.ts'
@@ -34,7 +35,6 @@ import {
 } from '../../shared/compaction/settings.ts'
 import type { CompactionTrigger } from '../../shared/compaction/record.ts'
 import { createCompactionWatch } from '../../shared/compaction/watch.ts'
-import { recentSpanTokens } from '../../shared/compaction/window.ts'
 import { retentionInForce } from '../cache/retention.ts'
 import { forPi, type LoadedSkill } from '../skills/service.ts'
 import type {
@@ -178,14 +178,8 @@ export function createSdkNodeSessionFactory({
       const settings = pi.SettingsManager.inMemory()
       // π's own auto-compaction is off here for the same reason it is off in a
       // session: Crucible decides when a loop compacts and writes what the
-      // model reads afterwards. The span π keeps verbatim is sized against
-      // this node's model, which unlike a session's cannot change under it.
-      settings.applyOverrides({
-        compaction: {
-          enabled: false,
-          keepRecentTokens: recentSpanTokens(model.contextWindow)
-        }
-      })
+      // model reads afterwards.
+      settings.applyOverrides({ compaction: PI_COMPACTION_SETTINGS })
       const resourceLoader = new pi.DefaultResourceLoader({
         cwd: request.cwd,
         agentDir,
@@ -219,8 +213,6 @@ export function createSdkNodeSessionFactory({
             },
             trigger: () => live.trigger,
             toItems: (messages) => toTranscript(messages),
-            sizeOf: pi.estimateTokens,
-            contextWindow: () => held.session?.model?.contextWindow,
             failed: onCompactionFailure
             // Nothing to hand the compaction to as it is written: a node's run
             // view builds its transcript from the entries, and what the

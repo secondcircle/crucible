@@ -1998,8 +1998,9 @@ export function createFakeAdapter({
     },
 
     // The same compaction a paid one produces, from a canned reply: the
-    // skeleton, the budget and the composition are the shared code, and only
-    // the model's words are scripted.
+    // skeleton and the composition are the shared code, and only the model's
+    // words are scripted. Everything since the last compaction ages out;
+    // nothing stays verbatim.
     async compact(
       sessionId: SessionId,
       trigger: CompactionTrigger
@@ -2007,10 +2008,10 @@ export function createFakeAdapter({
       const { conversation } = requireBound(sessionId)
       emit({ type: 'compaction_started', sessionId })
       const items = pathEntries(conversation).map((entry) => entry.item)
-      // Cut at the last user message, so a turn is never split between the
-      // skeleton and the verbatim tail.
-      const cut = items.findLastIndex((item) => item.kind === 'user')
-      const aged = cut <= 0 ? [] : items.slice(0, cut)
+      const since = items.findLastIndex(
+        (item) => item.kind === 'summary' && item.compaction !== undefined
+      )
+      const aged = items.slice(since + 1)
       if (aged.length === 0) {
         emit({ type: 'compacted', sessionId })
         throw new Error('There is nothing in this conversation to compact yet.')
@@ -2030,9 +2031,7 @@ export function createFakeAdapter({
       const record: CompactionRecord = {
         trigger,
         tokensBefore,
-        tokensAfter:
-          estimateTokens(settled.text) +
-          items.slice(cut).reduce((sum, item) => sum + estimateTokens(JSON.stringify(item)), 0)
+        tokensAfter: estimateTokens(settled.text)
       }
       append(conversation, { kind: 'summary', text: settled.text, compaction: record })
       conversation.usedTokens = record.tokensAfter

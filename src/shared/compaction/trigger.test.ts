@@ -34,7 +34,7 @@ describe('what a conversation’s size calls for', () => {
   // The floor is the smallest threshold the field accepts, so a conversation
   // under it is one nobody could have asked to compact. It is what a
   // compaction leaves, doubled: at the lowest threshold anybody can type, a
-  // compaction that meets its budgets lands at half of it.
+  // compaction that meets its expectation lands at half of it.
   it('leaves a conversation too small to gain anything alone', () => {
     const lowest: CompactionSettings = { enabled: true, thresholdK: MIN_THRESHOLD_K }
     expect(thresholdTokens(lowest)).toBe(SMALLEST_WORTH_COMPACTING)
@@ -46,7 +46,7 @@ describe('what a conversation’s size calls for', () => {
   // The size alone is half the question. A compaction is a whole-context
   // request and a broken prefix, so it has to win back a window worth that:
   // measured against what this conversation's own last compaction produced,
-  // not against the budgets it could not meet.
+  // not against an expectation it could not meet.
   it('waits for growth a compaction could take away, not for the threshold alone', () => {
     const over = { usedTokens: 210_000, contextWindow: 1_000_000 }
     expect(sizeTrigger(ON, { ...over, compactedTo: 190_000 })).toBeUndefined()
@@ -90,7 +90,7 @@ describe('what a conversation’s size calls for', () => {
   })
 
   // Below the edge the floor still holds, measured against the window it has:
-  // a quarter of a 32k model is the recent span a compaction would keep, and
+  // a quarter of a 32k model is what a compaction is expected to leave, and
   // twice that is the least worth rewriting.
   it('leaves a small model’s short conversation alone', () => {
     expect(sizeTrigger(ON, { usedTokens: 12_000, contextWindow: 32_768 })).toBeUndefined()

@@ -10,7 +10,7 @@ import type {
   CompactionRecord,
   CompactionTrigger
 } from '../../shared/compaction/record.ts'
-import { estimateTokens, recentSpanTokens } from '../../shared/compaction/window.ts'
+import { estimateTokens } from '../../shared/compaction/window.ts'
 import type { StoredMessage } from './sdk-transcript.ts'
 
 // Crucible's compaction, handed to π through the hook π offers for exactly
@@ -41,12 +41,6 @@ export interface CompactionDeps {
   readonly trigger: () => CompactionTrigger
   /** π's messages in the transcript's shape, which is what a skeleton is built from. */
   readonly toItems: (messages: readonly StoredMessage[]) => readonly TranscriptItem[]
-  /** π's own per-message estimate, so the window after is counted π's way. */
-  readonly sizeOf: (message: StoredMessage) => number
-  // The window the conversation's model has, so what a compaction keeps is
-  // sized against it rather than against a 200k-plus model nobody here may be
-  // running. Absent where there is no model to ask.
-  readonly contextWindow: () => number | undefined
   // π drops a hook that throws and falls back to its own summarizer, so a
   // failure is reported here and the compaction cancelled instead.
   readonly failed: (message: string) => void
@@ -57,18 +51,19 @@ export interface CompactionDeps {
   readonly settled?: (stored: StoredCompaction, text: string) => void
 }
 
-// π finds a compaction's cut point, so the span kept verbatim is π's setting
-// to read. It is re-stated from the model's own window whenever a compaction
-// is asked for, because a session's model can change under it and a 20k span
-// is two thirds of a 32k window.
-export function applyRecentSpan(session: AgentSession): void {
-  session.settingsManager.applyOverrides({
-    compaction: {
-      enabled: false,
-      keepRecentTokens: recentSpanTokens(session.model?.contextWindow)
-    }
-  })
-}
+// What π's own compaction is told in every loop Crucible starts. Off, because
+// Crucible decides when a conversation compacts and writes what the model
+// reads afterwards; and a zero tail, because nothing of the compacted span is
+// kept verbatim. π still finds a cut point from that number, and the hook
+// below ages out whatever π would have kept.
+export const PI_COMPACTION_SETTINGS = { enabled: false, keepRecentTokens: 0 } as const
+
+// What the compaction entry names as its first kept entry. Nothing is kept:
+// the entry stands for everything up to the moment the compaction was asked
+// for, and the model's view is the entry and then what arrived after it. π
+// reads an id that matches no earlier entry exactly that way, both when it
+// builds the model's context and when it finds the next compaction's start.
+export const NOTHING_KEPT = 'crucible:nothing-kept'
 
 export function compactionExtension(deps: CompactionDeps): InlineExtension {
   return {
@@ -77,14 +72,11 @@ export function compactionExtension(deps: CompactionDeps): InlineExtension {
     factory: (pi) => {
       pi.on('session_before_compact', async (event) => {
         const { preparation, branchEntries, signal } = event
-        const cut = cutAtUserBoundary(preparation, branchEntries)
-        if (cut.aged.length === 0) {
-          // One turn is the whole conversation, so there is no boundary to cut
-          // at and nothing to move out of the window.
+        const aged = everythingSince(preparation, branchEntries)
+        if (aged.length === 0) {
           deps.failed('There is nothing in this conversation to compact yet.')
           return { cancel: true }
         }
-        const { keptFrom, aged } = cut
 
         const plan = planCompaction(previousCompaction(branchEntries)?.state, deps.toItems(aged))
 
@@ -97,17 +89,18 @@ export function compactionExtension(deps: CompactionDeps): InlineExtension {
         }
         if (signal.aborted) return { cancel: true }
 
-        const settled = settleCompaction(plan, reply, deps.contextWindow())
+        const settled = settleCompaction(plan, reply)
         if (settled === undefined) {
-          deps.failed('The trajectory summary came back empty.')
+          deps.failed('The trajectory summary came back empty or cut short.')
           return { cancel: true }
         }
 
+        // Nothing is kept behind the compaction, so what the window holds
+        // afterwards is the compaction's own text and no more.
         const record: CompactionRecord = {
           trigger: deps.trigger(),
           tokensBefore: preparation.tokensBefore,
-          tokensAfter:
-            estimateTokens(settled.text) + keptTokens(branchEntries, keptFrom, deps.sizeOf)
+          tokensAfter: estimateTokens(settled.text)
         }
         const stored: StoredCompaction = { record, state: settled.state }
         deps.settled?.(stored, settled.text)
@@ -115,7 +108,7 @@ export function compactionExtension(deps: CompactionDeps): InlineExtension {
         return {
           compaction: {
             summary: settled.text,
-            firstKeptEntryId: keptFrom,
+            firstKeptEntryId: NOTHING_KEPT,
             tokensBefore: preparation.tokensBefore,
             details: { [COMPACTION_DETAILS_KEY]: stored }
           }
@@ -169,8 +162,24 @@ export function askOnWarmCache(options: {
       signal,
       ...reasoningOf(session)
     })
-    return textOf(answer)
+    return textOf(wholeReply(answer))
   }
+}
+
+// π's `complete` does not throw for a reply the provider cut: a stream that
+// errored, ran out of output room or was aborted comes back as a message with
+// that stop reason and whatever text had arrived. For a turn that is the
+// right shape — the loop reads the reason and retries. For a compaction it
+// is a partial account about to replace a whole one, so anything but a
+// finished reply is refused here, naming the reason, and the compaction is
+// cancelled with the conversation as it was. Four idle compactions in one
+// session landed accounts cut mid-word before this refused them.
+export function wholeReply(answer: AssistantMessage): AssistantMessage {
+  if (answer.stopReason === 'stop') return answer
+  const detail = answer.errorMessage === undefined ? '' : `: ${answer.errorMessage}`
+  throw new Error(
+    `The compaction's model reply ended with stop reason "${answer.stopReason}"${detail}.`
+  )
 }
 
 // The level the loop being compacted runs at, which is part of what makes the
@@ -192,59 +201,41 @@ function textOf(message: AssistantMessage): string {
 }
 
 /**
- * Where the recent span starts, and what ages out behind it.
- *
- * π cuts inside a turn when that one turn is larger than the recent span. The
- * cut moves back to the turn's own first message, so the span always starts at
- * a user message and no turn is half verbatim and half skeleton. Where that
- * message cannot be placed in the branch, π's own cut stands and the turn's
- * prefix ages out with everything before it: the boundary is worth honoring,
- * losing a stretch of the conversation from the window is not.
+ * Everything the compacted span holds, in order: what π offered to summarize,
+ * the prefix of any turn π's cut split, and whatever π would have kept behind
+ * the cut. All of it ages out. A compaction is asked for between turns, with
+ * anything sent meanwhile waiting on it, so the span runs to the moment of
+ * the ask and what the model reads afterwards is the account and the
+ * skeleton, then what arrived after. A build before this one kept a 20k tail
+ * cut back to a turn boundary, which in practice was 20k to 35k of the
+ * result and the largest single part of it.
  */
-export function cutAtUserBoundary(
+export function everythingSince(
   preparation: {
-    readonly isSplitTurn: boolean
     readonly firstKeptEntryId: string
     readonly messagesToSummarize: readonly StoredMessage[]
     readonly turnPrefixMessages: readonly StoredMessage[]
   },
   entries: readonly SessionEntry[]
-): { readonly keptFrom: string; readonly aged: readonly StoredMessage[] } {
-  if (!preparation.isSplitTurn) {
-    return { keptFrom: preparation.firstKeptEntryId, aged: preparation.messagesToSummarize }
-  }
-  const turnStart = entryIdOf(entries, preparation.turnPrefixMessages[0])
-  if (turnStart !== undefined) {
-    return { keptFrom: turnStart, aged: preparation.messagesToSummarize }
-  }
-  return {
-    keptFrom: preparation.firstKeptEntryId,
-    aged: [...preparation.messagesToSummarize, ...preparation.turnPrefixMessages]
-  }
+): readonly StoredMessage[] {
+  return [
+    ...preparation.messagesToSummarize,
+    ...preparation.turnPrefixMessages,
+    ...messagesFrom(entries, preparation.firstKeptEntryId)
+  ]
 }
 
-/** The entry carrying this exact message, by identity: π hands out the object. */
-function entryIdOf(entries: readonly SessionEntry[], message: unknown): string | undefined {
-  if (message === undefined) return undefined
-  return entries.find((entry) => (entry as { message?: unknown }).message === message)?.id
-}
-
-// What the window holds behind the compaction: every message from the first
-// kept entry on. Estimated rather than measured, because nothing has been
-// sent yet.
-function keptTokens(
+/** The messages π would have kept: every one from the first kept entry on. */
+function messagesFrom(
   entries: readonly SessionEntry[],
-  keptFrom: string,
-  sizeOf: (message: StoredMessage) => number
-): number {
+  keptFrom: string
+): readonly StoredMessage[] {
   const at = entries.findIndex((entry) => entry.id === keptFrom)
-  if (at === -1) return 0
-  let total = 0
-  for (const entry of entries.slice(at)) {
-    const message = (entry as { message?: StoredMessage }).message
-    if (message !== undefined) total += sizeOf(message)
-  }
-  return total
+  if (at === -1) return []
+  return entries
+    .slice(at)
+    .map((entry) => (entry as { message?: StoredMessage }).message)
+    .filter((message): message is StoredMessage => message !== undefined)
 }
 
 // The latest compaction on this branch, as Crucible wrote it. A compaction

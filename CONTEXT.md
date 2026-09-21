@@ -551,10 +551,11 @@ _Avoid_: monitor badge, wait pill, monitor card (there is no transcript card).
 
 **Compaction**:
 Crucible's own rewrite of what a model sees of a conversation once it grows
-past the threshold or sits idle before its cache lapses: a trajectory summary,
-a skeleton, and the recent span. Written by Crucible, never by π's built-in
-compaction, which is switched off. The session file keeps everything; only the
-model's view shrinks.
+past the threshold or sits idle before its cache lapses: a trajectory summary
+and a skeleton, standing for everything up to the moment the compaction was
+asked for. Nothing of that span stays verbatim; what arrives after it does.
+Written by Crucible, never by π's built-in compaction, which is switched off.
+The session file keeps everything; only the model's view shrinks.
 _Avoid_: context pruning (one part of it), summarization (one part of it), π
 compaction, auto-compact (as a noun).
 
@@ -572,13 +573,11 @@ call one line naming its handle and its result's size, each message Crucible
 sent in the user's role (a run's report, a wake, an answer batch) one line
 naming what it announced. Every dropped thing is restorable from disk, by
 re-running, or from the run's record. Pruned by the model's judgment at each
-later compaction and held under a budget, so it cannot grow without bound;
-only the user's words are never trimmed mechanically.
+later compaction, and by nothing else: no size rule trims it.
 _Avoid_: masked history, stubs, digest.
 
 **Recent span**:
-The tail of the conversation a compaction never touches, kept verbatim behind
-the skeleton. A size the implementation owns and no setting reaches, capped
-against the model's own window so a small one is not mostly recent span, cut
-at a user-message boundary.
-_Avoid_: keep-recent (π's setting), tail window, hot context.
+_Retired._ Nothing of a compacted span is kept verbatim: the compaction
+stands for everything up to the ask, and only what arrives after it is
+verbatim. Do not describe a compaction as keeping a tail.
+_Avoid_: recent span, keep-recent (π's setting), tail window, hot context.

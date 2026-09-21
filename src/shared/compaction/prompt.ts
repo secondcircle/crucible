@@ -19,16 +19,19 @@ export function compactionInstruction({ aged, carried }: CompactionRequest): str
       : 'The skeleton opens this conversation, numbered. These lines join the end of it:'
 
   return [
-    'This conversation is about to be compacted. Everything except the last stretch of it ' +
-      'leaves your context and is replaced by what you write now, so write for yourself: ' +
-      'the same agent, picking this work up cold, with nothing else of the conversation in ' +
-      'front of you. What you drop you can still reach — every file is on disk and every ' +
-      'command can be run again — but you will not know to look for it unless you say so here.',
+    'This conversation is about to be compacted. All of it up to this message leaves your ' +
+      'context and is replaced by what you write now; nothing of it stays verbatim. So write ' +
+      'for yourself: the same agent, picking this work up cold, with your account and the ' +
+      'skeleton below as the whole of what you know. What you drop you can still reach — ' +
+      'every file is on disk and every command can be run again — but you will not know to ' +
+      'look for it unless you say so here.',
     'Write two things.',
     'WHERE WE ARE. Where this work stands, in prose: the goal as it is now, the decisions ' +
       'that hold, what was tried and abandoned and why it was abandoned, what is in flight, ' +
-      'what comes next, and the few files that matter now. Name the abandoned approaches — ' +
-      'left out, they get retried. Aim under 1,200 words.',
+      'what comes next, and the files that matter now. Name the abandoned approaches — ' +
+      'left out, they get retried. Make it as long as the work needs and no longer: it is ' +
+      'read on every turn from here, and it is rewritten whole at the next compaction, so ' +
+      'anything worth carrying has to be in it.',
     'DEAD LINES. Beside your account the conversation survives as a skeleton: what the user ' +
       'said, verbatim; the opening of each reply you gave; one line per tool call naming what ' +
       'it touched; one line per message Crucible sent you, naming what it announced. ' +
@@ -45,7 +48,11 @@ export function compactionInstruction({ aged, carried }: CompactionRequest): str
 }
 
 export interface CompactionReply {
-  /** Empty when the model wrote nothing usable, which the caller treats as a failure. */
+  // Empty when the model wrote nothing usable, which the caller treats as a
+  // failure. An account whose closing tag never came is not usable: the reply
+  // was cut, and what is missing is its end, where what comes next and the
+  // files that matter live. Accepting one replaced a 1,000-word account with
+  // its first 89 words, and the next compaction rewrote from those.
   readonly trajectory: string
   /** 1-based line numbers, deduplicated and in order. */
   readonly strike: readonly number[]
@@ -58,12 +65,13 @@ export function readCompactionReply(text: string): CompactionReply {
   }
 }
 
+/** The text between the tags, and nothing where either tag is missing. */
 function block(text: string, tag: string): string | undefined {
   const opened = text.indexOf(`<${tag}>`)
   if (opened === -1) return undefined
-  const closed = text.indexOf(`</${tag}>`, opened)
   const from = opened + tag.length + 2
-  return closed === -1 ? text.slice(from) : text.slice(from, closed)
+  const closed = text.indexOf(`</${tag}>`, from)
+  return closed === -1 ? undefined : text.slice(from, closed)
 }
 
 // Numbers and `a-b` ranges, however they are separated. A range written
