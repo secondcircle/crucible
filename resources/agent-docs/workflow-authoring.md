@@ -193,8 +193,9 @@ repository — node outputs land there, never in the worktree.
 
 - `ctx.node(id, spec)` — one agent node; resolves when it completes. The
   spec:
-  - `system` — the node's system prompt, verbatim; optional. Absent means
-    the model runtime's stock prompt. See "What a node is told".
+  - `system` — the node's system prompt, verbatim, after Crucible's short
+    opening; optional. Absent means the opening alone. See "What a node is
+    told".
   - `prompt` — the node's first user message, verbatim: the task. Keep it
     locally scoped: the node knows nothing about other nodes, and nothing
     about its inputs or outputs beyond what this text says.
@@ -321,23 +322,27 @@ fills the record with noise.
 
 ## What a node is told
 
-Exactly what the workflow file says, and nothing else. A node's conversation
-opens with two pieces of text, both yours:
+What the workflow file says, after one short opening of Crucible's. A node's
+conversation opens with two pieces of text, both yours:
 
-- `system` — the node's whole system prompt, sent verbatim. Optional: leave
-  it out and the node runs under the model runtime's stock system prompt,
-  which knows nothing about runs, outputs or finishing. Put here what is
-  true of the node's situation rather than its task: that it is one node of
-  an automated run, that nobody is watching or will answer a question typed
-  into a message, what standard its work is held to. Several nodes of one
-  workflow usually share one.
+- `system` — the node's system prompt, sent verbatim and whole. Optional:
+  leave it out and the node gets Crucible's opening alone, which knows
+  nothing about runs, outputs or finishing. Put here what is true of the
+  node's situation rather than its task: that it is one node of an automated
+  run, that nobody is watching or will answer a question typed into a
+  message, what standard its work is held to. Several nodes of one workflow
+  usually share one.
 - `prompt` — the node's first user message, sent verbatim. The task.
 
-Crucible adds nothing to either. No role preamble, no list of the files the
-node reads, no list of the files it must write, no verdict schema, no
-reminder to finish. A word the node is told is a word you can find in the
-workflow file, and a word you cannot find there was never sent. That rule
-is what lets you read a file and know what its nodes cost.
+The opening is a few fixed lines naming the agent a coding assistant that
+reads files, runs commands and edits code, the same for every node of every
+workflow; it exists so that every request Crucible sends looks like one of
+Crucible's own, and it is never the model runtime's stock prompt. Beyond it,
+Crucible adds nothing to either text. No role preamble, no list of the files
+the node reads, no list of the files it must write, no verdict schema, no
+reminder to finish. A word the node is told is either in that opening or in
+the workflow file, and a word in neither place was never sent. That rule is
+what lets you read a file and know what its nodes cost.
 
 Two things do reach a node from outside the file, and neither is Crucible's
 text. The worktree's `AGENTS.md` (and any in its parent directories) arrives

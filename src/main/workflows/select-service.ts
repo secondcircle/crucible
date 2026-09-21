@@ -14,7 +14,7 @@ import type { MainWorkflowRunService } from '../../shared/workflows/service'
 import type { CacheRecorder } from '../cache/ledger'
 import type { Flavor } from '../agent/select-adapter'
 import type { LogSink } from '../log/sink'
-import { shippedSkillsPath, shippedWorkflowLibPath } from '../shipped'
+import { readShippedNodeBasePrompt, shippedSkillsPath, shippedWorkflowLibPath } from '../shipped'
 import { createSkillService, userSkillsPath } from '../skills/service'
 import { createWorkflowEngine } from './engine'
 import type { SpawnHost } from './host/host'
@@ -168,6 +168,9 @@ export function selectWorkflowRunService(
     store,
     sessions: createSdkNodeSessionFactory({
       agentDir: join(wiring.stateDir, 'workflow-agent'),
+      // Read once at wiring, so a launch that cannot read the file it ships
+      // fails here rather than at the first node's first paid turn.
+      basePrompt: readShippedNodeBasePrompt(wiring.appPath),
       ...(wiring.compaction === undefined ? {} : { compaction: wiring.compaction }),
       onCompactionFailure: (cause) => {
         log.append({

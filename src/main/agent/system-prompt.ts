@@ -1,7 +1,7 @@
-// No I/O and no SDK import, so what a session's agent is told can be checked
-// without constructing an adapter or paying for a call. Interactive sessions
-// only: a workflow node's system prompt is its workflow's own text, or none,
-// and never comes through here.
+// No I/O and no SDK import, so what an agent is told can be checked without
+// constructing an adapter or paying for a call. Two shapes: a session is a
+// role over the standing prompt; a workflow node is Crucible's base with the
+// workflow's own text, if any, after it.
 
 /** The one substitution a role prompt may ask for. */
 export const DOCS_INDEX_PLACEHOLDER = '{{CRUCIBLE_DOCS_INDEX}}'
@@ -39,4 +39,25 @@ export function composeSystemPrompt({
   }
 
   return `${substituted}\n\n${appended}`
+}
+
+export interface NodeSystemPromptLayers {
+  /** Crucible's own opening, sent to every node. */
+  readonly base: string
+  /** The workflow file's `system` text for this node, when it gives one. */
+  readonly system?: string
+}
+
+/**
+ * A node's system prompt: the base, then the workflow's text after a blank
+ * line when there is any. The base is never dropped, because a request that
+ * opens with the runtime's own stock prompt is one the provider bills as
+ * something other than Crucible, and a workflow written before `system`
+ * existed must still run.
+ */
+export function composeNodeSystemPrompt({ base, system }: NodeSystemPromptLayers): string {
+  const opening = base.trim()
+  if (opening === '') throw new Error('A Crucible node needs a base prompt; this one is blank.')
+  const own = system?.trim() ?? ''
+  return own === '' ? opening : `${opening}\n\n${own}`
 }

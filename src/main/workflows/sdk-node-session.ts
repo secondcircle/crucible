@@ -8,6 +8,7 @@ import type { CacheMissFacts, TranscriptItem, Unsubscribe } from '../../shared/a
 // Spelled with extensions so plain Node can load this module too.
 import { monitorPiTools } from '../agent/monitor-pi-tools.ts'
 import { shrinkingReadTool } from '../agent/shrink-images.ts'
+import { composeNodeSystemPrompt } from '../agent/system-prompt.ts'
 import {
   scanCacheMisses,
   type CacheMissTrackerOptions,
@@ -45,12 +46,12 @@ import type {
 
 // A node is a π session with two injected tools and no interactive user: an
 // in-memory settings manager and a session kept in the run's own directory,
-// so nothing of π's state is read or written. Its system prompt is the
-// workflow's own text when the node has one, and π's stock prompt when it
-// does not; Crucible composes nothing on top of either. π's own prompt files
-// (`.pi/SYSTEM.md`, `.pi/APPEND_SYSTEM.md`) stay unread as they do for every
-// Crucible agent, and its project context files (AGENTS.md and ancestors)
-// arrive as they do for every agent π runs.
+// so nothing of π's state is read or written. Its system prompt opens with
+// Crucible's node base and carries the workflow's own text after it when the
+// node has one; π's stock prompt is never sent, whatever the workflow file
+// says or omits. π's own prompt files (`.pi/SYSTEM.md`, `.pi/APPEND_SYSTEM.md`)
+// stay unread as they do for every Crucible agent, and its project context
+// files (AGENTS.md and ancestors) arrive as they do for every agent π runs.
 //
 // The session is on disk because a node has to outlive the app quitting: its
 // token goes on the node's record, and a resume reopens it so the node
@@ -61,6 +62,8 @@ type Sdk = typeof import('@earendil-works/pi-coding-agent')
 export interface SdkNodeSessionOptions {
   /** A scratch agent dir for π's resource loader; nothing durable lives in it. */
   readonly agentDir: string
+  /** What every node's system prompt opens with, ahead of the workflow's text. */
+  readonly basePrompt: string
   // The machine-global compaction setting, read per decision. A node is an
   // agent loop like any other: same switch, same threshold, same idle rule.
   readonly compaction?: () => CompactionSettings
@@ -70,6 +73,7 @@ export interface SdkNodeSessionOptions {
 
 export function createSdkNodeSessionFactory({
   agentDir,
+  basePrompt,
   compaction = () => DEFAULT_COMPACTION_SETTINGS,
   onCompactionFailure = () => {}
 }: SdkNodeSessionOptions): NodeSessionFactory {
@@ -192,10 +196,14 @@ export function createSdkNodeSessionFactory({
         // and never re-read, because a node is one task start to finish.
         noSkills: true,
         skillsOverride: () => ({ skills: forPi(skills), diagnostics: [] }),
-        // The workflow's text, or nothing: `undefined` here is how π is told
-        // to build its stock prompt. The base π hands in is a `.pi/SYSTEM.md`
-        // it may have found, which stays ignored either way.
-        systemPromptOverride: () => request.system,
+        // Always a full override: the base π hands in is a `.pi/SYSTEM.md` it
+        // may have found, and `undefined` would be π's stock prompt, which the
+        // provider bills as something other than Crucible.
+        systemPromptOverride: () =>
+          composeNodeSystemPrompt({
+            base: basePrompt,
+            ...(request.system === undefined ? {} : { system: request.system })
+          }),
         appendSystemPromptOverride: () => [],
         extensionFactories: [
           compactionExtension({

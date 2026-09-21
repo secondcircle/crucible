@@ -13,14 +13,20 @@ independent of its job: the communication style qualifies, tool guidance and
 docs pointers do not. Both layers ship as files under `resources/`, not as
 string constants.
 
-A workflow node is the other kind of agent Crucible starts, and it is not
-composed at all. Its system prompt is the workflow file's `system` field sent
-verbatim, or π's stock prompt when the field is absent; its first user message
-is the file's `prompt` field, verbatim. The engine writes no role, appends no
-standing prompt, and adds no list of inputs, outputs or schema. The reason is
-who owns the text: a session's prompt is Crucible's product, while a node's
-prompt is the workflow author's, and every word the engine adds is a word the
-author cannot see in the file or remove, sent on every turn of every node.
+A workflow node is the other kind of agent Crucible starts, and it is barely
+composed. Its system prompt is a short shipped opening, the node base, with
+the workflow file's `system` field sent verbatim after it, or the opening
+alone when the field is absent; its first user message is the file's
+`prompt` field, verbatim. The engine writes no role, appends no standing
+prompt, and adds no list of inputs, outputs or schema. The reason is who owns
+the text: a session's prompt is Crucible's product, while a node's prompt is
+the workflow author's, and every word the engine adds is a word the author
+cannot see in the file or remove, sent on every turn of every node. The
+opening is the one exception, and it exists for the provider rather than the
+model: π's stock prompt is never sent for any Crucible agent, because a
+request that opens with it is billed by Anthropic as something other than
+Crucible's own traffic, and a workflow file written before `system` existed
+must still run.
 
 ## Consequences
 
@@ -36,11 +42,12 @@ the answer arrives as the next message, all live in the descriptions of
 `complete_node`'s parameter schema. A blank session layer would let the SDK
 fall back to π's own prompt, so the composition module throws on one rather
 than returning an empty string, and a launch that cannot read a prompt file it
-ships fails loudly, naming the file. A node with no `system` runs under π's
-stock prompt by design, and a workflow that wants otherwise says so in the
-file. What π's resource loader appends for every agent, the worktree's
-`AGENTS.md` files and the skills block, reaches nodes and sessions alike;
-that text is the repository's and π's, not Crucible's.
+ships fails loudly, naming the file, and the node base is read at wiring for
+the same reason. A node with no `system` runs under the base alone, which
+knows nothing of runs or finishing, and a workflow that wants more says so
+in the file. What π's resource loader appends for every agent, the
+worktree's `AGENTS.md` files and the skills block, reaches nodes and sessions
+alike; that text is the repository's and π's, not Crucible's.
 
 ## Considered Options
 
@@ -53,3 +60,7 @@ context was text the file did not contain. The appendix also let workflow
 prompts lean on it ("the reports listed among your inputs"), so the prompts
 read as incomplete on their own. Making the appendix optional was rejected for
 the same reason: a node's prompt is either what the file says or it is not.
+Sending nothing at all when `system` is absent, so π's stock prompt stood in,
+was how verbatim prompts shipped first and was rejected the same day: every
+node of a workflow without `system` was refused by the provider as out of
+extra usage, while sessions on the same subscription ran.

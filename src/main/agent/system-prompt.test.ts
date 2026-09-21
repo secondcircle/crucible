@@ -1,10 +1,13 @@
 // @vitest-environment node
 //
-// The module is pure, so what a session's agent is told can be pinned here
-// without constructing an adapter or spending anything. Workflow nodes never
-// pass through it: their system prompt is the workflow's, verbatim or absent.
+// The module is pure, so what an agent is told can be pinned here without
+// constructing an adapter or spending anything.
 import { describe, expect, it } from 'vitest'
-import { composeSystemPrompt, DOCS_INDEX_PLACEHOLDER } from './system-prompt'
+import {
+  composeNodeSystemPrompt,
+  composeSystemPrompt,
+  DOCS_INDEX_PLACEHOLDER
+} from './system-prompt'
 
 const ROLE = 'You are an expert coding assistant.'
 const STANDING = '<communication-style>\nWrite plainly.\n</communication-style>'
@@ -60,5 +63,29 @@ describe('composing an agent\u2019s system prompt', () => {
     expect(() =>
       composeSystemPrompt({ role: `${ROLE}\nIndex: ${DOCS_INDEX_PLACEHOLDER}`, standing: STANDING })
     ).toThrow(`The role prompt still names ${DOCS_INDEX_PLACEHOLDER}`)
+  })
+})
+
+describe('composing a node\u2019s system prompt', () => {
+  const BASE = 'You are an expert coding assistant.\n'
+  const SYSTEM = 'You are one node of an automated run. Nobody reads your messages.'
+
+  it('is the base alone when the workflow gives no system text', () => {
+    expect(composeNodeSystemPrompt({ base: BASE })).toBe(BASE.trim())
+    expect(composeNodeSystemPrompt({ base: BASE, system: '  \n' })).toBe(BASE.trim())
+  })
+
+  it('is the base, a blank line, then the workflow\u2019s text, whole', () => {
+    expect(composeNodeSystemPrompt({ base: BASE, system: `\n${SYSTEM}\n\n` })).toBe(
+      `${BASE.trim()}\n\n${SYSTEM}`
+    )
+  })
+
+  // A blank base would hand the node the runtime's stock prompt, the one
+  // thing every node must never open with.
+  it('refuses a blank base', () => {
+    expect(() => composeNodeSystemPrompt({ base: ' ', system: SYSTEM })).toThrow(
+      'A Crucible node needs a base prompt; this one is blank.'
+    )
   })
 })

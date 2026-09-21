@@ -10,6 +10,7 @@ import { DOCS_INDEX_PLACEHOLDER } from './agent/system-prompt'
 import { createCommandService } from './commands/service'
 import { createSkillService, type LoadedSkill } from './skills/service'
 import {
+  readShippedNodeBasePrompt,
   readShippedRolePrompt,
   readShippedStandingPrompt,
   shippedCommandsPath,
@@ -722,6 +723,33 @@ describe('the shipped role prompt', () => {
     for (const gone of ['\u03c0', '/opt/homebrew', '~/.pi', 'harness', 'TUI', 'skills', 'themes']) {
       expect(text.toLowerCase()).not.toContain(gone.toLowerCase())
     }
+  })
+})
+
+describe('the shipped node base prompt', () => {
+  const base = (): string => readShippedNodeBasePrompt(APP)
+
+  it('opens the way a session\u2019s role does, and says nothing of runs, panels or docs', () => {
+    const text = base()
+    expect(text.startsWith('You are an expert coding assistant')).toBe(true)
+    expect(text).toMatch(/declared in each request/)
+    for (const gone of ['complete_node', 'raise_blocker', 'context panel', DOCS_INDEX_PLACEHOLDER]) {
+      expect(text).not.toContain(gone)
+    }
+  })
+
+  it('names nothing of the layer below it', () => {
+    const text = base()
+    expect(text).not.toMatch(PI_BY_NAME)
+    for (const gone of ['\u03c0', '/opt/homebrew', '~/.pi', 'harness', 'TUI']) {
+      expect(text.toLowerCase()).not.toContain(gone.toLowerCase())
+    }
+  })
+
+  it('names the file it ships and cannot read', () => {
+    expect(() => readShippedNodeBasePrompt(workspace)).toThrow(
+      join(workspace, 'resources', 'prompts', 'node-base.md')
+    )
   })
 })
 

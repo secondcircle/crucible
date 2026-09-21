@@ -39,8 +39,10 @@ export interface OutputSpec {
 
 export interface NodeSpec {
   /**
-   * The node's system prompt, sent verbatim and whole. Absent, the node runs
-   * under the model's stock system prompt. Either way the engine adds
+   * The node's system prompt, sent verbatim and whole after Crucible's short
+   * opening (a few lines naming the agent a coding assistant, the same for
+   * every node). Absent, the node gets that opening alone; the model
+   * runtime's stock prompt is never sent. Beyond the opening the engine adds
    * nothing of its own; what the worktree's AGENTS.md files say still
    * arrives, because the agent runtime loads those for every agent it runs.
    */

@@ -49,6 +49,15 @@ export function readShippedStandingPrompt(root: string): string {
   return read(shippedStandingPromptPath(root))
 }
 
+/** The opening every workflow node's system prompt has, before the workflow's own text. */
+export function shippedNodeBasePromptPath(root: string): string {
+  return join(root, SHIPPED_DIRECTORY, 'prompts', 'node-base.md')
+}
+
+export function readShippedNodeBasePrompt(root: string): string {
+  return read(shippedNodeBasePromptPath(root))
+}
+
 /** A missing file throws: a fallback would hand the agent π's own prompt. */
 export function shippedSystemPrompt(root: string): string {
   return composeSystemPrompt({

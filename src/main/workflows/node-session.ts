@@ -10,9 +10,10 @@ import type { LoadedSkill } from '../skills/service'
 // fakes and `npm test` constructs no SDK session at all.
 //
 // Nothing in a request is prompt text the engine wrote. The system prompt is
-// the workflow's, verbatim or absent; the task arrives through `prompt()`,
-// verbatim; how a node finishes is carried by the descriptions of the two
-// injected tools, which belong to the tools and not to any prompt.
+// the workflow's, verbatim or absent, and the factory opens it with
+// Crucible's node base; the task arrives through `prompt()`, verbatim; how a
+// node finishes is carried by the descriptions of the two injected tools,
+// which belong to the tools and not to any prompt.
 
 export interface NodeCompletion {
   readonly summary: string
@@ -43,10 +44,10 @@ export interface NodeSessionRequest {
   // fakes that script one node differently from another; it reaches no
   // prompt.
   readonly nodeId: string
-  // The workflow's own system prompt for this node, sent whole and
-  // unchanged. Absent means the model's stock system prompt and nothing of
-  // Crucible's on top; either way the runtime still appends what the
-  // worktree's AGENTS.md files say.
+  // The workflow's own system prompt for this node, sent whole and unchanged
+  // after Crucible's node base. Absent means the base alone; the model's
+  // stock prompt is never sent. Either way the runtime still appends what
+  // the worktree's AGENTS.md files say.
   readonly system?: string
   /** Built-in tool names the node gets, complete_node and raise_blocker aside. */
   readonly tools: readonly string[]
