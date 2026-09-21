@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { TranscriptItem } from '../agent/port'
 import { planCompaction, settleCompaction, type CompactionState } from './compaction'
-import { SUMMARY_BUDGET_TOKENS } from './window'
 
 const AGED: readonly TranscriptItem[] = [
   { kind: 'user', text: 'Rewrite the retry policy.' },
@@ -61,13 +60,15 @@ describe('settling one', () => {
     expect(settled.state.skeleton.length).toBeLessThan(many.length)
   })
 
-  it('clips an account that ignored the word count rather than refusing it', () => {
-    const settled = settleCompaction(
-      planCompaction(undefined, AGED),
-      reply('word '.repeat(40_000))
-    )
+  // The end of an account is where what comes next lives. A model that ran
+  // past the length it was asked for wrote a long account, not a bad one, and
+  // nothing it wrote is cut.
+  it('keeps an account whole however far past the asked-for length it ran', () => {
+    const account = `${'word '.repeat(40_000)}THE LAST THING IT SAID`
+    const settled = settleCompaction(planCompaction(undefined, AGED), reply(account))
     if (settled === undefined) throw new Error('the compaction should have settled')
-    expect(settled.text.length).toBeLessThan(SUMMARY_BUDGET_TOKENS * 4 + 4_000)
+    expect(settled.text).toContain('THE LAST THING IT SAID')
+    expect(settled.text).not.toContain('…')
   })
 
   it('leaves out the skeleton heading when the model struck everything', () => {

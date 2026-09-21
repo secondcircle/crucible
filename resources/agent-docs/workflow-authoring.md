@@ -43,22 +43,30 @@ imports is read live by every run.
 
 ```ts
 import { readFileSync } from 'node:fs'
-import { workflow } from 'crucible:workflow'
+import { artifactPaths, workflow } from 'crucible:workflow'
 
 export default workflow({
   description: 'one node running a prompt file, in a worktree',
   inputs: { prompt: "A file containing the node's task, used verbatim." },
   plan: () => [{ id: 'work' }],
   run: async (ctx) => {
+    const outputs = { report: { file: 'report.html', desc: 'what was done and why' } }
     const result = await ctx.node('work', {
-      prompt: readFileSync(ctx.inputs.prompt, 'utf8').trim(),
+      system: 'You are one node of an automated run; nobody is watching. Work autonomously.',
+      prompt: `${readFileSync(ctx.inputs.prompt, 'utf8').trim()}
+
+Write a report of what you did and why to \`${artifactPaths(ctx, outputs).report}\`.`,
       reads: [ctx.inputs.prompt],
-      outputs: { report: { file: 'report.html', desc: 'what was done and why' } }
+      outputs
     })
     return { summary: result.summary }
   }
 })
 ```
+
+The node is told the system prompt and the task, verbatim, and nothing more:
+that is why the prompt names the report's path itself. See "What a node is
+told" below.
 
 ## The definition
 
@@ -185,18 +193,24 @@ repository — node outputs land there, never in the worktree.
 
 - `ctx.node(id, spec)` — one agent node; resolves when it completes. The
   spec:
-  - `prompt` — the node's task, verbatim. Keep it locally scoped: the node
-    knows nothing about other nodes.
+  - `system` — the node's system prompt, verbatim; optional. Absent means
+    the model runtime's stock prompt. See "What a node is told".
+  - `prompt` — the node's first user message, verbatim: the task. Keep it
+    locally scoped: the node knows nothing about other nodes, and nothing
+    about its inputs or outputs beyond what this text says.
   - `reads` — absolute paths of required inputs; the node fails preflight
     when one is missing. Reads that are another node's outputs become graph
-    edges automatically.
+    edges automatically. The node is not told these paths; the prompt does
+    that.
   - `outputs` — name to `{ file, desc }`. Files are created under the
     artifact directory, and the node is not complete until every one exists
-    and is non-empty.
+    and is non-empty. `artifactPaths(ctx, outputs)` gives the resolved paths
+    to write into the prompt.
   - `verdict` — a JSON Schema object (subset: `type`, `properties`,
     `required`, `enum`, `const`, `items`). The node must pass a matching
     `verdict` argument to `complete_node`; the workflow branches on
-    `result.verdict`.
+    `result.verdict`. The schema reaches the model through the tool's
+    parameter schema, never through the prompt.
   - `model` — `"provider/model-id:thinkingLevel"`, e.g.
     `"anthropic/claude-opus-5:high"`. Omitted means the engine's default.
     `thinkingLevel` is π's name for the suffix and the reason it reads that
@@ -233,6 +247,16 @@ too; `research.md` beside this file has the details.
   answer comes back verbatim. The run parks with no timeout. Answers are
   recorded, so a resumed run is handed back what it was already told rather
   than asking again.
+- `ctx.notify({ reason, artifacts })` — a message with no question in it.
+  `reason` and the artifacts reach the orchestrating session's agent the
+  way a check-in's do, the message says no answer is expected, and the run
+  carries on: it resolves once the message is handed over. For what the
+  orchestrator should hear now but need not decide — a finding no node in
+  this run may act on, a document the workflow wrote between nodes. Prefer
+  it over `ask` whenever the run can proceed without the answer; a
+  check-in parks the run and costs the orchestrator a turn it has to
+  finish. Notifications are recorded, so a resumed run does not send the
+  same one twice.
 - `ctx.effect(id, produce)` — do something once per run, whatever happens to
   the run in between. `produce` runs the first time and its result is
   recorded under `id`; a resumed run is handed that result back instead of
@@ -261,6 +285,7 @@ the record the previous life wrote. So:
 - The node the run stopped on continues in its own session, from its last
   turn. Its conversation, artifacts and spend are kept.
 - A `ctx.ask` that was answered hands back that answer, and asks nobody.
+- A `ctx.notify` that was sent is not sent again.
 - A `ctx.effect` that was recorded hands back its value.
 - **Everything else in `run()` runs again, for real.** Your loops, your
   branches, your `spawn` calls, your commits, your reads of `git rev-parse
@@ -296,34 +321,81 @@ fills the record with noise.
 
 ## What a node is told
 
-Before your prompt arrives, the engine has already given the node a role
-prompt. Do not restate any of it. Verbatim, it tells the node that it has no
-interactive user and works autonomously; that its task lists required input
-files and it should read the ones it needs; that it must produce every
-declared output file with real, complete content; that it is not done until
-it calls `complete_node`, and ending a message is not completion; that a
-broken environment or malformed input means `raise_blocker` rather than
-improvising or asking in plain text, because nobody is reading plain text;
-that after raising one it stops and waits; and that it must never fabricate a
-result, but verify claims by running tools.
+Exactly what the workflow file says, and nothing else. A node's conversation
+opens with two pieces of text, both yours:
 
-So a node prompt that opens with "you are an autonomous agent", or closes by
-reminding the node to call `complete_node` and not to make things up, is
-spending its opening and closing lines on what the node was already told.
-Write the task instead.
+- `system` — the node's whole system prompt, sent verbatim. Optional: leave
+  it out and the node runs under the model runtime's stock system prompt,
+  which knows nothing about runs, outputs or finishing. Put here what is
+  true of the node's situation rather than its task: that it is one node of
+  an automated run, that nobody is watching or will answer a question typed
+  into a message, what standard its work is held to. Several nodes of one
+  workflow usually share one.
+- `prompt` — the node's first user message, sent verbatim. The task.
 
-Every node is a fresh agent with no interactive user. Beyond its built-in
-tools it gets exactly two more: `complete_node(summary, verdict?)` — the
-only way a node finishes — and `raise_blocker(reason, details?, artifact?)`,
-which parks the node and routes the question to the orchestrator. A node
-that ends its turn without calling either is nudged, then stalled out to
-the orchestrator. Output validation failures are delivered back into the
-same session, so fixes happen with full context.
+Crucible adds nothing to either. No role preamble, no list of the files the
+node reads, no list of the files it must write, no verdict schema, no
+reminder to finish. A word the node is told is a word you can find in the
+workflow file, and a word you cannot find there was never sent. That rule
+is what lets you read a file and know what its nodes cost.
+
+Two things do reach a node from outside the file, and neither is Crucible's
+text. The worktree's `AGENTS.md` (and any in its parent directories) arrives
+the way the model runtime delivers it to every agent it runs, as project
+context appended after the system prompt; that text is the repository's. And
+the two tools every node gets carry their own contract in their descriptions:
+
+- `complete_node(summary, verdict?)` — the only way a node finishes. Its
+  description says that ending a message is not completion, that the call
+  belongs after every declared output is written, that the run validates
+  the outputs and rejects the call in the same conversation when one is
+  missing, empty or fails its `check`, and that `verdict` is required when
+  a schema is declared and must be a plain JSON object matching it. The
+  schema itself is spliced into the tool's parameter schema, so the model
+  reads the exact shape where it reads the tool.
+- `raise_blocker(reason, details?, artifact?)` — parks the node and routes
+  the question to the orchestrator. Its description says that nobody reads a
+  node's messages, that this is the one channel for a question, and that
+  after calling it the node ends its turn and the answer arrives as its next
+  message.
+
+Because nothing else says where an output goes, your prompt has to. The
+paths are fixed before the node starts: `artifactPaths(ctx, outputs)`
+resolves a declared `outputs` record to the absolute paths the engine will
+validate and hand back in `result.outputs`, so declare the outputs once,
+resolve them, and write the paths into the prompt:
+
+```ts
+import { artifactPaths, workflow } from 'crucible:workflow'
+
+const outputs = { review: { file: 'review.md', desc: 'the branch judged' } }
+const paths = artifactPaths(ctx, outputs)
+await ctx.node('review', {
+  system: NODE_SYSTEM,
+  prompt: `Review the branch and write your findings to \`${paths.review}\`. …`,
+  reads: [intent],
+  outputs,
+  verdict: VERDICT
+})
+```
+
+The same goes for inputs: `reads` makes the engine check a file exists and
+draws a graph edge, but the node learns the path only if the prompt names
+it. A prompt that says "the earlier rounds are listed among your inputs"
+describes a list nobody sends; name the files. And a verdict-bearing prompt
+says in words what the verdict is (`approved` or `changes-required`, with a
+`reason`), since the schema reaches the model only through the tool.
+
+A node that ends its turn without calling either tool is nudged, then stalled
+out to the orchestrator; those nudges, the rejection carrying `check`
+problems, and the answer to a blocker are the engine's replies to something
+the node did, and they are not part of the prompt you wrote.
 
 ## Habits that hold up
 
-- Fresh context is the design. Push everything a node needs through `reads`
-  and the prompt; never assume it saw another node's conversation.
+- Fresh context is the design. Push everything a node needs through the
+  prompt, with `reads` declaring the files it names; never assume it saw
+  another node's conversation, or that it knows a path you did not write.
 - Commit meaningful stages from `run()` with ordinary git (the run's
   worktree is `ctx.cwd`), so the branch tells the story of the run.
 - Make verdicts small and closed — an enum and a reason beats free text the

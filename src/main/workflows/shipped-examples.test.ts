@@ -296,6 +296,11 @@ describe('the example workflows Crucible ships', () => {
     expect(dispatched).toHaveLength(1)
     expect(dispatched[0].from).toBeUndefined()
     expect(dispatched[0].reads).toEqual([prompt])
+    // The prompt file opens the task verbatim, and the workflow says where the
+    // report goes, because nothing else will.
+    expect(dispatched[0].prompt.startsWith('do the thing\n\n')).toBe(true)
+    expect(dispatched[0].prompt).toContain(join(scratch, 'report.html'))
+    expect(dispatched[0].system).toMatch(/no interactive user/)
   })
 
   // The audit is judged from its report, so what the run hands back has to
@@ -318,6 +323,14 @@ describe('the example workflows Crucible ships', () => {
       join(run.artifactDir, 'audit-findings.md'),
       join(run.artifactDir, 'sweep-findings.md')
     ])
+
+    // Every node is told where its own output goes, in its prompt, since the
+    // engine adds nothing; and every node gets the workflow's system prompt.
+    expect(run.dispatched[0].prompt).toContain(join(run.artifactDir, 'audit-findings.md'))
+    expect(run.dispatched[1].prompt).toContain(join(run.artifactDir, 'sweep-findings.md'))
+    expect(run.dispatched[2].prompt).toContain(join(run.artifactDir, 'report.html'))
+    expect(new Set(run.dispatched.map((node) => node.system)).size).toBe(1)
+    expect(run.dispatched[0].system).toMatch(/no interactive user/)
 
     expect(run.outputs).toEqual({
       report: join(run.artifactDir, 'report.html'),

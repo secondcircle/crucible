@@ -571,7 +571,9 @@ export function createWorkflowEngine(options: EngineOptions): WorkflowEngine {
     // run: `run()` re-executes from the top, and the nth check-in of a
     // resumed run is the nth check-in of the life before it. The · is the
     // engine's own marker in ids, so no workflow's effect id collides.
+    // Notifications are keyed the same way, in a count of their own.
     let asks = 0
+    let notifies = 0
 
     // Every record one node's session has taken: `id`, then `id·rN` in
     // order. One session, several records, which is what a revision is. The
@@ -591,7 +593,7 @@ export function createWorkflowEngine(options: EngineOptions): WorkflowEngine {
 
     /** One session of one node: what it is asked, and which record carries it. */
     interface NodeJob {
-      /** The node's own id, which names its revisions and its role prompt. */
+      /** The node's own id, which names its revisions and its session. */
       readonly id: string
       /** The record this session's first turn takes: `id`, or a revision of it. */
       readonly recordId: string
@@ -647,11 +649,14 @@ export function createWorkflowEngine(options: EngineOptions): WorkflowEngine {
       // one mid-flight.
       const furthest = replay ? chainOf(id).at(-1) : undefined
 
+      // The workflow's prompt, byte for byte. The engine appends nothing of
+      // its own to it: no input list, no output paths, no schema, no
+      // reminder to finish. What the workflow file says is what the node
+      // is told, so an author can read the file and know.
       const lost = monitors?.takeLost(nodeOwner(id)) ?? []
-      const task = [
-        composeTaskPrompt(spec, outputPaths),
-        ...(lost.length === 0 ? [] : [lostMonitorsNotice(lost)])
-      ].join('\n\n')
+      const task = [spec.prompt, ...(lost.length === 0 ? [] : [lostMonitorsNotice(lost)])].join(
+        '\n\n'
+      )
       const fresh = (): Promise<NodeResult> =>
         liveNode({
           id,
@@ -785,7 +790,7 @@ export function createWorkflowEngine(options: EngineOptions): WorkflowEngine {
                   parents,
                   firstMessage:
                     token === undefined
-                      ? [composeTaskPrompt(spec, outputPaths), RESTART_NOTICE, message].join('\n\n')
+                      ? [spec.prompt, RESTART_NOTICE, message].join('\n\n')
                       : [CONTINUED_NODE_MESSAGE, message].join('\n\n'),
                   ...(token === undefined ? {} : { resume: token }),
                   onHold: resolve
@@ -915,7 +920,10 @@ export function createWorkflowEngine(options: EngineOptions): WorkflowEngine {
           model,
           sessionDir: store.sessionDir(run.id),
           ...(job.resume === undefined ? {} : { resumeToken: job.resume }),
-          rolePrompt: nodeRolePrompt(id, run.workflow, cwd),
+          nodeId: id,
+          // The workflow's system prompt or none; the engine writes neither
+          // a role nor a standing prompt for a node.
+          ...(spec.system === undefined ? {} : { system: spec.system }),
           tools: spec.tools ?? DEFAULT_TOOLS,
           skills: nodeSkills,
           ...(monitors === undefined ? {} : { monitors: monitors.tools(owner, cwd) }),
@@ -1508,6 +1516,37 @@ export function createWorkflowEngine(options: EngineOptions): WorkflowEngine {
       return answer
     }
 
+    /**
+     * A message to the orchestrator that waits for nothing: no question on
+     * the record, no waiter, the run view shows no check-in. Recorded once
+     * said, so a resumed run does not say it again.
+     */
+    async function notify(message: {
+      reason: string
+      artifacts?: Record<string, string>
+    }): Promise<void> {
+      if (cancelAsked()) throw new Error('the run was cancelled')
+      const key = `·notify·${(notifies += 1)}`
+      if (recordedEffect(key).replayed) return
+      const artifactLines = Object.entries(message.artifacts ?? {}).map(
+        ([name, path]) => `- ${name}: ${path}`
+      )
+      tell(
+        run,
+        [
+          `${runMessageHeader(run)} reports:`,
+          '',
+          message.reason,
+          ...(artifactLines.length === 0 ? [] : ['', 'Documents that come with it:', ...artifactLines]),
+          '',
+          'This is for your information: the run is not waiting on an answer and continues on ' +
+            'its own. Act on it from your own context, or bring it to the user when it needs them.'
+        ].join('\n')
+      )
+      // There is no answer to keep; the record marks only that this was said.
+      recordEffect(key, null)
+    }
+
     const ctx: EngineContext = {
       inputs: run.inputs,
       artifactDir: artifacts,
@@ -1518,6 +1557,7 @@ export function createWorkflowEngine(options: EngineOptions): WorkflowEngine {
           track(runNode(id, spec, resolve)).catch(reject)
         }),
       ask,
+      notify,
       async recordedEffect(id) {
         return recordedEffect(id)
       },
@@ -1903,45 +1943,6 @@ function keptParents(
 ): string[] {
   const known = new Set(run.nodes.map((candidate) => candidate.id))
   return from.filter((parent) => parent !== id && known.has(parent))
-}
-
-function nodeRolePrompt(nodeId: string, workflow: string, cwd: string): string {
-  return [
-    `You are "${nodeId}", one worker node in the Crucible workflow "${workflow}".`,
-    `Working directory: ${cwd}`,
-    '',
-    'You have no interactive user. Work autonomously. Contract:',
-    '- Your task lists required input files; read the ones you need before acting.',
-    '- You must produce every declared output file with real, complete content.',
-    '- You are NOT done until you call the complete_node tool. Ending a message is not completion.',
-    '- If the environment is broken, inputs are malformed or incomplete, or anything abnormal prevents doing the task properly, call raise_blocker. Do not improvise around problems and do not ask questions in plain text — nobody is reading it.',
-    '- After raise_blocker, stop and wait; a response will arrive as your next message.',
-    '- Never fabricate results. Verify claims by running tools.'
-  ].join('\n')
-}
-
-function composeTaskPrompt(spec: NodeSpec, outputs: Record<string, string>): string {
-  const parts: string[] = [spec.prompt]
-  if (spec.reads !== undefined && spec.reads.length > 0) {
-    parts.push('', 'Input files (read what you need):', ...spec.reads.map((path) => `- ${path}`))
-  }
-  const outputEntries = Object.entries(spec.outputs ?? {})
-  if (outputEntries.length > 0) {
-    parts.push(
-      '',
-      'Required output files (create each one; the run validates them):',
-      ...outputEntries.map(([name, output]) => `- ${outputs[name]} — ${name}: ${output.desc}`)
-    )
-  }
-  if (spec.verdict !== undefined) {
-    parts.push(
-      '',
-      'When you call complete_node, you must include a `verdict` argument matching this JSON schema:',
-      JSON.stringify(spec.verdict, null, 2)
-    )
-  }
-  parts.push('', 'When everything above is genuinely done, call complete_node.')
-  return parts.join('\n')
 }
 
 function round4(value: number): number {

@@ -11,7 +11,43 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { toTranscript, type StoredMessage } from '../agent/sdk-transcript'
-import { completeNodeParameters, reopenable, toolCallCount } from './sdk-node-session'
+import {
+  COMPLETE_NODE_DESCRIPTION,
+  RAISE_BLOCKER_DESCRIPTION,
+  completeNodeParameters,
+  reopenable,
+  toolCallCount
+} from './sdk-node-session'
+
+// With no role prompt written for a node, the two tools' descriptions are the
+// whole of what a node is told about finishing. They ride the request's tools
+// parameter, so they reach a node whatever its workflow put in its prompts.
+describe('what the two node tools say about themselves', () => {
+  it('complete_node: the only way out, ending a message is not it, outputs first, the verdict shape', () => {
+    const text = COMPLETE_NODE_DESCRIPTION
+    expect(text).toMatch(/only way this node finishes/)
+    expect(text).toMatch(/Ending a message is not completion/)
+    expect(text).toMatch(/every\s+declared output file is written/)
+    expect(text).toMatch(/rejects the call, in this same\s+conversation/)
+    expect(text).toMatch(/`verdict` is required when a schema is declared/)
+    expect(text).toMatch(/plain\s+JSON object matching that schema, never as a JSON-encoded string/)
+  })
+
+  it('raise_blocker: parks the node, plain text is never read, the answer is the next message', () => {
+    const text = RAISE_BLOCKER_DESCRIPTION
+    expect(text).toMatch(/Park this node/)
+    expect(text).toMatch(/Nobody reads your messages/)
+    expect(text).toMatch(/end your\s+turn and wait: the answer arrives as your next message/)
+    expect(text).toMatch(/Do\s+not improvise/)
+  })
+
+  it('names nothing of the layer below', () => {
+    for (const text of [COMPLETE_NODE_DESCRIPTION, RAISE_BLOCKER_DESCRIPTION]) {
+      expect(text).not.toMatch(/\bpi\b/i)
+      expect(text).not.toContain('\u03c0')
+    }
+  })
+})
 
 describe('completeNodeParameters', () => {
   it('leaves verdict optional and untyped when the node declares no schema', () => {

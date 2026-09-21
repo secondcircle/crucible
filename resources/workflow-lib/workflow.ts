@@ -21,6 +21,8 @@
  * form for anything that takes more than a moment.
  */
 
+import { join } from 'node:path'
+
 /**
  * A JSON Schema object (the subset verdict validation understands: type,
  * properties, required, enum, const, items). Plain data, so a workflow file
@@ -36,7 +38,21 @@ export interface OutputSpec {
 }
 
 export interface NodeSpec {
-  /** The node's task. Keep it locally scoped: no references to other nodes. */
+  /**
+   * The node's system prompt, sent verbatim and whole. Absent, the node runs
+   * under the model's stock system prompt. Either way the engine adds
+   * nothing of its own; what the worktree's AGENTS.md files say still
+   * arrives, because the agent runtime loads those for every agent it runs.
+   */
+  system?: string
+  /**
+   * The node's first user message, sent verbatim. Nothing is appended: not
+   * the input paths, not the output paths, not the verdict schema, not a
+   * reminder to finish. A node that has to write somewhere is told where in
+   * this text (see `artifactPaths`), and how it finishes is carried by the
+   * `complete_node` and `raise_blocker` tool descriptions. Keep it locally
+   * scoped: no references to other nodes.
+   */
   prompt: string
   /**
    * Ids of the nodes this node follows — declared here because nodes born
@@ -132,6 +148,27 @@ export interface StageOptions {
   inputs: Record<string, string>
 }
 
+/**
+ * Where a node's declared outputs will land, before the node starts: the
+ * same paths the engine validates and hands back in `NodeResult.outputs`.
+ * A node is told nothing its prompt does not say, so a workflow that
+ * declares outputs names these paths in the prompt itself.
+ *
+ *   const outputs = { report: { file: 'report.html', desc: '…' } }
+ *   const paths = artifactPaths(ctx, outputs)
+ *   await ctx.node('work', { prompt: `… write it to ${paths.report}`, outputs })
+ */
+export function artifactPaths<Name extends string>(
+  ctx: { readonly artifactDir: string },
+  outputs: Readonly<Record<Name, OutputSpec>>
+): Record<Name, string> {
+  const paths = {} as Record<Name, string>
+  for (const name of Object.keys(outputs) as Name[]) {
+    paths[name] = join(ctx.artifactDir, outputs[name].file)
+  }
+  return paths
+}
+
 export interface RunContext {
   /** Input name -> absolute file path, validated before the run started. */
   inputs: Record<string, string>
@@ -152,6 +189,19 @@ export interface RunContext {
    * told rather than asking the same question twice.
    */
   ask(question: { reason: string; artifacts?: Record<string, string> }): Promise<string>
+  /**
+   * Tell the orchestrator something and carry on. `reason` reaches its agent
+   * verbatim, as `ask`'s does, and the artifacts go with it by name and
+   * path; the message says no answer is expected, and none comes back. The
+   * run never parks: this resolves once the message is handed over.
+   *
+   * For what the orchestrator should hear now but need not decide: a
+   * finding nobody in this run may act on, a document the workflow wrote
+   * between nodes. Reserve `ask` for a decision the run cannot proceed
+   * without. Notifications are recorded, so a resumed run does not send the
+   * same one twice.
+   */
+  notify(message: { reason: string; artifacts?: Record<string, string> }): Promise<void>
   /**
    * Do something once per run, whatever happens to the run in between:
    * `produce` executes the first time, its result is recorded under `id`,

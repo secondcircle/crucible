@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process'
-import { workflow, type PlannedNode } from 'crucible:workflow'
+import { artifactPaths, workflow, type OutputSpec, type PlannedNode } from 'crucible:workflow'
 
 // Take an intent document to built code — a Spec, a fresh-context builder, a
 // review loop, and the merge gate. What a run leaves is a branch; pulling it
@@ -32,6 +32,57 @@ import { workflow, type PlannedNode } from 'crucible:workflow'
 
 const DOCUMENT_MODEL = 'anthropic/claude-fable-5:high'
 const CODE_MODEL = 'anthropic/claude-opus-5:high'
+
+/**
+ * Every node's system prompt. A node is told exactly what this file writes:
+ * this, and its task prompt. Nothing else says that nobody is watching, so
+ * this does; how a node finishes is carried by the `complete_node` and
+ * `raise_blocker` tools' own descriptions, and each task prompt names the
+ * files its node writes.
+ */
+export const NODE_SYSTEM = `\
+You are one node of an automated workflow run, working in a git worktree of a
+repository with no interactive user. Nobody reads what you write as you work,
+and a question typed into a message is never answered: work from the task
+autonomously, verify every claim you make by running tools rather than
+asserting it, and when something you cannot resolve stands in the way, raise
+it with the raise_blocker tool and wait for the answer. Where the task names
+a file to write, you are finished only when it is written; either way you
+finish by calling complete_node.`
+
+/** Output declarations, so a prompt and a spec name the same file. */
+const SPEC: OutputSpec = {
+  file: 'spec.md',
+  desc: 'the Spec: what to build, derived from the intent document'
+}
+const specReviewOf = (round: number): OutputSpec => ({
+  file: `spec-review-${round}.md`,
+  desc: "the Spec's design judged against the design doctrine"
+})
+const reviewOf = (round: number): OutputSpec => ({
+  file: `review-${round}.md`,
+  desc: 'the branch judged at interior-module level'
+})
+const coverageReportOf = (round: number): OutputSpec => ({
+  file: `gate-alignment-${round}.html`,
+  desc: 'coverage and unasked work, judged against the intent document'
+})
+const commentReportOf = (round: number): OutputSpec => ({
+  file: `gate-comments-${round}.html`,
+  desc: 'every comment change made on the branch, with the why'
+})
+
+/** Paths as a prompt lists them. */
+const listed = (paths: readonly string[]): string => paths.map((path) => `\`${path}\``).join(', ')
+
+/**
+ * The verdict, as every judging node is told to give it: no schema reaches a
+ * prompt any more, and the tool's own parameter schema enforces the shape.
+ */
+const VERDICT_SHAPE = `\
+**Your verdict** is the \`verdict\` argument of complete_node: an object with
+\`verdict\`, one of \`approved\` and \`changes-required\`, and \`reason\`, a
+string.`
 
 /** Three rounds of the same argument is where a loop stops being worth trusting. */
 const REVIEWS_PER_CHECK_IN = 3
@@ -228,12 +279,12 @@ async function mergeCheck(cwd: string, target: string): Promise<MergeCheck> {
   }
 }
 
-export const plannerPrompt = (intent: string): string => `\
+export const plannerPrompt = (intent: string, spec: string): string => `\
 # Write the Spec
 
 **Goal**: produce the Spec for the work ruled in the intent document at
-\`${intent}\` — the one document a fresh-context builder will implement from
-and a reviewer will judge done-ness against.
+\`${intent}\`, written to \`${spec}\` — the one document a fresh-context
+builder will implement from and a reviewer will judge done-ness against.
 
 **Why this document decides everything**: the builder and the reviewer arrive
 knowing nothing but the intent document and your spec. Whatever the spec
@@ -303,6 +354,8 @@ ${DESIGN_DOCTRINE}`
 export const specReviewerPrompt = (
   intent: string,
   spec: string,
+  review: string,
+  earlierReviews: readonly string[],
   corrections: string[] = []
 ): string => `\
 # Review the Spec's design
@@ -310,8 +363,13 @@ export const specReviewerPrompt = (
 **Goal**: judge the design ruled by the Spec at \`${spec}\` against the design
 doctrine below, and deliver one verdict — \`approved\` when a builder should
 build from it as it stands, \`changes-required\` when the design must change
-first — with the findings written down where the agent who revises the Spec
-can work from them.
+first — with the findings written down at \`${review}\`, where the agent who
+revises the Spec can work from them.${
+  earlierReviews.length === 0
+    ? ''
+    : ` The earlier rounds of this review, ${listed(earlierReviews)}, show what has already
+been asked; a finding that persists has to read as persisting.`
+}
 
 **Why it matters**: the builder and every reviewer after it inherit the
 Spec's design without question — a representation that can hold an invalid
@@ -356,21 +414,27 @@ their own judges downstream. Spend your judgment on the design alone.
 - Your review is read by agents — the spec fixer, and the design reviews
   after yours — so it is plain markdown, written for them.
 
+${VERDICT_SHAPE}
+
 ${DESIGN_DOCTRINE}${standingCorrections(corrections)}`
 
 export const specFixerPrompt = (
   intent: string,
   spec: string,
   latestReview: string,
+  earlierReviews: readonly string[],
   corrections: string[] = []
 ): string => `\
 # Revise the Spec
 
 **Goal**: revise the Spec at \`${spec}\` — in place, it stays the one file
 the builder reads — so the next design review can approve it. The latest
-review, \`${latestReview}\`, is the standing judgment and comes first; the
-earlier ones show what has already been asked and what may have been missed
-twice.
+review, \`${latestReview}\`, is the standing judgment and comes first${
+  earlierReviews.length === 0
+    ? '.'
+    : `; the earlier ones, ${listed(earlierReviews)}, show what has already been
+asked and what may have been missed twice.`
+}
 
 **Why you**: you arrive with a fresh context because the planner could not
 see what the reviewer saw. A finding that survives your round comes back as
@@ -473,6 +537,8 @@ export const reviewerPrompt = (
   target: string,
   intent: string,
   spec: string,
+  review: string,
+  earlierReviews: readonly string[],
   corrections: string[] = []
 ): string => `\
 # Review the branch
@@ -480,7 +546,13 @@ export const reviewerPrompt = (
 **Goal**: judge what this branch has built against the Spec it was built from,
 and deliver one verdict — \`approved\` when the work stands as it is,
 \`changes-required\` when something must change first — with the findings
-written down where the agent who repairs them can work from them.
+written down at \`${review}\`, where the agent who repairs them can work from
+them.${
+  earlierReviews.length === 0
+    ? ''
+    : ` The earlier rounds of this review, ${listed(earlierReviews)}, show what has already
+been asked; a finding that persists has to read as persisting.`
+}
 
 **Why it matters**: nobody is looking at this code as closely as you are. A
 later gate judges the branch at map level — coverage against the intent
@@ -551,6 +623,8 @@ the authority behind it.
 - Your review is read by agents — the fixer, and the reviews after yours — so
   it is plain markdown, written for them and not rendered for anyone.
 
+${VERDICT_SHAPE}
+
 ${DESIGN_DOCTRINE}${standingCorrections(corrections)}`
 
 export const fixerPrompt = (
@@ -558,14 +632,19 @@ export const fixerPrompt = (
   intent: string,
   spec: string,
   latestReview: string,
+  earlierReviews: readonly string[],
   corrections: string[] = []
 ): string => `\
 # Fix the branch
 
 **Goal**: resolve what the reviews of this branch found, so the next review can
 approve the work. The latest review, \`${latestReview}\`, is the standing
-judgment and comes first; the earlier ones show what has already been asked
-and what may have been missed twice.
+judgment and comes first${
+  earlierReviews.length === 0
+    ? '.'
+    : `; the earlier ones, ${listed(earlierReviews)}, show what has already been
+asked and what may have been missed twice.`
+}
 
 **Why you**: you arrive with a fresh context because the agents who wrote this
 code could not see what the reviewer saw. The branch itself is the only record
@@ -636,14 +715,16 @@ export const gateAlignmentPrompt = (
   target: string,
   intent: string,
   spec: string,
+  report: string,
+  earlierReports: readonly string[],
   corrections: string[] = []
 ): string => `\
 # Alignment check
 
 **Goal**: judge the whole of this branch against the intent document that
-authorized it, and write the report the human reads before they merge: did
-this work do what was asked — all of it, and only it — and does what it added
-hold up where a user meets it.
+authorized it, and write the report the human reads before they merge, to
+\`${report}\`: did this work do what was asked — all of it, and only it — and
+does what it added hold up where a user meets it.
 
 **Why it matters**: the human authorized this work by the intent document,
 and you are what keeps that authorization meaningful. Every review before
@@ -705,10 +786,14 @@ reads as one.
 
 **Constraints on you**:
 
-- Review only — change no files besides your report.
-- Earlier rounds of this same check may be listed among your inputs. Read
-  them first: a finding that persists has to read as persisting, and one
-  already fixed must not be rediscovered cold.
+- Review only — change no files besides your report.${
+  earlierReports.length === 0
+    ? ''
+    : `
+- Earlier rounds of this same check: ${listed(earlierReports)}. Read them
+  first: a finding that persists has to read as persisting, and one already
+  fixed must not be rediscovered cold.`
+}
 - Your report is for a human reader: a dark-mode HTML document, using what
   HTML offers over markdown to convey coverage and creep intuitively.
 
@@ -716,13 +801,17 @@ reads as one.
 judgment. The repository's glossary is \`CONTEXT.md\` at the root — use its
 terms exactly; its decisions live in \`docs/adr/\`.${standingCorrections(corrections)}`
 
-export const gateCommentsPrompt = (target: string, corrections: string[] = []): string => `\
+export const gateCommentsPrompt = (
+  target: string,
+  report: string,
+  corrections: string[] = []
+): string => `\
 # Comment police
 
 **Goal**: bring every comment this branch added or edited into compliance with
 the comment doctrine below — by editing the files directly — and write a
-report of what you changed and why, so a human can spot-check your judgment
-cheaply instead of redoing the work.
+report of what you changed and why to \`${report}\`, so a human can
+spot-check your judgment cheaply instead of redoing the work.
 
 **Why it matters**: comments are the one channel code has for explaining
 itself to a future reader, and a bad one actively misleads. You fix rather
@@ -760,15 +849,17 @@ terms exactly; its decisions live in \`docs/adr/\`.${standingCorrections(correct
 export const gateVerdictPrompt = (
   target: string,
   intent: string,
+  coverageReport: string,
+  commentReport: string,
   corrections: string[] = []
 ): string => `\
 # The verdict on this branch
 
-**Goal**: weigh the two reports listed among your inputs — the branch's
-coverage and unasked work, and the comment changes made to it — against the
-intent document, and deliver one verdict through complete_node: \`approved\`
-when nothing must happen before a human decides this branch's fate,
-\`changes-required\` when something must.
+**Goal**: weigh the two reports on this branch — its coverage and unasked work
+at \`${coverageReport}\`, and the comment changes made to it at
+\`${commentReport}\` — against the intent document, and deliver one verdict
+through complete_node: \`approved\` when nothing must happen before a human
+decides this branch's fate, \`changes-required\` when something must.
 
 **Why it matters**: this is the last judgment the run makes. The human merges
 on it and their attention is the scarce resource — a verdict that hides a
@@ -792,6 +883,8 @@ working directory.
   has to be actionable without rereading the reports.
 - You change no files. Your product is the verdict and its reason.
 
+${VERDICT_SHAPE}
+
 **Context**: you are in a worktree of this repository, on the branch under
 judgment. The repository's glossary is \`CONTEXT.md\` at the root — use its
 terms exactly; its decisions live in \`docs/adr/\`.${standingCorrections(corrections)}`
@@ -802,6 +895,7 @@ export const gateFixerPrompt = (
   spec: string,
   coverageReport: string,
   commentReport: string,
+  earlierReports: readonly string[],
   corrections: string[] = []
 ): string => `\
 # Fix what the gate found
@@ -809,8 +903,12 @@ export const gateFixerPrompt = (
 **Goal**: resolve what this branch's final check found, so the next pass can
 approve it. The standing judgment is the pair of reports from the round that
 just refused the branch — coverage and unasked work at \`${coverageReport}\`,
-the comment changes at \`${commentReport}\`. Earlier rounds among your inputs
-show what has already been asked and what may have been missed twice.
+the comment changes at \`${commentReport}\`.${
+  earlierReports.length === 0
+    ? ''
+    : ` Earlier rounds, ${listed(earlierReports)}, show what has already been asked and
+what may have been missed twice.`
+}
 
 **Why you**: you arrive with a fresh context because the agents who wrote this
 code could not see what the check saw. The branch itself is the only record of
@@ -890,33 +988,15 @@ export default workflow({
   // The workflow commits per actor below, so the engine's end-of-run commit
   // would only sweep up stray droppings; still on, as the belt to the braces.
   plan: (): PlannedNode[] => [
-    {
-      id: 'planner',
-      model: DOCUMENT_MODEL,
-      outputs: {
-        spec: { file: 'spec.md', desc: 'the Spec: what to build, derived from the intent document' }
-      }
-    },
+    { id: 'planner', model: DOCUMENT_MODEL, outputs: { spec: SPEC } },
     {
       id: 'spec-review-1',
       model: DOCUMENT_MODEL,
       parents: ['planner'],
-      outputs: {
-        review: {
-          file: 'spec-review-1.md',
-          desc: "the Spec's design judged against the design doctrine"
-        }
-      }
+      outputs: { review: specReviewOf(1) }
     },
     { id: 'builder', model: CODE_MODEL, parents: ['spec-review-1'] },
-    {
-      id: 'review-1',
-      model: DOCUMENT_MODEL,
-      parents: ['builder'],
-      outputs: {
-        review: { file: 'review-1.md', desc: 'the branch judged at interior-module level' }
-      }
-    },
+    { id: 'review-1', model: DOCUMENT_MODEL, parents: ['builder'], outputs: { review: reviewOf(1) } },
     { id: 'gate-alignment-1', model: DOCUMENT_MODEL, parents: ['review-1'] },
     { id: 'gate-comments-1', model: DOCUMENT_MODEL, parents: ['gate-alignment-1'] },
     {
@@ -931,15 +1011,18 @@ export default workflow({
     // planner.
     const target = await localDefaultBranch(ctx.cwd)
     const intent = ctx.inputs.intent
+    // Nothing but a prompt tells a node where its output goes, so every
+    // output is resolved before its node starts and named in the prompt.
+    const at = (outputs: Record<string, OutputSpec>): Record<string, string> =>
+      artifactPaths(ctx, outputs)
 
     // The planner takes only the kickoff input: a root, so declaring
     // anything to follow would be an invented edge.
     const planner = await ctx.node('planner', {
-      prompt: plannerPrompt(intent),
+      system: NODE_SYSTEM,
+      prompt: plannerPrompt(intent, at({ spec: SPEC }).spec),
       reads: [intent],
-      outputs: {
-        spec: { file: 'spec.md', desc: 'the Spec: what to build, derived from the intent document' }
-      },
+      outputs: { spec: SPEC },
       model: DOCUMENT_MODEL
     })
     const spec = planner.outputs.spec
@@ -954,15 +1037,17 @@ export default workflow({
     let designApprovedBy: string
     for (let round = 1; ; round++) {
       const specReview = await ctx.node(`spec-review-${round}`, {
-        prompt: specReviewerPrompt(intent, spec, specCorrections),
+        system: NODE_SYSTEM,
+        prompt: specReviewerPrompt(
+          intent,
+          spec,
+          at({ review: specReviewOf(round) }).review,
+          specReviews,
+          specCorrections
+        ),
         from: [round === 1 ? 'planner' : `spec-fixer-${round - 1}`],
         reads: [intent, spec, ...specReviews],
-        outputs: {
-          review: {
-            file: `spec-review-${round}.md`,
-            desc: "the Spec's design judged against the design doctrine"
-          }
-        },
+        outputs: { review: specReviewOf(round) },
         verdict: VERDICT,
         model: DOCUMENT_MODEL
       })
@@ -989,7 +1074,14 @@ export default workflow({
       }
 
       await ctx.node(`spec-fixer-${round}`, {
-        prompt: specFixerPrompt(intent, spec, specReview.outputs.review, specCorrections),
+        system: NODE_SYSTEM,
+        prompt: specFixerPrompt(
+          intent,
+          spec,
+          specReview.outputs.review,
+          specReviews.slice(0, -1),
+          specCorrections
+        ),
         from: [`spec-review-${round}`],
         reads: [intent, spec, ...specReviews],
         model: DOCUMENT_MODEL
@@ -997,6 +1089,7 @@ export default workflow({
     }
 
     await ctx.node('builder', {
+      system: NODE_SYSTEM,
       prompt: builderPrompt(intent, spec),
       from: [designApprovedBy],
       reads: [intent, spec],
@@ -1014,15 +1107,18 @@ export default workflow({
     let approvedBy: string
     for (let round = 1; ; round++) {
       const review = await ctx.node(`review-${round}`, {
-        prompt: reviewerPrompt(target, intent, spec, corrections),
+        system: NODE_SYSTEM,
+        prompt: reviewerPrompt(
+          target,
+          intent,
+          spec,
+          at({ review: reviewOf(round) }).review,
+          reviews,
+          corrections
+        ),
         from: [round === 1 ? 'builder' : `fixer-${round - 1}`],
         reads: [intent, spec, ...reviews],
-        outputs: {
-          review: {
-            file: `review-${round}.md`,
-            desc: 'the branch judged at interior-module level'
-          }
-        },
+        outputs: { review: reviewOf(round) },
         verdict: VERDICT,
         model: DOCUMENT_MODEL
       })
@@ -1056,7 +1152,15 @@ export default workflow({
       }
 
       await ctx.node(`fixer-${round}`, {
-        prompt: fixerPrompt(target, intent, spec, review.outputs.review, corrections),
+        system: NODE_SYSTEM,
+        prompt: fixerPrompt(
+          target,
+          intent,
+          spec,
+          review.outputs.review,
+          reviews.slice(0, -1),
+          corrections
+        ),
         from: [`review-${round}`],
         reads: [intent, spec, ...reviews],
         model: CODE_MODEL
@@ -1074,28 +1178,31 @@ export default workflow({
       // First in the round, so it judges the diff the branch's agents left
       // rather than one the police has already edited.
       const alignment = await ctx.node(`gate-alignment-${round}`, {
-        prompt: gateAlignmentPrompt(target, intent, spec, gateCorrections),
+        system: NODE_SYSTEM,
+        prompt: gateAlignmentPrompt(
+          target,
+          intent,
+          spec,
+          at({ report: coverageReportOf(round) }).report,
+          coverageReports,
+          gateCorrections
+        ),
         from: [round === 1 ? approvedBy : `gate-fixer-${round - 1}`],
         reads: [intent, spec, ...coverageReports],
-        outputs: {
-          report: {
-            file: `gate-alignment-${round}.html`,
-            desc: 'coverage and unasked work, judged against the intent document'
-          }
-        },
+        outputs: { report: coverageReportOf(round) },
         model: DOCUMENT_MODEL
       })
       coverageReports.push(alignment.outputs.report)
 
       const police = await ctx.node(`gate-comments-${round}`, {
-        prompt: gateCommentsPrompt(target, gateCorrections),
+        system: NODE_SYSTEM,
+        prompt: gateCommentsPrompt(
+          target,
+          at({ report: commentReportOf(round) }).report,
+          gateCorrections
+        ),
         from: [`gate-alignment-${round}`],
-        outputs: {
-          report: {
-            file: `gate-comments-${round}.html`,
-            desc: 'every comment change made on the branch, with the why'
-          }
-        },
+        outputs: { report: commentReportOf(round) },
         model: DOCUMENT_MODEL
       })
       commentReports.push(police.outputs.report)
@@ -1104,7 +1211,14 @@ export default workflow({
       await commit(ctx.cwd, `build: comment police ${round}`)
 
       const gate = await ctx.node(`gate-verdict-${round}`, {
-        prompt: gateVerdictPrompt(target, intent, gateCorrections),
+        system: NODE_SYSTEM,
+        prompt: gateVerdictPrompt(
+          target,
+          intent,
+          alignment.outputs.report,
+          police.outputs.report,
+          gateCorrections
+        ),
         from: [`gate-alignment-${round}`, `gate-comments-${round}`],
         reads: [intent, alignment.outputs.report, police.outputs.report],
         verdict: VERDICT,
@@ -1143,12 +1257,14 @@ export default workflow({
       }
 
       await ctx.node(`gate-fixer-${round}`, {
+        system: NODE_SYSTEM,
         prompt: gateFixerPrompt(
           target,
           intent,
           spec,
           alignment.outputs.report,
           police.outputs.report,
+          [...coverageReports.slice(0, -1), ...commentReports.slice(0, -1)],
           gateCorrections
         ),
         from: [`gate-verdict-${round}`],

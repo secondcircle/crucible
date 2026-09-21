@@ -177,6 +177,38 @@ describe('the size rules', () => {
     expect(fired).toHaveLength(1)
   })
 
+  // The turn that crossed the threshold reports its size once more as it
+  // ends, after the ask has gone out, and π reports nothing for the rewritten
+  // conversation until it has answered a request. So the next turn's end is
+  // the first settle after the compaction, and the only facts in hand are the
+  // old conversation's. A build that judged them compacted a 207k conversation
+  // and then, one turn later, the 68k one it left behind.
+  it('drops the facts of the conversation a compaction rewrote', () => {
+    watching()
+    watch.saw('a', { lastRequestAt: 0, usedTokens: 207_000, contextWindow: 1_000_000 })
+    watch.settled('a')
+    expect(fired).toHaveLength(1)
+
+    // The turn-end report of the conversation being rewritten.
+    watch.saw('a', { lastRequestAt: 1, usedTokens: 207_000, contextWindow: 1_000_000 })
+    watch.compacted('a')
+
+    // The next turn: π has no size to give until its answer lands, so the
+    // turn settles on no fresh facts at all.
+    watch.settled('a')
+    expect(fired).toHaveLength(1)
+
+    // The rewritten conversation's own size, once π knows it.
+    watch.saw('a', {
+      lastRequestAt: 2,
+      usedTokens: 68_000,
+      contextWindow: 1_000_000,
+      compactedTo: 42_000
+    })
+    watch.settled('a')
+    expect(fired).toHaveLength(1)
+  })
+
   // Rare and large: the next one waits until there is a whole compacted
   // window's worth of new conversation for it to take away.
   it('compacts again once there is as much to take away as the last one left', () => {

@@ -1,5 +1,7 @@
-// No I/O and no SDK import, so what an agent is told can be checked without
-// constructing an adapter or paying for a call.
+// No I/O and no SDK import, so what a session's agent is told can be checked
+// without constructing an adapter or paying for a call. Interactive sessions
+// only: a workflow node's system prompt is its workflow's own text, or none,
+// and never comes through here.
 
 /** The one substitution a role prompt may ask for. */
 export const DOCS_INDEX_PLACEHOLDER = '{{CRUCIBLE_DOCS_INDEX}}'

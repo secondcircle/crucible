@@ -48,6 +48,11 @@ Every message a run sends starts with `⚑ Crucible run <id>`:
   Answer with `crucible_answer` from your own context when you can; when it
   genuinely needs the user's judgment, put the question to them first and
   relay their ruling. Your answer reaches the waiting agent verbatim.
+- **A report.** The run is telling you something and continues on its own:
+  a document it produced between nodes, a list of items reviewers found
+  that no agent may fix. Nothing is parked and no answer goes back through
+  `crucible_answer`. Act on it from your own context, or bring it to the
+  user when it is theirs to weigh, while the run keeps working.
 - **A stall.** A node went quiet without completing. Look at what it was
   asked to do and send a corrective instruction the same way.
 - **Completion.** The message names the run's branch and worktree. The work

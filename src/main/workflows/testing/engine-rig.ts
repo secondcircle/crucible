@@ -73,8 +73,9 @@ export interface NodeTools {
   /** A line of liveness, which is what the engine snapshots the node on. */
   readonly activity: (doing: string) => void
   readonly cwd: string
-  // The first prompt of the session, which is the one naming the output
-  // paths; later prompts (rejections, blocker answers, shoves) do not.
+  // The first prompt of the session, which is the one the test's workflow
+  // wrote the output paths into; later prompts (rejections, blocker answers,
+  // shoves) do not carry them.
   readonly taskPrompt: string
   /** Set when this session was reopened rather than started fresh. */
   readonly continued: boolean
@@ -84,10 +85,13 @@ export interface NodeTools {
 // node's record is read while its agent is working.
 export type NodeScript = (prompt: string, tools: NodeTools, turn: number) => void | Promise<void>
 
-/** The prompt names every output path; a script writes one by its file name. */
+// The engine appends nothing to a prompt, so a test's workflow names its
+// output paths itself, the way a real one does (`artifactPaths`). A script
+// finds the one it wants by file name: the absolute path in the prompt that
+// ends in it.
 export function outputPath(prompt: string, file: string): string {
-  const line = prompt.split('\n').find((candidate) => candidate.includes(file))
-  const match = line === undefined ? null : /- (\S+) —/.exec(line)
+  const escaped = file.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  const match = new RegExp(`(\\S*/${escaped})(?!\\w)`).exec(prompt)
   if (match === null) throw new Error(`no output path for ${file} in the prompt`)
   return match[1]
 }
@@ -113,7 +117,7 @@ export function scriptedSessions(
     requests,
     async start(request: NodeSessionRequest): Promise<NodeSession> {
       requests.push(request)
-      const nodeId = /^You are "([^"]+)"/.exec(request.rolePrompt)?.[1] ?? 'unknown'
+      const nodeId = request.nodeId
       models.push(`${nodeId}: ${request.model}`)
       const script = scriptFor(nodeId)
       let turn = 0

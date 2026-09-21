@@ -9,7 +9,11 @@
 // conversation.
 export const RECENT_SPAN_TOKENS = 20_000
 
-/** What the model-written trajectory summary may take. */
+// What the model-written trajectory summary is sized at: the length the
+// instruction asks for, and what the arithmetic below assumes it took. It is
+// not enforced. An account that runs long is kept whole, because nothing an
+// agent writes is cut, and the next compaction rewrites it rather than adding
+// to it, so a long one does not compound.
 export const SUMMARY_BUDGET_TOKENS = 3_000
 
 // What the skeleton may take after pruning. The skeleton of a 500k span is
