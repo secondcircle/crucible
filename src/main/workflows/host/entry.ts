@@ -125,6 +125,9 @@ function runContext(
       }
     },
     ask: (question) => rpc.request('ask', question),
+    notify: async (message) => {
+      await rpc.request('notify', message)
+    },
     // Built here, so the workflow's own code is what runs inside an effect
     // and only its result crosses the wire.
     effect: effectOver({

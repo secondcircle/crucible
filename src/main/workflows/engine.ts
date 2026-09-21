@@ -571,7 +571,9 @@ export function createWorkflowEngine(options: EngineOptions): WorkflowEngine {
     // run: `run()` re-executes from the top, and the nth check-in of a
     // resumed run is the nth check-in of the life before it. The · is the
     // engine's own marker in ids, so no workflow's effect id collides.
+    // Notifications are keyed the same way, in a count of their own.
     let asks = 0
+    let notifies = 0
 
     // Every record one node's session has taken: `id`, then `id·rN` in
     // order. One session, several records, which is what a revision is. The
@@ -1514,6 +1516,37 @@ export function createWorkflowEngine(options: EngineOptions): WorkflowEngine {
       return answer
     }
 
+    /**
+     * A message to the orchestrator that waits for nothing: no question on
+     * the record, no waiter, the run view shows no check-in. Recorded once
+     * said, so a resumed run does not say it again.
+     */
+    async function notify(message: {
+      reason: string
+      artifacts?: Record<string, string>
+    }): Promise<void> {
+      if (cancelAsked()) throw new Error('the run was cancelled')
+      const key = `·notify·${(notifies += 1)}`
+      if (recordedEffect(key).replayed) return
+      const artifactLines = Object.entries(message.artifacts ?? {}).map(
+        ([name, path]) => `- ${name}: ${path}`
+      )
+      tell(
+        run,
+        [
+          `${runMessageHeader(run)} reports:`,
+          '',
+          message.reason,
+          ...(artifactLines.length === 0 ? [] : ['', 'Documents that come with it:', ...artifactLines]),
+          '',
+          'This is for your information: the run is not waiting on an answer and continues on ' +
+            'its own. Act on it from your own context, or bring it to the user when it needs them.'
+        ].join('\n')
+      )
+      // There is no answer to keep; the record marks only that this was said.
+      recordEffect(key, null)
+    }
+
     const ctx: EngineContext = {
       inputs: run.inputs,
       artifactDir: artifacts,
@@ -1524,6 +1557,7 @@ export function createWorkflowEngine(options: EngineOptions): WorkflowEngine {
           track(runNode(id, spec, resolve)).catch(reject)
         }),
       ask,
+      notify,
       async recordedEffect(id) {
         return recordedEffect(id)
       },

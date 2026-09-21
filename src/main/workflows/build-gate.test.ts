@@ -180,6 +180,9 @@ function driver(repo: string, script: Script = {}): Driver {
       answered += 1
       return script.answers?.[answered - 1] ?? `correction ${answered}`
     },
+    notify: () => {
+      throw new Error('the build workflow notifies nobody')
+    },
     // Nothing is replayed here: this drives one life of the workflow, so
     // every effect is produced where the workflow asks for it.
     effect: async (_id, produce) => produce(),

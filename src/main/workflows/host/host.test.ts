@@ -97,6 +97,9 @@ function recordingContext(
       calls.push(`ask ${question.reason}`)
       return 'approved'
     },
+    async notify(message) {
+      calls.push(`notify ${message.reason} [${Object.keys(message.artifacts ?? {}).join(',')}]`)
+    },
     async recordedEffect(id) {
       calls.push(`recordedEffect ${id}`)
       return id in recorded ? { replayed: true, value: recorded[id] } : { replayed: false }
@@ -132,6 +135,7 @@ export default workflow({
       check: (outputs) => Object.keys(outputs).length === 1 ? [] : ['wrong count']
     })
     const answer = await ctx.ask({ reason: 'ok?', artifacts: { out: first.outputs.out } })
+    await ctx.notify({ reason: 'fyi', artifacts: { out: first.outputs.out } })
     const gate = await ctx.effect('gate', () => ({ ok: true, ran: 1 }))
     const held = await ctx.openNode('review', { prompt: 'r' })
     const before = held.id
@@ -158,6 +162,7 @@ const FULL_DEF: WorkflowDef = {
       check: (outputs) => (Object.keys(outputs).length === 1 ? [] : ['wrong count'])
     })
     const answer = await ctx.ask({ reason: 'ok?', artifacts: { out: first.outputs.out } })
+    await ctx.notify({ reason: 'fyi', artifacts: { out: first.outputs.out } })
     const gate = await ctx.effect('gate', () => ({ ok: true, ran: 1 }))
     const held = await ctx.openNode('review', { prompt: 'r' })
     const before = held.id
@@ -244,6 +249,7 @@ describe.each([
       'node first',
       'check first: ',
       'ask ok?',
+      'notify fyi [out]',
       'recordedEffect gate',
       'recordEffect gate={"ok":true,"ran":1}',
       'openNode review',

@@ -190,6 +190,19 @@ export interface RunContext {
    */
   ask(question: { reason: string; artifacts?: Record<string, string> }): Promise<string>
   /**
+   * Tell the orchestrator something and carry on. `reason` reaches its agent
+   * verbatim, as `ask`'s does, and the artifacts go with it by name and
+   * path; the message says no answer is expected, and none comes back. The
+   * run never parks: this resolves once the message is handed over.
+   *
+   * For what the orchestrator should hear now but need not decide: a
+   * finding nobody in this run may act on, a document the workflow wrote
+   * between nodes. Reserve `ask` for a decision the run cannot proceed
+   * without. Notifications are recorded, so a resumed run does not send the
+   * same one twice.
+   */
+  notify(message: { reason: string; artifacts?: Record<string, string> }): Promise<void>
+  /**
    * Do something once per run, whatever happens to the run in between:
    * `produce` executes the first time, its result is recorded under `id`,
    * and a resumed run is handed that result back instead of executing it

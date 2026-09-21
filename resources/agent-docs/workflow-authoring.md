@@ -247,6 +247,16 @@ too; `research.md` beside this file has the details.
   answer comes back verbatim. The run parks with no timeout. Answers are
   recorded, so a resumed run is handed back what it was already told rather
   than asking again.
+- `ctx.notify({ reason, artifacts })` — a message with no question in it.
+  `reason` and the artifacts reach the orchestrating session's agent the
+  way a check-in's do, the message says no answer is expected, and the run
+  carries on: it resolves once the message is handed over. For what the
+  orchestrator should hear now but need not decide — a finding no node in
+  this run may act on, a document the workflow wrote between nodes. Prefer
+  it over `ask` whenever the run can proceed without the answer; a
+  check-in parks the run and costs the orchestrator a turn it has to
+  finish. Notifications are recorded, so a resumed run does not send the
+  same one twice.
 - `ctx.effect(id, produce)` — do something once per run, whatever happens to
   the run in between. `produce` runs the first time and its result is
   recorded under `id`; a resumed run is handed that result back instead of
@@ -275,6 +285,7 @@ the record the previous life wrote. So:
 - The node the run stopped on continues in its own session, from its last
   turn. Its conversation, artifacts and spend are kept.
 - A `ctx.ask` that was answered hands back that answer, and asks nobody.
+- A `ctx.notify` that was sent is not sent again.
 - A `ctx.effect` that was recorded hands back its value.
 - **Everything else in `run()` runs again, for real.** Your loops, your
   branches, your `spawn` calls, your commits, your reads of `git rev-parse

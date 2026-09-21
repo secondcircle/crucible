@@ -323,6 +323,45 @@ describe('the engine end to end', () => {
     expect(engine.runs()[0].outputs).toEqual({ ruling: 'beside its caller' })
   })
 
+  it('delivers a notification to the orchestrator without parking the run', async () => {
+    const telling: WorkflowDef = {
+      description: 'tells its orchestrator something mid-run and carries on',
+      inputs: {},
+      run: async (ctx) => {
+        const diff = join(ctx.artifactDir, 'arch-diff.md')
+        writeFileSync(diff, 'the architecture moved\n')
+        await ctx.notify({
+          reason: 'the reviewers found a defect in a component another team owns',
+          artifacts: { diff }
+        })
+        // Resolved means the run is past it: whatever the record says at this
+        // moment is what a notify leaves behind.
+        const run = engine.runs()[0]
+        return { waiting: run.waiting ?? false, question: run.question ?? null }
+      }
+    }
+    const { engine, repo, delivered } = rig({ telling }, () => () => {})
+    const started = await engine.start(startRequest(repo, 'telling', {}))
+    await until(() => engine.runs()[0].status === 'complete')
+
+    // The orchestrator heard it: the run's header, the reason, the document
+    // by name and path, and that nothing is owed back.
+    const heard = delivered.find((message) => message.text.includes('reports:'))
+    expect(heard?.sessionId).toBe('orchestrator-1')
+    expect(heard?.text).toContain(`\u2691 Crucible run ${started.id} (telling) reports:`)
+    expect(heard?.text).toContain('the reviewers found a defect in a component another team owns')
+    expect(heard?.text).toContain(`- diff: ${join(engine.runs()[0].dir ?? '', 'artifacts', 'arch-diff.md')}`)
+    expect(heard?.text).toContain('not waiting on an answer')
+    expect(heard?.text).not.toContain('crucible_answer')
+
+    // Nobody was asked anything: no waiter, no question for the run view,
+    // and the workflow got on with it the moment the message was handed over.
+    expect(engine.runs()[0].outputs).toEqual({ waiting: false, question: null })
+    expect(engine.runs()[0].question).toBeUndefined()
+    // Said once, and the record knows it was said.
+    expect((engine.runs()[0].effects ?? []).map((effect) => effect.key)).toEqual(['\u00b7notify\u00b71'])
+  })
+
   it('nudges a node that ends its turn silent, then stalls it out to the orchestrator', async () => {
     const { engine, repo, delivered } = rig({ solo: oneNode }, () => {
       let helped = false

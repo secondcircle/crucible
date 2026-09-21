@@ -105,6 +105,10 @@ export function createWorkflowHost(
         return undefined
       },
       ask: (question) => ctx().ask(question),
+      notify: async (message) => {
+        await ctx().notify(message)
+        return undefined
+      },
       recordedEffect: ({ id }) => ctx().recordedEffect(id),
       recordEffect: async ({ id, value }) => {
         await ctx().recordEffect(id, value)

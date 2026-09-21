@@ -118,6 +118,7 @@ export type MainRequests = {
   }
   close: { params: { handle: number }; result: undefined }
   ask: { params: { reason: string; artifacts?: Record<string, string> }; result: string }
+  notify: { params: { reason: string; artifacts?: Record<string, string> }; result: undefined }
   // The two halves of `ctx.effect`, because the work itself runs where the
   // workflow's code lives: the host asks whether this run already recorded
   // the id, and posts what it produced when it did not.

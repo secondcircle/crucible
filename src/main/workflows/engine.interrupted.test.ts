@@ -732,6 +732,38 @@ describe('what a resumed run does not do again', () => {
     expect(recorded.map((effect) => effect.value)).toEqual(['ship it'])
   })
 
+  it('does not send a notification it already sent', async () => {
+    const telling: WorkflowDef = {
+      description: 'a planner, a notification, a gate',
+      inputs: { intent: 'the intent document' },
+      plan: (): PlannedNode[] => [{ id: 'planner' }, { id: 'gate', parents: ['planner'] }],
+      run: async (ctx) => {
+        await ctx.node('planner', {
+          prompt: `write the spec; write ${join(ctx.artifactDir, 'spec.md')}`,
+          reads: [ctx.inputs.intent],
+          outputs: { spec: { file: 'spec.md', desc: 'the Spec' } }
+        })
+        await ctx.notify({ reason: 'the spec is in' })
+        const gate = await ctx.node('gate', { prompt: 'judge it' })
+        return { summary: gate.summary }
+      }
+    }
+    // The notification goes out, and the quit lands on the gate.
+    const { before, runId } = await interruptedRun({ gated: telling }, planThenPark)
+    expect(before.delivered.filter((message) => message.text.includes('the spec is in'))).toHaveLength(1)
+
+    const after = relaunch(before, { gated: telling }, () => (_prompt, tools) => {
+      tools.complete({ summary: 'judged it' })
+    })
+    await after.engine.resume(runId)
+    await until(() => after.engine.runs()[0].status === 'complete')
+
+    // The orchestrator heard it once, in the life before; this one says
+    // nothing about it, and the record still holds the one it said.
+    expect(after.delivered.filter((message) => message.text.includes('the spec is in'))).toEqual([])
+    expect((after.engine.runs()[0].effects ?? []).map((effect) => effect.key)).toEqual(['\u00b7notify\u00b71'])
+  })
+
   it('hands back an effect it already recorded instead of doing the work again', async () => {
     let gateRuns = 0
     const gating: WorkflowDef = {
