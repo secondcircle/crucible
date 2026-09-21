@@ -342,10 +342,22 @@ _Avoid_: blocked (π's word for an interactive run's wait), stuck, orphaned.
 The drawn picture of a run's nodes and the edges between them, layered
 top-down in the run view's left pane, with loops laid out left to right: what
 followed what, what fanned out in parallel, what was sent back for revision.
-A pannable, zoomable canvas that opens fit and centered. An edge means the
-work of one node reached another, and carries no text; a node states what it
-follows rather than having it inferred.
-_Avoid_: the flow, the graph rail, the DAG view, pipeline diagram.
+A pannable, zoomable canvas that opens fit and centered. An edge means one
+thing only: that node ran next, as the node itself declared. It carries no
+text, and reading a file another node wrote is never an edge — dataflow is
+the artifact rail's. A planned node that has not started sits below
+everything that has run, never where a plan's forecast would put it.
+_Avoid_: the flow, the graph rail, the DAG view, pipeline diagram, dependency
+edge (for a file read).
+
+**Step block**:
+In the run graph, a stretch of consecutive nodes about one piece of work whose
+name appears in each of their ids (`builder-x`, `review-x-1`, `fixer-x-1`),
+drawn inside a faint labelled outline. Inferred from ids alone, like a loop;
+blocks stack down the main line in the order they ran, and the loops inside a
+block fan right as loops do everywhere.
+_Avoid_: stage, group, phase, swimlane, slice (the slicer's word for the plan
+entry, not the drawn thing).
 
 **Loop**:
 In the run graph, a stretch of nodes whose base name recurs with rising round
