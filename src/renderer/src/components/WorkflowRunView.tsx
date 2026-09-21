@@ -21,7 +21,14 @@ import { waitedFor } from '../monitors/activity'
 import type { ArtifactView } from '../../../shared/workflows/service'
 import { money, nodeProgress, shortAge, shortModel, since } from '../runs/format'
 import { transcriptWithSeams } from '../runs/seams'
-import { railOf, rowFor, type RailModel } from '../runs/rail'
+import {
+  nodeRailOf,
+  railOf,
+  rowFor,
+  type RailModel,
+  type RailScope,
+  type RunRail
+} from '../runs/rail'
 import { relativeTime } from '../labels'
 import { useClock } from '../clock'
 import { ArtifactRail } from './ArtifactRail'
@@ -164,6 +171,9 @@ export function WorkflowRunView({
   // is not offered there; the banner says Resume alone applies.
   const canStartOver = stop !== undefined && stoppedNodes(run).length > 0
   const rail = usePlacedRail(run)
+  // Where the user left the switch, for as long as this view stays open: the
+  // run view is mounted per opening, so a fresh open is always "this node".
+  const [scope, setScope] = useState<RailScope>('this-node')
   const body = useRef<HTMLDivElement>(null)
   const { graphWidth, railShown, startDrag } = useSplitter(body)
   // The reader shows what the record still names: an artifact whose row leaves
@@ -171,10 +181,10 @@ export function WorkflowRunView({
   const openRow = openArtifact === undefined ? undefined : rowFor(rail, openArtifact)
   const cost = money(runCost(run))
   const question = run.question
-  const selected =
-    openArtifact !== undefined
-      ? [openArtifact]
-      : (shown?.artifacts ?? []).map((declared) => declared.path)
+  // A run with no nodes has no node scope to be in, so the rail shows what it
+  // has: the run's own list.
+  const shownRail: RailModel =
+    scope === 'whole-run' || shown === undefined ? rail : nodeRailOf(run, shown)
 
   return (
     <section className="runview" aria-label={`Run ${run.id}`}>
@@ -359,7 +369,12 @@ export function WorkflowRunView({
         </div>
 
         {fullScreen || !railShown ? null : (
-          <ArtifactRail rail={rail} selected={selected} onOpen={onOpenArtifact} />
+          <ArtifactRail
+            rail={shownRail}
+            openArtifact={openArtifact}
+            onScope={setScope}
+            onOpen={onOpenArtifact}
+          />
         )}
       </div>
     </section>
@@ -464,7 +479,7 @@ function rememberedWidth(): number {
 // The memory lives as long as the view. A run reopened later starts from
 // record order again, which is the most first appearance any record can be
 // asked for.
-function usePlacedRail(run: RunRecord): RailModel {
+function usePlacedRail(run: RunRecord): RunRail {
   const [placed, setPlaced] = useState<{
     readonly runId: string
     readonly order: readonly string[]
