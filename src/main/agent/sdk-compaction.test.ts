@@ -12,6 +12,7 @@ import { RUN_MESSAGE_PREFIX } from '../../shared/workflows/run'
 import {
   COMPACTION_DETAILS_KEY,
   askOnWarmCache,
+  autoCompactionEvent,
   compactionExtension,
   everythingSince,
   NOTHING_KEPT,
@@ -343,6 +344,36 @@ describe('the compaction hook', () => {
       /\[crucible\] ⚑ Crucible run 4cc6 \(build\) completed · branch crucible\/run-4cc6 · 1,7\d\d tok dropped/
     )
     expect(result?.compaction?.summary).not.toContain('x'.repeat(100))
+  })
+})
+
+// A workflow node is one long turn, and a session's turn can run for an hour
+// of tool calls: π's own check between tool rounds is the one place a
+// compaction lands while an agent works, and π announces those with the same
+// events as the manual one. The manual one announces itself where it is
+// called, so it is not announced twice.
+describe('a compaction π started on its own', () => {
+  it('opens as the threshold, or as the window edge on overflow', () => {
+    expect(autoCompactionEvent({ type: 'compaction_start', reason: 'threshold' })).toEqual({
+      kind: 'started',
+      trigger: 'threshold'
+    })
+    expect(autoCompactionEvent({ type: 'compaction_start', reason: 'overflow' })).toEqual({
+      kind: 'started',
+      trigger: 'windowEdge'
+    })
+  })
+
+  it('closes with the end event', () => {
+    expect(autoCompactionEvent({ type: 'compaction_end', reason: 'threshold' })).toEqual({
+      kind: 'ended'
+    })
+  })
+
+  it('is silent for the manual one and for every other event', () => {
+    expect(autoCompactionEvent({ type: 'compaction_start', reason: 'manual' })).toBeUndefined()
+    expect(autoCompactionEvent({ type: 'compaction_end', reason: 'manual' })).toBeUndefined()
+    expect(autoCompactionEvent({ type: 'message_end' })).toBeUndefined()
   })
 })
 

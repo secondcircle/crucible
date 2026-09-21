@@ -27,6 +27,10 @@ interface Scripted {
   finishCompaction(tokensAfter?: number): void
   readonly compactions: () => number
   readonly aborted: () => string[]
+  /** What π's own size check was last armed with. */
+  readonly armed: () => unknown
+  /** π announcing a compaction of its own, between two tool rounds. */
+  emit(event: unknown): void
 }
 
 function scripted(): Scripted {
@@ -40,11 +44,18 @@ function scripted(): Scripted {
   // where every reader of it — this launch or the next — goes for it.
   const entries: unknown[] = []
 
+  let armed: unknown
   const session = {
     get isStreaming() {
       return false
     },
     thinkingLevel: 'medium',
+    model: { contextWindow: 1_000_000 },
+    settingsManager: {
+      applyOverrides(overrides: { compaction?: unknown }) {
+        armed = overrides.compaction
+      }
+    },
     messages: [],
     sessionManager: { getEntries: () => entries, getBranch: () => entries },
     subscribe(listener: Listener) {
@@ -114,14 +125,19 @@ function scripted(): Scripted {
       compacting = undefined
     },
     compactions: () => compactions,
-    aborted: () => aborted
+    aborted: () => aborted,
+    armed: () => armed,
+    emit(event: unknown) {
+      for (const listener of listeners) listener(event)
+    }
   }
 }
 
 function node(
   fake: Scripted,
   onFailure: (cause: unknown) => void = () => {},
-  thresholdK = 200
+  thresholdK = 200,
+  begin: (trigger: string) => void = () => {}
 ): ReturnType<typeof wrapNodeSession> {
   return wrapNodeSession(
     fake.session,
@@ -129,7 +145,7 @@ function node(
     {},
     {
       settings: () => ({ enabled: true, thresholdK }),
-      begin: () => {},
+      begin,
       entryToMessages: () => [],
       onFailure
     }
@@ -232,6 +248,44 @@ describe('a compaction the turn’s own size called for', () => {
     fake.say(430_000)
     await settled()
     expect(fake.compactions()).toBe(2)
+    session.dispose()
+  })
+})
+
+// A node is one long turn: the watch above fires between turns, and a node
+// has no "between". π checks the size itself between one tool round and the
+// next, and the node arms that check at the size the same rules give it, so
+// a node that reads files for an hour compacts in the middle of doing so and
+// carries on, rather than growing to the window and erroring there.
+describe('a compaction inside the turn, between tool rounds', () => {
+  it('arms π’s own check at the size the rules fire at, from the first moment', () => {
+    const fake = scripted()
+    const session = node(fake)
+    expect(fake.armed()).toEqual({ enabled: true, reserveTokens: 800_001, keepRecentTokens: 0 })
+    session.dispose()
+  })
+
+  // What the last compaction left the conversation at moves the point, so the
+  // check is re-armed whenever the size is re-read.
+  it('re-arms after a compaction, so the next fires only on growth worth taking away', () => {
+    const fake = scripted()
+    const session = node(fake)
+    fake.say(400_000)
+    fake.finishCompaction(150_000)
+    fake.say(160_000)
+    expect(fake.armed()).toEqual({ enabled: true, reserveTokens: 700_001, keepRecentTokens: 0 })
+    session.dispose()
+  })
+
+  it('records the trigger of a compaction π started, as it would its own', () => {
+    const fake = scripted()
+    const triggers: string[] = []
+    const session = node(fake, () => {}, 200, (trigger) => triggers.push(trigger))
+    fake.emit({ type: 'compaction_start', reason: 'threshold' })
+    fake.emit({ type: 'compaction_start', reason: 'overflow' })
+    // The manual one is the watch's own, which names its trigger itself.
+    fake.emit({ type: 'compaction_start', reason: 'manual' })
+    expect(triggers).toEqual(['threshold', 'windowEdge'])
     session.dispose()
   })
 })

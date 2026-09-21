@@ -238,6 +238,23 @@ function messagesFrom(
     .filter((message): message is StoredMessage => message !== undefined)
 }
 
+// π announces the compactions it starts itself — between two tool rounds of a
+// turn, at the size `piCompactionSettings` armed, or on overflow — with the
+// same events as the manual one `AgentSession.compact()` runs. The manual one
+// is Crucible's own call and announces itself where it is made; these are the
+// ones the caller learns of only here. π's `overflow` is the window edge by
+// Crucible's names, and `threshold` is the threshold.
+export function autoCompactionEvent(
+  event: { readonly type: string; readonly reason?: string }
+): { readonly kind: 'started'; readonly trigger: CompactionTrigger } | { readonly kind: 'ended' } | undefined {
+  if (event.reason === 'manual') return undefined
+  if (event.type === 'compaction_start') {
+    return { kind: 'started', trigger: event.reason === 'overflow' ? 'windowEdge' : 'threshold' }
+  }
+  if (event.type === 'compaction_end') return { kind: 'ended' }
+  return undefined
+}
+
 // The latest compaction on this branch, as Crucible wrote it. A compaction
 // entry without Crucible's data is one π wrote before this build, and its
 // skeleton is simply not there to carry forward.

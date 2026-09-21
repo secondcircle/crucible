@@ -553,7 +553,8 @@ _Avoid_: monitor badge, wait pill, monitor card (there is no transcript card).
 Crucible's own rewrite of what a model sees of a conversation once it grows
 past the threshold or sits idle before its cache lapses: a trajectory summary
 and a skeleton, standing for everything up to the moment the compaction was
-asked for. Nothing of that span stays verbatim; what arrives after it does.
+asked for. Fires between tool rounds inside a turn as well as between turns,
+so a workflow node's one long turn compacts too. Nothing of that span stays verbatim; what arrives after it does.
 Written by Crucible, never by π's built-in compaction, which is switched off.
 The session file keeps everything; only the model's view shrinks.
 _Avoid_: context pruning (one part of it), summarization (one part of it), π

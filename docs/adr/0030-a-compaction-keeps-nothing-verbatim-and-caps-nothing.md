@@ -19,8 +19,7 @@ first paragraph, because the reply's stop reason was never read and an
 unclosed tag was accepted. We decided that a compaction stands for everything
 up to the moment it was asked for, and nothing of that span stays verbatim:
 what the model reads afterwards is the account and the skeleton, then
-whatever arrived after the ask. Compactions run between turns with sends
-waiting on them, so that is the cut the conversation already has. We also
+whatever arrived after the ask (ADR 0031 says when the ask is made). We also
 decided that no rule of size touches what the model wrote or what it left:
 the account is as long as the model makes it, the skeleton is what the strike
 list leaves, and the only mechanical rule is that a reply the provider did not

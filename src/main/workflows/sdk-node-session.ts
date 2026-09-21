@@ -24,6 +24,7 @@ import {
 } from '../agent/sdk-transcript.ts'
 import {
   askOnWarmCache,
+  autoCompactionEvent,
   compactionExtension,
   PI_COMPACTION_SETTINGS,
   previousCompaction,
@@ -34,6 +35,7 @@ import {
   type CompactionSettings
 } from '../../shared/compaction/settings.ts'
 import type { CompactionTrigger } from '../../shared/compaction/record.ts'
+import { piCompactionSettings } from '../../shared/compaction/trigger.ts'
 import { createCompactionWatch } from '../../shared/compaction/watch.ts'
 import { retentionInForce } from '../cache/retention.ts'
 import { forPi, type LoadedSkill } from '../skills/service.ts'
@@ -445,6 +447,7 @@ export function wrapNodeSession(
   // so on a provider that caches nothing it must not run at all. That is the
   // same fact, from the same scan, that a session reports across the port.
   function noteSize(): void {
+    armPiCompaction()
     const usage = session.getContextUsage()
     if (usage?.tokens == null) return
     const prefix = scanCacheMisses(
@@ -460,11 +463,32 @@ export function wrapNodeSession(
     })
   }
 
+  // The one place a compaction can land while a node works: π's own check
+  // between one tool round and the next, armed here at the size Crucible's
+  // rules give it. A node is one long turn, so the watch above — which only
+  // fires between turns — would otherwise never fire for it, and the node
+  // would grow to the model's window and error there.
+  function armPiCompaction(): void {
+    const compactedTo = previousCompaction(session.sessionManager.getBranch())?.record.tokensAfter
+    const window = session.model?.contextWindow
+    session.settingsManager.applyOverrides({
+      compaction: piCompactionSettings(compaction.settings(), {
+        ...(window === undefined ? {} : { contextWindow: window }),
+        ...(compactedTo === undefined ? {} : { compactedTo })
+      })
+    })
+  }
+  armPiCompaction()
+
   const unsubscribe = session.subscribe((event) => {
     if (event.type === 'message_end' && event.message.role === 'assistant') {
       observe(event.message as StoredMessage)
       noteSize()
     }
+    // A compaction π started between two tool rounds is recorded the way the
+    // watch's own is, so the run's record names its trigger.
+    const auto = autoCompactionEvent(event)
+    if (auto?.kind === 'started') compaction.begin(auto.trigger)
     const now = liveness(event as Record<string, unknown>, inflight)
     if (now === null) return
     for (const listener of [...activityListeners]) listener(now)

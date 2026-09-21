@@ -1,3 +1,4 @@
+import type { CompactionSettings } from '../../shared/compaction/settings'
 import type { ConversationAdapter } from '../../shared/agent/adapter'
 import { createFakeAdapter, type FakePanel } from '../../shared/agent/fake-adapter'
 import type { AskTools } from '../../shared/agent/ask-tool'
@@ -24,6 +25,8 @@ export interface SdkOptions {
   readonly skills: () => SkillService
   /** Opening the OS browser during a login; only main can do it. */
   readonly openExternal?: (url: string) => void
+  /** The compaction setting, read whenever a conversation's size check is re-armed. */
+  readonly compactionSettings?: () => CompactionSettings
 }
 
 export interface FlavorDecision {
@@ -96,7 +99,10 @@ export function selectAdapter(
             skills: sdk.skills(),
             systemPrompt: sdk.systemPrompt(),
             log,
-            ...(sdk.openExternal === undefined ? {} : { openExternal: sdk.openExternal })
+            ...(sdk.openExternal === undefined ? {} : { openExternal: sdk.openExternal }),
+            ...(sdk.compactionSettings === undefined
+              ? {}
+              : { compactionSettings: sdk.compactionSettings })
           })
         : createFakeAdapter({
             panel,
