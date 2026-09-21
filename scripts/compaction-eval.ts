@@ -12,6 +12,13 @@
 //   plan    <session.jsonl> --out <dir>         what the model would be asked, free
 //   compact <session.jsonl> --out <dir>         the production compaction, paid
 //   probe   <dir> <probes.json>                 questions against the compacted copy, paid
+//
+// `plan` and `compact` take `--split <turn>` to compact twice: the branch is
+// cut before that user turn, the first part compacted, the rest appended
+// onto the compaction and compacted again. That is the second compaction a
+// long session gets in production, the one that carries the first's skeleton
+// and rewrites its account, and no session in history has grown far enough
+// past its first compaction to have had one.
 import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { basename, join, resolve } from 'node:path'
@@ -66,6 +73,60 @@ function scratchCopy(sessionFile: string, label: string): string {
 
 async function sdk(): Promise<typeof import('@earendil-works/pi-coding-agent')> {
   return import('@earendil-works/pi-coding-agent')
+}
+
+interface StoredEntry {
+  readonly type?: string
+  readonly id?: string
+  readonly parentId?: string | null
+  readonly message?: { readonly role?: string }
+}
+
+// The session's branch as raw lines: the header, then every entry from the
+// root to the leaf in order. π takes the last entry of the file as the leaf,
+// so a file of the branch alone is the same conversation.
+function branchLines(sessionFile: string): { header: string; path: string[] } {
+  const lines = readFileSync(sessionFile, 'utf8').split('\n').filter((line) => line !== '')
+  const byId = new Map<string, { entry: StoredEntry; line: string }>()
+  let leaf: StoredEntry | undefined
+  for (const line of lines) {
+    const entry = JSON.parse(line) as StoredEntry
+    if (entry.id === undefined) continue
+    byId.set(entry.id, { entry, line })
+    leaf = entry
+  }
+  const path: string[] = []
+  for (let held = leaf === undefined ? undefined : byId.get(leaf.id ?? ''); held !== undefined; ) {
+    path.unshift(held.line)
+    held = held.entry.parentId ? byId.get(held.entry.parentId) : undefined
+  }
+  return { header: lines[0] ?? '', path }
+}
+
+// The branch cut before its Nth user turn, numbered as `read` numbers them.
+function splitAtTurn(sessionFile: string, turn: number): { before: string[]; after: string[]; header: string } {
+  const { header, path } = branchLines(sessionFile)
+  let seen = 0
+  const at = path.findIndex((line) => {
+    const entry = JSON.parse(line) as StoredEntry
+    if (entry.type === 'message' && entry.message?.role === 'user') seen += 1
+    return seen === turn
+  })
+  if (at <= 0) fail(`The branch has no user turn ${turn} to split before.`)
+  return { header, before: path.slice(0, at), after: path.slice(at) }
+}
+
+// The rest of the branch hung off the compaction that now ends the file, so
+// the leaf's chain runs through it exactly as it would had the compaction
+// happened live.
+function appendAfterCompaction(sessionFile: string, after: readonly string[]): void {
+  const lines = readFileSync(sessionFile, 'utf8').split('\n').filter((line) => line !== '')
+  const last = JSON.parse(lines[lines.length - 1] ?? 'null') as StoredEntry | null
+  if (last?.type !== 'compaction' || last.id === undefined) fail('The compacted file does not end on a compaction.')
+  const [first, ...rest] = after
+  if (first === undefined) return
+  const reparented = JSON.stringify({ ...(JSON.parse(first) as object), parentId: last.id })
+  writeFileSync(sessionFile, [...lines, reparented, ...rest].join('\n') + '\n')
 }
 
 // Every message on the branch, in the transcript's own shape. The whole path,
@@ -218,8 +279,45 @@ async function read(args: readonly string[]): Promise<void> {
 async function compactCommand(args: readonly string[], dry: boolean): Promise<void> {
   const file = resolve(args[0] ?? fail('a session file is needed.'))
   const out = flag(args, '--out') ?? fail('--out <dir> is needed.')
+  const split = flag(args, '--split')
   mkdirSync(out, { recursive: true })
 
+  let subject = file
+  if (split !== undefined) {
+    const turn = Number(split)
+    if (!Number.isInteger(turn) || turn < 2) fail('--split needs a user turn number of 2 or more.')
+    const { header, before, after } = splitAtTurn(file, turn)
+    const first = join(mkdtempSync(join(tmpdir(), 'crucible-compaction-eval-split-')), basename(file))
+    writeFileSync(first, [header, ...before].join('\n') + '\n')
+    print(`stage 1: the branch before turn ${turn} (${before.length} entries)`)
+    const compacted = await compactOnce(first, join(out, 'stage1'), dry)
+    appendAfterCompaction(compacted, after)
+    // π reads a window's size off the last assistant message's usage, and the
+    // appended messages carry the usage of the session they came from, so
+    // stage 2's own `tokensBefore` is the whole original session. What the
+    // window really holds is stage 1's result plus what was appended.
+    const stage1 = JSON.parse(readFileSync(join(out, 'stage1', 'record.json'), 'utf8')) as { tokensAfter: number }
+    const appended = after.reduce((total, line) => {
+      const entry = JSON.parse(line) as StoredEntry
+      return entry.type === 'message' ? total + estimateTokens(JSON.stringify(entry.message)) : total
+    }, 0)
+    print(`\nstage 2: turn ${turn} onward (${after.length} entries) appended onto the compaction`)
+    print(`window ≈ ${(stage1.tokensAfter + appended).toLocaleString('en-US')} tok (stage 1 left ${stage1.tokensAfter.toLocaleString('en-US')}; π's own 'before' below repeats the source's last usage)`)
+    subject = compacted
+  }
+  const compacted = await compactOnce(subject, out, dry)
+  if (!dry) {
+    // The compacted copy is what `probe` binds to; the source, readable, is
+    // what a reader writes probes from and judges the replies against.
+    copyFileSync(compacted, join(out, 'compacted.jsonl'))
+    writeFileSync(join(out, 'source.md'), renderReadable(await transcriptOf(file)))
+    print(`wrote:   ${out}/compacted.jsonl, ${out}/source.md`)
+  }
+}
+
+/** The production compaction on a copy of `file`; answers with the compacted copy. */
+async function compactOnce(file: string, out: string, dry: boolean): Promise<string> {
+  mkdirSync(out, { recursive: true })
   let instruction: string | undefined
   const started = Date.now()
   const rig = await harness(file, dry ? 'plan' : 'compact', async (asked, signal, warm) => {
@@ -228,7 +326,11 @@ async function compactCommand(args: readonly string[], dry: boolean): Promise<vo
     print(`instruction: ${estimateTokens(asked).toLocaleString('en-US')} tok, written to ${out}/instruction.md`)
     if (dry) return '<trajectory>\n(dry run: the model was not asked)\n</trajectory>\n<strike></strike>'
     print('asking the model on the whole conversation…')
-    return warm(asked, signal)
+    const reply = await warm(asked, signal)
+    // The answer as the model wrote it, strike list included: the compaction
+    // text shows what survived, not which numbers were named.
+    writeFileSync(join(out, 'reply.md'), reply)
+    return reply
   })
 
   let text: string | undefined
@@ -256,16 +358,12 @@ async function compactCommand(args: readonly string[], dry: boolean): Promise<vo
         2
       )
     )
-    if (!dry) {
-      // The compacted copy is what `probe` binds to.
-      copyFileSync(rig.sessionFile, join(out, 'compacted.jsonl'))
-      writeFileSync(join(out, 'source.md'), renderReadable(await transcriptOf(file)))
-    }
     print('')
     print(`before:  ${record.tokensBefore.toLocaleString('en-US')} tok`)
     print(`after:   ${record.tokensAfter.toLocaleString('en-US')} tok (compaction text ${estimateTokens(text).toLocaleString('en-US')})`)
     print(`took:    ${seconds}s`)
-    print(`wrote:   ${out}/compaction.md${dry ? '' : `, ${out}/compacted.jsonl, ${out}/source.md`}`)
+    print(`wrote:   ${out}/compaction.md`)
+    return rig.sessionFile
   } finally {
     await rig.stop()
   }

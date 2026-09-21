@@ -17,6 +17,16 @@ export function compactionInstruction({ aged, carried }: CompactionRequest): str
     carried === 0
       ? 'Here is that skeleton, one numbered line per thing that happened:'
       : 'The skeleton opens this conversation, numbered. These lines join the end of it:'
+  // Measured on a real session compacted twice: told nothing, the model
+  // struck three quarters of the new lines and not one of the carried ones,
+  // though its account covered everything they described. The opening
+  // skeleton was kept beside the account this one replaces, so its lines are
+  // as much up for striking as the new ones.
+  const reach =
+    carried === 0
+      ? ''
+      : ' The lines of the opening skeleton count too, by their numbers: they were kept beside ' +
+        'the account you are now replacing, and whatever it covers that they only pointed at is spent.'
 
   return [
     'This conversation is about to be compacted. Everything except the last stretch of it ' +
@@ -36,10 +46,13 @@ export function compactionInstruction({ aged, carried }: CompactionRequest): str
     renderSkeleton(aged, carried + 1),
     'Give the numbers of the lines that no longer bear on the work — an exploration that ' +
       'went nowhere, a question your account now answers, a check whose result you have just ' +
-      'written down. A line you are unsure about stays. A line carrying something the user ' +
-      'said stays unless you are certain it is spent. One case is spent more often than it ' +
-      'looks: a user line that is a command’s instructions (a /command the user invoked, ' +
-      'expanded), once you have carried them out and their product is on disk. The ' +
+      'written down.' +
+      reach +
+      ' A line you are unsure about stays. A line carrying what the user typed stays even ' +
+      'when your account covers it: their words are the one thing not on disk, and asked ' +
+      'later what they said, you will have your paraphrase and nothing else. The exception ' +
+      'is a user line that is a command’s instructions (a /command the user invoked, ' +
+      'expanded): that is spent once you have carried them out and their product is on disk. The ' +
       'instructions were Crucible’s words; the subject the user gave with them is what ' +
       'your account must carry before you strike the line.',
     'Answer with exactly this and nothing around it:',
@@ -56,9 +69,18 @@ export interface CompactionReply {
 }
 
 export function readCompactionReply(text: string): CompactionReply {
+  // An account with no close and no strike list after it did not end: the
+  // model was cut off partway through, and what arrived reads as an account
+  // whose ending — what comes next, the files that matter — is the part
+  // missing. A close forgotten on an otherwise finished answer still has the
+  // strike list after it, and that account is read.
+  const strike = block(text, 'strike')
+  const account = block(text, 'trajectory') ?? ''
+  const finished = strike !== undefined || text.includes('</trajectory>')
   return {
-    trajectory: (block(text, 'trajectory') ?? '').trim(),
-    strike: readStrike(block(text, 'strike') ?? '')
+    // With the close forgotten, the account runs on into the strike list.
+    trajectory: finished ? account.split('<strike>')[0]?.trim() ?? '' : '',
+    strike: readStrike(strike ?? '')
   }
 }
 

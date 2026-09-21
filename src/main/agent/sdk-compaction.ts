@@ -185,7 +185,16 @@ function reasoningOf(session: AgentSession): { readonly reasoning?: ThinkingLeve
   return { reasoning: level }
 }
 
+// The reply, whole, or a failure. A reply the provider cut off — an error
+// mid-stream, the output limit, an abort — is text up to where it stopped,
+// which reads as an account and settles as one: an eval saw a trajectory end
+// mid-sentence with no strike list, and the compaction land on it.
 function textOf(message: AssistantMessage): string {
+  const reason = message.stopReason
+  if (reason !== 'stop') {
+    const detail = message.errorMessage === undefined ? '' : `: ${message.errorMessage}`
+    throw new Error(`The compaction reply did not finish (${reason})${detail}`)
+  }
   return (message.content ?? [])
     .map((block) => (block.type === 'text' ? block.text : ''))
     .join('')

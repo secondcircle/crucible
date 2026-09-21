@@ -23,6 +23,15 @@ describe('what the model is asked at a compaction', () => {
     expect(asked).toContain('The skeleton opens this conversation')
   })
 
+  // Left unsaid, the model reads the carried block as settled and strikes
+  // only among the new lines.
+  it('says the carried lines may be struck too, and only when there are any', () => {
+    expect(compactionInstruction({ aged: AGED, carried: 40 })).toContain(
+      'The lines of the opening skeleton count too'
+    )
+    expect(compactionInstruction({ aged: AGED, carried: 0 })).not.toContain('opening skeleton')
+  })
+
   it('names the two things it wants and the exact shape of the answer', () => {
     const asked = compactionInstruction({ aged: AGED, carried: 0 })
     expect(asked).toContain('WHERE WE ARE')
@@ -49,10 +58,20 @@ describe('reading the model’s answer', () => {
     expect(readCompactionReply('<trajectory>x</trajectory><strike>1-99999</strike>').strike).toEqual([])
   })
 
-  it('reads an unclosed account rather than losing it', () => {
-    expect(readCompactionReply('<trajectory>Where we are, cut off').trajectory).toBe(
-      'Where we are, cut off'
-    )
+  it('reads an unclosed account when the strike list follows it', () => {
+    expect(readCompactionReply('<trajectory>Where we are.\n<strike>2</strike>')).toEqual({
+      trajectory: 'Where we are.',
+      strike: [2]
+    })
+  })
+
+  // Seen on a real session: the provider stopped a third of the way into
+  // the account, and the conversation landed on it.
+  it('treats an account with neither its close nor a strike list as cut off', () => {
+    expect(readCompactionReply('<trajectory>Where we are, cut mid-sent')).toEqual({
+      trajectory: '',
+      strike: []
+    })
   })
 
   it('answers with nothing where the model wrote no account at all', () => {

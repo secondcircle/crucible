@@ -114,6 +114,7 @@ describe('the compaction’s own model request', () => {
       complete: async (_model, context, options) => {
         seen = { options, context: context as unknown as { tools?: { name: string }[] } }
         return {
+          stopReason: 'stop',
           content: [{ type: 'text', text: '<trajectory>x</trajectory>' }]
         } as AssistantMessage
       }
@@ -133,6 +134,23 @@ describe('the compaction’s own model request', () => {
 
   it('carries no level on a model that does not reason', async () => {
     expect((await askedWith(sessionAt('high', false))).options).not.toHaveProperty('reasoning')
+  })
+
+  // Text up to where the provider stopped reads as an account and would
+  // settle as one, with no strike list and an ending cut mid-sentence.
+  it('refuses a reply the provider cut off', async () => {
+    const ask = askOnWarmCache({
+      session: sessionAt('high'),
+      toLlm: (messages) => [...(messages as unknown as unknown[])],
+      complete: async () =>
+        ({
+          stopReason: 'length',
+          content: [{ type: 'text', text: '<trajectory>half an acc' }]
+        }) as AssistantMessage
+    })
+    await expect(ask('compact this', new AbortController().signal)).rejects.toThrow(
+      'did not finish (length)'
+    )
   })
 
   // The tools block is a cache breakpoint: same tools in another order is
