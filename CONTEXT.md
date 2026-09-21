@@ -357,11 +357,15 @@ _Avoid_: cycle (a run record has none), iteration, retry, revision (that is
 the engine's `·rN` record of a replayed node).
 
 **Artifact rail**:
-The third column of the run view, listing every artifact the run has touched
-in production order — inputs first, then what the run wrote — each naming the
-node that wrote it and the nodes that read it. Declared outputs appear dimmed
-from the moment their node starts.
-_Avoid_: artifacts panel, output list, artifact sidebar.
+The third column of the run view, following the node the graph has picked:
+what that node made first, then what it took, each row naming the node that
+wrote it and the nodes that read it. Its **rail scope** switch, "this node" or
+"whole run", puts the run-wide list back — inputs first, then everything the
+run wrote, in production order — and stays where it was left while the run
+view is open. Declared outputs appear dimmed from the moment their node
+starts.
+_Avoid_: artifacts panel, output list, artifact sidebar, filter (the rail
+is not filtered; it is scoped).
 
 **Artifact reader**:
 The rendered view of one artifact, opened in place of the node transcript
