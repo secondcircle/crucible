@@ -21,7 +21,14 @@ import { waitedFor } from '../monitors/activity'
 import type { ArtifactView } from '../../../shared/workflows/service'
 import { money, nodeProgress, shortAge, shortModel, since } from '../runs/format'
 import { transcriptWithSeams } from '../runs/seams'
-import { railOf, rowFor, type RailModel } from '../runs/rail'
+import {
+  nodeRailOf,
+  railOf,
+  rowFor,
+  type RailModel,
+  type RailScope,
+  type RunRail
+} from '../runs/rail'
 import { relativeTime } from '../labels'
 import { useClock } from '../clock'
 import { ArtifactRail } from './ArtifactRail'
@@ -164,17 +171,29 @@ export function WorkflowRunView({
   // is not offered there; the banner says Resume alone applies.
   const canStartOver = stop !== undefined && stoppedNodes(run).length > 0
   const rail = usePlacedRail(run)
+  // Where the user left the switch, for as long as this view stays open: the
+  // run view is mounted per opening, so a fresh open is always "this node".
+  const [scope, setScope] = useState<RailScope>('this-node')
   const body = useRef<HTMLDivElement>(null)
   const { graphWidth, railShown, startDrag } = useSplitter(body)
-  // The reader shows what the record still names: an artifact whose row leaves
-  // the record (a pruned ghost's) puts the node's transcript back by itself.
-  const openRow = openArtifact === undefined ? undefined : rowFor(rail, openArtifact)
+  // The reader shows what the record still names, in whichever scope drew the
+  // row that was clicked: the lookup is the record's, not the rail's, so every
+  // row of either scope and every chip of the node strip opens.
+  const openRow = openArtifact === undefined ? undefined : rowFor(run, openArtifact)
+  // Which leaves one answer to "is the reader open" for the Escape ladder above
+  // to read off the open path: an artifact whose row leaves the record (a
+  // pruned ghost's) closes the reader here rather than leaving a path open on a
+  // reader nobody can see, and the next Escape spent closing it.
+  useEffect(() => {
+    if (openArtifact !== undefined && openRow === undefined) onOpenArtifact(undefined)
+  }, [openArtifact, openRow, onOpenArtifact])
   const cost = money(runCost(run))
   const question = run.question
-  const selected =
-    openArtifact !== undefined
-      ? [openArtifact]
-      : (shown?.artifacts ?? []).map((declared) => declared.path)
+  // A run with no nodes has no node to scope to, so the switch is not offered
+  // at all — a half that could never be pressed is worse than no switch — and
+  // the rail shows what the run has: its own list.
+  const shownRail: RailModel =
+    scope === 'whole-run' || shown === undefined ? rail : nodeRailOf(run, shown)
 
   return (
     <section className="runview" aria-label={`Run ${run.id}`}>
@@ -359,7 +378,12 @@ export function WorkflowRunView({
         </div>
 
         {fullScreen || !railShown ? null : (
-          <ArtifactRail rail={rail} selected={selected} onOpen={onOpenArtifact} />
+          <ArtifactRail
+            rail={shownRail}
+            openArtifact={openArtifact}
+            onScope={shown === undefined ? undefined : setScope}
+            onOpen={onOpenArtifact}
+          />
         )}
       </div>
     </section>
@@ -464,7 +488,7 @@ function rememberedWidth(): number {
 // The memory lives as long as the view. A run reopened later starts from
 // record order again, which is the most first appearance any record can be
 // asked for.
-function usePlacedRail(run: RunRecord): RailModel {
+function usePlacedRail(run: RunRecord): RunRail {
   const [placed, setPlaced] = useState<{
     readonly runId: string
     readonly order: readonly string[]

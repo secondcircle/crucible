@@ -197,6 +197,9 @@ function headline(row: RailRow, view: ArtifactView | undefined): React.JSX.Eleme
     return <>{notWritten(row)}</>
   }
   if (row.kind === 'input') {
+    // A node can be handed a file the run never took in and never wrote — its
+    // prompt named it — and saying it arrived at kickoff would be a lie.
+    if (row.fromOutside === true) return <>read from outside the run{size}</>
     return <>handed in at kickoff{size}</>
   }
   const at = row.writtenAt ?? view?.modifiedAt
