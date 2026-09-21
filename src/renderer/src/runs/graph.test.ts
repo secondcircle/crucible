@@ -580,6 +580,189 @@ describe('a loop, laid out left to right', () => {
   })
 })
 
+// The build the picture was drawn for: three steps cut by the slicer, a
+// two-round holistic review before them, one node running and the gate nodes
+// forecast by `plan()` under the holistic review — which is where the record
+// holds them, and nowhere near where they belong on the page.
+const STEPS = [
+  'analyst',
+  'architect',
+  'slicer',
+  'holistic-review-1',
+  'holistic-review-2',
+  'builder-browser-suite-runner',
+  'review-browser-suite-runner-1',
+  'fixer-browser-suite-runner-1',
+  'review-browser-suite-runner-2',
+  'builder-account-shell',
+  'review-account-shell-1',
+  'builder-settings-pane',
+  'review-settings-pane-1',
+  'fixer-settings-pane-1',
+  'review-settings-pane-2',
+  'fixer-settings-pane-2',
+  'review-settings-pane-3'
+]
+
+const BUILT: RunNode[] = (() => {
+  const walked = STEPS.map((id, at) =>
+    nodeOf(id, at === 0 ? [] : [STEPS[at - 1]], {
+      startedAt: new Date(Date.parse('2026-09-21T10:00:00.000Z') + at * 60_000).toISOString(),
+      endedAt: new Date(Date.parse('2026-09-21T11:00:00.000Z') + at * 60_000).toISOString(),
+      ...(id === 'review-settings-pane-3'
+        ? { status: 'running' as const, endedAt: undefined }
+        : {})
+    })
+  )
+  const ghost = (id: string, parents: string[]): RunNode =>
+    nodeOf(id, parents, { status: 'pending', startedAt: undefined, endedAt: undefined })
+  return [
+    ...walked.slice(0, 4),
+    ghost('gate-alignment-1', ['holistic-review-1']),
+    ghost('gate-comments', ['gate-alignment-1']),
+    ...walked.slice(4)
+  ]
+})()
+
+/** Every card as the column and row it landed in, which is the picture. */
+function gridOf(layout: Layout): Record<string, [number, number]> {
+  const xs = [...new Set(layout.cards.map((one) => one.x))].sort((a, b) => a - b)
+  const ys = [...new Set(layout.cards.map((one) => one.y))].sort((a, b) => a - b)
+  return Object.fromEntries(
+    layout.cards.map((one) => [one.id, [xs.indexOf(one.x), ys.indexOf(one.y)]])
+  )
+}
+
+describe('a build, read as a flow', () => {
+  const layout = layOutGraph(BUILT)
+
+  it('stacks the steps down the main line and fans each step’s rounds to the right', () => {
+    expect(gridOf(layout)).toEqual({
+      analyst: [0, 0],
+      architect: [0, 1],
+      slicer: [0, 2],
+      'holistic-review-1': [0, 3],
+      'holistic-review-2': [1, 3],
+      'builder-browser-suite-runner': [0, 4],
+      'review-browser-suite-runner-1': [0, 5],
+      'fixer-browser-suite-runner-1': [0, 6],
+      'review-browser-suite-runner-2': [1, 5],
+      'builder-account-shell': [0, 7],
+      'review-account-shell-1': [0, 8],
+      'builder-settings-pane': [0, 9],
+      'review-settings-pane-1': [0, 10],
+      'fixer-settings-pane-1': [0, 11],
+      'review-settings-pane-2': [1, 10],
+      'fixer-settings-pane-2': [1, 11],
+      'review-settings-pane-3': [2, 10],
+      // Below everything that has run, in plan order, however the plan
+      // forecast them.
+      'gate-alignment-1': [0, 12],
+      'gate-comments': [0, 13]
+    })
+  })
+
+  it('draws one line per node it ran after, and hangs the planned tail off the running node', () => {
+    expect(layout.edges.map((edge) => `${edge.from}→${edge.to}`)).toEqual([
+      'analyst→architect',
+      'architect→slicer',
+      'slicer→holistic-review-1',
+      'review-settings-pane-3→gate-alignment-1',
+      'gate-alignment-1→gate-comments',
+      'holistic-review-1→holistic-review-2',
+      'holistic-review-2→builder-browser-suite-runner',
+      'builder-browser-suite-runner→review-browser-suite-runner-1',
+      'review-browser-suite-runner-1→fixer-browser-suite-runner-1',
+      'fixer-browser-suite-runner-1→review-browser-suite-runner-2',
+      'review-browser-suite-runner-2→builder-account-shell',
+      'builder-account-shell→review-account-shell-1',
+      'review-account-shell-1→builder-settings-pane',
+      'builder-settings-pane→review-settings-pane-1',
+      'review-settings-pane-1→fixer-settings-pane-1',
+      'fixer-settings-pane-1→review-settings-pane-2',
+      'review-settings-pane-2→fixer-settings-pane-2',
+      'fixer-settings-pane-2→review-settings-pane-3'
+    ])
+  })
+
+  it('has three line shapes and no others: down, up into the next round, back along a band', () => {
+    const kinds = new Map(layout.edges.map((edge) => [`${edge.from}→${edge.to}`, edge.route.kind]))
+    expect(kinds.get('builder-settings-pane→review-settings-pane-1')).toBe('direct')
+    expect(kinds.get('fixer-settings-pane-1→review-settings-pane-2')).toBe('across')
+    expect(kinds.get('review-browser-suite-runner-2→builder-account-shell')).toBe('return')
+    // The planned tail leaves the running node the same way the main line
+    // leaves any round: down and left, back under the first column.
+    expect(kinds.get('review-settings-pane-3→gate-alignment-1')).toBe('return')
+    expect(new Set(kinds.values())).toEqual(new Set(['direct', 'across', 'return']))
+  })
+
+  it('outlines each step’s own stretch and nobody else’s', () => {
+    expect(layout.blocks.map((block) => block.name)).toEqual([
+      'browser-suite-runner',
+      'account-shell',
+      'settings-pane'
+    ])
+
+    for (const block of layout.blocks) {
+      const inside = layout.cards.filter(
+        (card) =>
+          card.x >= block.x &&
+          card.x + layout.cardWidth <= block.x + block.width &&
+          card.y >= block.y &&
+          card.y + layout.cardHeight <= block.y + block.height
+      )
+      expect(inside.map((card) => card.id).sort()).toEqual(
+        BUILT.map((node) => node.id)
+          .filter((id) => id.endsWith(block.name) || id.includes(`${block.name}-`))
+          .sort()
+      )
+    }
+    // The outlines stack down the page in the order the steps ran, never
+    // overlapping one another.
+    const stacked = layout.blocks.map((block) => [block.y, block.y + block.height])
+    for (const [at, [, bottom]] of stacked.entries()) {
+      const next = stacked[at + 1]
+      if (next !== undefined) expect(bottom).toBeLessThan(next[0])
+    }
+  })
+
+  it('puts the planned tail under every branch, not just under the node it hangs from', () => {
+    // The running node is not the deepest thing on the page: another branch
+    // went two layers further. Nothing planned may sit beside that work.
+    const held = layOutGraph([
+      nodeOf('builder'),
+      nodeOf('review-code', ['builder'], { status: 'running', endedAt: undefined }),
+      nodeOf('review-tests', ['builder']),
+      nodeOf('fixer-1', ['review-tests']),
+      nodeOf('gate-alignment-1', ['builder'], {
+        status: 'pending',
+        startedAt: undefined,
+        endedAt: undefined
+      })
+    ])
+
+    const walked = ['builder', 'review-code', 'review-tests', 'fixer-1']
+    const deepest = Math.max(...walked.map((id) => card(held, id).layer))
+    expect(card(held, 'gate-alignment-1').layer).toBeGreaterThan(deepest)
+    expect(held.edges.map((edge) => `${edge.from}→${edge.to}`)).toContain(
+      'review-code→gate-alignment-1'
+    )
+  })
+
+  it('holds the whole drawing, outlines included, and overlaps nothing', () => {
+    expectNothingOverlaps(layout)
+    expectNoEdgeCrossesACard(layout)
+    expectExtentHoldsEverything(layout)
+    for (const block of layout.blocks) {
+      expect(block.x).toBeGreaterThanOrEqual(0)
+      expect(block.y).toBeGreaterThanOrEqual(0)
+      expect(block.x + block.width).toBeLessThanOrEqual(layout.width)
+      expect(block.y + block.height).toBeLessThanOrEqual(layout.height)
+    }
+    expect(layOutGraph(BUILT.map((node) => ({ ...node })))).toEqual(layout)
+  })
+})
+
 describe('what a card says', () => {
   it('gives the status as a word and a duration, never colour alone', () => {
     const done = cardFace(nodeOf('planner', [], { cost: 8.75, toolCalls: 61 }))

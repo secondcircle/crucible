@@ -59,7 +59,8 @@ export interface NodeSpec {
   /**
    * Ids of the nodes this node follows — declared here because nodes born
    * inside a runtime loop can never appear in plan(). Ids naming no node in
-   * the run are ignored; artifact dataflow adds edges, never removes one.
+   * the run are ignored. This is the whole of what the run graph draws: a
+   * file this node reads is dataflow, and never an edge.
    */
   from?: string[]
   /** Absolute paths of required input files. Preflight fails if any is missing. */
@@ -223,9 +224,9 @@ export interface RunContext {
    */
   effect<T>(id: string, produce: () => T | Promise<T>): Promise<T>
   /**
-   * Register a file the WORKFLOW wrote (a split, a merge, an extract) as
-   * produced by `fromNodeId`, so nodes reading it infer a real parent instead
-   * of hanging parentless in the graph. Rejects if the node does not exist.
+   * Name a file the WORKFLOW wrote (a split, a merge, an extract) as coming
+   * from `fromNodeId`. It adds no edge to the graph — edges are what a node
+   * declares in `from`. Rejects if the node does not exist.
    */
   derive(path: string, fromNodeId: string): Promise<void>
   /**

@@ -1,6 +1,8 @@
 import { nodeChains, type RunNode } from '../../../shared/workflows/run'
+import { readFlow } from './flow'
 import { money, nodeDuration, shortModel } from './format'
 import { readLoops, type Loop, type LoopReading, type NodeSpot } from './loops'
+import { readSteps } from './steps'
 
 /** Below this a card stops being readable, whatever its ids are. */
 const MIN_CARD_WIDTH = 168
@@ -29,6 +31,14 @@ const CHANNEL_CLEARANCE = 10
 
 /** Room around the drawing, so a card's outline is not clipped by the pane. */
 const CANVAS_MARGIN = 4
+
+/** What a step block's outline keeps clear of the cards inside it. */
+const BLOCK_PAD_X = 10
+const BLOCK_PAD_TOP = 14
+const BLOCK_PAD_BOTTOM = 12
+
+/** The step's name straddles the top edge, so the drawing keeps room for it. */
+const BLOCK_LABEL_RISE = 9
 
 const CORNER = 12
 
@@ -70,9 +80,20 @@ export interface GraphEdge {
   readonly d: string
 }
 
+/** One step block's outline, around the cards of the nodes that ran in it. */
+export interface GraphBlock {
+  /** The step's own name, which the outline is labelled with. */
+  readonly name: string
+  readonly x: number
+  readonly y: number
+  readonly width: number
+  readonly height: number
+}
+
 export interface GraphLayout {
   readonly cards: readonly GraphCard[]
   readonly edges: readonly GraphEdge[]
+  readonly blocks: readonly GraphBlock[]
   readonly cardWidth: number
   readonly cardHeight: number
   readonly width: number
@@ -85,22 +106,22 @@ interface Span {
 }
 
 /**
- * The graph of one run record: every node once, every edge its `parents` name
- * that the record can honor. A parent id naming no node is skipped rather
- * than drawn to nothing.
+ * The graph of one run record: every node once, and one line for each node it
+ * ran after. The first node is at the top, every node sits under the one it
+ * followed, a review loop's rounds fan out to the right, and the nodes of one
+ * step stand inside an outline of their own.
  */
 export function layOutGraph(nodes: readonly RunNode[]): GraphLayout {
   const index = new Map(nodes.map((node, at) => [node.id, at]))
   const cardWidth = widthFor(nodes)
   const cardHeight = heightFor(nodes)
 
-  // One edge per parent, whatever the record repeats, and never one to a node
-  // the record no longer holds or to the node itself.
-  const parentsOf = (node: RunNode): readonly string[] => [
-    ...new Set(node.parents.filter((parent) => parent !== node.id && index.has(parent)))
-  ]
+  const flow = readFlow(nodes)
+  const parentsOf = (node: RunNode): readonly string[] => flow.get(node) ?? []
 
-  const reading = readLoops(nodes)
+  // Loops are read from what has run: a planned node hangs off the bottom of
+  // the drawing, never in a round's column.
+  const reading = walkedLoops(nodes)
   const rows = rowsOf(nodes, parentsOf, reading)
   const columns = columnsOf(nodes, parentsOf, reading, rows, cardWidth)
 
@@ -129,11 +150,21 @@ export function layOutGraph(nodes: readonly RunNode[]): GraphLayout {
   const drafts = routes.map((route) =>
     pathFor(route.route, raw[route.from], raw[route.to], cardWidth, cardHeight)
   )
+  const drafted = blocksOf(nodes, raw, cardWidth, cardHeight)
   const offset = {
-    x: CANVAS_MARGIN - Math.min(0, ...drafts.flatMap((d) => coordsOf(d, 0))),
-    y: CANVAS_MARGIN - Math.min(0, ...drafts.flatMap((d) => coordsOf(d, 1)))
+    x:
+      CANVAS_MARGIN -
+      Math.min(0, ...drafts.flatMap((d) => coordsOf(d, 0)), ...drafted.map((one) => one.x)),
+    y:
+      CANVAS_MARGIN -
+      Math.min(
+        0,
+        ...drafts.flatMap((d) => coordsOf(d, 1)),
+        ...drafted.map((one) => one.y - BLOCK_LABEL_RISE)
+      )
   }
   const cards = raw.map((card) => ({ ...card, x: card.x + offset.x, y: card.y + offset.y }))
+  const blocks = drafted.map((one) => ({ ...one, x: one.x + offset.x, y: one.y + offset.y }))
 
   const edges: GraphEdge[] = routes.map((held) => {
     const route = moved(held.route, offset)
@@ -145,21 +176,62 @@ export function layOutGraph(nodes: readonly RunNode[]): GraphLayout {
   return {
     cards,
     edges,
+    blocks,
     cardWidth,
     cardHeight,
     width:
       Math.max(
         0,
         ...cards.map((card) => card.x + cardWidth),
-        ...edges.flatMap((edge) => coordsOf(edge.d, 0))
+        ...edges.flatMap((edge) => coordsOf(edge.d, 0)),
+        ...blocks.map((one) => one.x + one.width)
       ) + CANVAS_MARGIN,
     height:
       Math.max(
         0,
         ...cards.map((card) => card.y + cardHeight),
-        ...edges.flatMap((edge) => coordsOf(edge.d, 1))
+        ...edges.flatMap((edge) => coordsOf(edge.d, 1)),
+        ...blocks.map((one) => one.y + one.height)
       ) + CANVAS_MARGIN
   }
+}
+
+/**
+ * The loops of a record, read from the nodes that have run and mapped back
+ * onto the whole of it: a node that has not started is on the spine, wherever
+ * a round number in its id might otherwise have put it.
+ */
+function walkedLoops(nodes: readonly RunNode[]): LoopReading {
+  const walked = nodes.filter((node) => node.status !== 'pending')
+  const read = readLoops(walked)
+  return {
+    spots: nodes.map((node) => {
+      const at = walked.indexOf(node)
+      return at === -1 ? { kind: 'spine' } : read.spots[at]
+    }),
+    loops: read.loops
+  }
+}
+
+/** One outline per step block, around the cards of the nodes that ran in it. */
+function blocksOf(
+  nodes: readonly RunNode[],
+  cards: readonly GraphCard[],
+  cardWidth: number,
+  cardHeight: number
+): GraphBlock[] {
+  return readSteps(nodes).map((step) => {
+    const members = step.members.map((at) => cards[at])
+    const x = Math.min(...members.map((card) => card.x)) - BLOCK_PAD_X
+    const y = Math.min(...members.map((card) => card.y)) - BLOCK_PAD_TOP
+    return {
+      name: step.name,
+      x,
+      y,
+      width: Math.max(...members.map((card) => card.x + cardWidth)) + BLOCK_PAD_X - x,
+      height: Math.max(...members.map((card) => card.y + cardHeight)) + BLOCK_PAD_BOTTOM - y
+    }
+  })
 }
 
 /**
@@ -309,7 +381,19 @@ function rowsOf(
     return row
   }
 
-  for (const node of nodes) rowOf(node.id, new Set())
+  const walked = nodes.filter((node) => node.status !== 'pending')
+  for (const node of walked) rowOf(node.id, new Set())
+
+  // Nothing that has not run can come before something that has: the planned
+  // tail starts under every row the run has already used, whichever node it
+  // hangs from, and each planned node sits one row under the one before it.
+  let below =
+    walked.length === 0 ? 0 : Math.max(...walked.map((node) => releaseOf(node.id, new Set())))
+  for (const node of nodes) {
+    if (node.status !== 'pending' || rows.has(node.id)) continue
+    rows.set(node.id, below)
+    below += 1
+  }
   return rows
 }
 

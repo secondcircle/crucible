@@ -200,9 +200,9 @@ repository — node outputs land there, never in the worktree.
     locally scoped: the node knows nothing about other nodes, and nothing
     about its inputs or outputs beyond what this text says.
   - `reads` — absolute paths of required inputs; the node fails preflight
-    when one is missing. Reads that are another node's outputs become graph
-    edges automatically. The node is not told these paths; the prompt does
-    that.
+    when one is missing. Reading another node's output is dataflow, which the
+    artifact rail shows and the graph never draws: say what the node follows
+    in `from`. The node is not told these paths; the prompt does that.
   - `outputs` — name to `{ file, desc }`. Files are created under the
     artifact directory, and the node is not complete until every one exists
     and is non-empty. `artifactPaths(ctx, outputs)` gives the resolved paths
@@ -267,9 +267,9 @@ too; `research.md` beside this file has the details.
   comes back is the round-tripped value on the first run as well, so the two
   cannot differ. Each id may be recorded once per run — reuse one and the
   run fails, as two nodes sharing an id do. See below for what to wrap.
-- `await ctx.derive(path, fromNodeId)` — register a file the workflow itself
-  wrote as produced by a node, so later readers get a real graph parent.
-  Rejects when the node does not exist.
+- `await ctx.derive(path, fromNodeId)` — name a file the workflow itself
+  wrote as coming from a node. It draws no edge: a node's edges are the ones
+  it declares in `from`. Rejects when the node does not exist.
 - `ctx.stage({ workflow, inputs })` — schedule a successor run. The name
   resolves through the origin ladder at stage time; the engine starts the
   successor only when this run completes cleanly, in a fresh worktree
@@ -386,10 +386,10 @@ await ctx.node('review', {
 })
 ```
 
-The same goes for inputs: `reads` makes the engine check a file exists and
-draws a graph edge, but the node learns the path only if the prompt names
-it. A prompt that says "the earlier rounds are listed among your inputs"
-describes a list nobody sends; name the files. And a verdict-bearing prompt
+The same goes for inputs: `reads` makes the engine check a file exists, but
+the node learns the path only if the prompt names it. A prompt that says "the
+earlier rounds are listed among your inputs" describes a list nobody sends;
+name the files. And a verdict-bearing prompt
 says in words what the verdict is (`approved` or `changes-required`, with a
 `reason`), since the schema reaches the model only through the tool.
 
@@ -421,7 +421,7 @@ and adapt:
   prompt file in the run's worktree, declaring a report artifact so the run
   is inspectable from the graph.
 - `examples/adr-audit.ts` — a multi-node pipeline with no inputs at all:
-  audit, sweep and report nodes chained through `reads`, doctrine text
+  audit, sweep and report nodes chained through `from`, doctrine text
   shipped inside the file so replacing the workflow replaces the rule and
   its enforcement in one act, and commits made from `run()` so the branch
   tells the story. Declaring no inputs is what makes a workflow schedulable.

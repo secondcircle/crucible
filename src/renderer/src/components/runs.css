@@ -388,6 +388,30 @@
   background: var(--faint);
 }
 
+/* ---------- step blocks ---------- */
+
+/* The stretch of nodes one step ran in, outlined behind them. Never a target:
+   the cards inside it are what a click is for. */
+.gpane .sblock {
+  position: absolute;
+  border: 1px dashed var(--step-block);
+  border-radius: var(--radius-lg);
+  pointer-events: none;
+}
+
+/* The name straddles the top edge, cut into it by the pane's own ground. */
+.gpane .sblock .lb {
+  position: absolute;
+  top: -9px;
+  right: 12px;
+  padding: 0 6px;
+  background: var(--bg2);
+  font: 10.5px var(--mono);
+  letter-spacing: 0.04em;
+  color: var(--faint);
+  white-space: nowrap;
+}
+
 /* ---------- node cards ---------- */
 
 .gpane .nd {
@@ -529,6 +553,33 @@
 /* A parked child holds its line still: the march means work in flight. */
 .gpane .e.flowing.still {
   animation: none;
+}
+
+/* ---------- the legend ---------- */
+
+/* What the lines mean, kept on screen: the complaint that started this was a
+   line whose meaning was nowhere in the window. */
+.gpane .glegend {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px 12px;
+  padding: 7px 14px;
+  border-top: 1px solid var(--line);
+  font-size: 11px;
+  color: var(--dim);
+}
+
+.gpane .glegend .i {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  white-space: nowrap;
+}
+
+.gpane .glegend svg {
+  flex-shrink: 0;
+  overflow: visible;
 }
 
 @keyframes edge-march {

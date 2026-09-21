@@ -658,19 +658,19 @@ describe('what the record says a node follows', () => {
       await ctx.node('beta', { prompt: 'follow alpha' })
       // Declares something else: the spec wins over the plan's forecast.
       await ctx.node('gamma', { prompt: 'follow beta', from: ['beta'] })
-      // Declared and inferred together, plus an id naming nothing.
+      // One declaration, an id naming nothing, and a file another node wrote.
       await ctx.node('delta', {
         prompt: 'follow gamma, and read what alpha wrote',
         from: ['gamma', 'nobody-by-that-name'],
         reads: [alpha.outputs.note]
       })
-      // Neither declaration nor a read anyone produced: a root, and the
-      // stray root is the point — no edge is invented from running last.
+      // Declares nothing at all: a root, and the stray root is the point —
+      // no edge is invented from running last.
       await ctx.node('epsilon', { prompt: 'follow nothing' })
     }
   }
 
-  it('keeps the plan’s parents, lets a spec replace them, and adds what dataflow reveals', async () => {
+  it('keeps the plan’s parents, lets a spec replace them, and adds nothing for a file read', async () => {
     const { engine, repo } = rig({ declaring }, (nodeId) =>
       nodeId !== 'alpha'
         ? idle
@@ -693,9 +693,10 @@ describe('what the record says a node follows', () => {
       beta: ['alpha'],
       // The spec replaces the forecast rather than unioning with it.
       gamma: ['beta'],
-      // Declared first, then what reading alpha's file revealed; the id
+      // What it declared, and only that: reading alpha's file is dataflow,
+      // which the artifact rail shows and the graph never draws. The id
       // naming no node is dropped the way revise() drops one.
-      delta: ['gamma', 'alpha'],
+      delta: ['gamma'],
       epsilon: []
     })
   })
