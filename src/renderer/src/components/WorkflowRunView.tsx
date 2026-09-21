@@ -176,13 +176,22 @@ export function WorkflowRunView({
   const [scope, setScope] = useState<RailScope>('this-node')
   const body = useRef<HTMLDivElement>(null)
   const { graphWidth, railShown, startDrag } = useSplitter(body)
-  // The reader shows what the record still names: an artifact whose row leaves
-  // the record (a pruned ghost's) puts the node's transcript back by itself.
-  const openRow = openArtifact === undefined ? undefined : rowFor(rail, openArtifact)
+  // The reader shows what the record still names, in whichever scope drew the
+  // row that was clicked: the lookup is the record's, not the rail's, so every
+  // row of either scope and every chip of the node strip opens.
+  const openRow = openArtifact === undefined ? undefined : rowFor(run, openArtifact)
+  // Which leaves one answer to "is the reader open" for the Escape ladder above
+  // to read off the open path: an artifact whose row leaves the record (a
+  // pruned ghost's) closes the reader here rather than leaving a path open on a
+  // reader nobody can see, and the next Escape spent closing it.
+  useEffect(() => {
+    if (openArtifact !== undefined && openRow === undefined) onOpenArtifact(undefined)
+  }, [openArtifact, openRow, onOpenArtifact])
   const cost = money(runCost(run))
   const question = run.question
-  // A run with no nodes has no node scope to be in, so the rail shows what it
-  // has: the run's own list.
+  // A run with no nodes has no node to scope to, so the switch is not offered
+  // at all — a half that could never be pressed is worse than no switch — and
+  // the rail shows what the run has: its own list.
   const shownRail: RailModel =
     scope === 'whole-run' || shown === undefined ? rail : nodeRailOf(run, shown)
 
@@ -372,7 +381,7 @@ export function WorkflowRunView({
           <ArtifactRail
             rail={shownRail}
             openArtifact={openArtifact}
-            onScope={setScope}
+            onScope={shown === undefined ? undefined : setScope}
             onOpen={onOpenArtifact}
           />
         )}

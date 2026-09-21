@@ -19,6 +19,10 @@ export interface RailRow {
   readonly kind: 'input' | 'produced'
   /** The node that declared it; absent for a kickoff input. */
   readonly producer?: string
+  // A file the run neither took in at kickoff nor wrote for itself, named by
+  // some node's prompt as a read: it reached the run from outside. Drawn as an
+  // input like any other, but the reader says where it came from truthfully.
+  readonly fromOutside?: true
   /** Ids of the nodes whose `reads` name this path, in node order. */
   readonly readers: readonly string[]
   readonly state: RailState
@@ -159,12 +163,17 @@ function producedRow(run: RunRecord, node: RunNode, artifact: RunArtifact): Rail
 
 // A declared read of a file the run neither took in at kickoff nor wrote for
 // itself: it reached the node from outside the run, which is what an input is.
+//
+// It carries no description: a node's prompt names its reads by path alone
+// (`NodeSpec.reads`), so the record has nowhere to describe one and the engine
+// stamps every read `desc: 'input'` to fill a field the shape requires. That
+// placeholder is not a description of the file and is never drawn as one.
 function outsideRow(run: RunRecord, read: RunArtifact): RailRow {
   return {
     path: read.path,
     name: artifactName(read.path),
-    desc: read.desc,
     kind: 'input',
+    fromOutside: true,
     readers: readersOf(run, read.path),
     state: 'written'
   }
@@ -195,9 +204,26 @@ function inPlacedOrder(produced: Map<string, RailRow>, placed: readonly string[]
   return rows
 }
 
-/** The row for one path, whichever group it sits in. */
-export function rowFor(rail: RunRail, path: string): RailRow | undefined {
-  return [...rail.inputs, ...rail.produced].find((candidate) => candidate.path === path)
+/**
+ * The row for one path of this run, whichever scope drew it and whichever
+ * group it sat in — the one answer to "what is the reader showing".
+ *
+ * The rail is not the place to ask: a path clickable in one scope is missing
+ * from the other's lists, and the reader would blink out when the user threw
+ * the switch. The record is, and the paths it can answer for are exactly the
+ * paths `recordNamesPath` lets the main process serve: a kickoff input, a
+ * declared output, or a file some node's prompt named as a read.
+ */
+export function rowFor(run: RunRecord, path: string): RailRow | undefined {
+  const produced = producedRows(run).get(path)
+  if (produced !== undefined) return produced
+  const input = inputRows(run).find((row) => row.path === path)
+  if (input !== undefined) return input
+  // Declared reads last, so a file the run wrote or took in is the row the
+  // rail drew for it rather than an outsider's — the same order `nodeRailOf`
+  // builds a took row in.
+  const read = run.nodes.flatMap((node) => node.reads).find((candidate) => candidate.path === path)
+  return read === undefined ? undefined : outsideRow(run, read)
 }
 
 // Several node records can declare the same path (a revision re-declares its

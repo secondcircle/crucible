@@ -13,7 +13,9 @@ export function ArtifactRail({
   readonly rail: RailModel
   /** The path the reader is showing, which is the one row drawn outlined. */
   readonly openArtifact: string | undefined
-  readonly onScope: (scope: RailScope) => void
+  // Throws the scope switch. Absent when there is no node scope to throw it
+  // to — a run with no nodes — and then no switch is drawn.
+  readonly onScope: ((scope: RailScope) => void) | undefined
   readonly onOpen: (path: string) => void
 }): React.JSX.Element {
   const groups = groupsOf(rail)
@@ -27,20 +29,22 @@ export function ArtifactRail({
           </span>
         )}
       </div>
-      <div className="arscope" role="group" aria-label="Rail scope">
-        <Scope
-          on={rail.scope === 'this-node'}
-          scope="this-node"
-          label="this node"
-          onScope={onScope}
-        />
-        <Scope
-          on={rail.scope === 'whole-run'}
-          scope="whole-run"
-          label="whole run"
-          onScope={onScope}
-        />
-      </div>
+      {onScope === undefined ? null : (
+        <div className="arscope" role="group" aria-label="Rail scope">
+          <Scope
+            on={rail.scope === 'this-node'}
+            scope="this-node"
+            label="this node"
+            onScope={onScope}
+          />
+          <Scope
+            on={rail.scope === 'whole-run'}
+            scope="whole-run"
+            label="whole run"
+            onScope={onScope}
+          />
+        </div>
+      )}
       <div className="arlist">
         {groups.every((group) => group.rows.length === 0) ? (
           <p className="arempty">{emptyWords(rail)}</p>

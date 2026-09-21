@@ -245,10 +245,11 @@ describe('the artifact rail, following the picked node', () => {
     expect(rows()[1]).toHaveTextContent('read by auditor')
   })
 
-  // review-1, finding 1: written by the review, left failing on purpose.
-  // Every row opens the reader — that is the rail's one act, in both scopes.
-  // A took row the run neither took in nor wrote is drawn but cannot be
-  // opened, and the Escape that follows is eaten by a reader nobody can see.
+  // Every row opens the reader — that is the rail's one act, in both scopes —
+  // and the row the reader is shown is looked up in the record rather than in
+  // the rail that happens to be drawn, so a path only one scope lists opens
+  // like any other and the Escape that follows is not eaten by a reader
+  // nobody can see.
   it('opens the reader from a took row the run neither took in nor wrote', async () => {
     const outside = '/repos/crucible/docs/adr/0001-agent-port.md'
     const auditRun = runOf({
@@ -272,7 +273,10 @@ describe('the artifact rail, following the picked node', () => {
       fireEvent.click(within(rail()).getByRole('button', { name: /0001-agent-port\.md/ }))
       await settled()
     })
-    expect(screen.queryByLabelText('Artifact 0001-agent-port.md')).not.toBeNull()
+    const reader = screen.getByLabelText('Artifact 0001-agent-port.md')
+    // Where it came from, said truthfully: the run never took this one in.
+    expect(reader).toHaveTextContent('read from outside the run')
+    expect(reader).toHaveTextContent('the agent port')
 
     // And the run view's own Escape still closes the run, rather than being
     // spent closing a reader that never opened.
@@ -281,12 +285,21 @@ describe('the artifact rail, following the picked node', () => {
       await settled()
     })
     expect(screen.queryByLabelText('Artifact 0001-agent-port.md')).toBeNull()
+    expect(screen.getByLabelText('Run en42')).toBeInTheDocument()
+
+    // The node strip's took chip is the same path by the same act, and opens
+    // the same reader.
+    await act(async () => {
+      const strip = screen.getByLabelText('Run en42').querySelector('.inout') as HTMLElement
+      fireEvent.click(within(strip).getByRole('button', { name: '0001-agent-port.md' }))
+      await settled()
+    })
+    expect(screen.queryByLabelText('Artifact 0001-agent-port.md')).not.toBeNull()
   })
 
-  // review-1, finding 2: written by the review, left failing on purpose.
-  // The engine stamps every declared read `desc: 'input'` as a placeholder;
-  // drawn as a row description it reads as a one-line description of the
-  // file, under a row whose producer column already says "input".
+  // The engine stamps every declared read `desc: 'input'` because the shape
+  // requires the field; a node's prompt names its reads by path alone, so the
+  // record never describes one and the rail draws no description for it.
   it('draws no description on a took row the record never described', async () => {
     const outside = '/repos/crucible/docs/adr/0001-agent-port.md'
     await openRun([
@@ -298,23 +311,62 @@ describe('the artifact rail, following the picked node', () => {
     ])
 
     expect(rows()[0].querySelector('.desc')?.textContent).not.toBe('input')
+    expect(rows()[0].querySelector('.desc')).toBeNull()
+    // Everything the row does say is still said.
+    expect(rows()[0]).toHaveTextContent('0001-agent-port.md')
+    expect(rows()[0]).toHaveTextContent('read by auditor')
   })
 
-  // review-1, finding 3: written by the review, left failing on purpose.
   // A record with no nodes yet (a workflow with no plan(), or a run that died
-  // before its first node started) opens on "whole run" and the "this node"
-  // half of the switch answers nothing, ever.
+  // before its first node started) has no node to scope to, so it is offered
+  // no switch at all rather than a half that can never be pressed.
   it('offers no dead half of the switch on a run with no nodes', async () => {
     await openRun([runOf({ nodes: [] })])
 
     const thisNode = within(rail()).queryByRole('button', { name: 'this node' })
     // A switch the rail does not offer has nothing to answer for.
-    if (thisNode === null) return
+    if (thisNode === null) {
+      expect(within(rail()).queryByRole('button', { name: 'whole run' })).toBeNull()
+      expect(groups()).toEqual(['Handed in at kickoff'])
+      return
+    }
     await act(async () => {
       fireEvent.click(thisNode)
       await settled()
     })
     expect(thisNode).toHaveAttribute('aria-pressed', 'true')
+  })
+
+  // The Escape ladder reads "the reader is open" off the open path alone, so
+  // the path is never left pointing at a row the record has stopped naming.
+  it('closes the reader by itself when the open row leaves the record', async () => {
+    const { workflowRuns } = await openRun([runOf()], (scripted) => {
+      scripted.artifacts.set(`en42:${SPEC}`, { kind: 'markdown', body: '# the spec', bytes: 10 })
+    })
+    await pickNode('review-1')
+
+    await act(async () => {
+      fireEvent.click(within(rail()).getByRole('button', { name: /review\.md/ }))
+      await settled()
+    })
+    expect(screen.getByLabelText('Artifact review.md')).toBeInTheDocument()
+
+    // The ghost is pruned: its row, and the reader on it, go with it.
+    await act(async () => {
+      const pruned = runOf()
+      workflowRuns.setRuns([
+        { ...pruned, nodes: pruned.nodes.filter((node) => node.id !== 'review-1') }
+      ])
+      await settled()
+    })
+    expect(screen.queryByLabelText('Artifact review.md')).toBeNull()
+
+    // One Escape, and it is the run that closes.
+    await act(async () => {
+      fireEvent.keyDown(document, { key: 'Escape' })
+      await settled()
+    })
+    expect(screen.queryByLabelText('Run en42')).toBeNull()
   })
 
   it('says so when the picked node declared nothing, and shows no count', async () => {
