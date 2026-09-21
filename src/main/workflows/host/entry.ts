@@ -67,12 +67,12 @@ const rpc = createRpc<MainRequests, HostRequests>(channel, {
     return outputs === null || outputs === undefined ? undefined : outputs
   },
 
-  check: async ({ nodeRequest, outputs }) => {
+  check: async ({ nodeRequest, outputs, verdict }) => {
     const spec = specs.get(nodeRequest)
     if (spec?.check === undefined) {
       throw new Error(`check asked of a node request with no check (${nodeRequest})`)
     }
-    return spec.check(outputs)
+    return spec.check(outputs, verdict)
   }
 })
 

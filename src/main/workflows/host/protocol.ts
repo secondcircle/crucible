@@ -89,8 +89,11 @@ export type HostRequests = {
     params: { inputs: Record<string, string>; artifactDir: string; cwd: string }
     result: Record<string, unknown> | undefined
   }
-  /** `spec.check(outputs)` of the node request named, run where the function lives. */
-  check: { params: { nodeRequest: number; outputs: Record<string, string> }; result: string[] }
+  /** `spec.check(outputs, verdict)` of the node request named, run where the function lives. */
+  check: {
+    params: { nodeRequest: number; outputs: Record<string, string>; verdict?: unknown }
+    result: string[]
+  }
 }
 
 /** Requests a host makes of the main process: the run context, call by call. */
