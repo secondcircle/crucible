@@ -91,6 +91,7 @@ import {
   compactionExtension,
   previousCompaction,
   storedCompactionOf,
+  type CompactionDeps,
   type StoredCompaction
 } from './sdk-compaction.ts'
 import type { CompactionRecord } from '../../shared/compaction/record.ts'
@@ -201,7 +202,8 @@ export function createSdkAdapter({
   skills,
   systemPrompt,
   openExternal,
-  log
+  log,
+  askCompaction
 }: {
   // The same model the fake's scripts call and the same model the shell reads:
   // the tools registered below are its three behaviors and nothing more.
@@ -231,6 +233,14 @@ export function createSdkAdapter({
   // reduces them to a display-safe sentence: without this record, a structured
   // or overlong provider error leaves no evidence anywhere.
   readonly log?: LogSink
+  // Around the compaction's one model request. The compaction eval reads the
+  // instruction here and, in a dry run, answers it instead of the model. The
+  // app never passes one: `warm` is the request as production makes it.
+  readonly askCompaction?: (
+    instruction: string,
+    signal: AbortSignal,
+    warm: CompactionDeps['ask']
+  ) => Promise<string>
 }): ConversationAdapter {
   const agentDir = crucibleAgentDir(homedir())
   const listeners = new Set<AdapterEventListener>()
@@ -410,13 +420,17 @@ export function createSdkAdapter({
         // The compaction, whoever asked for it: Crucible writes the whole of
         // what the model reads afterwards, and π persists it.
         compactionExtension({
-          ask: (instruction, signal) =>
-            askOnWarmCache({
+          ask: (instruction, signal) => {
+            const warm = askOnWarmCache({
               session: requireBound(sessionId).session,
               toLlm: pi.convertToLlm,
               complete: (model, context, options) =>
                 models.completeSimple(model, context, options)
-            })(instruction, signal),
+            })
+            return askCompaction === undefined
+              ? warm(instruction, signal)
+              : askCompaction(instruction, signal, warm)
+          },
           trigger: () => sessions.get(sessionId)?.compacting?.trigger ?? 'threshold',
           toItems: (messages) => toTranscript(messages as readonly StoredMessage[]),
           sizeOf: pi.estimateTokens,

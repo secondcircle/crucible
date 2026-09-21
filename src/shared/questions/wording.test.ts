@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { Question } from '../agent/port'
-import { askAnswer, composeAnswerBatch, isAnswerBatch } from './wording'
+import { askAnswer, composeAnswerBatch, isAnswerBatch, readAnswerBatch } from './wording'
 
 function questionOf(overrides: Partial<Question> = {}): Question {
   return {
@@ -78,6 +78,32 @@ describe('the answer batch', () => {
       { question: questionOf(), reply: { kind: 'answered', text: 'the env var' } }
     ])
     expect(batch.text).toMatch(/nothing further is coming/)
+  })
+
+  // The compaction skeleton keeps what the person typed and nothing of the
+  // envelope, so the writer's shape has to read back exactly, a multi-line
+  // answer included.
+  it('reads back as the answers it carries, the typed ones whole', () => {
+    const batch = composeAnswerBatch([
+      { question: questionOf({ id: 'q-1' }), reply: { kind: 'recommendation' } },
+      {
+        question: questionOf({ id: 'q-2', question: 'Block on a missing changelog entry?' }),
+        reply: { kind: 'answered', text: 'Block, but only on main.\n\n1. Not on release branches.' }
+      },
+      {
+        question: questionOf({ id: 'q-3', question: 'Drop the --legacy flag?' }),
+        reply: { kind: 'dismissed' }
+      }
+    ])
+    expect(readAnswerBatch(batch.text)).toEqual([
+      { question: 'Where should the OpenAI API key come from?', reply: { kind: 'recommendation' } },
+      {
+        question: 'Block on a missing changelog entry?',
+        reply: { kind: 'text', text: 'Block, but only on main.\n\n1. Not on release branches.' }
+      },
+      { question: 'Drop the --legacy flag?', reply: { kind: 'dismissed' } }
+    ])
+    expect(readAnswerBatch('Okay so everything is on main now?')).toEqual([])
   })
 
   it('is recognizable as a batch by its own wording', () => {

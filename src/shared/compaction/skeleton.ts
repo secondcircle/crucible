@@ -1,5 +1,6 @@
 import type { TranscriptItem } from '../agent/port'
 import { spokenByCrucible } from '../agent/spoken-by-crucible.ts'
+import { isAnswerBatch, readAnswerBatch } from '../questions/wording.ts'
 import { estimateTokens } from './window.ts'
 
 // The skeleton: the compacted span with its bulk removed. What the person
@@ -62,6 +63,16 @@ export function skeletonOf(items: readonly TranscriptItem[]): readonly SkeletonL
         // most of a skeleton, all of it protected by a rule written for the
         // person's brief. One line, like a tool call: what it announced, and
         // what the rest weighed.
+        // An answer batch is Crucible's envelope around the person's own
+        // rulings, and in a session driven by the ask tool it is most of
+        // what they said. The envelope goes; what they typed stays, as their
+        // words, beside the question it answered. A taken recommendation or
+        // a dismissal is one clause: the agent's own question is a line of
+        // its own already.
+        if (isAnswerBatch(text)) {
+          lines.push({ kind: 'user', text: answersLine(text) })
+          break
+        }
         if (spokenByCrucible(text)) {
           lines.push({ kind: 'notice', text: clipHandle(text), tokens: estimateTokens(text) })
           break
@@ -121,6 +132,32 @@ function assistantLine(text: string): SkeletonLine {
   const opening = clipHandle(firstParagraph(text))
   const more = estimateTokens(text) - estimateTokens(opening)
   return more > 0 ? { kind: 'assistant', text: opening, more } : { kind: 'assistant', text: opening }
+}
+
+// A question is named by its opening, since the whole of it is on the ask
+// tool's own line; an answer the person typed is whole.
+const QUESTION_LIMIT = 160
+
+function answersLine(batch: string): string {
+  const answers = readAnswerBatch(batch)
+  if (answers.length === 0) return clipHandle(batch)
+  const parts = answers.map(({ question, reply }, index) => {
+    const asked = clip(question, QUESTION_LIMIT)
+    switch (reply.kind) {
+      case 'text':
+        return `(${index + 1}) ${asked} → “${reply.text}”`
+      case 'recommendation':
+        return `(${index + 1}) ${asked} → took the recommendation`
+      case 'dismissed':
+        return `(${index + 1}) ${asked} → dismissed`
+    }
+  })
+  return `Answered: ${parts.join(' ')}`
+}
+
+function clip(text: string, limit: number): string {
+  const line = text.trim()
+  return line.length <= limit ? line : `${line.slice(0, limit)}…`
 }
 
 function firstParagraph(text: string): string {

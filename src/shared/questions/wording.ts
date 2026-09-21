@@ -50,23 +50,79 @@ export function composeAnswerBatch(answered: readonly AnsweredQuestion[]): Syste
         'further is coming for these.',
       '',
       ...lines,
-      'Act on them now, and say what you are doing differently because of them.'
+      BATCH_CLOSE
     ].join('\n'),
     card: cardFor(answered)
   }
 }
 
+// One answer as the batch spelled it, read back. The user's typed words are
+// kept whole; a taken recommendation and a dismissal are the fact of them.
+export interface ReadAnswer {
+  readonly question: string
+  readonly reply:
+    | { readonly kind: 'text'; readonly text: string }
+    | { readonly kind: 'recommendation' }
+    | { readonly kind: 'dismissed' }
+}
+
+const TYPED_ANSWER = '   Answer: '
+const TAKEN_ANSWER = '   Answer (your own recommendation, taken as it stood): '
+const DISMISSED_ANSWER = '   Dismissed with no answer.'
+const BATCH_CLOSE = 'Act on them now, and say what you are doing differently because of them.'
+
+// The batch read back by the module that wrote it, so the compaction skeleton
+// can keep what the person typed without knowing the shape. A typed answer
+// runs to the next numbered question or the closing line, however many lines
+// it took: nothing the user wrote is cut. The questions are numbered in
+// sequence, so a list the user typed inside an answer opens no question.
+export function readAnswerBatch(text: string): readonly ReadAnswer[] {
+  if (!isAnswerBatch(text)) return []
+  const answers: ReadAnswer[] = []
+  let question: string | undefined
+  let typed: string[] | undefined
+  const close = (): void => {
+    if (question !== undefined && typed !== undefined) {
+      answers.push({ question, reply: { kind: 'text', text: typed.join('\n').trim() } })
+    }
+    question = undefined
+    typed = undefined
+  }
+  for (const line of text.split('\n').slice(1)) {
+    const numbered = /^(\d+)\. (.*)$/.exec(line)
+    if (numbered !== null && Number(numbered[1]) === answers.length + (typed === undefined ? 1 : 2)) {
+      close()
+      question = numbered[2]
+      continue
+    }
+    if (line === BATCH_CLOSE) break
+    if (question === undefined) continue
+    if (typed !== undefined) {
+      typed.push(line)
+      continue
+    }
+    if (line.startsWith(TAKEN_ANSWER)) {
+      answers.push({ question, reply: { kind: 'recommendation' } })
+      question = undefined
+    } else if (line.startsWith(DISMISSED_ANSWER)) {
+      answers.push({ question, reply: { kind: 'dismissed' } })
+      question = undefined
+    } else if (line.startsWith(TYPED_ANSWER)) {
+      typed = [line.slice(TYPED_ANSWER.length)]
+    }
+  }
+  close()
+  return answers
+}
+
 function replyLines(question: Question, reply: QuestionReply): readonly string[] {
   if (reply.kind === 'dismissed') {
-    return [
-      '   Dismissed with no answer. Decide this one on your own judgment and say what you ' +
-        'decided.'
-    ]
+    return [`${DISMISSED_ANSWER} Decide this one on your own judgment and say what you decided.`]
   }
   if (reply.kind === 'recommendation') {
-    return [`   Answer (your own recommendation, taken as it stood): ${question.recommendation}`]
+    return [`${TAKEN_ANSWER}${question.recommendation}`]
   }
-  return [`   Answer: ${reply.text}`]
+  return [`${TYPED_ANSWER}${reply.text}`]
 }
 
 // Amber, like the dock the answers came from, and one row however many

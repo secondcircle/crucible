@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import type { TranscriptItem } from '../agent/port'
 import { WAKE_MESSAGE_PREFIX } from '../monitors/wording'
-import { ANSWER_BATCH_PREFIX } from '../questions/wording'
+import { composeAnswerBatch } from '../questions/wording'
+import type { Question } from '../agent/port'
 import { RUN_MESSAGE_PREFIX } from '../workflows/run'
 import {
   pruneSkeleton,
@@ -11,6 +12,16 @@ import {
   trimSkeleton,
   type SkeletonLine
 } from './skeleton'
+
+function questionOf(question: string): Question {
+  return {
+    id: question,
+    question,
+    context: 'context',
+    recommendation: 'the recommendation',
+    askedAt: '2026-09-10T10:00:00.000Z'
+  }
+}
 
 const SPAN: readonly TranscriptItem[] = [
   { kind: 'user', text: 'Make the retry policy the same in both clients.' },
@@ -86,16 +97,37 @@ describe('the skeleton', () => {
       `${RUN_MESSAGE_PREFIX} 09fb (build) completed · branch crucible/run-09fb.\n\n` +
       `Outputs: ${JSON.stringify({ verdict: 'approved', reason: 'x'.repeat(4_000) })}`
     const wake = `${WAKE_MESSAGE_PREFIX} m1 ended: condition met.\n\nThe check printed nothing.`
-    const answers = `${ANSWER_BATCH_PREFIX}. Every question you had open, answered.\n\n1. Merge?\n   Answer: yes`
     const lines = skeletonOf([
       { kind: 'user', text: report },
       { kind: 'user', text: wake },
-      { kind: 'user', text: answers },
       { kind: 'user', text: 'Okay so everything is on main now?' }
     ])
-    expect(lines.map((line) => line.kind)).toEqual(['notice', 'notice', 'notice', 'user'])
+    expect(lines.map((line) => line.kind)).toEqual(['notice', 'notice', 'user'])
     expect(renderSkeleton(lines.slice(0, 1))).toMatch(
       /^1\. \[crucible\] ⚑ Crucible run 09fb \(build\) completed · branch crucible\/run-09fb\. · 1,0\d\d tok dropped$/
+    )
+  })
+
+  // An answer batch is Crucible's envelope, but what is inside it is the
+  // person's ruling, and in a session run through the ask tool it is most of
+  // what they ever said. Measured on a real session: eleven batches reduced
+  // to eleven identical headers, and the compacted agent could say what was
+  // decided but not what the user said or why.
+  it('keeps what the person typed in an answer batch, as their own words', () => {
+    const batch = composeAnswerBatch([
+      {
+        question: questionOf('Which counter do you want: A, B or C?'),
+        reply: { kind: 'answered', text: 'B looks better, but should days be its own column?' }
+      },
+      { question: questionOf('Freeze the counter when a job closes?'), reply: { kind: 'recommendation' } },
+      { question: questionOf('Email the customer on cancel?'), reply: { kind: 'dismissed' } }
+    ])
+    const lines = skeletonOf([{ kind: 'user', text: batch.text }])
+    expect(lines.map((line) => line.kind)).toEqual(['user'])
+    expect(renderSkeleton(lines)).toBe(
+      '1. [user] Answered: (1) Which counter do you want: A, B or C? → “B looks better, but should ' +
+        'days be its own column?” (2) Freeze the counter when a job closes? → took the ' +
+        'recommendation (3) Email the customer on cancel? → dismissed'
     )
   })
 
