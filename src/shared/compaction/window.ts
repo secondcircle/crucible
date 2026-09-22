@@ -2,20 +2,17 @@
 // Settings section is the switch and the threshold, and everything here is
 // the implementation's own.
 //
-// Nothing here caps what a compaction produces. The account is as long as the
-// model makes it, the skeleton is as long as the model leaves it, and nothing
-// of the compacted span is kept verbatim: everything up to the moment the
-// compaction was asked for is summarized, and only what arrives after it is
-// verbatim. A build before this one kept a 20k tail and trimmed the skeleton
-// to 20k, and both were arbitrary: the tail was the largest part of a 65k
-// result, and the trim dropped every reply and call from a skeleton whose
-// protected lines alone were over the cap.
+// Nothing here caps what a compaction produces. The summary is as long as the
+// model makes it, and nothing of the compacted span is kept verbatim:
+// everything up to the moment the compaction was asked for is summarized, and
+// only what arrives after it is verbatim. A build before this one kept a 20k
+// tail and trimmed a skeleton to 20k, and both were arbitrary: the tail was
+// the largest part of a 65k result.
 
 // What a compaction is expected to leave behind, before this conversation has
-// had one: the account and the skeleton together. Measured, a summary runs a
-// few thousand tokens and a skeleton of a day's work a few thousand more.
-// Once a conversation has compacted, what its own last compaction actually
-// produced replaces this.
+// had one. Measured, a summary of a day's work runs a few thousand tokens to
+// a few tens of thousands. Once a conversation has compacted, what its own
+// last compaction actually produced replaces this.
 export const EXPECTED_COMPACTED_TOKENS = 20_000
 
 // How close to the model's own window counts as the edge. π's own
@@ -49,8 +46,8 @@ export function compactedWindowTokens(contextWindow?: number): number {
 // What a compaction of this conversation would leave it at: the expectation
 // above, or — once it has compacted at least once — what its own last
 // compaction actually produced, which is the honest number. A conversation
-// whose skeleton the model will not prune compacts to more than the
-// expectation, and only the model may drop what the user said.
+// whose summary the model writes long compacts to more than the expectation,
+// and only the model decides what it keeps.
 function compactionWouldLeave(contextWindow?: number, compactedTo?: number): number {
   return Math.max(compactedWindowTokens(contextWindow), compactedTo ?? 0)
 }

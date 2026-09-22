@@ -55,7 +55,7 @@ export function sizeTrigger(
     const edge = window - windowEdgeReserveTokens(window)
     // Once as a last resort means once. A conversation whose own compaction
     // landed at the edge is one compacting cannot move: it would write the
-    // same account and the same skeleton and come back to the same edge, and
+    // same summary and come back to the same edge, and
     // the turns it bought would each cost a full context. Where the last one
     // did get it clear, growing back to the edge is growth a compaction can
     // take away again.

@@ -8,10 +8,10 @@ import { describe, expect, it } from 'vitest'
 import type { AgentSession, SessionEntry } from '@earendil-works/pi-coding-agent'
 import type { AssistantMessage } from '@earendil-works/pi-ai'
 import type { TranscriptItem } from '../../shared/agent/port'
-import { RUN_MESSAGE_PREFIX } from '../../shared/workflows/run'
+import { COMPACTION_SYSTEM_PROMPT } from '../../shared/compaction/prompt'
 import {
   COMPACTION_DETAILS_KEY,
-  askOnWarmCache,
+  askAfresh,
   autoCompactionEvent,
   compactionExtension,
   everythingSince,
@@ -25,8 +25,7 @@ import {
 import type { StoredMessage } from './sdk-transcript'
 
 const WRITTEN: StoredCompaction = {
-  record: { trigger: 'idle', tokensBefore: 214_000, tokensAfter: 48_000 },
-  state: { skeleton: [{ kind: 'user', text: 'the ask' }] }
+  record: { trigger: 'idle', tokensBefore: 214_000, tokensAfter: 48_000 }
 }
 
 const entry = (details: unknown): { type: string; details?: unknown } => ({
@@ -56,23 +55,33 @@ describe('reading Crucible’s data off a π compaction entry', () => {
     ).toBeUndefined()
   })
 
-  it('reads a record missing its numbers as zeroes and keeps the skeleton', () => {
+  it('reads a record missing its numbers as zeroes', () => {
     expect(
       storedCompactionOf({
         [COMPACTION_DETAILS_KEY]: { record: { trigger: 'threshold' } }
       })
     ).toEqual({
-      record: { trigger: 'threshold', tokensBefore: 0, tokensAfter: 0 },
-      state: { skeleton: [] }
+      record: { trigger: 'threshold', tokensBefore: 0, tokensAfter: 0 }
     })
+  })
+
+  // A build before this one stored a skeleton beside the record. Read past.
+  it('ignores the state an older build stored beside the record', () => {
+    expect(
+      storedCompactionOf({
+        [COMPACTION_DETAILS_KEY]: {
+          record: { trigger: 'threshold', tokensBefore: 1, tokensAfter: 1 },
+          state: { skeleton: [{ kind: 'user', text: 'old' }] }
+        }
+      })
+    ).toEqual({ record: { trigger: 'threshold', tokensBefore: 1, tokensAfter: 1 } })
   })
 })
 
 describe('the compaction a branch is standing on', () => {
   it('is the latest one, because summaries are rewritten and never stacked', () => {
     const older: StoredCompaction = {
-      record: { trigger: 'threshold', tokensBefore: 10, tokensAfter: 5 },
-      state: { skeleton: [] }
+      record: { trigger: 'threshold', tokensBefore: 10, tokensAfter: 5 }
     }
     const entries = [
       { type: 'message' },
@@ -88,45 +97,38 @@ describe('the compaction a branch is standing on', () => {
   })
 })
 
-// Q6: "Same model and same thinking level as the loop being compacted." The
-// request only reads the cached prefix if it is the same prompt the provider
-// is holding, and a thinking change is a cache miss in Crucible's own model of
-// one (`CacheMissFacts.thinkingChanged`). π carries the level the same way.
+// The request stands on its own: same model, the compaction's own system
+// prompt, no tools, one user message. It reads nothing of the agent's own
+// prefix, by design: the request that did was the one the provider's output
+// classifier kept refusing.
 describe('the compaction’s own model request', () => {
-  const sessionAt = (
-    thinkingLevel: string | undefined,
-    reasoning = true,
-    tools: { active: string[]; all: string[] } = { active: [], all: [] }
-  ): AgentSession =>
+  const sessionAt = (thinkingLevel: string | undefined, reasoning = true): AgentSession =>
     ({
       model: { id: 'claude-probe', provider: 'anthropic', reasoning },
       thinkingLevel,
       systemPrompt: 'the session’s own system prompt',
       messages: [{ role: 'user', content: 'the conversation so far' }],
-      getActiveToolNames: () => tools.active,
-      getAllTools: () => tools.all.map((name) => ({ name, description: name, parameters: {} }))
+      getActiveToolNames: () => ['bash', 'read'],
+      getAllTools: () => []
     }) as unknown as AgentSession
 
-  async function askedWith(session: AgentSession): Promise<{
+  interface Seen {
     readonly options: { readonly reasoning?: string }
-    readonly context: { readonly tools?: { name: string }[] }
-  }> {
-    let seen:
-      | {
-          options: { readonly reasoning?: string }
-          context: { readonly tools?: { name: string }[] }
-        }
-      | undefined
-    const ask = askOnWarmCache({
+    readonly context: {
+      readonly systemPrompt?: string
+      readonly messages: { role: string; content: unknown }[]
+      readonly tools?: unknown[]
+    }
+  }
+
+  async function askedWith(session: AgentSession): Promise<Seen> {
+    let seen: Seen | undefined
+    const ask = askAfresh({
       session,
-      toLlm: (messages) => [...(messages as unknown as unknown[])],
       complete: async (_model, context, options) => {
-        seen = {
-          options,
-          context: context as unknown as { tools?: { name: string }[] }
-        }
+        seen = { options, context: context as unknown as Seen['context'] }
         return {
-          content: [{ type: 'text', text: '<trajectory>x</trajectory>' }],
+          content: [{ type: 'text', text: 'the summary' }],
           stopReason: 'stop'
         } as AssistantMessage
       }
@@ -135,6 +137,13 @@ describe('the compaction’s own model request', () => {
     if (seen === undefined) throw new Error('the request was supposed to be made')
     return seen
   }
+
+  it('carries the instruction as its only message, under its own system prompt', async () => {
+    const { context } = await askedWith(sessionAt('high'))
+    expect(context.systemPrompt).toBe(COMPACTION_SYSTEM_PROMPT)
+    expect(context.messages.map((message) => message.content)).toEqual(['compact this'])
+    expect(context.tools).toEqual([])
+  })
 
   it('runs at the thinking level the loop being compacted runs at', async () => {
     expect((await askedWith(sessionAt('high'))).options.reasoning).toBe('high')
@@ -148,36 +157,20 @@ describe('the compaction’s own model request', () => {
     expect((await askedWith(sessionAt('high', false))).options).not.toHaveProperty('reasoning')
   })
 
-  // Text up to where the provider stopped reads as an account and would
-  // settle as one, with no strike list and an ending cut mid-sentence.
+  // Text up to where the provider stopped reads as a summary and would settle
+  // as one, with its ending cut mid-sentence.
   it('refuses a reply the provider cut off', async () => {
-    const ask = askOnWarmCache({
+    const ask = askAfresh({
       session: sessionAt('high'),
-      toLlm: (messages) => [...(messages as unknown as unknown[])],
       complete: async () =>
         ({
           stopReason: 'length',
-          content: [{ type: 'text', text: '<trajectory>half an acc' }]
+          content: [{ type: 'text', text: 'half a summ' }]
         }) as AssistantMessage
     })
     await expect(ask('compact this', new AbortController().signal)).rejects.toThrow(
       'stop reason "length"'
     )
-  })
-
-  // The tools block is a cache breakpoint: same tools in another order is
-  // another prefix, and the whole conversation is re-billed.
-  it('carries the agent’s own tools, in the agent’s own order', async () => {
-    const session = sessionAt('high', true, {
-      active: ['bash', 'read', 'write'],
-      all: ['read', 'write', 'bash', 'not_mounted']
-    })
-
-    expect((await askedWith(session)).context.tools?.map((tool) => tool.name)).toEqual([
-      'bash',
-      'read',
-      'write'
-    ])
   })
 })
 
@@ -188,7 +181,7 @@ describe('the compaction’s own model request', () => {
 describe('the compaction’s model reply', () => {
   const replied = (stopReason: string, errorMessage?: string): AssistantMessage =>
     ({
-      content: [{ type: 'text', text: '<trajectory>Where we are, cut mid-wo' }],
+      content: [{ type: 'text', text: 'Where we are, cut mid-wo' }],
       stopReason,
       ...(errorMessage === undefined ? {} : { errorMessage })
     }) as AssistantMessage
@@ -206,15 +199,10 @@ describe('the compaction’s model reply', () => {
   })
 
   it('is refused by the request itself, before any text is read', async () => {
-    const ask = askOnWarmCache({
+    const ask = askAfresh({
       session: {
-        model: { id: 'm', provider: 'anthropic', reasoning: false },
-        systemPrompt: '',
-        messages: [],
-        getActiveToolNames: () => [],
-        getAllTools: () => []
+        model: { id: 'm', provider: 'anthropic', reasoning: false }
       } as unknown as AgentSession,
-      toLlm: () => [],
       complete: async () => replied('error', 'stream reset')
     })
     await expect(ask('compact', new AbortController().signal)).rejects.toThrow('stream reset')
@@ -223,7 +211,7 @@ describe('the compaction’s model reply', () => {
 
 // The hook is where a reply becomes the window. Driven here with π's shape
 // faked, because nothing else exercises what it does with a bad reply or
-// with the skeleton it was handed.
+// with the previous summary π hands it.
 describe('the compaction hook', () => {
   type Hook = (event: {
     preparation: {
@@ -232,6 +220,7 @@ describe('the compaction hook', () => {
       messagesToSummarize: StoredMessage[]
       turnPrefixMessages: StoredMessage[]
       tokensBefore: number
+      previousSummary?: string
     }
     branchEntries: SessionEntry[]
     signal: AbortSignal
@@ -243,13 +232,16 @@ describe('the compaction hook', () => {
     ({ role: 'user', content: text, timestamp: 0 }) as StoredMessage
 
   function hookWith(
-    reply: string,
-    previous?: StoredCompaction
-  ): { hook: Hook; failures: string[]; settled: StoredCompaction[] } {
+    reply: string
+  ): { hook: Hook; failures: string[]; settled: StoredCompaction[]; asked: string[] } {
     const failures: string[] = []
     const settled: StoredCompaction[] = []
+    const asked: string[] = []
     const deps: CompactionDeps = {
-      ask: async () => reply,
+      ask: async (instruction) => {
+        asked.push(instruction)
+        return reply
+      },
       trigger: () => 'idle',
       toItems: (messages) =>
         messages.map((message): TranscriptItem => ({
@@ -268,26 +260,7 @@ describe('the compaction hook', () => {
       }
     } as never)
     if (hook === undefined) throw new Error('the hook was supposed to be registered')
-    const entries: SessionEntry[] =
-      previous === undefined
-        ? []
-        : [
-            {
-              type: 'compaction',
-              id: 'c1',
-              details: { [COMPACTION_DETAILS_KEY]: previous }
-            } as never
-          ]
-    const registered = hook
-    return {
-      failures,
-      settled,
-      hook: (event) =>
-        registered({
-          ...event,
-          branchEntries: [...entries, ...event.branchEntries]
-        })
-    }
+    return { failures, settled, asked, hook }
   }
 
   const aged = {
@@ -306,7 +279,7 @@ describe('the compaction hook', () => {
   // summarized, and what the model reads afterwards is the compaction and
   // then what arrived after it. No tail of the compacted span stays verbatim.
   it('keeps nothing of the compacted span verbatim', async () => {
-    const { hook } = hookWith('<trajectory>Standing here.</trajectory><strike></strike>')
+    const { hook } = hookWith('Standing here.')
     const result = await hook(aged)
     expect(result?.compaction).toMatchObject({
       firstKeptEntryId: NOTHING_KEPT
@@ -320,47 +293,32 @@ describe('the compaction hook', () => {
     )
   })
 
-  it('cancels, naming the cut, when the account came back without its end', async () => {
-    const { hook, failures, settled } = hookWith('<trajectory>Where we are, cut mid-wo')
+  it('cancels, saying so, when the model wrote nothing', async () => {
+    const { hook, failures, settled } = hookWith('  \n')
     expect(await hook(aged)).toEqual({ cancel: true })
-    expect(failures).toEqual(['The trajectory summary came back empty or cut short.'])
+    expect(failures).toEqual(['The summary came back empty.'])
     expect(settled).toEqual([])
   })
 
-  // A skeleton stored by a build before the `notice` kind holds every run
-  // report as the person's own words. Carried as stored, they were never
-  // trimmed and never struck; one session's skeleton was 90 such lines and
-  // 31k tokens, with every reply and call trimmed away around them.
-  it('re-reads a carried skeleton with this build’s kinds, so old run reports can be trimmed', async () => {
-    const report = `${RUN_MESSAGE_PREFIX} 4cc6 (build) completed · branch crucible/run-4cc6\n\n${'x'.repeat(7_000)}`
-    const stale: StoredCompaction = {
-      record: { trigger: 'threshold', tokensBefore: 1, tokensAfter: 1 },
-      state: {
-        skeleton: [
-          { kind: 'user', text: report },
-          { kind: 'user', text: 'proceed' },
-          { kind: 'user', text: report.replace('4cc6', 'bc12') }
-        ]
-      }
-    }
-    const { hook, settled } = hookWith(
-      '<trajectory>Standing here.</trajectory><strike></strike>',
-      stale
-    )
+  // π hands over the previous compaction's own summary, and the span it
+  // offers starts after that entry. The summary goes into the document so
+  // the next one is written over both.
+  it('summarizes the previous summary together with what followed it', async () => {
+    const { hook, asked } = hookWith('Standing further along.')
+    await hook({
+      ...aged,
+      preparation: { ...aged.preparation, previousSummary: 'Standing here.' }
+    })
+    const instruction = asked[0] ?? ''
+    expect(instruction).toContain('Standing here.')
+    expect(instruction).toContain('the ask')
+    expect(instruction.indexOf('Standing here.')).toBeLessThan(instruction.indexOf('the ask'))
+  })
+
+  it('writes the summary as the whole of what the model reads afterwards', async () => {
+    const { hook } = hookWith('Standing here.')
     const result = await hook(aged)
-    expect(result?.cancel).toBeUndefined()
-    expect(settled[0]?.state.skeleton.map((line) => line.kind)).toEqual([
-      'notice',
-      'user',
-      'notice',
-      'user',
-      'user'
-    ])
-    // The text the model reads says who spoke, and what the line cost.
-    expect(result?.compaction?.summary).toMatch(
-      /\[crucible\] ⚑ Crucible run 4cc6 \(build\) completed · branch crucible\/run-4cc6 · 1,7\d\d tok dropped/
-    )
-    expect(result?.compaction?.summary).not.toContain('x'.repeat(100))
+    expect(result?.compaction?.summary).toBe('Standing here.')
   })
 })
 

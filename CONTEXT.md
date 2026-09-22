@@ -551,31 +551,42 @@ _Avoid_: monitor badge, wait pill, monitor card (there is no transcript card).
 
 **Compaction**:
 Crucible's own rewrite of what a model sees of a conversation once it grows
-past the threshold or sits idle before its cache lapses: a trajectory summary
-and a skeleton, standing for everything up to the moment the compaction was
-asked for. Fires between tool rounds inside a turn as well as between turns,
-so a workflow node's one long turn compacts too. Nothing of that span stays verbatim; what arrives after it does.
-Written by Crucible, never by π's built-in compaction, which is switched off.
-The session file keeps everything; only the model's view shrinks.
-_Avoid_: context pruning (one part of it), summarization (one part of it), π
-compaction, auto-compact (as a noun).
+past the threshold or sits idle before its cache lapses: one summary, standing
+for everything up to the moment the compaction was asked for. The model is
+handed the conversation as a markdown document (the previous summary, then
+each message and tool call in order, results cut to their opening lines,
+thinking left out) and asked to summarize it so it can continue as if nothing
+had been compacted. Fires between tool rounds inside a turn as well as between
+turns, so a workflow node's one long turn compacts too. Nothing of that span
+stays verbatim; what arrives after it does. Written by Crucible, never by π's
+built-in compaction, which is switched off. The session file keeps
+everything; only the model's view shrinks.
+_Avoid_: context pruning, summarization (one part of it), π compaction,
+auto-compact (as a noun).
+
+**Compaction document**:
+The conversation as the summarizing request reads it: a markdown file with
+the previous summary first, then one heading per message, tool calls nested
+under the reply that made them, each result cut to its first 40 lines with
+the count of what was cut, Crucible's own messages (a run's report, a wake,
+an answer batch) named as Crucible's. Rendered by Crucible from the
+transcript, never stored.
+_Avoid_: skeleton, transcript dump, history blob.
 
 **Trajectory summary**:
-The model-written part of a compaction: where the conversation stands — the
-goal, standing decisions, what was tried and abandoned, what is in flight,
-what comes next, the files that matter now. Rewritten whole at every
-compaction over the previous one; summaries never stack.
+_Retired as a distinct thing._ The summary a compaction writes is the whole
+of what the model reads afterwards; there is no separate account beside a
+skeleton. Say "the summary" or "the compaction's summary".
 _Avoid_: history summary, recap, compaction summary (π's field name).
 
 **Skeleton**:
-The compacted span with its bulk removed: the user's words verbatim, the
-opening paragraph of each of the agent's replies, thinking gone, each tool
-call one line naming its handle and its result's size, each message Crucible
-sent in the user's role (a run's report, a wake, an answer batch) one line
-naming what it announced. Every dropped thing is restorable from disk, by
-re-running, or from the run's record. Pruned by the model's judgment at each
-later compaction, and by nothing else: no size rule trims it.
-_Avoid_: masked history, stubs, digest.
+_Retired._ Earlier builds kept a numbered list of the compacted span (the
+user's words verbatim, reply openings, one line per tool call) beside the
+summary and had the model strike dead lines at each compaction. The request
+that asked for it was refused by the provider's output classifier as
+reproducing model output, and the mechanic was replaced by the compaction
+document and one plain summary. Do not describe a compaction as keeping one.
+_Avoid_: masked history, stubs, digest, strike list.
 
 **Recent span**:
 _Retired._ Nothing of a compacted span is kept verbatim: the compaction

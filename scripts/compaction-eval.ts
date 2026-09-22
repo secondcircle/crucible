@@ -16,8 +16,8 @@
 // `plan` and `compact` take `--split <turn>` to compact twice: the branch is
 // cut before that user turn, the first part compacted, the rest appended
 // onto the compaction and compacted again. That is the second compaction a
-// long session gets in production, the one that carries the first's skeleton
-// and rewrites its account, and no session in history has grown far enough
+// long session gets in production, the one that summarizes the first's
+// summary with what followed it, and no session in history has grown far enough
 // past its first compaction to have had one.
 import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -273,9 +273,8 @@ async function read(args: readonly string[]): Promise<void> {
 }
 
 // One compaction, real or dry. Dry answers the model's part with a
-// placeholder and strikes nothing, so everything mechanical — the cut, the
-// skeleton, the trim, the window — is exactly what production would produce
-// around a real account.
+// placeholder, so everything mechanical — the cut, the document, the window —
+// is exactly what production would produce around a real summary.
 async function compactCommand(args: readonly string[], dry: boolean): Promise<void> {
   const file = resolve(args[0] ?? fail('a session file is needed.'))
   const out = flag(args, '--out') ?? fail('--out <dir> is needed.')
@@ -324,7 +323,7 @@ async function compactOnce(file: string, out: string, dry: boolean): Promise<str
     instruction = asked
     writeFileSync(join(out, 'instruction.md'), asked)
     print(`instruction: ${estimateTokens(asked).toLocaleString('en-US')} tok, written to ${out}/instruction.md`)
-    if (dry) return '<trajectory>\n(dry run: the model was not asked)\n</trajectory>\n<strike></strike>'
+    if (dry) return '(dry run: the model was not asked)'
     print('asking the model on the whole conversation…')
     const reply = await warm(asked, signal)
     // The answer as the model wrote it, strike list included: the compaction

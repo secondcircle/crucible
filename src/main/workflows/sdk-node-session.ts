@@ -23,7 +23,7 @@ import {
   type StoredMessage
 } from '../agent/sdk-transcript.ts'
 import {
-  askOnWarmCache,
+  askAfresh,
   autoCompactionEvent,
   compactionExtension,
   PI_COMPACTION_SETTINGS,
@@ -206,9 +206,8 @@ export function createSdkNodeSessionFactory({
             ask: (instruction, signal) => {
               const bound = held.session
               if (bound === undefined) throw new Error('this node has no conversation yet')
-              return askOnWarmCache({
+              return askAfresh({
                 session: bound,
-                toLlm: pi.convertToLlm,
                 complete: (model, context, options) =>
                   models.completeSimple(model, context, options)
               })(instruction, signal)

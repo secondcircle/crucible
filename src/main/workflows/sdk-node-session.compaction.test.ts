@@ -115,8 +115,7 @@ function scripted(): Scripted {
           type: 'compaction',
           details: {
             [COMPACTION_DETAILS_KEY]: {
-              record: { trigger: 'threshold', tokensBefore: 0, tokensAfter },
-              state: { skeleton: [] }
+              record: { trigger: 'threshold', tokensBefore: 0, tokensAfter }
             }
           }
         })

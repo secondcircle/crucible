@@ -1,11 +1,8 @@
 import type { AssistantMessage, Context, Model, ThinkingLevel } from '@earendil-works/pi-ai'
 import type { AgentSession, InlineExtension, SessionEntry } from '@earendil-works/pi-coding-agent'
 import type { TranscriptItem } from '../../shared/agent/port'
-import {
-  planCompaction,
-  settleCompaction,
-  type CompactionState
-} from '../../shared/compaction/compaction.ts'
+import { planCompaction, settleCompaction } from '../../shared/compaction/compaction.ts'
+import { COMPACTION_SYSTEM_PROMPT } from '../../shared/compaction/prompt.ts'
 import type {
   CompactionRecord,
   CompactionTrigger
@@ -15,31 +12,30 @@ import type { StoredMessage } from './sdk-transcript.ts'
 
 // Crucible's compaction, handed to π through the hook π offers for exactly
 // this. π's own summarizer never runs: this returns the whole compaction
-// content, so what lands in the session file is Crucible's trajectory summary
-// and skeleton and nothing of π's. The file keeps every original message —
-// only what the next request carries changes.
+// content, so what lands in the session file is Crucible's summary and
+// nothing of π's. The file keeps every original message — only what the next
+// request carries changes.
 
 export const COMPACTION_EXTENSION = 'crucible-compaction'
 
 // Crucible's own data on π's compaction entry, under one key of the `details`
-// slot π documents for extensions. It is what the next compaction prunes and
-// what the transcript reads its facts from after a reload.
+// slot π documents for extensions. It is what the transcript reads its facts
+// from after a reload.
 export const COMPACTION_DETAILS_KEY = 'crucible'
 
 /** What a compaction entry carries home, beside the text the model reads. */
 export interface StoredCompaction {
   readonly record: CompactionRecord
-  readonly state: CompactionState
 }
 
 export interface CompactionDeps {
-  // One model request against the conversation exactly as it stands, so the
-  // provider reads the prefix it already has cached and only the instruction
-  // is new input. Answers with the model's text.
+  // One model request that stands on its own: the instruction is its only
+  // user message, and the conversation it summarizes is inside it as a
+  // document. Answers with the model's text.
   readonly ask: (instruction: string, signal: AbortSignal) => Promise<string>
   /** What asked for this compaction; read at hook time, since π calls back. */
   readonly trigger: () => CompactionTrigger
-  /** π's messages in the transcript's shape, which is what a skeleton is built from. */
+  /** π's messages in the transcript's shape, which is what the document is rendered from. */
   readonly toItems: (messages: readonly StoredMessage[]) => readonly TranscriptItem[]
   // π drops a hook that throws and falls back to its own summarizer, so a
   // failure is reported here and the compaction cancelled instead.
@@ -78,7 +74,9 @@ export function compactionExtension(deps: CompactionDeps): InlineExtension {
           return { cancel: true }
         }
 
-        const plan = planCompaction(previousCompaction(branchEntries)?.state, deps.toItems(aged))
+        // π hands over the previous compaction's summary itself; the span it
+        // offers starts after that entry.
+        const plan = planCompaction(preparation.previousSummary, deps.toItems(aged))
 
         let reply: string
         try {
@@ -91,7 +89,7 @@ export function compactionExtension(deps: CompactionDeps): InlineExtension {
 
         const settled = settleCompaction(plan, reply)
         if (settled === undefined) {
-          deps.failed('The trajectory summary came back empty or cut short.')
+          deps.failed('The summary came back empty.')
           return { cancel: true }
         }
 
@@ -102,7 +100,7 @@ export function compactionExtension(deps: CompactionDeps): InlineExtension {
           tokensBefore: preparation.tokensBefore,
           tokensAfter: estimateTokens(settled.text)
         }
-        const stored: StoredCompaction = { record, state: settled.state }
+        const stored: StoredCompaction = { record }
         deps.settled?.(stored, settled.text)
 
         return {
@@ -118,15 +116,17 @@ export function compactionExtension(deps: CompactionDeps): InlineExtension {
   }
 }
 
-// The compaction's own model request. It is the conversation as it stands —
-// same system prompt, same tools, same messages, same thinking level — with
-// the instruction appended, so the provider reads the prefix it is already
-// holding instead of re-billing it. That is the whole reason the idle
-// compaction fires with the cache still warm rather than after it has lapsed,
-// and why the conversation is not serialized into a blob first.
-export function askOnWarmCache(options: {
+// The compaction's own model request. It stands on its own: the same model
+// the conversation runs on, a system prompt that says what is being asked, no
+// tools, and one user message holding the conversation as a document with the
+// instruction under it. It reads none of the provider's cached prefix, so a
+// compaction bills the conversation once more; that is the price of a request
+// that looks nothing like the agent's own turn. A build before this one
+// appended the instruction to the live conversation to read the warm cache,
+// and the provider's output classifier refused fourteen of sixteen such
+// requests on one session as reproducing model output.
+export function askAfresh(options: {
   readonly session: AgentSession
-  readonly toLlm: (messages: never) => unknown[]
   readonly complete: (
     model: Model<never>,
     context: Context,
@@ -137,26 +137,10 @@ export function askOnWarmCache(options: {
     const { session } = options
     const model = session.model
     if (model === undefined) throw new Error('This conversation has no model to compact with.')
-    // The agent's own list, in the agent's own order: π builds a turn's tools
-    // block from that list, and the block is a cache breakpoint, so a block
-    // that agrees on contents but not on order re-bills the whole prefix.
-    const defined = new Map(session.getAllTools().map((tool) => [tool.name, tool]))
-    const tools = session
-      .getActiveToolNames()
-      .map((name) => defined.get(name))
-      .filter((tool) => tool !== undefined)
-      .map((tool) => ({
-        name: tool.name,
-        description: tool.description,
-        parameters: tool.parameters
-      }))
     const context = {
-      systemPrompt: session.systemPrompt,
-      messages: [
-        ...options.toLlm([...session.messages] as never),
-        { role: 'user', content: instruction }
-      ],
-      tools
+      systemPrompt: COMPACTION_SYSTEM_PROMPT,
+      messages: [{ role: 'user', content: instruction, timestamp: Date.now() }],
+      tools: []
     } as unknown as Context
     const answer = await options.complete(model as unknown as Model<never>, context, {
       signal,
@@ -182,12 +166,10 @@ export function wholeReply(answer: AssistantMessage): AssistantMessage {
   )
 }
 
-// The level the loop being compacted runs at, which is part of what makes the
-// request land on the prefix the provider is holding: a request at another
-// level is a different prompt and re-bills the conversation this one exists
-// to save. Omitted where π omits it — thinking off, or a model that does not
-// reason — because a level on such a request is a parameter the provider
-// would reject or ignore.
+// The level the loop being compacted runs at: a summary of a day's work is
+// worth the same thought the work got. Omitted where π omits it — thinking
+// off, or a model that does not reason — because a level on such a request is
+// a parameter the provider would reject or ignore.
 function reasoningOf(session: AgentSession): { readonly reasoning?: ThinkingLevel } {
   const level = session.thinkingLevel
   if (session.model?.reasoning !== true || level === undefined || level === 'off') return {}
@@ -205,10 +187,10 @@ function textOf(message: AssistantMessage): string {
  * the prefix of any turn π's cut split, and whatever π would have kept behind
  * the cut. All of it ages out. A compaction is asked for between turns, with
  * anything sent meanwhile waiting on it, so the span runs to the moment of
- * the ask and what the model reads afterwards is the account and the
- * skeleton, then what arrived after. A build before this one kept a 20k tail
- * cut back to a turn boundary, which in practice was 20k to 35k of the
- * result and the largest single part of it.
+ * the ask and what the model reads afterwards is the summary, then what
+ * arrived after. A build before this one kept a 20k tail cut back to a turn
+ * boundary, which in practice was 20k to 35k of the result and the largest
+ * single part of it.
  */
 export function everythingSince(
   preparation: {
@@ -256,8 +238,7 @@ export function autoCompactionEvent(
 }
 
 // The latest compaction on this branch, as Crucible wrote it. A compaction
-// entry without Crucible's data is one π wrote before this build, and its
-// skeleton is simply not there to carry forward.
+// entry without Crucible's data is one π wrote before this build.
 export function previousCompaction(
   entries: readonly { readonly type?: unknown; readonly details?: unknown }[]
 ): StoredCompaction | undefined {
@@ -274,17 +255,16 @@ export function storedCompactionOf(details: unknown): StoredCompaction | undefin
   if (typeof details !== 'object' || details === null) return undefined
   const held = (details as Record<string, unknown>)[COMPACTION_DETAILS_KEY]
   if (typeof held !== 'object' || held === null) return undefined
-  const { record, state } = held as { record?: unknown; state?: unknown }
+  // Older builds stored a `state` beside the record; it is not read.
+  const { record } = held as { record?: unknown }
   if (typeof record !== 'object' || record === null) return undefined
   const { trigger, tokensBefore, tokensAfter } = record as Record<string, unknown>
   if (trigger !== 'threshold' && trigger !== 'windowEdge' && trigger !== 'idle') return undefined
-  const skeleton = (state as { skeleton?: unknown } | undefined)?.skeleton
   return {
     record: {
       trigger,
       tokensBefore: typeof tokensBefore === 'number' ? tokensBefore : 0,
       tokensAfter: typeof tokensAfter === 'number' ? tokensAfter : 0
-    },
-    state: { skeleton: Array.isArray(skeleton) ? skeleton : [] }
+    }
   }
 }

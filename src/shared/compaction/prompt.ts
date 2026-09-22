@@ -1,112 +1,34 @@
-import { renderSkeleton, type SkeletonLine } from './skeleton.ts'
+import { renderConversation, type ConversationDocument } from './transcript.ts'
 
 // What the model is asked for at a compaction, and how its answer is read.
-// The request is appended to the conversation as it already stands, so the
-// model reads its own work from the warm cache and only these words are new
-// input.
+// The request stands on its own: a document that is the conversation so far,
+// and one instruction. Nothing about the shape of the answer is dictated; the
+// whole reply is the summary.
 
-export interface CompactionRequest {
-  /** Lines aged out since the last compaction, in order. */
-  readonly aged: readonly SkeletonLine[]
-  /** How many lines the skeleton in the window already holds. */
-  readonly carried: number
-}
+// The request's own system prompt, so the summarizing model is not the agent
+// mid-turn with its tools mounted. It is asked to read a document.
+export const COMPACTION_SYSTEM_PROMPT =
+  'You summarize conversations between a user and an AI coding assistant so the assistant ' +
+  'can continue them after the earlier messages are removed from its context.'
 
-export function compactionInstruction({ aged, carried }: CompactionRequest): string {
-  const numbering =
-    carried === 0
-      ? 'Here is that skeleton, one numbered line per thing that happened:'
-      : 'The skeleton opens this conversation, numbered. These lines join the end of it:'
-  // Measured on a real session compacted twice: told nothing, the model
-  // struck three quarters of the new lines and not one of the carried ones,
-  // though its account covered everything they described. The opening
-  // skeleton was kept beside the account this one replaces, so its lines are
-  // as much up for striking as the new ones.
-  const reach =
-    carried === 0
-      ? ''
-      : ' The lines of the opening skeleton count too, by their numbers: they were kept beside ' +
-        'the account you are now replacing, and whatever it covers that they only pointed at is spent.'
-
+export function compactionInstruction(document: ConversationDocument): string {
   return [
-    'This conversation is about to be compacted. All of it up to this message leaves your ' +
-      'context and is replaced by what you write now; nothing of it stays verbatim. So write ' +
-      'for yourself: the same agent, picking this work up cold, with your account and the ' +
-      'skeleton below as the whole of what you know. What you drop you can still reach — ' +
-      'every file is on disk and every command can be run again — but you will not know to ' +
-      'look for it unless you say so here.',
-    'Write two things.',
-    'WHERE WE ARE. Where this work stands, in prose: the goal as it is now, the decisions ' +
-      'that hold, what was tried and abandoned and why it was abandoned, what is in flight, ' +
-      'what comes next, and the files that matter now. Name the abandoned approaches — ' +
-      'left out, they get retried. Make it as long as the work needs and no longer: it is ' +
-      'read on every turn from here, and it is rewritten whole at the next compaction, so ' +
-      'anything worth carrying has to be in it.',
-    'DEAD LINES. Beside your account the conversation survives as a skeleton: what the user ' +
-      'said, verbatim; the opening of each reply you gave; one line per tool call naming what ' +
-      'it touched; one line per message Crucible sent you, naming what it announced. ' +
-      numbering,
-    renderSkeleton(aged, carried + 1),
-    'Give the numbers of the lines that no longer bear on the work — an exploration that ' +
-      'went nowhere, a question your account now answers, a check whose result you have just ' +
-      'written down.' +
-      reach +
-      ' A line you are unsure about stays. A line carrying what the user typed stays even ' +
-      'when your account covers it: their words are the one thing not on disk, and asked ' +
-      'later what they said, you will have your paraphrase and nothing else. The exception ' +
-      'is a user line that is a command’s instructions (a /command the user invoked, ' +
-      'expanded): that is spent once you have carried them out and their product is on disk. The ' +
-      'instructions were Crucible’s words; the subject the user gave with them is what ' +
-      'your account must carry before you strike the line.',
-    'Answer with exactly this and nothing around it:',
-    '<trajectory>\nyour account\n</trajectory>\n<strike>numbers, comma separated; ranges ' +
-      'like 12-20 are fine; leave it empty if nothing is dead</strike>'
+    'Below is the conversation so far between a user and an AI coding assistant, as a ' +
+      'markdown document.',
+    renderConversation(document),
+    '---',
+    'Write a summary of this conversation for the assistant, so that it can continue the ' +
+      'conversation as if no compaction had happened. Keep all information that is still ' +
+      'relevant: what the user asked for and the constraints they set, the decisions made, ' +
+      'what was tried and did not work, what is in progress, what comes next, and the files ' +
+      'and commands that matter now. Leave out information that no longer bears on the ' +
+      'conversation. Write the summary and nothing else.'
   ].join('\n\n')
 }
 
-export interface CompactionReply {
-  // Empty when the model wrote nothing usable, which the caller treats as a
-  // failure. An account whose closing tag never came is not usable: the reply
-  // was cut, and what is missing is its end, where what comes next and the
-  // files that matter live. Accepting one replaced a 1,000-word account with
-  // its first 89 words, and the next compaction rewrote from those.
-  readonly trajectory: string
-  /** 1-based line numbers, deduplicated and in order. */
-  readonly strike: readonly number[]
-}
-
-export function readCompactionReply(text: string): CompactionReply {
-  return {
-    trajectory: (block(text, 'trajectory') ?? '').trim(),
-    strike: readStrike(block(text, 'strike') ?? '')
-  }
-}
-
-/** The text between the tags, and nothing where either tag is missing. */
-function block(text: string, tag: string): string | undefined {
-  const opened = text.indexOf(`<${tag}>`)
-  if (opened === -1) return undefined
-  const from = opened + tag.length + 2
-  const closed = text.indexOf(`</${tag}>`, from)
-  return closed === -1 ? undefined : text.slice(from, closed)
-}
-
-// Numbers and `a-b` ranges, however they are separated. A range written
-// backwards is read the way it was plainly meant.
-function readStrike(text: string): readonly number[] {
-  const struck = new Set<number>()
-  for (const match of text.matchAll(/(\d+)\s*(?:-|–|—|to)\s*(\d+)|(\d+)/g)) {
-    const [, from, to, single] = match
-    if (single !== undefined) {
-      struck.add(Number(single))
-      continue
-    }
-    if (from === undefined || to === undefined) continue
-    const low = Math.min(Number(from), Number(to))
-    const high = Math.max(Number(from), Number(to))
-    // A wild range would strike the whole skeleton on one bad digit.
-    if (high - low > 5_000) continue
-    for (let at = low; at <= high; at += 1) struck.add(at)
-  }
-  return [...struck].sort((left, right) => left - right)
+// The whole reply is the summary. Nothing where the model wrote nothing, which
+// the caller treats as a failure and leaves the conversation as it was.
+export function readCompactionReply(text: string): string | undefined {
+  const summary = text.trim()
+  return summary === '' ? undefined : summary
 }

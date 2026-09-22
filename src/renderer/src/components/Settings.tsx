@@ -269,9 +269,9 @@ function CompactionPane({ port }: { readonly port: AgentPort }): React.JSX.Eleme
       )}
 
       <p className="note">
-        A conversation past the threshold rewrites what its model reads: a trajectory summary the
-        model writes, a skeleton of everything before that point, and the recent messages
-        untouched. Nothing is deleted — the transcript and the session tree keep every message.
+        A conversation past the threshold rewrites what its model reads: a summary the model
+        writes of everything before that point, and then whatever arrives after it. Nothing is
+        deleted — the transcript and the session tree keep every message.
         A conversation that has sat idle long enough to lose its prompt cache is compacted before
         it does, so the next message is billed against the small context instead of the whole one.
       </p>

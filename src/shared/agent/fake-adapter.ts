@@ -423,12 +423,22 @@ const SHARED_RUN_ANSWER_DELTAS: readonly string[] = [
 export const FAKE_BRANCH_SUMMARY =
   'Summary of the abandoned branch: the fake adapter summarizes deterministically, in one sentence.'
 
-// What the fake model answers when it is asked to write a trajectory summary.
+// What the fake model answers when it is asked to summarize the conversation.
 // The reply goes through the same reader a real one does, so the compaction a
 // UI check drives is composed by the code a paid one would use.
 export const FAKE_TRAJECTORY_SUMMARY =
   'Where we are: the fake adapter compacts deterministically. The goal, the standing ' +
   'decisions and what was abandoned would be written here by the session’s own model.'
+
+// The fake model's summary: the canned line, then what the person said,
+// kept whole. A real summary is as long as the work needs, and one of a
+// conversation whose own words are over the threshold lands over it too;
+// the fake reproduces that so the rules that weigh where a compaction landed
+// are exercised without a model.
+function fakeSummaryOf(aged: readonly TranscriptItem[]): string {
+  const said = aged.filter((item) => item.kind === 'user').map((item) => item.text)
+  return [FAKE_TRAJECTORY_SUMMARY, ...said].join('\n\n')
+}
 
 // Every workspace starts with these, so resume has something to find.
 const CANNED_HISTORY: readonly { readonly preview: string; readonly items: TranscriptItem[] }[] = [
@@ -1998,9 +2008,9 @@ export function createFakeAdapter({
     },
 
     // The same compaction a paid one produces, from a canned reply: the
-    // skeleton and the composition are the shared code, and only the model's
-    // words are scripted. Everything since the last compaction ages out;
-    // nothing stays verbatim.
+    // request and the reading are the shared code, and only the model's words
+    // are scripted. Everything since the last compaction ages out; nothing
+    // stays verbatim.
     async compact(
       sessionId: SessionId,
       trigger: CompactionTrigger
@@ -2017,14 +2027,15 @@ export function createFakeAdapter({
         throw new Error('There is nothing in this conversation to compact yet.')
       }
 
-      const plan = planCompaction(undefined, aged)
-      const settled = settleCompaction(
-        plan,
-        `<trajectory>${FAKE_TRAJECTORY_SUMMARY}</trajectory><strike></strike>`
+      const previous = since === -1 ? undefined : items[since]
+      const plan = planCompaction(
+        previous?.kind === 'summary' ? previous.text : undefined,
+        aged
       )
+      const settled = settleCompaction(plan, fakeSummaryOf(aged))
       if (settled === undefined) {
         emit({ type: 'compacted', sessionId })
-        throw new Error('The trajectory summary came back empty.')
+        throw new Error('The summary came back empty.')
       }
 
       const tokensBefore = conversation.usedTokens

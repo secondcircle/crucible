@@ -356,7 +356,7 @@ describe('a branch that has been compacted', () => {
       type: 'compaction',
       summary: '## Where we are\n\nStanding here.',
       tokensBefore: 214_000,
-      details: { crucible: { record: RECORD, state: { skeleton: [] } } }
+      details: { crucible: { record: RECORD } }
     },
     { type: 'message', message: { role: 'user', content: 'The ask after it.' } }
   ]

@@ -370,9 +370,9 @@ export interface ConversationAdapter {
     text: string
   ): Promise<QueuedEntry | undefined>
 
-  // Rewrites what the model sees of this conversation: a trajectory summary
-  // and a skeleton, standing for everything up to now. Nothing is said to the
-  // agent, and nothing of the conversation is deleted.
+  // Rewrites what the model sees of this conversation: a summary standing for
+  // everything up to now. Nothing is said to the agent, and nothing of the
+  // conversation is deleted.
   // `undefined` means there was nothing to compact, which is not a failure.
   compact(
     sessionId: SessionId,

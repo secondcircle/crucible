@@ -88,7 +88,7 @@ import { branchSummaryExtension } from './sdk-branch-summary.ts'
 import {
   PI_COMPACTION_SETTINGS,
   autoCompactionEvent,
-  askOnWarmCache,
+  askAfresh,
   compactionExtension,
   previousCompaction,
   storedCompactionOf,
@@ -241,11 +241,11 @@ export function createSdkAdapter({
   readonly log?: LogSink
   // Around the compaction's one model request. The compaction eval reads the
   // instruction here and, in a dry run, answers it instead of the model. The
-  // app never passes one: `warm` is the request as production makes it.
+  // app never passes one: `fresh` is the request as production makes it.
   readonly askCompaction?: (
     instruction: string,
     signal: AbortSignal,
-    warm: CompactionDeps['ask']
+    fresh: CompactionDeps['ask']
   ) => Promise<string>
   // The machine-global compaction setting, read whenever π's own check is
   // re-armed: a session's turn compacts between tool rounds at the size this
@@ -428,15 +428,14 @@ export function createSdkAdapter({
         // what the model reads afterwards, and π persists it.
         compactionExtension({
           ask: (instruction, signal) => {
-            const warm = askOnWarmCache({
+            const fresh = askAfresh({
               session: requireBound(sessionId).session,
-              toLlm: pi.convertToLlm,
               complete: (model, context, options) =>
                 models.completeSimple(model, context, options)
             })
             return askCompaction === undefined
-              ? warm(instruction, signal)
-              : askCompaction(instruction, signal, warm)
+              ? fresh(instruction, signal)
+              : askCompaction(instruction, signal, fresh)
           },
           trigger: () => sessions.get(sessionId)?.compacting?.trigger ?? 'threshold',
           toItems: (messages) => toTranscript(messages as readonly StoredMessage[]),
