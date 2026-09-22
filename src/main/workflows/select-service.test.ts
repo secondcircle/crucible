@@ -4,18 +4,15 @@
 // `createWorkflowEngine` is stood in for here — the loader, the store and the
 // node-session factory are the real ones (the factory imports π lazily,
 // inside `start`, so constructing it loads no SDK) — so a field dropped
-// anywhere on the way down fails this test. The chooser that puts the meters
-// in front of a node's model is wired here too, and proven here.
+// anywhere on the way down fails this test.
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { SessionId } from '../../shared/agent/port'
-import type { QuotaRefreshOptions, QuotaService } from '../../shared/quota/service'
-import type { QuotaMeter, QuotaSnapshot } from '../../shared/quota/types'
 import type { LogEntry, LogSink } from '../log/sink'
 import type { EngineOptions, WorkflowEngine } from './engine'
-import { chooserFrom, selectWorkflowRunService } from './select-service'
+import { selectWorkflowRunService } from './select-service'
 
 const stood = vi.hoisted(() => ({ options: [] as unknown[] }))
 
@@ -58,33 +55,6 @@ afterEach(() => {
 
 const engineOptions = (): EngineOptions | undefined =>
   stood.options.at(-1) as EngineOptions | undefined
-
-
-const FABLE = 'anthropic/claude-fable-5:high'
-const OPUS = 'anthropic/claude-opus-5-5:high'
-
-function anthropic(meters: QuotaMeter[]): QuotaSnapshot {
-  const now = Date.now()
-  return {
-    providers: { anthropic: { providerId: 'anthropic', meters, fetchedAt: now } },
-    fetchedAt: now
-  }
-}
-
-const WEEK_AHEAD = Date.now() + 3 * 24 * 60 * 60 * 1000
-
-function quotaSaying(meters: QuotaMeter[]): QuotaService & { readonly scopes: unknown[] } {
-  const scopes: unknown[] = []
-  return {
-    scopes,
-    read: () => Promise.resolve(anthropic(meters)),
-    refresh(opts: QuotaRefreshOptions = {}) {
-      scopes.push(opts.providers)
-      return Promise.resolve(anthropic(meters))
-    },
-    onChange: () => () => {}
-  }
-}
 
 describe('choosing a workflow run service', () => {
   it('tells the engine which orchestrator sessions still exist', () => {
@@ -139,27 +109,5 @@ describe('choosing a workflow run service', () => {
     expect(log.entries).toEqual([
       { source: 'main', event: 'workflow_run_service_selected', service: 'fake' }
     ])
-  })
-})
-
-describe('the chooser the engine is wired with', () => {
-  it('sends a fable node to opus while fable leads the account week', async () => {
-    const quota = quotaSaying([
-      { kind: 'weekly', label: '7D', usedPercent: 67, resetsAt: WEEK_AHEAD },
-      { kind: 'weekly_scoped', label: 'FABLE', usedPercent: 92, resetsAt: WEEK_AHEAD }
-    ])
-
-    expect(await chooserFrom(quota)(FABLE)).toBe(OPUS)
-    // Only the provider whose model is in question; nobody else's request is spent.
-    expect(quota.scopes).toEqual([['anthropic']])
-  })
-
-  it('leaves the node alone while the account week leads', async () => {
-    const quota = quotaSaying([
-      { kind: 'weekly', label: '7D', usedPercent: 92, resetsAt: WEEK_AHEAD },
-      { kind: 'weekly_scoped', label: 'FABLE', usedPercent: 67, resetsAt: WEEK_AHEAD }
-    ])
-
-    expect(await chooserFrom(quota)(FABLE)).toBe(FABLE)
   })
 })

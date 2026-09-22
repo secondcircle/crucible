@@ -236,7 +236,6 @@ const workflowRuns = selectWorkflowRunService(
     stateDir: app.getPath('userData'),
     spawnHost,
     cache,
-    quota,
     // The same switch and threshold the sidebar's sessions run under: one
     // machine-global setting, every agent loop.
     compaction: () => store.state.compaction,

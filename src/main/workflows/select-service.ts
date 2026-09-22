@@ -4,8 +4,6 @@ import { basename, join } from 'node:path'
 import type { SessionId } from '../../shared/agent/port'
 import type { CompactionSettings } from '../../shared/compaction/settings'
 import type { NodeMonitors } from '../../shared/monitors/service'
-import { swapModel } from '../../shared/quota/model-swap'
-import type { QuotaService } from '../../shared/quota/service'
 import {
   createFakeWorkflowRunService,
   type FakeArtifactFiles
@@ -70,11 +68,6 @@ export interface WorkflowRunWiring {
   // The machine-global compaction setting, read per decision. A node compacts
   // by the same rules a session does; absent leaves nodes on the default.
   readonly compaction?: () => CompactionSettings
-  /**
-   * What a node's model is checked against before it starts. Absent, every
-   * node runs the model its workflow declared.
-   */
-  readonly quota?: QuotaService
   // Every node's monitor tools and its wait. Absent leaves nodes unable to
   // wait on anything, which is the fake flavor's own arrangement.
   readonly monitors?: NodeMonitors
@@ -119,16 +112,6 @@ function scriptedArtifactFiles(root: string): FakeArtifactFiles {
         return undefined
       }
     }
-  }
-}
-
-// `refresh` rather than `read`: a run may work for hours with no window
-// asking, and a node is about to spend on the answer. The store's TTL makes
-// this at most one request a minute however many nodes start.
-export function chooserFrom(quota: QuotaService): (model: string) => Promise<string> {
-  return async (model: string): Promise<string> => {
-    const providerId = model.split('/')[0]
-    return swapModel(model, await quota.refresh({ providers: [providerId] }))
   }
 }
 
@@ -186,7 +169,6 @@ export function selectWorkflowRunService(
     sessionExists: wiring.sessionExists,
     ...(wiring.monitors === undefined ? {} : { monitors: wiring.monitors }),
     ...(wiring.cache === undefined ? {} : { cache: wiring.cache }),
-    ...(wiring.quota === undefined ? {} : { chooseModel: chooserFrom(wiring.quota) }),
     // Built only here, in the sdk branch, so a fake-flavor launch reads no
     // skill folder for a run either.
     skills: createSkillService({

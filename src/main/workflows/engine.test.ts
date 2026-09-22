@@ -567,24 +567,26 @@ describe('the engine end to end', () => {
   })
 })
 
-// Which model a node runs is not settled when the workflow is written: the
-// engine asks, and what it is told is what gets spent.
-describe('choosing the model a node runs', () => {
-  const FABLE = 'anthropic/claude-fable-5:high'
-  const OPUS = 'anthropic/claude-opus-5-5:high'
+// The workflow file is the one word on which model a node runs: the ghost on
+// the rail shows what the plan named, and the node spends what its spec named.
+describe('the model a node runs', () => {
+  const FABLE = 'anthropic/claude-fable-5-1:high'
+  const DEFAULT = 'anthropic/claude-opus-5-5:high'
 
-  const fableNode: WorkflowDef = {
-    description: 'one node that asks for fable',
-    inputs: { prompt: 'the task file' },
-    plan: () => [{ id: 'work', model: FABLE }],
-    run: async (ctx) => {
-      const outputs = { report: { file: 'report.md', desc: 'what happened' } }
-      const result = await ctx.node('work', {
-        prompt: `do the thing; write ${artifactPaths(ctx, outputs).report}`,
-        model: FABLE,
-        outputs
-      })
-      return { summary: result.summary }
+  function solo(planned: string | undefined, declared: string | undefined): WorkflowDef {
+    return {
+      description: 'one node that names its model, or does not',
+      inputs: { prompt: 'the task file' },
+      plan: () => [{ id: 'work', ...(planned === undefined ? {} : { model: planned }) }],
+      run: async (ctx) => {
+        const outputs = { report: { file: 'report.md', desc: 'what happened' } }
+        const result = await ctx.node('work', {
+          prompt: `do the thing; write ${artifactPaths(ctx, outputs).report}`,
+          ...(declared === undefined ? {} : { model: declared }),
+          outputs
+        })
+        return { summary: result.summary }
+      }
     }
   }
 
@@ -593,42 +595,41 @@ describe('choosing the model a node runs', () => {
     tools.complete({ summary: 'did the thing' })
   }
 
-  it('runs the model it is handed, and shows it on the ghost before the node starts', async () => {
-    const asked: string[] = []
-    const { engine, repo, sessions } = rig({ solo: fableNode }, () => writesReport, {
-      chooseModel: (model) => {
-        asked.push(model)
-        return OPUS
-      }
-    })
-
+  async function runSolo(workflow: WorkflowDef): Promise<{
+    forecast: string | undefined
+    ran: string[]
+    recorded: string | undefined
+  }> {
+    const { engine, repo, sessions } = rig({ solo: workflow }, () => writesReport)
     const task = join(repo, 'task.md')
     writeFileSync(task, 'the task\n')
     const started = await engine.start(startRequest(repo, 'solo', { prompt: task }))
-
-    // The forecast on the rail is already the swapped model, before a session exists.
-    expect(started.nodes[0].model).toBe(OPUS)
-
+    const forecast = started.nodes[0].model
     await until(() => engine.runs()[0].status === 'complete')
-    // Asked twice for the one node: once for the plan, once as it started.
-    expect(asked).toEqual([FABLE, FABLE])
-    expect(sessions.models).toEqual(['work: ' + OPUS])
-    expect(engine.runs()[0].nodes[0].model).toBe(OPUS)
+    return { forecast, ran: sessions.models, recorded: engine.runs()[0].nodes[0].model }
+  }
+
+  it('shows the declared model on the ghost before the node starts, and runs it', async () => {
+    expect(await runSolo(solo(FABLE, FABLE))).toEqual({
+      forecast: FABLE,
+      ran: ['work: ' + FABLE],
+      recorded: FABLE
+    })
   })
 
-  it('runs the declared model when the chooser throws, so no node loses its turn', async () => {
-    const { engine, repo, sessions } = rig({ solo: fableNode }, () => writesReport, {
-      chooseModel: () => {
-        throw new Error('the meters are unreachable')
-      }
+  it('forecasts and runs the engine default when the workflow names no model', async () => {
+    expect(await runSolo(solo(undefined, undefined))).toEqual({
+      forecast: DEFAULT,
+      ran: ['work: ' + DEFAULT],
+      recorded: DEFAULT
     })
+  })
 
-    const task = join(repo, 'task.md')
-    writeFileSync(task, 'the task\n')
-    await engine.start(startRequest(repo, 'solo', { prompt: task }))
-
-    await until(() => engine.runs()[0].status === 'complete')
-    expect(sessions.models).toEqual(['work: ' + FABLE])
+  it('runs what the node spec names, even where the plan forecast another', async () => {
+    const { forecast, ran, recorded } = await runSolo(solo(DEFAULT, FABLE))
+    expect(forecast).toBe(DEFAULT)
+    expect(ran).toEqual(['work: ' + FABLE])
+    expect(recorded).toBe(FABLE)
   })
 })
 
