@@ -253,7 +253,7 @@ export function createWorkflowEngine(options: EngineOptions): WorkflowEngine {
     monitors,
     onChanged,
     log,
-    defaultModel = 'anthropic/claude-opus-5:high',
+    defaultModel = 'anthropic/claude-opus-5-5:high',
     chooseModel = (model: string) => model,
     pollMs = 1000,
     watchdogMs = 15_000,

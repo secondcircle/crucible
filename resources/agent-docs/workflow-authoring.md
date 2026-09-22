@@ -213,7 +213,7 @@ repository — node outputs land there, never in the worktree.
     `result.verdict`. The schema reaches the model through the tool's
     parameter schema, never through the prompt.
   - `model` — `"provider/model-id:thinkingLevel"`, e.g.
-    `"anthropic/claude-opus-5:high"`. Omitted means the engine's default.
+    `"anthropic/claude-opus-5-5:high"`. Omitted means the engine's default.
     `thinkingLevel` is π's name for the suffix and the reason it reads that
     way here, but what it sets is effort, and effort governs the whole turn
     rather than the depth of thinking alone. Lower it and the node makes

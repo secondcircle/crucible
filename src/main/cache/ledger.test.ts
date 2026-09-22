@@ -58,7 +58,7 @@ function miss(over: Partial<RecordedCacheMiss> = {}): RecordedCacheMiss {
       workspace: '/Users/ike/repos/crucible'
     },
     provider: 'anthropic',
-    model: 'claude-opus-5',
+    model: 'claude-opus-5-5',
     thinkingLevel: 'high',
     tokensRebilled: 118_211,
     dollarsRebilled: 0.62,
@@ -115,7 +115,7 @@ describe('the cache ledger', () => {
         workspace: '/Users/ike/repos/crucible'
       },
       provider: 'anthropic',
-      model: 'claude-opus-5',
+      model: 'claude-opus-5-5',
       thinkingLevel: 'high',
       retention: '1h',
       tokensRebilled: 118_211,

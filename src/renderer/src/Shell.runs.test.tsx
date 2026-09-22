@@ -71,7 +71,7 @@ function runOf(overrides: Partial<RunRecord>): RunRecord {
         id: 'builder',
         status: 'running',
         parents: ['planner'],
-        model: 'anthropic/claude-opus-5:high',
+        model: 'anthropic/claude-opus-5-5:high',
         reads: [],
         artifacts: [],
         toolCalls: 17,

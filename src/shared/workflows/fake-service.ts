@@ -454,7 +454,7 @@ function scriptOf(workflow: string): readonly ScriptedNode[] {
       {
         id: 'work',
         parents: [],
-        model: 'anthropic/claude-opus-5:high',
+        model: 'anthropic/claude-opus-5-5:high',
         planned: true,
         outputs: [
           {
@@ -489,7 +489,7 @@ function scriptOf(workflow: string): readonly ScriptedNode[] {
     {
       id: 'builder',
       parents: ['planner'],
-      model: 'anthropic/claude-opus-5:high',
+      model: 'anthropic/claude-opus-5-5:high',
       planned: false,
       outputs: [
         {
@@ -541,7 +541,7 @@ function scriptOf(workflow: string): readonly ScriptedNode[] {
     {
       id: 'fixer-1',
       parents: ['review-1', 'review-tests'],
-      model: 'anthropic/claude-opus-5:high',
+      model: 'anthropic/claude-opus-5-5:high',
       planned: false,
       outputs: [
         {
@@ -1266,7 +1266,7 @@ function cannedFinished(
         id: 'builder',
         status: 'complete',
         parents: ['planner'],
-        model: 'anthropic/claude-opus-5:high',
+        model: 'anthropic/claude-opus-5-5:high',
         reads: [read(intent), read(spec)],
         artifacts: [
           {
@@ -1383,7 +1383,7 @@ function cannedFailed(
         id: 'builder',
         status: 'failed',
         parents: ['planner'],
-        model: 'anthropic/claude-opus-5:high',
+        model: 'anthropic/claude-opus-5-5:high',
         reads: [
           { name: artifactName(intent), path: intent, desc: 'input' },
           { name: 'spec.md', path: spec, desc: 'input' }
@@ -1467,7 +1467,7 @@ function cannedInterrupted(
         id: 'architect',
         status: 'complete',
         parents: ['requirements'],
-        model: 'anthropic/claude-opus-5:high',
+        model: 'anthropic/claude-opus-5-5:high',
         reads: [read(spec)],
         artifacts: [],
         summary: 'Settled the module boundaries.',
@@ -1480,7 +1480,7 @@ function cannedInterrupted(
         id: 'builder',
         status: 'complete',
         parents: ['architect'],
-        model: 'anthropic/claude-opus-5:high',
+        model: 'anthropic/claude-opus-5-5:high',
         reads: [read(intent), read(spec)],
         artifacts: [
           {
@@ -1524,7 +1524,7 @@ function cannedInterrupted(
         id: 'gate-alignment',
         status: 'interrupted',
         parents: ['t2-review'],
-        model: 'anthropic/claude-opus-5:high',
+        model: 'anthropic/claude-opus-5-5:high',
         sessionToken: `${runDir(CANNED_INTERRUPTED_ID)}/sessions/gate-alignment.jsonl`,
         reads: [read(intent), read(changes), read(tests)],
         artifacts: [
@@ -1607,7 +1607,7 @@ function cannedUnattended(
         id: 'builder',
         status: 'blocked',
         parents: ['planner'],
-        model: 'anthropic/claude-opus-5:high',
+        model: 'anthropic/claude-opus-5-5:high',
         reads: [
           { name: artifactName(intent), path: intent, desc: 'input' },
           { name: 'spec.md', path: spec, desc: 'input' }

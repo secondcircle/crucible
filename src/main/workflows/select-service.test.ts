@@ -61,7 +61,7 @@ const engineOptions = (): EngineOptions | undefined =>
 
 
 const FABLE = 'anthropic/claude-fable-5:high'
-const OPUS = 'anthropic/claude-opus-5:high'
+const OPUS = 'anthropic/claude-opus-5-5:high'
 
 function anthropic(meters: QuotaMeter[]): QuotaSnapshot {
   const now = Date.now()

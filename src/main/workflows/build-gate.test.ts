@@ -299,7 +299,7 @@ describe('the merge gate, the final phase of a build', () => {
       'node:gate-verdict-2'
     ])
     expect(rig.asks).toEqual([])
-    expect(rig.node('gate-fixer-1').model).toBe('anthropic/claude-opus-5:high')
+    expect(rig.node('gate-fixer-1').model).toBe('anthropic/claude-opus-5-5:high')
     expect(rig.node('gate-alignment-2').head).toBe('build: gate fixer 1')
     expect(rig.node('gate-alignment-2').dirty).toBe('')
 

@@ -919,7 +919,7 @@ describe('what it says about itself', () => {
   it('refuses a model or a level it cannot honestly serve', async () => {
     const { adapter } = await withSession()
 
-    await expect(adapter.setModel('s1', 'anthropic/claude-opus-5')).rejects.toThrow()
+    await expect(adapter.setModel('s1', 'anthropic/claude-opus-5-5')).rejects.toThrow()
     await expect(adapter.setThinkingLevel('s1', 'xhigh')).rejects.toThrow()
     await expect(adapter.setThinkingLevel('s1', 'high')).resolves.toBeUndefined()
   })

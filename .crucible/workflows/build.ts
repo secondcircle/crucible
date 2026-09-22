@@ -22,7 +22,7 @@ import {
 // - The run never merges or pushes; pulling the branch in is the human's act.
 
 const REVIEW_MODEL = "anthropic/claude-fable-5:high";
-const CODE_MODEL = "anthropic/claude-opus-5:high";
+const CODE_MODEL = "anthropic/claude-opus-5-5:high";
 
 /**
  * Every node's system prompt. A node is told exactly what this file writes:

@@ -19,11 +19,11 @@ const MODELS: readonly ModelInfo[] = [
 
 // The two ids Crucible knows by heart, under the labels a port reports for
 // them. The ring's order is the module's, not this list's.
-const OPUS = 'anthropic/claude-opus-5'
+const OPUS = 'anthropic/claude-opus-5-5'
 const FABLE = 'anthropic/claude-fable-5-1'
 
 const RING_MODELS: readonly ModelInfo[] = [
-  { id: OPUS, label: 'Claude Opus 5', thinkingLevels: ['off', 'high'] },
+  { id: OPUS, label: 'Claude Opus 5.5', thinkingLevels: ['off', 'high'] },
   { id: FABLE, label: 'Claude Fable 5.1', thinkingLevels: ['off', 'high'] }
 ]
 
@@ -149,7 +149,7 @@ describe('model aliases', () => {
     openPicker()
     const picker = screen.getByRole('dialog', { name: 'Model picker' })
     expect(within(picker).getAllByRole('button').map((button) => button.textContent)).toEqual([
-      'Claude Opus 5✓',
+      'Claude Opus 5.5✓',
       'Claude Fable 5.1'
     ])
   })

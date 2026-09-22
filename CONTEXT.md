@@ -69,7 +69,7 @@ _Avoid_: session name, summary, label.
 
 **Model alias**:
 The short display name Crucible shows for a model it knows by heart — `Opus`
-for `Claude Opus 5`. Display only: the picker still lists what the port
+for `Claude Opus 5.5`. Display only: the picker still lists what the port
 reported, under the port's own labels.
 _Avoid_: nickname, friendly name, short name.
 

@@ -33,7 +33,7 @@ function message(
   const cacheWrite = over.cacheWrite ?? 0
   return {
     provider: over.provider ?? 'anthropic',
-    model: over.model ?? 'claude-opus-5',
+    model: over.model ?? 'claude-opus-5-5',
     timestamp: over.at ?? 0,
     usage: {
       input,

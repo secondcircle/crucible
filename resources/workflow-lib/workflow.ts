@@ -72,7 +72,7 @@ export interface NodeSpec {
    * supply a matching `verdict` in its complete_node call.
    */
   verdict?: VerdictSchema
-  /** "provider/model-id:thinkingLevel", e.g. "anthropic/claude-opus-5:high". */
+  /** "provider/model-id:thinkingLevel", e.g. "anthropic/claude-opus-5-5:high". */
   model?: string
   /** Built-in tool names. Defaults to read/bash/edit/write/grep/find/ls. */
   tools?: string[]

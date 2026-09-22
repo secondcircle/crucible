@@ -7,6 +7,7 @@ import type { ObservedCacheMiss } from '../../shared/agent/adapter'
 import type { CacheMissFacts, TranscriptItem, Unsubscribe } from '../../shared/agent/port'
 // Spelled with extensions so plain Node can load this module too.
 import { monitorPiTools } from '../agent/monitor-pi-tools.ts'
+import { MODEL_RUNTIME_OPTIONS } from '../agent/model-runtime-options.ts'
 import { shrinkingReadTool } from '../agent/shrink-images.ts'
 import { composeNodeSystemPrompt } from '../agent/system-prompt.ts'
 import {
@@ -88,7 +89,7 @@ export function createSdkNodeSessionFactory({
   }
 
   function runtime(): ReturnType<Sdk['ModelRuntime']['create']> {
-    modelRuntime ??= sdk().then((pi) => pi.ModelRuntime.create())
+    modelRuntime ??= sdk().then((pi) => pi.ModelRuntime.create(MODEL_RUNTIME_OPTIONS))
     return modelRuntime
   }
 

@@ -256,7 +256,7 @@ describe('the engine end to end', () => {
       return (prompt, tools) => {
         tools.cacheMiss({
           provider: 'anthropic',
-          model: 'claude-opus-5',
+          model: 'claude-opus-5-5',
           thinkingLevel: 'high',
           tokensRebilled: 118_211,
           dollarsRebilled: 0.62,
@@ -571,7 +571,7 @@ describe('the engine end to end', () => {
 // engine asks, and what it is told is what gets spent.
 describe('choosing the model a node runs', () => {
   const FABLE = 'anthropic/claude-fable-5:high'
-  const OPUS = 'anthropic/claude-opus-5:high'
+  const OPUS = 'anthropic/claude-opus-5-5:high'
 
   const fableNode: WorkflowDef = {
     description: 'one node that asks for fable',

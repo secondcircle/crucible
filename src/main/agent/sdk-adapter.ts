@@ -62,6 +62,7 @@ import { RUN_TOOLS, type RunTools } from '../../shared/agent/run-tools.ts'
 import { bindMonitorTools, type MonitorTools } from '../../shared/agent/monitor-tools.ts'
 import { bindAskTool, type AskTools } from '../../shared/agent/ask-tool.ts'
 import { monitorPiTools } from './monitor-pi-tools.ts'
+import { MODEL_RUNTIME_OPTIONS } from './model-runtime-options.ts'
 import { askPiTool } from './ask-pi-tool.ts'
 import { shrinkAttachments, shrinkingReadTool, type Shrink } from './shrink-images.ts'
 import { retentionInForce } from '../cache/retention.ts'
@@ -326,20 +327,16 @@ export function createSdkAdapter({
 
   function runtime(): Promise<ModelRuntime> {
     modelRuntime ??= sdk()
-      .then((pi) => pi.ModelRuntime.create())
+      // The built-in catalog is only as new as the installed SDK; pi.dev's
+      // overlay is fetched before the runtime answers, so the first model list
+      // and the first `getModel` already know models the package does not
+      // (Opus 5.5 shipped there a release ahead). π keeps the overlay on disk
+      // and revalidates by etag at most every four hours, so this is usually
+      // no request at all. Past the timeout, or offline, the stored overlay
+      // and the static catalog stand.
+      .then((pi) => pi.ModelRuntime.create(MODEL_RUNTIME_OPTIONS))
       .then((created) => {
         models = created
-        // π's own startup pattern: the built-in catalog answers immediately,
-        // and a background refresh overlays pi.dev's current model list — so
-        // models newer than the installed SDK appear without a package bump.
-        // Fire-and-forget with π's 15s timeout; a failure leaves the static
-        // catalog in force, which is exactly what showed before this ran.
-        const controller = new AbortController()
-        const timeout = setTimeout(() => controller.abort(), 15_000)
-        void created
-          .refresh({ signal: controller.signal })
-          .catch(() => {})
-          .finally(() => clearTimeout(timeout))
         return created
       })
     return modelRuntime

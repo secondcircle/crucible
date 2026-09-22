@@ -40,7 +40,7 @@ export function fileSize(bytes: number): string {
   return `${mb < 10 ? mb.toFixed(1) : Math.round(mb)} MB`
 }
 
-/** `anthropic/claude-opus-5:high` worn short: `opus-5:high`. */
+/** `anthropic/claude-opus-5-5:high` worn short: `opus-5-5:high`. */
 export function shortModel(model: string | undefined): string {
   if (model === undefined) return ''
   const afterProvider = model.split('/').at(-1) ?? model

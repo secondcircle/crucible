@@ -10,7 +10,7 @@ const HOUR = 60 * 60 * 1000
 const DAY = 24 * HOUR
 
 const FABLE = 'anthropic/claude-fable-5-1'
-const OPUS = 'anthropic/claude-opus-5'
+const OPUS = 'anthropic/claude-opus-5-5'
 
 function meters(week: number, fable: number): QuotaMeter[] {
   return [
