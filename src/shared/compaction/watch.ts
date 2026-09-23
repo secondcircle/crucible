@@ -154,7 +154,19 @@ export function createCompactionWatch(options: CompactionWatchOptions): Compacti
         },
         now()
       )
-      if (due !== undefined) fire(id, due)
+      if (due !== undefined) {
+        fire(id, due)
+        return
+      }
+      // Struck ahead of the deadline. The timer runs on the process's
+      // monotonic clock and the deadline sits on the wall clock the prefix was
+      // stamped with; over fifty minutes the two drift apart by milliseconds,
+      // and Node's timers strike a millisecond early on their own besides. The
+      // rule answered "not yet", not "no", so the wait resumes for what is
+      // left. Dropped here instead, the conversation sat unwatched until its
+      // next turn re-billed the whole thing, the one bill this clock exists to
+      // prevent.
+      if (now() < at) arm(id, held)
     }, Math.max(0, at - now()))
   }
 

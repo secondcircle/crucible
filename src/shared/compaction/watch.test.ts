@@ -309,6 +309,34 @@ describe('the idle clock', () => {
     expect(fired).toEqual([])
   })
 
+  // The timer keeps monotonic time and the deadline is on the wall clock the
+  // prefix was stamped with; over fifty minutes the two disagree by
+  // milliseconds, and the timer can strike with the wall clock still short of
+  // the mark. That is "not yet", so the wait resumes for what is left. This
+  // was the orchestrator that sat two hours over a warm 337k prefix and
+  // re-billed all of it on the next message.
+  it('waits out a timer that strikes ahead of the wall clock', () => {
+    let behind = 0
+    watch = createCompactionWatch({
+      settings: () => ON,
+      retention: '1h',
+      idle: (id) => !busy.has(id),
+      compact: (id, trigger) => fired.push({ id, trigger }),
+      now: () => clock.now() - behind,
+      setTimer: clock.setTimer,
+      clearTimer: clock.clearTimer
+    })
+    watch.saw('a', { lastRequestAt: 0, usedTokens: 120_000, contextWindow: 1_000_000 })
+    // The wall clock is slewed back while the conversation sits.
+    behind = 2
+    clock.advance(50 * 60 * 1000)
+    expect(fired).toEqual([])
+    expect(clock.pending()).toBe(1)
+
+    clock.advance(2)
+    expect(fired).toEqual([{ id: 'a', trigger: 'idle' }])
+  })
+
   it('leaves a working conversation alone when its moment comes', () => {
     watching()
     watch.saw('a', { lastRequestAt: 0, usedTokens: 120_000, contextWindow: 1_000_000 })
