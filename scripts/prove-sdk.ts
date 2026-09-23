@@ -10,6 +10,9 @@ const PROMPT = 'Say hello in five words. Do not use any tools.'
 const DEADLINE_MS = 60_000
 const SESSION = 'prove-sdk'
 const TURN = 'prove-sdk-turn'
+// Unset, π's own default model answers; set ("provider/model-id"), the proof
+// names the model the run is meant to be evidence for.
+const MODEL = process.env.CRUCIBLE_PROVE_MODEL
 
 function print(line: string): void {
   process.stdout.write(`${line}\n`)
@@ -34,7 +37,11 @@ print(`cwd:    ${process.cwd()}`)
 print(`system: ${systemPrompt.length} characters, composed from the shipped prompt files`)
 print(`prompt: ${JSON.stringify(PROMPT)}`)
 
-const binding = await adapter.bind({ sessionId: SESSION, workspacePath: process.cwd() })
+const binding = await adapter.bind({
+  sessionId: SESSION,
+  workspacePath: process.cwd(),
+  ...(MODEL === undefined ? {} : { preferredModel: MODEL })
+})
 print(`model:  ${binding.model ?? 'none reported'}`)
 print(`think:  ${binding.thinkingLevel ?? 'none reported'}`)
 print('')
