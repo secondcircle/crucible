@@ -331,7 +331,13 @@ function rowsOf(
   parentsOf: (node: RunNode) => readonly string[],
   reading: LoopReading
 ): Map<string, number> {
-  const byId = new Map(nodes.map((node) => [node.id, node]))
+  // A started record wins its id over a pending one under the same id, so
+  // the walked pass never reads a planned node's floor.
+  const byId = new Map(
+    [...nodes]
+      .sort((a, b) => Number(a.status !== 'pending') - Number(b.status !== 'pending'))
+      .map((node) => [node.id, node])
+  )
   const spots = spotsById(nodes, reading)
   const leads = leadingNodes(nodes, reading)
   const rows = new Map<string, number>()
@@ -374,26 +380,35 @@ function rowsOf(
     if (node === undefined || walking.has(id)) return 0
     walking.add(id)
     const parents = parentsOf(node)
-    const row =
-      parents.length === 0 ? 0 : Math.max(...parents.map((parent) => releaseOf(parent, walking)))
+    const row = Math.max(
+      node.status === 'pending' ? floorOf(parents) : 0,
+      ...parents.map((parent) => releaseOf(parent, walking))
+    )
     walking.delete(id)
     rows.set(id, row)
     return row
   }
 
   const walked = nodes.filter((node) => node.status !== 'pending')
-  for (const node of walked) rowOf(node.id, new Set())
 
-  // Nothing that has not run can come before something that has: the planned
-  // tail starts under every row the run has already used, whichever node it
-  // hangs from, and each planned node sits one row under the one before it.
-  let below =
-    walked.length === 0 ? 0 : Math.max(...walked.map((node) => releaseOf(node.id, new Set())))
-  for (const node of nodes) {
-    if (node.status !== 'pending' || rows.has(node.id)) continue
-    rows.set(node.id, below)
-    below += 1
+  // Nothing that has not run can come before something that has: a planned
+  // node sits under every row the run has already used, wherever its parents
+  // are. The exception is a started sibling, one sharing a parent with it,
+  // which it stands beside, since the two are one fan-out part walked.
+  function floorOf(parents: readonly string[]): number {
+    const shared = new Set(parents)
+    return Math.max(
+      0,
+      ...walked.map((node) =>
+        parentsOf(node).some((parent) => shared.has(parent))
+          ? rowOf(node.id, new Set())
+          : releaseOf(node.id, new Set())
+      )
+    )
   }
+
+  for (const node of walked) rowOf(node.id, new Set())
+  for (const node of nodes) rowOf(node.id, new Set())
   return rows
 }
 

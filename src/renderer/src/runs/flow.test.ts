@@ -3,7 +3,7 @@
 // What the graph draws a line for, read off the record alone: the nodes each
 // node ran after. The whole claim is that a line means "ran next" — never
 // that one node read what another wrote — and that a node which has not
-// started hangs under the run rather than wherever a plan forecast it.
+// started is drawn from the parents its record holds, as one that has.
 import { describe, expect, it } from 'vitest'
 import type { RunNode } from '../../../shared/workflows/run'
 import { readFlow, runOrder } from './flow'
@@ -67,10 +67,31 @@ describe('what a node ran after', () => {
   })
 })
 
-describe('the planned tail', () => {
-  it('chains it off the node running now, in plan order, whatever the plan forecast', () => {
-    // The build's shape: the gate nodes are forecast under the holistic
-    // review, and the run is deep inside a step by the time they matter.
+describe('a node that has not started', () => {
+  it('draws from the parents its record holds, so a planned fan-out stays one', () => {
+    // A design run's plan: two holistic reviews off the slicer, merged by a
+    // third. Neither review follows the other.
+    const nodes = [
+      ran('architect'),
+      ghost('slicer', ['architect']),
+      ghost('holistic-review-1-a', ['slicer']),
+      ghost('holistic-review-1-b', ['slicer']),
+      ghost('holistic-review-1', ['holistic-review-1-a', 'holistic-review-1-b'])
+    ]
+
+    expect(after(nodes)).toEqual({
+      architect: [],
+      slicer: ['architect'],
+      'holistic-review-1-a': ['slicer'],
+      'holistic-review-1-b': ['slicer'],
+      'holistic-review-1': ['holistic-review-1-a', 'holistic-review-1-b']
+    })
+  })
+
+  it('keeps the forecast when the run has gone on somewhere else', () => {
+    // The gate is forecast under the holistic review; the run is deep inside
+    // a step by now. The record still says what it says, and the layout, not
+    // the flow, is what keeps the gate below the work.
     const nodes = [
       ran('analyst'),
       ran('holistic-review-1', ['analyst'], 1),
@@ -81,33 +102,20 @@ describe('the planned tail', () => {
     ]
 
     expect(after(nodes)).toMatchObject({
-      'gate-alignment-1': ['review-account-shell-1'],
+      'gate-alignment-1': ['holistic-review-1'],
       'gate-comments': ['gate-alignment-1']
     })
   })
 
-  it('hangs it off the last that ran when nothing is running', () => {
-    const nodes = [
-      ran('analyst'),
-      ran('builder', ['analyst'], 1),
-      // Forecast early in the record, and still the tail: record order is
-      // plan order, not the order the run reached them.
-      ghost('gate-1', ['analyst']),
-      { ...ran('review-1', ['builder'], 2), status: 'failed' as const }
-    ]
-
-    expect(after(nodes)['gate-1']).toEqual(['review-1'])
-  })
-
-  it('never lets a node that has not run come before one that has', () => {
-    // A node declaring a parent the plan has forecast but nobody has started:
-    // the edge would climb out of the tail into work already done.
+  it('is never the parent of one that has', () => {
+    // A started node declaring a parent nobody has started: the edge would
+    // climb out of the planned work into work already done.
     const nodes = [ghost('later'), ran('omega', ['later'], 1)]
 
-    expect(after(nodes)).toEqual({ later: ['omega'], omega: [] })
+    expect(after(nodes)).toEqual({ later: [], omega: [] })
   })
 
-  it('starts the tail at its own first node while nothing has run at all', () => {
+  it('reads the same while nothing has run at all', () => {
     const nodes = [ghost('analyst'), ghost('builder', ['analyst']), ghost('gate', ['builder'])]
 
     expect(after(nodes)).toEqual({ analyst: [], builder: ['analyst'], gate: ['builder'] })

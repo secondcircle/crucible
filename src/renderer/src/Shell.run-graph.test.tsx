@@ -235,9 +235,9 @@ describe('the drawn graph', () => {
         cardFor(id)
       )
     }
-    // Four lines, one per node that ran next: the trunk, the fan-out of two,
-    // and the dashed one down to the node nobody has started.
-    expect(document.querySelectorAll('.cstage svg path')).toHaveLength(4)
+    // Five lines, one per parent a node declares: the trunk, the fan-out of
+    // two, and the dashed pair that rejoins it at the node nobody has started.
+    expect(document.querySelectorAll('.cstage svg path')).toHaveLength(5)
     // Every card is placed by the layout, never by the flow of the document.
     expect(cardFor('builder').style.top).not.toBe(cardFor('planner').style.top)
   })
@@ -269,7 +269,7 @@ describe('the drawn graph', () => {
     })
 
     // Ahead of the walk: either end still pending. The planned node hangs off
-    // the node running now, wherever the plan forecast it.
+    // the parents its record names.
     expect(edgeClass('review-code', 'gate-alignment-1')).toContain('future')
     // Being walked: the child has started and not settled.
     expect(edgeClass('builder', 'review-code')).toContain('flowing')

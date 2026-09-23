@@ -345,8 +345,9 @@ followed what, what fanned out in parallel, what was sent back for revision.
 A pannable, zoomable canvas that opens fit and centered. An edge means one
 thing only: that node ran next, as the node itself declared. It carries no
 text, and reading a file another node wrote is never an edge — dataflow is
-the artifact rail's. A planned node that has not started sits below
-everything that has run, never where a plan's forecast would put it.
+the artifact rail's. A planned node that has not started is drawn from the
+parents its record holds, the plan's forecast, and sits below everything
+that has run except a started sibling, which it stands beside.
 _Avoid_: the flow, the graph rail, the DAG view, pipeline diagram, dependency
 edge (for a file read).
 

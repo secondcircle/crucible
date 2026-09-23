@@ -582,8 +582,8 @@ describe('a loop, laid out left to right', () => {
 
 // The build the picture was drawn for: three steps cut by the slicer, a
 // two-round holistic review before them, one node running and the gate nodes
-// forecast by `plan()` under the holistic review — which is where the record
-// holds them, and nowhere near where they belong on the page.
+// forecast by `plan()` under the holistic review, which is where the record
+// holds them. Their line comes from there; their cards sit below the work.
 const STEPS = [
   'analyst',
   'architect',
@@ -655,19 +655,19 @@ describe('a build, read as a flow', () => {
       'review-settings-pane-2': [1, 10],
       'fixer-settings-pane-2': [1, 11],
       'review-settings-pane-3': [2, 10],
-      // Below everything that has run, in plan order, however the plan
-      // forecast them.
+      // Below everything that has run, however far up the plan forecast
+      // their parent.
       'gate-alignment-1': [0, 12],
       'gate-comments': [0, 13]
     })
   })
 
-  it('draws one line per node it ran after, and hangs the planned tail off the running node', () => {
+  it('draws one line per node it ran after, the planned ones from their forecast parents', () => {
     expect(layout.edges.map((edge) => `${edge.from}→${edge.to}`)).toEqual([
       'analyst→architect',
       'architect→slicer',
       'slicer→holistic-review-1',
-      'review-settings-pane-3→gate-alignment-1',
+      'holistic-review-1→gate-alignment-1',
       'gate-alignment-1→gate-comments',
       'holistic-review-1→holistic-review-2',
       'holistic-review-2→builder-browser-suite-runner',
@@ -685,15 +685,15 @@ describe('a build, read as a flow', () => {
     ])
   })
 
-  it('has three line shapes and no others: down, up into the next round, back along a band', () => {
+  it('has four line shapes and no others: down, up into the next round, back along a band, past the work', () => {
     const kinds = new Map(layout.edges.map((edge) => [`${edge.from}→${edge.to}`, edge.route.kind]))
     expect(kinds.get('builder-settings-pane→review-settings-pane-1')).toBe('direct')
     expect(kinds.get('fixer-settings-pane-1→review-settings-pane-2')).toBe('across')
     expect(kinds.get('review-browser-suite-runner-2→builder-account-shell')).toBe('return')
-    // The planned tail leaves the running node the same way the main line
-    // leaves any round: down and left, back under the first column.
-    expect(kinds.get('review-settings-pane-3→gate-alignment-1')).toBe('return')
-    expect(new Set(kinds.values())).toEqual(new Set(['direct', 'across', 'return']))
+    // The gate's forecast parent is nine rows up: its line runs in a channel
+    // clear of every card the build put between them.
+    expect(kinds.get('holistic-review-1→gate-alignment-1')).toBe('lane')
+    expect(new Set(kinds.values())).toEqual(new Set(['direct', 'across', 'return', 'lane']))
   })
 
   it('outlines each step’s own stretch and nobody else’s', () => {
@@ -726,7 +726,7 @@ describe('a build, read as a flow', () => {
     }
   })
 
-  it('puts the planned tail under every branch, not just under the node it hangs from', () => {
+  it('puts a planned node under every branch, not just under the node it hangs from', () => {
     // The running node is not the deepest thing on the page: another branch
     // went two layers further. Nothing planned may sit beside that work.
     const held = layOutGraph([
@@ -744,9 +744,11 @@ describe('a build, read as a flow', () => {
     const walked = ['builder', 'review-code', 'review-tests', 'fixer-1']
     const deepest = Math.max(...walked.map((id) => card(held, id).layer))
     expect(card(held, 'gate-alignment-1').layer).toBeGreaterThan(deepest)
-    expect(held.edges.map((edge) => `${edge.from}→${edge.to}`)).toContain(
-      'review-code→gate-alignment-1'
-    )
+    // Its one line is the one its record names, whatever runs now.
+    expect(held.edges.filter((edge) => edge.to === 'gate-alignment-1')).toMatchObject([
+      { from: 'builder' }
+    ])
+    expectNoEdgeCrossesACard(held)
   })
 
   it('holds the whole drawing, outlines included, and overlaps nothing', () => {
@@ -760,6 +762,101 @@ describe('a build, read as a flow', () => {
       expect(block.y + block.height).toBeLessThanOrEqual(layout.height)
     }
     expect(layOutGraph(BUILT.map((node) => ({ ...node })))).toEqual(layout)
+  })
+})
+
+describe('a fan-out, planned or walked', () => {
+  const ghost = (id: string, parents: string[]): RunNode =>
+    nodeOf(id, parents, { status: 'pending', startedAt: undefined, endedAt: undefined })
+  const running = (id: string, parents: string[]): RunNode =>
+    nodeOf(id, parents, { status: 'running', endedAt: undefined })
+  const edgesOf = (layout: Layout): string[] =>
+    layout.edges.map((edge) => `${edge.from}→${edge.to}`).sort()
+
+  /** Siblings side by side under their parent, the merge under all of them. */
+  function expectFanOut(layout: Layout, parent: string, siblings: string[], merge: string): void {
+    for (const id of siblings) {
+      expect(card(layout, id).layer, `${id} is one row under ${parent}`).toBe(
+        card(layout, parent).layer + 1
+      )
+    }
+    const xs = siblings.map((id) => card(layout, id).x)
+    expect(new Set(xs).size, 'no two siblings share a column').toBe(siblings.length)
+    expect(card(layout, merge).layer).toBe(card(layout, parent).layer + 2)
+    expect(centre(layout, merge)).toBeCloseTo(centre(layout, parent))
+    expectNothingOverlaps(layout)
+    expectNoEdgeCrossesACard(layout)
+  }
+
+  // Run 94c5 as recorded: the architect running, the rest of the plan ahead.
+  const DESIGN = [
+    nodeOf('analyst'),
+    running('architect', ['screen-designer']),
+    ghost('slicer', ['architect']),
+    ghost('holistic-review-1-a', ['slicer']),
+    ghost('holistic-review-1-b', ['slicer']),
+    ghost('holistic-review-1', ['holistic-review-1-a', 'holistic-review-1-b']),
+    ghost('gate-brief-1', ['holistic-review-1']),
+    nodeOf('screen-designer', ['analyst'])
+  ]
+
+  it('lays a planned fan-out side by side and rejoins it under both halves', () => {
+    const layout = layOutGraph(DESIGN)
+
+    expectFanOut(layout, 'slicer', ['holistic-review-1-a', 'holistic-review-1-b'], 'holistic-review-1')
+    expect(edgesOf(layout)).toEqual(
+      [
+        'analyst→screen-designer',
+        'screen-designer→architect',
+        'architect→slicer',
+        'slicer→holistic-review-1-a',
+        'slicer→holistic-review-1-b',
+        'holistic-review-1-a→holistic-review-1',
+        'holistic-review-1-b→holistic-review-1',
+        'holistic-review-1→gate-brief-1'
+      ].sort()
+    )
+  })
+
+  it('keeps the same picture while one half has started and the other has not', () => {
+    const layout = layOutGraph(
+      DESIGN.map((node) =>
+        node.id === 'architect' || node.id === 'slicer'
+          ? nodeOf(node.id, [...node.parents])
+          : node.id === 'holistic-review-1-a'
+            ? running(node.id, [...node.parents])
+            : node
+      )
+    )
+
+    expectFanOut(layout, 'slicer', ['holistic-review-1-a', 'holistic-review-1-b'], 'holistic-review-1')
+    expect(edgesOf(layout)).toEqual(edgesOf(layOutGraph(DESIGN)))
+  })
+
+  // A root-cause run: the probes fan out of triage and rejoin at the pin.
+  const PROBES = ['probe-1-select-sync', 'probe-1-date-lag', 'probe-1-form-fill', 'probe-1-replay']
+
+  it('fans a root-cause run’s probes out of triage and rejoins them at the pin', () => {
+    const walked = [
+      nodeOf('triage-1'),
+      ...PROBES.map((id) => nodeOf(id, ['triage-1'])),
+      nodeOf('pin', PROBES)
+    ]
+    const midway = [
+      nodeOf('triage-1'),
+      ...PROBES.map((id, at) =>
+        at < 2 ? running(id, ['triage-1']) : ghost(id, ['triage-1'])
+      ),
+      ghost('pin', PROBES)
+    ]
+
+    for (const layout of [layOutGraph(walked), layOutGraph(midway)]) {
+      expectFanOut(layout, 'triage-1', PROBES, 'pin')
+      expect(edgesOf(layout)).toEqual(
+        [...PROBES.map((id) => `triage-1→${id}`), ...PROBES.map((id) => `${id}→pin`)].sort()
+      )
+    }
+    expect(gridOf(layOutGraph(midway))).toEqual(gridOf(layOutGraph(walked)))
   })
 })
 
