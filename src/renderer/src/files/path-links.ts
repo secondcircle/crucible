@@ -58,16 +58,24 @@ export interface PathLinks {
   keep(target: ClickTarget): void
 }
 
-// Nothing is a link where no session's chat is being read: an exhibit's
-// markdown, an issue's body, a run node's transcript.
-const NONE: PathLinks = {
-  opens: () => false,
-  check: () => {},
-  open: () => {},
-  keep: () => {}
+/**
+ * Where no session's chat is being read — an exhibit's markdown, an issue's
+ * body, a run node's transcript — no path is a link, but a local address
+ * still opens where it opens from the chat.
+ */
+export function addressLinks(
+  open: (target: ClickTarget) => void,
+  keep: (target: ClickTarget) => void
+): PathLinks {
+  return { opens: () => false, check: () => {}, open, keep }
 }
 
-export const PathLinksContext = createContext<PathLinks>(NONE)
+export const PathLinksContext = createContext<PathLinks>(
+  addressLinks(
+    () => {},
+    () => {}
+  )
+)
 
 export function usePathLinks({
   service,

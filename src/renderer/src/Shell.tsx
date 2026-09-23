@@ -109,6 +109,7 @@ import { faceOf, withFace, type SidebarFace, type SidebarFaces } from './sidebar
 import { filtering, insideTree, toggleFolder, wholePath, type Expanded } from './files/tree'
 import { useWatchedFiles } from './files/use-files'
 import {
+  addressLinks,
   PathLinksContext,
   targetKey,
   usePathLinks,
@@ -1767,6 +1768,10 @@ export function Shell({
     open: openFromMessage,
     keep: keepInPanel
   })
+  const addressesOnly = useMemo(
+    () => addressLinks(openFromMessage, keepInPanel),
+    [openFromMessage, keepInPanel]
+  )
 
   // ⌘I, on exactly the same terms: claimed where there is an issue board to
   // open, and left to the OS where there is not.
@@ -2967,441 +2972,445 @@ export function Shell({
         }
       />
 
-      {/* Everything the overlay region spans, and the region itself: the chat
-          column, the divider and the context panel. The sidebar is outside
-          this box, which is why no overlay can reach it. */}
-      <div className="body">
-        <main className="main" style={place === 'maximized' ? CHAT_AWAY : undefined}>
-          <TopBar
-            session={session}
-            instance={instance}
-            menuOpen={popover === 'sessionMenu'}
-            onToggleMenu={() => setPopover(popover === 'sessionMenu' ? 'none' : 'sessionMenu')}
-            onResetSession={resetSession}
-            onOpenUsage={() => occupy({ kind: 'settings', section: 'usage' })}
-            onJumpToCacheMiss={() => setMissJump((asked) => asked + 1)}
-            issues={
-              issues === undefined
-                ? undefined
-                : { open: issues.open, yours: issues.yours, onOpen: openIssues }
-            }
-            schedules={
-              scheduleEntry === undefined || scheduleEntry.schedules.length === 0
-                ? undefined
-                : {
-                    count: scheduleEntry.schedules.length,
-                    needYou: parkedHere.length,
-                    onOpen: openSchedules
-                  }
-            }
-            update={
-              appVersion?.kind === 'installed' && appVersion.update.kind === 'ready'
-                ? { version: appVersion.update.version, onRestart: restartIntoUpdate }
-                : undefined
-            }
-          />
+      {/* No path is a link outside the chat, which provides its own; a local
+          address opens in the session's panel from anywhere it is written. */}
+      <PathLinksContext.Provider value={addressesOnly}>
+        {/* Everything the overlay region spans, and the region itself: the chat
+            column, the divider and the context panel. The sidebar is outside
+            this box, which is why no overlay can reach it. */}
+        <div className="body">
+          <main className="main" style={place === 'maximized' ? CHAT_AWAY : undefined}>
+            <TopBar
+              session={session}
+              instance={instance}
+              menuOpen={popover === 'sessionMenu'}
+              onToggleMenu={() => setPopover(popover === 'sessionMenu' ? 'none' : 'sessionMenu')}
+              onResetSession={resetSession}
+              onOpenUsage={() => occupy({ kind: 'settings', section: 'usage' })}
+              onJumpToCacheMiss={() => setMissJump((asked) => asked + 1)}
+              issues={
+                issues === undefined
+                  ? undefined
+                  : { open: issues.open, yours: issues.yours, onOpen: openIssues }
+              }
+              schedules={
+                scheduleEntry === undefined || scheduleEntry.schedules.length === 0
+                  ? undefined
+                  : {
+                      count: scheduleEntry.schedules.length,
+                      needYou: parkedHere.length,
+                      onOpen: openSchedules
+                    }
+              }
+              update={
+                appVersion?.kind === 'installed' && appVersion.update.kind === 'ready'
+                  ? { version: appVersion.update.version, onRestart: restartIntoUpdate }
+                  : undefined
+              }
+            />
 
-          <RunStrip
-            runs={sessionRuns}
-            monitors={sessionMonitors}
-            now={monitorNow}
-            openMonitorId={openMonitorId}
-            checkout={active?.path}
-            onOpen={openWorkflowRun}
-            onOpenMonitor={toggleMonitor}
-            onStopMonitor={stopMonitor}
-          />
+            <RunStrip
+              runs={sessionRuns}
+              monitors={sessionMonitors}
+              now={monitorNow}
+              openMonitorId={openMonitorId}
+              checkout={active?.path}
+              onOpen={openWorkflowRun}
+              onOpenMonitor={toggleMonitor}
+              onStopMonitor={stopMonitor}
+            />
 
-          {/* The transcript's own row. Nothing overlays it any more: every
-              overlay is in the region, which covers this, the composer and the
-              context panel together. */}
-          <div className="stage">
-            {snapshot.workspaces.length === 0 ? (
-              <div className="blank">
-                <p>No workspace yet.</p>
-                <button className="btn primary" onClick={addWorkspace}>
-                  Add workspace
-                </button>
-              </div>
-            ) : session === undefined ? (
-              <div className="blank">
-                <p>No session in this workspace.</p>
-                <button className="btn primary" onClick={newSession}>
-                  New session
-                </button>
-              </div>
-            ) : (
-              // A path an agent named is clickable here and nowhere else: not
-              // in an exhibit, not in an issue's body, not in a run node's
-              // transcript, none of which is this session's chat.
-              <PathLinksContext.Provider value={pathLinks}>
-                <Transcript
-                  items={items}
-                  sessionId={session.id}
-                  invocations={shownInvocations}
-                  missJump={missJump}
-                  shown={place !== 'maximized'}
-                />
-              </PathLinksContext.Provider>
-            )}
+            {/* The transcript's own row. Nothing overlays it any more: every
+                overlay is in the region, which covers this, the composer and the
+                context panel together. */}
+            <div className="stage">
+              {snapshot.workspaces.length === 0 ? (
+                <div className="blank">
+                  <p>No workspace yet.</p>
+                  <button className="btn primary" onClick={addWorkspace}>
+                    Add workspace
+                  </button>
+                </div>
+              ) : session === undefined ? (
+                <div className="blank">
+                  <p>No session in this workspace.</p>
+                  <button className="btn primary" onClick={newSession}>
+                    New session
+                  </button>
+                </div>
+              ) : (
+                // A path an agent named is clickable here and nowhere else: not
+                // in an exhibit, not in an issue's body, not in a run node's
+                // transcript, none of which is this session's chat.
+                <PathLinksContext.Provider value={pathLinks}>
+                  <Transcript
+                    items={items}
+                    sessionId={session.id}
+                    invocations={shownInvocations}
+                    missJump={missJump}
+                    shown={place !== 'maximized'}
+                  />
+                </PathLinksContext.Provider>
+              )}
 
-            {toast === undefined || toast.sessionId !== activeSessionId ? null : (
-              <p className="toast" role="status">
-                {toast.text}
+              {toast === undefined || toast.sessionId !== activeSessionId ? null : (
+                <p className="toast" role="status">
+                  {toast.text}
+                </p>
+              )}
+            </div>
+
+            {failure === undefined || failure.sessionId !== activeSessionId ? null : (
+              <p className="failure" role="alert">
+                {failure.message}
               </p>
             )}
-          </div>
 
-          {failure === undefined || failure.sessionId !== activeSessionId ? null : (
-            <p className="failure" role="alert">
-              {failure.message}
-            </p>
-          )}
+            {/* A summarize keeps running behind a closed overlay, and a session
+                that looks idle while it pays for a call is a wait nobody can see.
+                The failure outlives the call, so it is read the moment the user
+                arrives, before they reopen anything. One wait state at a time:
+                a summarize the cache expiry choice is showing is narrated there. */}
+            {activeJump === undefined ||
+            treeShowing ||
+            choiceShown ? null : activeJump.kind === 'failed' ? (
+              <p className="failure" role="alert">
+                {jumpNote(activeJump)}
+              </p>
+            ) : (
+              <p className="jumpline" role="status">
+                <span className="spin" aria-hidden="true" />
+                {jumpNote(activeJump)}
+              </p>
+            )}
 
-          {/* A summarize keeps running behind a closed overlay, and a session
-              that looks idle while it pays for a call is a wait nobody can see.
-              The failure outlives the call, so it is read the moment the user
-              arrives, before they reopen anything. One wait state at a time:
-              a summarize the cache expiry choice is showing is narrated there. */}
-          {activeJump === undefined ||
-          treeShowing ||
-          choiceShown ? null : activeJump.kind === 'failed' ? (
-            <p className="failure" role="alert">
-              {jumpNote(activeJump)}
-            </p>
+            {queue === undefined ? null : <QueuedStrip queue={queue} onDequeue={dequeue} />}
+
+            {run === undefined ? null : (
+              <BashDrawer run={run} onStop={stopRun} onShare={shareRun} onClose={closeRun} />
+            )}
+
+            {/* Pinned here, between the transcript and the composer, so a
+                question can never scroll out of sight. */}
+            {line === undefined || session === undefined ? null : (
+              <QuestionsDock
+                sessionId={session.id}
+                line={line}
+                now={questionNow}
+                boxRef={answerBox}
+                onReply={replyToQuestion}
+              />
+            )}
+
+            <Composer
+              draft={draft}
+              disabled={session === undefined}
+              working={working}
+              boxRef={box}
+              elapsedSeconds={elapsedSeconds}
+              model={model}
+              modelId={shownModel}
+              models={models}
+              modelPickerOpen={popover === 'model'}
+              thinkingLevel={session?.thinkingLevel}
+              thinkingMenuOpen={popover === 'thinking'}
+              attachments={chips}
+              files={shownFiles}
+              commands={browsingCommands ? commandList : undefined}
+              workspaceName={active?.name}
+              sessionDirectory={sessionDirectory}
+              worktree={session?.worktree}
+              worktreeShown={active !== undefined && gitWorkspaces[active.id] === true}
+              worktreeBusy={flipInFlight}
+              worktreeLocked={session !== undefined && !session.fresh}
+              worktreeOutput={
+                worktreeOutput !== undefined && worktreeOutput.sessionId === activeSessionId
+                  ? worktreeOutput.output
+                  : undefined
+              }
+              onDraft={setDraft}
+              onSend={send}
+              onFollowUp={followUp}
+              onRestoreLast={restoreLast}
+              onStop={cancel}
+              onToggleModelPicker={() => setPopover(popover === 'model' ? 'none' : 'model')}
+              onSelectModel={selectModel}
+              onToggleThinkingMenu={() => setPopover(popover === 'thinking' ? 'none' : 'thinking')}
+              onSelectThinkingLevel={selectThinkingLevel}
+              onRemoveAttachment={removeAttachment}
+              onFileToken={setFileToken}
+              onRunBash={runBash}
+              onToggleWorktree={toggleWorktree}
+            />
+          </main>
+
+          {/* Nothing at all when the session has no tabs: the chat is full-width,
+              and there is no empty panel and no edge strip to explain. */}
+          {place === 'none' || panel === undefined || activeSessionId === undefined ? null : place ===
+            'collapsed' ? (
+            <PanelEdge
+              count={panel.tabs.length}
+              onOpen={() =>
+                setPanelViews((current) => withPanelView(current, activeSessionId, 'split'))
+              }
+            />
           ) : (
-            <p className="jumpline" role="status">
-              <span className="spin" aria-hidden="true" />
-              {jumpNote(activeJump)}
-            </p>
-          )}
-
-          {queue === undefined ? null : <QueuedStrip queue={queue} onDequeue={dequeue} />}
-
-          {run === undefined ? null : (
-            <BashDrawer run={run} onStop={stopRun} onShare={shareRun} onClose={closeRun} />
-          )}
-
-          {/* Pinned here, between the transcript and the composer, so a
-              question can never scroll out of sight. */}
-          {line === undefined || session === undefined ? null : (
-            <QuestionsDock
-              sessionId={session.id}
-              line={line}
-              now={questionNow}
-              boxRef={answerBox}
-              onReply={replyToQuestion}
+            // One render site, whichever view the panel is in: the difference is
+            // the layout it is handed, never a branch of its own, because a
+            // second site would unmount the guest and reload the exhibit.
+            <ContextPanel
+              panel={panel}
+              sessionId={activeSessionId}
+              layout={
+                place === 'maximized'
+                  ? { kind: 'maximized' }
+                  : {
+                      kind: 'split',
+                      ...(panelWidth === undefined ? {} : { width: panelWidth }),
+                      onResize: setPanelWidth
+                    }
+              }
+              port={port}
+              changed={filesChanged}
+              inFront={inFront}
+              onCopyLocation={(location) =>
+                void navigator.clipboard?.writeText(location).catch(report)
+              }
+              onReveal={
+                sessionDirectory === undefined
+                  ? undefined
+                  : (path) => void service.revealFile(sessionDirectory, path).catch(report)
+              }
+              onCollapse={() =>
+                setPanelViews((current) => withPanelView(current, activeSessionId, 'collapsed'))
+              }
+              onToggleMaximize={() =>
+                setPanelViews((current) =>
+                  withPanelView(
+                    current,
+                    activeSessionId,
+                    place === 'maximized' ? 'split' : 'maximized'
+                  )
+                )
+              }
             />
           )}
 
-          <Composer
-            draft={draft}
-            disabled={session === undefined}
-            working={working}
-            boxRef={box}
-            elapsedSeconds={elapsedSeconds}
-            model={model}
-            modelId={shownModel}
-            models={models}
-            modelPickerOpen={popover === 'model'}
-            thinkingLevel={session?.thinkingLevel}
-            thinkingMenuOpen={popover === 'thinking'}
-            attachments={chips}
-            files={shownFiles}
-            commands={browsingCommands ? commandList : undefined}
-            workspaceName={active?.name}
-            sessionDirectory={sessionDirectory}
-            worktree={session?.worktree}
-            worktreeShown={active !== undefined && gitWorkspaces[active.id] === true}
-            worktreeBusy={flipInFlight}
-            worktreeLocked={session !== undefined && !session.fresh}
-            worktreeOutput={
-              worktreeOutput !== undefined && worktreeOutput.sessionId === activeSessionId
-                ? worktreeOutput.output
-                : undefined
-            }
-            onDraft={setDraft}
-            onSend={send}
-            onFollowUp={followUp}
-            onRestoreLast={restoreLast}
-            onStop={cancel}
-            onToggleModelPicker={() => setPopover(popover === 'model' ? 'none' : 'model')}
-            onSelectModel={selectModel}
-            onToggleThinkingMenu={() => setPopover(popover === 'thinking' ? 'none' : 'thinking')}
-            onSelectThinkingLevel={selectThinkingLevel}
-            onRemoveAttachment={removeAttachment}
-            onFileToken={setFileToken}
-            onRunBash={runBash}
-            onToggleWorktree={toggleWorktree}
-          />
-        </main>
-
-        {/* Nothing at all when the session has no tabs: the chat is full-width,
-            and there is no empty panel and no edge strip to explain. */}
-        {place === 'none' || panel === undefined || activeSessionId === undefined ? null : place ===
-          'collapsed' ? (
-          <PanelEdge
-            count={panel.tabs.length}
-            onOpen={() =>
-              setPanelViews((current) => withPanelView(current, activeSessionId, 'split'))
-            }
-          />
-        ) : (
-          // One render site, whichever view the panel is in: the difference is
-          // the layout it is handed, never a branch of its own, because a
-          // second site would unmount the guest and reload the exhibit.
-          <ContextPanel
-            panel={panel}
-            sessionId={activeSessionId}
-            layout={
-              place === 'maximized'
-                ? { kind: 'maximized' }
-                : {
-                    kind: 'split',
-                    ...(panelWidth === undefined ? {} : { width: panelWidth }),
-                    onResize: setPanelWidth
-                  }
-            }
-            port={port}
-            changed={filesChanged}
-            inFront={inFront}
-            onCopyLocation={(location) =>
-              void navigator.clipboard?.writeText(location).catch(report)
-            }
-            onReveal={
-              sessionDirectory === undefined
-                ? undefined
-                : (path) => void service.revealFile(sessionDirectory, path).catch(report)
-            }
-            onCollapse={() =>
-              setPanelViews((current) => withPanelView(current, activeSessionId, 'collapsed'))
-            }
-            onToggleMaximize={() =>
-              setPanelViews((current) =>
-                withPanelView(
-                  current,
-                  activeSessionId,
-                  place === 'maximized' ? 'split' : 'maximized'
-                )
-              )
-            }
-          />
-        )}
-
-        {/* The overlay region: one host for every overlay. It is here at all
-            only while something is in it, and everything in it is anchored to
-            it, so no overlay can reach the sidebar or either bar. */}
-        {occupied || confirm !== undefined || choiceShown || compactionWaitShown ? (
-          <div className="region">
-            {issuesOpen ? (
-              <IssueBoard
-                answer={issueAnswer}
-                refreshing={issueEntry?.refreshing ?? false}
-                failure={issueEntry?.failure}
-                sessions={issueSessions}
-                aligning={aligning}
-                onRefresh={() => {
-                  if (activeWorkspaceId !== undefined) refreshIssues(activeWorkspaceId)
-                }}
-                onAlign={alignOn}
-                onOpenSession={activateSession}
-                onOpenIssue={openIssue}
-                onCopy={copyReference}
-                onClose={closeRegion}
-              />
-            ) : null}
-
-            {schedulesShown && active !== undefined && scheduleService !== undefined ? (
-              <ScheduleBoard
-                workspaceName={active.name}
-                workspacePath={active.path}
-                {...(scheduleEntry === undefined ? {} : { schedules: scheduleEntry })}
-                runs={allRuns}
-                {...(selectedRunId === undefined ? {} : { selectedRunId })}
-                onSelectRun={setSelectedRunId}
-                onSetEnabled={(workflow, enabled) =>
-                  scheduleService.setEnabled(active.path, workflow, enabled)
-                }
-                onSetAllPaused={(paused) => scheduleService.setAllPaused(active.path, paused)}
-                onRunNow={runNowFromBoard}
-                onTakeToSession={investigateRun}
-                onOpenRunView={openWorkflowRun}
-                onDismiss={dismissFromBoard}
-                artifact={boardArtifact}
-                onClose={closeRegion}
-              />
-            ) : null}
-
-            {treeShown ? (
-              tree === undefined ? (
-                <div className="tree loading">
-                  <p className="nonodes">Reading this session's tree…</p>
-                </div>
-              ) : (
-                <SessionTree
-                  tree={tree}
-                  working={working}
-                  jump={activeJump}
-                  onJump={jump}
-                  onLabel={label}
+          {/* The overlay region: one host for every overlay. It is here at all
+              only while something is in it, and everything in it is anchored to
+              it, so no overlay can reach the sidebar or either bar. */}
+          {occupied || confirm !== undefined || choiceShown || compactionWaitShown ? (
+            <div className="region">
+              {issuesOpen ? (
+                <IssueBoard
+                  answer={issueAnswer}
+                  refreshing={issueEntry?.refreshing ?? false}
+                  failure={issueEntry?.failure}
+                  sessions={issueSessions}
+                  aligning={aligning}
+                  onRefresh={() => {
+                    if (activeWorkspaceId !== undefined) refreshIssues(activeWorkspaceId)
+                  }}
+                  onAlign={alignOn}
+                  onOpenSession={activateSession}
+                  onOpenIssue={openIssue}
+                  onCopy={copyReference}
                   onClose={closeRegion}
                 />
-              )
-            ) : null}
+              ) : null}
 
-            {runsOverviewOpen ? (
-              <RunsOverview
-                runs={allRuns}
-                workspaces={snapshot.workspaces}
-                sessions={snapshot.sessions}
-                onOpenRun={openWorkflowRun}
-                onGoToSession={goToRunSession}
-                onDismiss={dismissRun}
-                onCancel={cancelRun}
-                onResume={resumeRun}
-                onInvestigate={investigateRun}
-                onClose={closeRegion}
-              />
-            ) : null}
+              {schedulesShown && active !== undefined && scheduleService !== undefined ? (
+                <ScheduleBoard
+                  workspaceName={active.name}
+                  workspacePath={active.path}
+                  {...(scheduleEntry === undefined ? {} : { schedules: scheduleEntry })}
+                  runs={allRuns}
+                  {...(selectedRunId === undefined ? {} : { selectedRunId })}
+                  onSelectRun={setSelectedRunId}
+                  onSetEnabled={(workflow, enabled) =>
+                    scheduleService.setEnabled(active.path, workflow, enabled)
+                  }
+                  onSetAllPaused={(paused) => scheduleService.setAllPaused(active.path, paused)}
+                  onRunNow={runNowFromBoard}
+                  onTakeToSession={investigateRun}
+                  onOpenRunView={openWorkflowRun}
+                  onDismiss={dismissFromBoard}
+                  artifact={boardArtifact}
+                  onClose={closeRegion}
+                />
+              ) : null}
 
-            {/* Rendered after the overview so an opened run sits above it and
-                Esc unwinds in the order the surfaces were entered. */}
-            {runShown && openRun !== undefined && workflowRuns !== undefined ? (
-              <WorkflowRunView
-                key={openRun.id}
-                run={openRun}
-                canGoToSession={
-                  openRun.sessionId !== undefined &&
-                  snapshot.sessions.some((candidate) => candidate.id === openRun.sessionId)
-                }
-                workspaceOpen={snapshot.workspaces.some(
-                  (candidate) => candidate.path === openRun.workspacePath
-                )}
-                transcript={runTranscript}
-                artifact={runArtifact}
-                openArtifact={openArtifactPath}
-                onOpenArtifact={setOpenArtifactPath}
-                onRevealArtifact={(path) =>
-                  void workflowRuns.revealArtifact(openRun.id, path).catch(report)
-                }
-                onCopyPath={(path) => void navigator.clipboard?.writeText(path).catch(report)}
-                onGoToSession={() => {
-                  if (openRun.sessionId !== undefined) goToRunSession(openRun.sessionId)
-                }}
-                onPause={() => void workflowRuns.pause(openRun.id).catch(report)}
-                onResume={(kind) => resumeRun(openRun.id, kind).then(() => {})}
-                onCancel={() => void cancelRun(openRun.id)}
-                onInvestigate={() => investigateRun(openRun.id)}
-                onClose={() => {
-                  setGraphFullScreen(false)
-                  closeTopOfRegion()
-                }}
-                fullScreen={graphFullScreen}
-                onToggleFullScreen={() => setGraphFullScreen((up) => !up)}
-              />
-            ) : null}
+              {treeShown ? (
+                tree === undefined ? (
+                  <div className="tree loading">
+                    <p className="nonodes">Reading this session's tree…</p>
+                  </div>
+                ) : (
+                  <SessionTree
+                    tree={tree}
+                    working={working}
+                    jump={activeJump}
+                    onJump={jump}
+                    onLabel={label}
+                    onClose={closeRegion}
+                  />
+                )
+              ) : null}
 
-            {cacheShown && cacheService !== undefined && cacheHealth !== undefined ? (
-              <CacheHealthView
-                health={cacheHealth}
-                workspaceOpen={activeWorkspaceId !== undefined}
-                // Appends a reset line and nothing else: the misses underneath
-                // survive it, which is what makes reset cheap enough to need no
-                // confirmation.
-                onReset={() => cacheService.reset().then(() => {})}
-                onInvestigate={investigateCache}
-                // The button says it copied; a toast over the transcript would
-                // be a second answer to one click.
-                onCopy={(path) => void navigator.clipboard?.writeText(path).catch(report)}
-                onClose={closeRegion}
-              />
-            ) : null}
+              {runsOverviewOpen ? (
+                <RunsOverview
+                  runs={allRuns}
+                  workspaces={snapshot.workspaces}
+                  sessions={snapshot.sessions}
+                  onOpenRun={openWorkflowRun}
+                  onGoToSession={goToRunSession}
+                  onDismiss={dismissRun}
+                  onCancel={cancelRun}
+                  onResume={resumeRun}
+                  onInvestigate={investigateRun}
+                  onClose={closeRegion}
+                />
+              ) : null}
 
-            {resumeOpen ? (
-              <ResumeOverlay onSearch={search} onChoose={resume} onClose={closeRegion} />
-            ) : null}
+              {/* Rendered after the overview so an opened run sits above it and
+                  Esc unwinds in the order the surfaces were entered. */}
+              {runShown && openRun !== undefined && workflowRuns !== undefined ? (
+                <WorkflowRunView
+                  key={openRun.id}
+                  run={openRun}
+                  canGoToSession={
+                    openRun.sessionId !== undefined &&
+                    snapshot.sessions.some((candidate) => candidate.id === openRun.sessionId)
+                  }
+                  workspaceOpen={snapshot.workspaces.some(
+                    (candidate) => candidate.path === openRun.workspacePath
+                  )}
+                  transcript={runTranscript}
+                  artifact={runArtifact}
+                  openArtifact={openArtifactPath}
+                  onOpenArtifact={setOpenArtifactPath}
+                  onRevealArtifact={(path) =>
+                    void workflowRuns.revealArtifact(openRun.id, path).catch(report)
+                  }
+                  onCopyPath={(path) => void navigator.clipboard?.writeText(path).catch(report)}
+                  onGoToSession={() => {
+                    if (openRun.sessionId !== undefined) goToRunSession(openRun.sessionId)
+                  }}
+                  onPause={() => void workflowRuns.pause(openRun.id).catch(report)}
+                  onResume={(kind) => resumeRun(openRun.id, kind).then(() => {})}
+                  onCancel={() => void cancelRun(openRun.id)}
+                  onInvestigate={() => investigateRun(openRun.id)}
+                  onClose={() => {
+                    setGraphFullScreen(false)
+                    closeTopOfRegion()
+                  }}
+                  fullScreen={graphFullScreen}
+                  onToggleFullScreen={() => setGraphFullScreen((up) => !up)}
+                />
+              ) : null}
 
-            {settingsOpen ? (
-              <Settings
-                section={settingsSection}
-                onSection={(section) => occupy({ kind: 'settings', section })}
-                onClose={closeRegion}
-                port={port}
-                auth={auth}
-                workspace={service}
-                workspaceOpen={active !== undefined}
-                sessions={snapshot.sessions.filter(
-                  (candidate) => candidate.workspaceId === activeWorkspaceId
-                )}
-                activeSessionId={activeSessionId}
-                contextPercent={contextPercent(session?.usage)}
-              />
-            ) : null}
+              {cacheShown && cacheService !== undefined && cacheHealth !== undefined ? (
+                <CacheHealthView
+                  health={cacheHealth}
+                  workspaceOpen={activeWorkspaceId !== undefined}
+                  // Appends a reset line and nothing else: the misses underneath
+                  // survive it, which is what makes reset cheap enough to need no
+                  // confirmation.
+                  onReset={() => cacheService.reset().then(() => {})}
+                  onInvestigate={investigateCache}
+                  // The button says it copied; a toast over the transcript would
+                  // be a second answer to one click.
+                  onCopy={(path) => void navigator.clipboard?.writeText(path).catch(report)}
+                  onClose={closeRegion}
+                />
+              ) : null}
 
-            {/* Last, so a confirm raised over an open occupant stacks above it
-                and is answered before anything else is. */}
-            {confirm === undefined ? null : confirm.kind === 'cancelRun' ? (
-              <ConfirmDialog
-                title="Cancel this run?"
-                body="Its agents stop where they stand and the run lands in Done as cancelled. The worktree, branch and artifacts all stay."
-                confirmLabel="Cancel the run"
-                cancelLabel="Let it keep working"
-                onConfirm={confirmed}
-                onCancel={() => setConfirm(undefined)}
-              />
-            ) : confirm.kind === 'reset' ? (
-              <ConfirmDialog
-                title="Reset this session?"
-                body="The conversation is replaced with a fresh one. This session keeps its place in the sidebar, and the old conversation stays findable through Resume session."
-                confirmLabel="Reset anyway"
-                cancelLabel="Keep the conversation"
-                onConfirm={confirmed}
-                onCancel={() => setConfirm(undefined)}
-              />
-            ) : (
-              <ConfirmDialog
-                title="Invalidate this session's cache?"
-                body={`Changing the thinking level to ${confirm.level} mid-conversation invalidates this session's prompt cache, so the whole conversation is re-sent at full price on the next message.`}
-                confirmLabel="Change anyway"
-                cancelLabel="Keep current level"
-                onConfirm={confirmed}
-                onCancel={() => setConfirm(undefined)}
-              />
-            )}
+              {resumeOpen ? (
+                <ResumeOverlay onSearch={search} onChoose={resume} onClose={closeRegion} />
+              ) : null}
 
-            {/* A send that arrived while this session was compacting: the
-                same wait the summarize door puts up, and the same way out. */}
-            {compactionWaitShown ? (
-              <SummarizingDialog
-                title="Compacting the conversation"
-                subtitle="Rewriting what the agent reads. Your message goes out the moment this lands."
-                footer="cancel — the conversation is left exactly as it was"
-              />
-            ) : null}
+              {settingsOpen ? (
+                <Settings
+                  section={settingsSection}
+                  onSection={(section) => occupy({ kind: 'settings', section })}
+                  onClose={closeRegion}
+                  port={port}
+                  auth={auth}
+                  workspace={service}
+                  workspaceOpen={active !== undefined}
+                  sessions={snapshot.sessions.filter(
+                    (candidate) => candidate.workspaceId === activeWorkspaceId
+                  )}
+                  activeSessionId={activeSessionId}
+                  contextPercent={contextPercent(session?.usage)}
+                />
+              ) : null}
 
-            {/* The choice a send raised, above whatever it was raised over,
-                and only ever on the session that raised it. */}
-            {choiceShown && choice !== undefined ? (
-              <CacheExpiryChoice
-                prefix={choice.prefix}
-                now={choice.at}
-                summarizing={choice.summarizing === true}
-                note={
-                  activeJump?.kind === 'retrying' || activeJump?.kind === 'cancelling'
-                    ? jumpNote(activeJump)
-                    : undefined
-                }
-                onSendAnyway={sendAnyway}
-                onSummarize={summarizeThenSend}
-                onDismiss={() => {
-                  setChoice(undefined)
-                  box.current?.focus()
-                }}
-              />
-            ) : null}
-          </div>
-        ) : null}
-      </div>
+              {/* Last, so a confirm raised over an open occupant stacks above it
+                  and is answered before anything else is. */}
+              {confirm === undefined ? null : confirm.kind === 'cancelRun' ? (
+                <ConfirmDialog
+                  title="Cancel this run?"
+                  body="Its agents stop where they stand and the run lands in Done as cancelled. The worktree, branch and artifacts all stay."
+                  confirmLabel="Cancel the run"
+                  cancelLabel="Let it keep working"
+                  onConfirm={confirmed}
+                  onCancel={() => setConfirm(undefined)}
+                />
+              ) : confirm.kind === 'reset' ? (
+                <ConfirmDialog
+                  title="Reset this session?"
+                  body="The conversation is replaced with a fresh one. This session keeps its place in the sidebar, and the old conversation stays findable through Resume session."
+                  confirmLabel="Reset anyway"
+                  cancelLabel="Keep the conversation"
+                  onConfirm={confirmed}
+                  onCancel={() => setConfirm(undefined)}
+                />
+              ) : (
+                <ConfirmDialog
+                  title="Invalidate this session's cache?"
+                  body={`Changing the thinking level to ${confirm.level} mid-conversation invalidates this session's prompt cache, so the whole conversation is re-sent at full price on the next message.`}
+                  confirmLabel="Change anyway"
+                  cancelLabel="Keep current level"
+                  onConfirm={confirmed}
+                  onCancel={() => setConfirm(undefined)}
+                />
+              )}
+
+              {/* A send that arrived while this session was compacting: the
+                  same wait the summarize door puts up, and the same way out. */}
+              {compactionWaitShown ? (
+                <SummarizingDialog
+                  title="Compacting the conversation"
+                  subtitle="Rewriting what the agent reads. Your message goes out the moment this lands."
+                  footer="cancel — the conversation is left exactly as it was"
+                />
+              ) : null}
+
+              {/* The choice a send raised, above whatever it was raised over,
+                  and only ever on the session that raised it. */}
+              {choiceShown && choice !== undefined ? (
+                <CacheExpiryChoice
+                  prefix={choice.prefix}
+                  now={choice.at}
+                  summarizing={choice.summarizing === true}
+                  note={
+                    activeJump?.kind === 'retrying' || activeJump?.kind === 'cancelling'
+                      ? jumpNote(activeJump)
+                      : undefined
+                  }
+                  onSendAnyway={sendAnyway}
+                  onSummarize={summarizeThenSend}
+                  onDismiss={() => {
+                    setChoice(undefined)
+                    box.current?.focus()
+                  }}
+                />
+              ) : null}
+            </div>
+          ) : null}
+        </div>
+      </PathLinksContext.Provider>
 
       {/* Drop feedback, not a surface: it stays full-window. */}
       {veil ? (

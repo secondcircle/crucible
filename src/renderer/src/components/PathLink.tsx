@@ -64,15 +64,17 @@ export function PathButton({
 /** A local address: the panel is where a page served here is looked at. */
 export function AddressButton({
   address,
+  look,
   children
 }: {
   readonly address: string
+  readonly look: 'code' | 'link'
   readonly children: ReactNode
 }): React.JSX.Element {
   return (
     <Target
       target={{ kind: 'address', address }}
-      look="link"
+      look={look}
       title={`Open ${address} in the context panel`}
     >
       {children}

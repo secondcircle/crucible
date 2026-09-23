@@ -2,6 +2,7 @@ import { createElement, memo, type ReactNode } from 'react'
 import { isLocalAddress } from '../../../shared/agent/local-address'
 import { useNamedPath } from '../files/path-links'
 import { AddressButton, PathButton } from './PathLink'
+import { isWebAddress, webAddressIn } from './web-address'
 import './markdown.css'
 
 // Written by hand rather than pulled in so that no string from an agent can
@@ -159,43 +160,71 @@ function cells(row: string): string[] {
     .map((cell) => cell.trim())
 }
 
+// A bare address runs to the next space, quote or angle bracket; where the
+// sentence around it takes some of that back is `webAddressIn`'s call.
 const INLINE =
-  /(`+)([\s\S]+?)\1|\*\*([\s\S]+?)\*\*|__([\s\S]+?)__|\*([^*\n]+?)\*|_([^_\n]+?)_|\[([^\]]*)\]\(([^)\s]+)\)/g
+  /(`+)([\s\S]+?)\1|\*\*([\s\S]+?)\*\*|__([\s\S]+?)__|\*([^*\n]+?)\*|_([^_\n]+?)_|\[([^\]]*)\]\(([^)\s]+)\)|\b(https?:\/\/[^\s<>`"]+)/g
 
 function inline(text: string): ReactNode[] {
   const out: ReactNode[] = []
   let index = 0
   let key = 0
 
-  INLINE.lastIndex = 0
-  for (let match = INLINE.exec(text); match !== null; match = INLINE.exec(text)) {
+  // A copy per call, because bold and emphasis parse their own insides and a
+  // shared pattern's position would be trampled by the nested call.
+  const pattern = new RegExp(INLINE)
+  for (let match = pattern.exec(text); match !== null; match = pattern.exec(text)) {
     if (match.index > index) out.push(text.slice(index, match.index))
-    const [whole, , code, strong, strongToo, emphasis, emphasisToo, label, href] = match
+    const [whole, , code, strong, strongToo, emphasis, emphasisToo, label, href, bare] = match
+    let taken = whole.length
 
     if (code !== undefined) out.push(<CodeSpan key={key++} text={code} />)
-    else if (strong !== undefined) out.push(<strong key={key++}>{strong}</strong>)
-    else if (strongToo !== undefined) out.push(<strong key={key++}>{strongToo}</strong>)
-    else if (emphasis !== undefined) out.push(<em key={key++}>{emphasis}</em>)
-    else if (emphasisToo !== undefined) out.push(<em key={key++}>{emphasisToo}</em>)
+    else if (strong !== undefined) out.push(<strong key={key++}>{inline(strong)}</strong>)
+    else if (strongToo !== undefined) out.push(<strong key={key++}>{inline(strongToo)}</strong>)
+    else if (emphasis !== undefined) out.push(<em key={key++}>{inline(emphasis)}</em>)
+    else if (emphasisToo !== undefined) out.push(<em key={key++}>{inline(emphasisToo)}</em>)
     else if (href !== undefined) out.push(<Link key={key++} label={label} href={href} />)
-    else out.push(whole)
+    else if (bare !== undefined) {
+      const address = webAddressIn(bare)
+      if (address === undefined) out.push(whole)
+      else {
+        out.push(
+          <WebAddress key={key++} address={address} look="link">
+            {address}
+          </WebAddress>
+        )
+        // What the sentence took back is read again as the text it is.
+        taken = address.length
+        pattern.lastIndex = match.index + taken
+      }
+    } else out.push(whole)
 
-    index = match.index + whole.length
+    index = match.index + taken
   }
   if (index < text.length) out.push(text.slice(index))
   return out
 }
 
-// A path in backticks is a file the moment the disk says it is one; every
-// other code span is the code span it always was.
+// A path in backticks is a file the moment the disk says it is one, and a web
+// address in backticks is a link whatever the disk says; every other code span
+// is the code span it always was.
 function CodeSpan({ text }: { readonly text: string }): React.JSX.Element {
   const named = useNamedPath(text)
-  if (named === undefined) return <code>{text}</code>
-  return (
-    <PathButton named={named} look="code">
-      {text}
-    </PathButton>
-  )
+  if (named !== undefined) {
+    return (
+      <PathButton named={named} look="code">
+        {text}
+      </PathButton>
+    )
+  }
+  if (isWebAddress(text)) {
+    return (
+      <WebAddress address={text} look="code">
+        {text}
+      </WebAddress>
+    )
+  }
+  return <code>{text}</code>
 }
 
 // Three doors and no fourth: the context panel for a file this agent named
@@ -218,13 +247,36 @@ function Link({
       </PathButton>
     )
   }
-  // The panel is what a page served on this machine is for; every other
-  // address keeps going to the browser.
-  if (isLocalAddress(href)) return <AddressButton address={href}>{shown}</AddressButton>
   if (!/^(https?:|mailto:)/i.test(href)) return <>{`[${label}](${href})`}</>
   return (
-    <a href={href} target="_blank" rel="noreferrer noopener">
+    <WebAddress address={href} look="link">
       {shown}
+    </WebAddress>
+  )
+}
+
+// One rule for every way an agent can write an address: the panel is what a
+// page served on this machine is for, and every other address keeps going to
+// the browser, where the user's logins are.
+function WebAddress({
+  address,
+  look,
+  children
+}: {
+  readonly address: string
+  readonly look: 'code' | 'link'
+  readonly children: ReactNode
+}): React.JSX.Element {
+  if (isLocalAddress(address)) {
+    return (
+      <AddressButton address={address} look={look}>
+        {children}
+      </AddressButton>
+    )
+  }
+  return (
+    <a href={address} target="_blank" rel="noreferrer noopener">
+      {look === 'code' ? <code>{children}</code> : children}
     </a>
   )
 }

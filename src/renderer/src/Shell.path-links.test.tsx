@@ -429,6 +429,182 @@ describe('a markdown link in an agent’s message', () => {
   })
 })
 
+// A bare address opens where a markdown link to it opens: a page served on
+// this machine in the panel, every other page in the browser that holds the
+// user's logins.
+describe('a bare web address in an agent’s message', () => {
+  const address = (name: string): HTMLElement => screen.getByRole('link', { name })
+
+  it('is a link to the browser, with the sentence’s full stop left out of it', async () => {
+    const { port } = await shell()
+
+    await said(port, 'Go to https://blaportal.com/account/notifications. Uncheck the box.')
+
+    const outside = address('https://blaportal.com/account/notifications')
+    expect(outside).toHaveAttribute('href', 'https://blaportal.com/account/notifications')
+    expect(outside).toHaveAttribute('target', '_blank')
+    // The sentence reads exactly as it was written, full stop and all.
+    expect(outside.closest('p')).toHaveTextContent(
+      'Go to https://blaportal.com/account/notifications. Uncheck the box.'
+    )
+    expect(outside.nextSibling?.textContent).toBe('. Uncheck the box.')
+  })
+
+  it('opens a localhost address as a web tab in the panel', async () => {
+    const { port } = await shell()
+
+    await said(port, 'The dev server is up at http://localhost:5173/settings, as asked.')
+    await click(link('http://localhost:5173/settings'))
+
+    expect(port.calls).toContainEqual({
+      op: 'openAddress',
+      args: ['s1', 'http://localhost:5173/settings', { keep: false }]
+    })
+    expect(tabs()).toEqual(['settings'])
+    expect(screen.queryByRole('link')).toBeNull()
+  })
+
+  it('leaves out a parenthesis it did not open, and keeps one it did', async () => {
+    const { port } = await shell()
+
+    await said(
+      port,
+      'The docs (at https://example.test/docs) cite https://en.wikipedia.org/wiki/Foo_(bar).'
+    )
+
+    expect(address('https://example.test/docs')).toHaveAttribute(
+      'href',
+      'https://example.test/docs'
+    )
+    expect(address('https://en.wikipedia.org/wiki/Foo_(bar)')).toHaveAttribute(
+      'href',
+      'https://en.wikipedia.org/wiki/Foo_(bar)'
+    )
+  })
+
+  it('is one inside bold and emphasis too', async () => {
+    const { port } = await shell()
+
+    await said(port, '**Open https://example.test/now** or _try http://127.0.0.1:8080/_.')
+
+    expect(address('https://example.test/now').closest('strong')).not.toBeNull()
+    expect(link('http://127.0.0.1:8080/').closest('em')).not.toBeNull()
+  })
+
+  it('needs its scheme, and only http or https will do', async () => {
+    const { port } = await shell()
+
+    await said(port, 'Not www.example.test, not ftp://example.test/file, not mailto:a@b.test.')
+
+    expect(screen.queryByRole('link')).toBeNull()
+    expect(screen.queryByRole('button', { name: /example/ })).toBeNull()
+  })
+
+  it('is a link in backticks too, and keeps the code chip’s look', async () => {
+    const { port, workspace } = await shell()
+
+    await said(port, 'Fetch `https://example.test/api` or `http://localhost:5173/`.')
+
+    const outside = address('https://example.test/api')
+    expect(outside).toHaveAttribute('target', '_blank')
+    expect(outside.querySelector('code')).toHaveTextContent('https://example.test/api')
+
+    const local = link('http://localhost:5173/')
+    expect(local).toHaveClass('pathlink', 'code')
+    await click(local)
+    expect(tabs()).toEqual(['localhost'])
+
+    // An address is never a path, so no answer about one is asked of the disk.
+    const asked = workspace.calls
+      .filter((call) => call.op === 'existingFiles')
+      .flatMap((call) => call.args[1] as readonly string[])
+    expect(asked).toEqual([])
+  })
+
+  it('is recognized as text and never interpreted as markup', async () => {
+    const { port } = await shell()
+
+    await said(port, 'See https://example.test/<b>x</b>"onclick="alert(1) now.')
+
+    expect(address('https://example.test/')).toHaveAttribute('href', 'https://example.test/')
+    const transcript = screen.getByRole('log', { name: 'Transcript' })
+    expect(transcript.querySelector('b')).toBeNull()
+    expect(transcript.querySelector('[onclick]')).toBeNull()
+  })
+})
+
+// Every live target reads as one before the pointer reaches it; a code span
+// that names nothing keeps the look it always had.
+describe('what a live target looks like', () => {
+  it('is drawn as a link, and a dead code span as plain code', async () => {
+    const { port } = await shell()
+
+    await said(
+      port,
+      'Edit `CONTEXT.md`, not `service_request.submitted`; read [the glossary](CONTEXT.md) ' +
+        'and https://example.test/.'
+    )
+
+    expect(link('CONTEXT.md')).toHaveClass('pathlink', 'code')
+    expect(link('the glossary')).toHaveClass('pathlink', 'link')
+    expect(screen.getByRole('link', { name: 'https://example.test/' }).closest('.markdown')).not.toBeNull()
+
+    const dead = screen.getByText('service_request.submitted')
+    expect(dead.tagName).toBe('CODE')
+    expect(dead.className).toBe('')
+    expect(dead.closest('a, button')).toBeNull()
+  })
+})
+
+// Outside the chat a bare address is a link as well, and a local one still
+// opens in the panel; a path there is text, as it always was.
+describe('a bare web address outside the chat', () => {
+  it('opens a local one from a markdown exhibit in the panel, and links no path', async () => {
+    const port = createScriptedPort(
+      oneSession({
+        panel: {
+          tabs: [
+            {
+              id: 'plan',
+              title: 'the plan',
+              kind: 'markdown',
+              shownAt: '2026-08-19T14:14:00.000Z',
+              path: '/repos/crucible/docs/plan.md'
+            }
+          ],
+          activeTabId: 'plan'
+        }
+      })
+    )
+    port.exhibits.set(
+      'plan',
+      'Serve it at http://localhost:4000/ and read https://example.test/ and `CONTEXT.md`.'
+    )
+    render(
+      <Shell
+        port={port}
+        workspace={createScriptedWorkspace(FILES)}
+        commands={createScriptedCommands()}
+      />
+    )
+    await sessionsShown()
+    await settled()
+
+    const panel = screen.getByLabelText('Context panel')
+    expect(within(panel).getByRole('link', { name: 'https://example.test/' })).toHaveAttribute(
+      'target',
+      '_blank'
+    )
+    expect(within(panel).getByText('CONTEXT.md').tagName).toBe('CODE')
+
+    await click(within(panel).getByRole('button', { name: 'http://localhost:4000/' }))
+    expect(port.calls).toContainEqual({
+      op: 'openAddress',
+      args: ['s1', 'http://localhost:4000/', { keep: false }]
+    })
+  })
+})
+
 describe('where a path is not a link', () => {
   it('is not one in the user’s own message', async () => {
     await shell()

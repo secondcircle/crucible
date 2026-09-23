@@ -389,10 +389,12 @@ const REPLY_DELTAS: readonly string[] = [
   '- a thinking block, dim and collapsed\n',
   '- a chain of five calls, two of them one skill, one a failure, then a lone call\n',
   // The paths are genuinely there in a Crucible checkout, so the click that
-  // opens one in the context panel is drivable with no model and no cost.
+  // opens one in the context panel is drivable with no model and no cost;
+  // `inline code` names nothing, so a live link sits beside a dead span.
   '- markdown with `inline code`, a table and a fenced block\n\n' +
     'The glossary is `CONTEXT.md`, this port is `src/shared/agent/port.ts:1`, ' +
-    'and the build rules are in `Makefile`.\n\n',
+    'and the build rules are in `Makefile`. The SDK lives at ' +
+    'https://github.com/earendil-works/pi.\n\n',
   '| flavor | cost | default |\n| --- | --- | --- |\n',
   '| fake | none | yes |\n| sdk | metered | no |\n\n',
   '```ts\n',

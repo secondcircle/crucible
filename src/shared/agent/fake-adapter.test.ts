@@ -104,6 +104,22 @@ describe('the scripted turn', () => {
     expect(reply).toContain('```ts')
   })
 
+  // What a check of the links in a reply drives: a bare web address, a path a
+  // Crucible checkout has, and a code span that names nothing.
+  it('names a bare web address, a real path and a dead code span', async () => {
+    const { adapter, events } = await withSession()
+
+    await adapter.prompt('s1', 't-1', 'hello')
+    const reply = events
+      .filter((event) => event.type === 'text_delta')
+      .map((event) => event.delta)
+      .join('')
+
+    expect(reply).toContain(' https://github.com/earendil-works/pi.')
+    expect(reply).toContain('`CONTEXT.md`')
+    expect(reply).toContain('`inline code`')
+  })
+
   it('opens and closes every call it starts, with its output', async () => {
     const { adapter, events } = await withSession()
 

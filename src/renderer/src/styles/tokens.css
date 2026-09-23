@@ -53,6 +53,9 @@
   /* the outline around a step block: fainter than any card's border, so the
      cards inside it stay the thing being read */
   --step-block: #33282f;
+  /* the underline a link in a message carries at rest: the link color, held
+     back far enough that a paragraph of links still reads as prose */
+  --link-cue: color-mix(in srgb, var(--accent2) 55%, transparent);
 
   /* what a source view colors: keyword, string, comment, number, type */
   --syntax-keyword: #c586c0;

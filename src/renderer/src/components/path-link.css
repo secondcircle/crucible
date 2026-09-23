@@ -1,7 +1,7 @@
-/* A path the disk has answered for. It reads as what it sits in — a code span,
-   a link, a word in a tool chain row header — and says it is clickable by the
-   underline that appears under the pointer. A code span nobody can open looks
-   exactly as it always did. */
+/* A path the disk has answered for, or a local address. It reads as what it
+   sits in — a code span, a link, a word in a tool chain row header — and says
+   it is clickable by an underline. A code span nobody can open looks exactly
+   as it always did. */
 .pathlink {
   font: inherit;
   background: none;
@@ -29,6 +29,21 @@
 
 .pathlink.link {
   color: var(--accent2);
+}
+
+/* In a message the underline is there before the pointer is, so a live chip
+   never reads as a dead one. The same cue as a link in markdown. */
+.pathlink.code,
+.pathlink.link {
+  text-decoration-style: dotted;
+  text-decoration-color: var(--link-cue);
+  text-underline-offset: 3px;
+}
+
+.pathlink.code:hover,
+.pathlink.link:hover {
+  text-decoration-style: solid;
+  text-decoration-color: currentcolor;
 }
 
 /* Inside a tool chain row header, whose summary is already dim and mono. */

@@ -82,6 +82,16 @@
   border-top: 1px solid var(--line);
 }
 
+/* The cue every live target in a message carries: dotted at rest, solid under
+   the pointer. A path chip carries the same one, so there is one thing to
+   learn. */
 .markdown a {
   color: var(--accent2);
+  text-decoration: underline dotted var(--link-cue);
+  text-underline-offset: 3px;
+}
+
+.markdown a:hover {
+  text-decoration-style: solid;
+  text-decoration-color: currentcolor;
 }
