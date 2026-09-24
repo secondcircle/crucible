@@ -9,6 +9,7 @@ import {
   type FakeArtifactFiles
 } from '../../shared/workflows/fake-service'
 import type { MainWorkflowRunService } from '../../shared/workflows/service'
+import type { RuleGate } from '../../shared/rules/gate'
 import type { CacheRecorder } from '../cache/ledger'
 import type { Flavor } from '../agent/select-adapter'
 import type { LogSink } from '../log/sink'
@@ -78,6 +79,9 @@ export interface WorkflowRunWiring {
   // the canned rows uninvestigable; the fallback below is this checkout,
   // which the user can add.
   readonly cannedWorkspacePath?: string
+  // The workspace's rules, fed every node's edits in either flavor: a real
+  // node's through its π hooks, the fake's scripted node through the same gate.
+  readonly rules?: RuleGate
 }
 
 // The fake service is compiled into the renderer bundle too, so its file
@@ -130,7 +134,8 @@ export function selectWorkflowRunService(
       deliver: wiring.deliver,
       files: scriptedArtifactFiles(join(wiring.stateDir, 'workflow-runs')),
       workspace: { path, name: basename(path) },
-      ...(wiring.reveal === undefined ? {} : { reveal: wiring.reveal })
+      ...(wiring.reveal === undefined ? {} : { reveal: wiring.reveal }),
+      ...(wiring.rules === undefined ? {} : { rules: wiring.rules })
     })
   }
 
@@ -155,6 +160,7 @@ export function selectWorkflowRunService(
       // fails here rather than at the first node's first paid turn.
       basePrompt: readShippedNodeBasePrompt(wiring.appPath),
       ...(wiring.compaction === undefined ? {} : { compaction: wiring.compaction }),
+      ...(wiring.rules === undefined ? {} : { rules: wiring.rules }),
       onCompactionFailure: (cause) => {
         log.append({
           source: 'main',

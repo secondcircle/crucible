@@ -1,4 +1,5 @@
 import type { SessionState } from '../../../shared/agent/port'
+import type { RulesHealth } from '../../../shared/rules/board'
 import { missesText } from '../cache/format'
 import { contextPercent, tokens } from '../labels'
 import './cache-strip.css'
@@ -19,6 +20,7 @@ export function TopBar({
   onJumpToCacheMiss,
   issues,
   schedules,
+  rules,
   update
 }: {
   readonly session?: SessionState
@@ -48,6 +50,9 @@ export function TopBar({
     readonly needYou: number
     readonly onOpen: () => void
   }
+  // The rules board's resting surface: absent for a workspace with no
+  // `.crucible/rules/`, as the schedule chip is for one with no schedules.
+  readonly rules?: { readonly health: RulesHealth; readonly onOpen: () => void }
   /** A newer version, on disk and waiting. One click restarts into it. */
   readonly update?: { readonly version: string; readonly onRestart: () => void }
 }): React.JSX.Element {
@@ -103,6 +108,27 @@ export function TopBar({
             {schedules.count} schedule{schedules.count === 1 ? '' : 's'}
           </b>
           {schedules.needYou > 0 ? <u> · {schedules.needYou} needs you</u> : null}
+        </button>
+      )}
+
+      {/* Violet-glyphed because rules are neither runs nor issues. Lit only
+          while a rule is broken or a judge cannot be reached; escalations are
+          counted in its words and never light it, or it would never go out. */}
+      {rules === undefined ? null : (
+        <button
+          className={`tchip rules${rules.health.lit ? ' lit' : ''}`}
+          aria-label="Rules board"
+          onClick={rules.onOpen}
+        >
+          <span className="g" aria-hidden="true">
+            §
+          </span>{' '}
+          <b>
+            {rules.health.rules} rule{rules.health.rules === 1 ? '' : 's'}
+          </b>
+          {rules.health.escalated > 0 ? <span> · {rules.health.escalated} escalated</span> : null}
+          {rules.health.broken > 0 ? <u> · {rules.health.broken} broken</u> : null}
+          {rules.health.judgeDown ? <u> · judge unreachable</u> : null}
         </button>
       )}
 

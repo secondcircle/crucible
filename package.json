@@ -19,6 +19,7 @@
     "dev:port": "bash scripts/dev-port.sh",
     "dev:sdk": "CRUCIBLE_AGENT=sdk npm run dev",
     "prove:sdk": "CRUCIBLE_AGENT=sdk node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/prove-sdk.ts",
+    "prove:rules": "jiti scripts/prove-rules.ts",
     "build": "electron-vite build",
     "lint": "eslint .",
     "typecheck": "npm run typecheck:node && npm run typecheck:web",
@@ -49,9 +50,12 @@
   "dependencies": {
     "@earendil-works/pi-ai": "^0.87.1",
     "@earendil-works/pi-coding-agent": "^0.87.1",
+    "@typesafe-ai/sdk": "^0.6.0",
     "electron": "^43.4.0",
     "jiti": "^2.7.0",
     "react": "^19.2.8",
-    "react-dom": "^19.2.8"
+    "react-dom": "^19.2.8",
+    "tree-sitter-wasms": "^0.1.13",
+    "web-tree-sitter": "^0.25.10"
   }
 }

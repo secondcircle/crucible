@@ -30,6 +30,8 @@ import type { MonitorService, MonitorsSnapshot } from '../../shared/monitors/ser
 import { issueCounts, withSessions } from '../../shared/workspace/classify-issues'
 import type { QuotaService } from '../../shared/quota/service'
 import type { ScheduleService, SchedulesSnapshot } from '../../shared/schedules/service'
+import type { FiringView, RulesHealth } from '../../shared/rules/board'
+import type { RulesService } from '../../shared/rules/service'
 import type {
   IssueBoardAnswer,
   IssueRow,
@@ -51,6 +53,8 @@ import type {
 } from '../../shared/workflows/service'
 import { useIssueBoards } from './board/use-boards'
 import { BashDrawer, type RunView } from './components/BashDrawer'
+import { RulesBoard, type RulesBoardDoor } from './components/RulesBoard'
+import { marksByCall, RuleMarksContext, type RuleMarks } from './rules/marks'
 import { CacheExpiryChoice } from './components/CacheExpiryChoice'
 import { SummarizingDialog } from './components/SummarizingDialog'
 import { CacheHealthView } from './components/CacheHealthView'
@@ -139,6 +143,14 @@ type Popover = 'none' | 'model' | 'thinking' | 'sessionMenu'
 type Occupant =
   | { readonly kind: 'issues'; readonly workspaceId: WorkspaceId }
   | { readonly kind: 'schedules'; readonly workspaceId: WorkspaceId }
+  // The workspace the board reads, and where it was opened from, which is
+  // also what its scope switch can narrow to.
+  | {
+      readonly kind: 'rules'
+      readonly workspaceId: WorkspaceId
+      readonly door: RulesBoardDoor
+      readonly runId?: WorkflowRunId
+    }
   | { readonly kind: 'tree' }
   | { readonly kind: 'settings'; readonly section: SettingsSection }
   | { readonly kind: 'runs' }
@@ -180,6 +192,9 @@ type Confirm =
   // another asks. It belongs to a run, not to a session.
   | { readonly kind: 'cancelRun'; readonly runId: WorkflowRunId }
 
+/** How long "Open in the conversation" holds the call it asked for open and in view. */
+const FOCUS_MS = 5000
+
 /** Two Escapes this far apart are the tree's accelerator. */
 const DOUBLE_ESCAPE_MS = 500
 
@@ -210,6 +225,7 @@ export function Shell({
   needsYou: needsYouService,
   workflowRuns,
   schedules: scheduleService,
+  rules: rulesService,
   monitors: monitorService,
   exhibitKeys,
   folded,
@@ -242,6 +258,9 @@ export function Shell({
   // repository's workflow files, and a run is a fact about the engine.
   // Without this service no chip and no schedule board render at all.
   readonly schedules?: ScheduleService
+  // Read-only, beside them: what the workspace's rules did, from its ledger.
+  // Without this service no rules chip, no mark and no rules tab render.
+  readonly rules?: RulesService
   // Beside them all, and for the same reason: a monitor is Crucible's own
   // state, observed through its own seam, and the tools that set one live
   // with the agent. Without this service no chip and no ⏳ render at all.
@@ -659,6 +678,76 @@ export function Shell({
   // A record can only vanish across a launch; the view must not outlive it.
   if (openRunId !== undefined && openRun === undefined) setRegion((up) => up.slice(0, -1))
 
+  // What the rules did, read from the ledger as the chip, the session's marks
+  // and the open run's counts need it. Any append asks again; the ledger is
+  // the truth and nothing here is patched.
+  const [rulesAsked, setRulesAsked] = useState(0)
+  useEffect(() => {
+    if (rulesService === undefined) return
+    return rulesService.onEvent(() => setRulesAsked((count) => count + 1))
+  }, [rulesService])
+
+  const [rulesHealth, setRulesHealth] = useState<{ readonly of: string; readonly health?: RulesHealth }>()
+  const rulesWorkspace = active?.path
+  useEffect(() => {
+    if (rulesService === undefined || rulesWorkspace === undefined) return
+    let current = true
+    void rulesService
+      .health(rulesWorkspace)
+      .then((health) => {
+        if (current) setRulesHealth(health === undefined ? { of: rulesWorkspace } : { of: rulesWorkspace, health })
+      })
+      .catch(() => {})
+    return () => {
+      current = false
+    }
+  }, [rulesService, rulesWorkspace, rulesAsked])
+  const shownRulesHealth = rulesHealth?.of === rulesWorkspace ? rulesHealth?.health : undefined
+
+  const [sessionFirings, setSessionFirings] = useState<{
+    readonly of: string
+    readonly firings: readonly FiringView[]
+  }>()
+  useEffect(() => {
+    if (rulesService === undefined || rulesWorkspace === undefined || activeSessionId === undefined) return
+    let current = true
+    const of = `${rulesWorkspace}\0${activeSessionId}`
+    void rulesService
+      .firings(rulesWorkspace, { kind: 'session', sessionId: activeSessionId })
+      .then((firings) => {
+        if (current) setSessionFirings({ of, firings })
+      })
+      .catch(() => {})
+    return () => {
+      current = false
+    }
+  }, [rulesService, rulesWorkspace, activeSessionId, rulesAsked])
+  const shownSessionFirings =
+    sessionFirings?.of === `${rulesWorkspace}\0${activeSessionId}` ? sessionFirings.firings : undefined
+
+  const [runFirings, setRunFirings] = useState<{ readonly of: string; readonly firings: readonly FiringView[] }>()
+  const runWorkspace = openRun?.workspacePath
+  useEffect(() => {
+    if (rulesService === undefined || runWorkspace === undefined || openRunId === undefined) return
+    let current = true
+    void rulesService
+      .firings(runWorkspace, { kind: 'run', runId: openRunId })
+      .then((firings) => {
+        if (current) setRunFirings({ of: openRunId, firings })
+      })
+      .catch(() => {})
+    return () => {
+      current = false
+    }
+  }, [rulesService, runWorkspace, openRunId, rulesAsked])
+
+  // The call "Open in the conversation" last asked for, in a session or in
+  // one node of a run.
+  const [ruleFocus, setRuleFocus] = useState<
+    | { readonly sessionId: SessionId; readonly callId: string; readonly asked: number }
+    | { readonly runId: WorkflowRunId; readonly nodeId: string; readonly callId: string; readonly asked: number }
+  >()
+
   // Owned by the session that asked for whatever failed. A call site that
   // knows the session names it; one that does not gets the session that was
   // active when the failure arrived.
@@ -903,6 +992,20 @@ export function Shell({
   // session left to draw.
   if (occupant?.kind === 'issues' && !issuesOpen) setRegion([])
   if (occupant?.kind === 'schedules' && !schedulesOpen) setRegion([])
+  // The rules board is the workspace's: switching away closes it, unless it
+  // was opened from a run, which is where Esc goes back to.
+  const rulesOccupant = occupant?.kind === 'rules' ? occupant : undefined
+  const rulesBoardWorkspace =
+    rulesOccupant === undefined
+      ? undefined
+      : snapshot.workspaces.find((candidate) => candidate.id === rulesOccupant.workspaceId)
+  if (
+    rulesOccupant !== undefined &&
+    (rulesBoardWorkspace === undefined ||
+      (rulesOccupant.runId === undefined && rulesOccupant.workspaceId !== activeWorkspaceId))
+  ) {
+    setRegion([])
+  }
   if (occupant?.kind === 'tree' && session === undefined) setRegion([])
 
   // A confirm names the session it was raised on, so the render that lands an
@@ -924,6 +1027,7 @@ export function Shell({
   // rather than a dim over an empty frame.
   const treeShown = treeOpen && session !== undefined
   const schedulesShown = schedulesOpen && scheduleService !== undefined && active !== undefined
+  const rulesShown = rulesOccupant !== undefined && rulesService !== undefined && rulesBoardWorkspace !== undefined
   const runShown = openRun !== undefined && workflowRuns !== undefined
   const cacheShown = cacheOpen && cacheService !== undefined && cacheHealth !== undefined
   // The cache expiry choice belongs to the session that raised it: landing
@@ -934,6 +1038,7 @@ export function Shell({
   const occupied =
     issuesOpen ||
     schedulesShown ||
+    rulesShown ||
     treeShown ||
     runsOverviewOpen ||
     runShown ||
@@ -1605,6 +1710,34 @@ export function Shell({
     setSelectedRunId(parkedHere[0]?.id)
     occupy({ kind: 'schedules', workspaceId: activeWorkspaceId })
   }, [activeWorkspaceId, occupy, parkedHere])
+
+  // Every door onto the rules board: the chip, the run strip's chip, a mark
+  // on a tool call. The board opens on this workspace, scoped as asked.
+  const openRules = useCallback(
+    (door: RulesBoardDoor): void => {
+      if (activeWorkspaceId === undefined) return
+      occupy({ kind: 'rules', workspaceId: activeWorkspaceId, door })
+    },
+    [activeWorkspaceId, occupy]
+  )
+
+  // From the run view the board goes on top of it, so Esc lands back there.
+  const openRulesOnRun = useCallback(
+    (run: RunRecord, firingId?: string): void => {
+      const workspace = snapshot.workspaces.find((candidate) => candidate.path === run.workspacePath)
+      if (workspace === undefined) return
+      setRegion((up) => [
+        ...up,
+        {
+          kind: 'rules',
+          workspaceId: workspace.id,
+          runId: run.id,
+          door: { scope: { kind: 'run', runId: run.id }, ...(firingId === undefined ? {} : { firingId }) }
+        }
+      ])
+    },
+    [snapshot.workspaces]
+  )
 
   // Where the Tab walk lands on a parked run: its workspace, its board, that
   // run in the reading pane. A run in a workspace the sidebar no longer holds
@@ -2670,6 +2803,45 @@ export function Shell({
     setGraphFullScreen(false)
   }, [])
 
+  // "Open in the conversation": the tool chain the firing judged, in the
+  // session's chat or in its node's transcript in the run view.
+  const openFiringInConversation = useCallback(
+    (view: FiringView): void => {
+      const { agent, toolCallId } = view.firing
+      const asked = Date.now()
+      if (agent.kind === 'session') {
+        if (!snapshot.sessions.some((candidate) => candidate.id === agent.sessionId)) return
+        activateSession(agent.sessionId)
+        if (toolCallId !== undefined) setRuleFocus({ sessionId: agent.sessionId, callId: toolCallId, asked })
+        return
+      }
+      if (!allRuns.some((candidate) => candidate.id === agent.runId)) return
+      openWorkflowRun(agent.runId)
+      setRuleFocus({ runId: agent.runId, nodeId: agent.nodeId, callId: toolCallId ?? '', asked })
+    },
+    [snapshot.sessions, allRuns, activateSession, openWorkflowRun]
+  )
+
+  // A focus is for the arrival it was asked with: a later visit to the same
+  // conversation lands wherever the reader left it.
+  useEffect(() => {
+    if (ruleFocus === undefined) return
+    const expire = setTimeout(() => setRuleFocus(undefined), FOCUS_MS)
+    return () => clearTimeout(expire)
+  }, [ruleFocus])
+
+  const sessionMarks: RuleMarks | undefined = useMemo(() => {
+    if (shownSessionFirings === undefined || activeSessionId === undefined) return undefined
+    const sessionId = activeSessionId
+    return {
+      byCall: marksByCall(shownSessionFirings),
+      onOpen: (firingId: string) => openRules({ scope: { kind: 'session', sessionId }, firingId }),
+      ...(ruleFocus !== undefined && 'sessionId' in ruleFocus && ruleFocus.sessionId === sessionId
+        ? { focus: { callId: ruleFocus.callId, asked: ruleFocus.asked } }
+        : {})
+    }
+  }, [shownSessionFirings, activeSessionId, openRules, ruleFocus])
+
   // The door out of a run surface: land in the orchestrator's chat. The
   // arrival empties the region on its own.
   const goToRunSession = useCallback(
@@ -3002,6 +3174,11 @@ export function Shell({
                       onOpen: openSchedules
                     }
               }
+              rules={
+                shownRulesHealth === undefined
+                  ? undefined
+                  : { health: shownRulesHealth, onOpen: () => openRules({ scope: { kind: 'workspace' } }) }
+              }
               update={
                 appVersion?.kind === 'installed' && appVersion.update.kind === 'ready'
                   ? { version: appVersion.update.version, onRestart: restartIntoUpdate }
@@ -3018,6 +3195,15 @@ export function Shell({
               onOpen={openWorkflowRun}
               onOpenMonitor={toggleMonitor}
               onStopMonitor={stopMonitor}
+              {...(shownSessionFirings === undefined || activeSessionId === undefined
+                ? {}
+                : {
+                    rules: {
+                      fired: shownSessionFirings.length,
+                      open: shownSessionFirings.filter((view) => view.came?.outcome === 'open').length,
+                      onOpen: () => openRules({ scope: { kind: 'session', sessionId: activeSessionId } })
+                    }
+                  })}
             />
 
             {/* The transcript's own row. Nothing overlays it any more: every
@@ -3043,13 +3229,15 @@ export function Shell({
                 // in an exhibit, not in an issue's body, not in a run node's
                 // transcript, none of which is this session's chat.
                 <PathLinksContext.Provider value={pathLinks}>
-                  <Transcript
-                    items={items}
-                    sessionId={session.id}
-                    invocations={shownInvocations}
-                    missJump={missJump}
-                    shown={place !== 'maximized'}
-                  />
+                  <RuleMarksContext.Provider value={sessionMarks}>
+                    <Transcript
+                      items={items}
+                      sessionId={session.id}
+                      invocations={shownInvocations}
+                      missJump={missJump}
+                      shown={place !== 'maximized'}
+                    />
+                  </RuleMarksContext.Provider>
                 </PathLinksContext.Provider>
               )}
 
@@ -3306,6 +3494,49 @@ export function Shell({
                   }}
                   fullScreen={graphFullScreen}
                   onToggleFullScreen={() => setGraphFullScreen((up) => !up)}
+                  {...(rulesService === undefined ||
+                  runFirings?.of !== openRun.id ||
+                  (runFirings.firings.length === 0 &&
+                    (shownRulesHealth === undefined || openRun.workspacePath !== active?.path))
+                    ? {}
+                    : {
+                        rules: {
+                          firings: runFirings.firings,
+                          onOpen: (firingId?: string) => openRulesOnRun(openRun, firingId),
+                          ...(ruleFocus !== undefined && 'runId' in ruleFocus && ruleFocus.runId === openRun.id
+                            ? { focus: { nodeId: ruleFocus.nodeId, callId: ruleFocus.callId, asked: ruleFocus.asked } }
+                            : {})
+                        }
+                      })}
+                />
+              ) : null}
+
+              {rulesShown &&
+              rulesOccupant !== undefined &&
+              rulesService !== undefined &&
+              rulesBoardWorkspace !== undefined ? (
+                <RulesBoard
+                  key={JSON.stringify(rulesOccupant.door)}
+                  service={rulesService}
+                  workspaceName={rulesBoardWorkspace.name}
+                  workspacePath={rulesBoardWorkspace.path}
+                  door={rulesOccupant.door}
+                  {...(activeSessionId === undefined ? {} : { session: { sessionId: activeSessionId } })}
+                  {...(rulesOccupant.runId === undefined ? {} : { run: { runId: rulesOccupant.runId } })}
+                  sessionTitle={(sessionId) =>
+                    snapshot.sessions.find((candidate) => candidate.id === sessionId)?.title
+                  }
+                  onOpenInConversation={openFiringInConversation}
+                  {...(activeSessionId === undefined
+                    ? {}
+                    : {
+                        onExplain: (command: string) => {
+                          closeRegion()
+                          runBash(command)
+                        }
+                      })}
+                  onCopy={(text) => void navigator.clipboard?.writeText(text).catch(report)}
+                  onClose={closeTopOfRegion}
                 />
               ) : null}
 

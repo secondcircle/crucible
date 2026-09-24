@@ -875,6 +875,8 @@ export function createWorkflowEngine(options: EngineOptions): WorkflowEngine {
           sessionDir: store.sessionDir(run.id),
           ...(job.resume === undefined ? {} : { resumeToken: job.resume }),
           nodeId: id,
+          runId: run.id,
+          workflow: run.workflow,
           // The workflow's system prompt or none; the engine writes neither
           // a role nor a standing prompt for a node.
           ...(spec.system === undefined ? {} : { system: spec.system }),

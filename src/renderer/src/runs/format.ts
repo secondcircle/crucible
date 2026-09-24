@@ -98,6 +98,7 @@ export function toViewItem(item: TranscriptItem): ViewItem {
     case 'tool':
       return {
         kind: 'tool',
+        ...(item.callId === undefined ? {} : { callId: item.callId }),
         name: item.name,
         summary: item.summary,
         output: item.output,

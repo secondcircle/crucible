@@ -13,6 +13,7 @@ import { MonitorDetail } from './MonitorDetail'
 import './cache-strip.css'
 import './runs.css'
 import './monitors.css'
+import './rules.css'
 
 export function RunStrip({
   runs,
@@ -22,7 +23,8 @@ export function RunStrip({
   checkout,
   onOpen,
   onOpenMonitor,
-  onStopMonitor
+  onStopMonitor,
+  rules
 }: {
   readonly runs: readonly RunRecord[]
   readonly monitors?: readonly LiveMonitor[]
@@ -32,8 +34,12 @@ export function RunStrip({
   readonly onOpen: (runId: string) => void
   readonly onOpenMonitor?: (monitorId: string) => void
   readonly onStopMonitor?: (monitorId: string) => void
+  // This session's rule firings: how many, how many still open, and the door
+  // to the board scoped to it. Absent, or none fired, and there is no chip.
+  readonly rules?: { readonly fired: number; readonly open: number; readonly onOpen: () => void }
 }): React.JSX.Element | null {
-  if (runs.length === 0 && monitors.length === 0) return null
+  const fired = rules !== undefined && rules.fired > 0 ? rules : undefined
+  if (runs.length === 0 && monitors.length === 0 && fired === undefined) return null
   const open = monitors.find((monitor) => monitor.id === openMonitorId)
   const waits = monitors.length > 0
 
@@ -79,6 +85,22 @@ export function RunStrip({
             </button>
           )
         })}
+
+        {fired === undefined ? null : (
+          <>
+            <span className={`rslabel${runs.length === 0 ? '' : ' second'}`}>Rules</span>
+            <button
+              className="runchip rchip rl"
+              title="Opens the rules board scoped to this session"
+              onClick={fired.onOpen}
+            >
+              <span className="g" aria-hidden="true">
+                §
+              </span>{' '}
+              <b>{fired.fired} fired</b> here{fired.open > 0 ? ` · ${fired.open} open` : ''}
+            </button>
+          </>
+        )}
 
         {monitors.length === 0 ? null : (
           <>

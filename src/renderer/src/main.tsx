@@ -8,6 +8,7 @@ import { createExhibitKeysClient } from './exhibits/ipc-client'
 import { createNeedsYouClient } from './needs-you/ipc-client'
 import { createQuotaClient } from './quota/ipc-client'
 import { createWorkflowRunClient } from './runs/ipc-client'
+import { createRulesClient } from './rules/ipc-client'
 import { createScheduleClient } from './schedules/ipc-client'
 import { createMonitorClient } from './monitors/ipc-client'
 import { instanceBadge } from './bridge'
@@ -34,6 +35,7 @@ function mountApp(): void {
         needsYou={createNeedsYouClient()}
         workflowRuns={createWorkflowRunClient()}
         schedules={createScheduleClient()}
+        rules={createRulesClient()}
         monitors={createMonitorClient()}
         exhibitKeys={createExhibitKeysClient()}
         folded={localFoldedStore()}

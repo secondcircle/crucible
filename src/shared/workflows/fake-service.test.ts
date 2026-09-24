@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 import { runIsLive, type RunRecord } from './run'
 import type { MainWorkflowRunService } from './service'
 import { createFakeWorkflowRunService, memoryArtifactFiles } from './fake-service'
+import type { RuleGate } from '../rules/gate'
 
 async function until(what: () => boolean, ms = 4000): Promise<void> {
   const deadline = Date.now() + ms
@@ -449,6 +450,47 @@ describe('the fake flavor\u2019s artifacts', () => {
     expect(parked?.nodes[0].artifacts[0].writtenAt).toBeDefined()
     expect(parked?.nodes[1].status).toBe('blocked')
     expect(parked?.nodes[1].artifacts[0].writtenAt).toBeUndefined()
+    service.dispose()
+  })
+})
+
+describe('the scripted run under rules', () => {
+  it('makes its node edits through the gate and reports the node complete', async () => {
+    const seen: string[] = []
+    const rules: RuleGate = {
+      watch(agent) {
+        if (agent.kind === 'node') seen.push(`watch ${agent.workflow}/${agent.nodeId} in ${agent.cwd}`)
+        return {
+          turnStarted: async () => {},
+          beforeBash: async () => ({}),
+          afterBash: async () => ({}),
+          afterEdit: async (call) => {
+            seen.push(`edit ${call.callId}`)
+            return {}
+          },
+          said: () => {},
+          checkpoint: async (at) => {
+            seen.push(`checkpoint ${at}`)
+            return {}
+          }
+        }
+      }
+    }
+    const service = createFakeWorkflowRunService({ beatMs: 0, rules })
+    await service.tools.start('s1', '/repos/thing', 'adhoc', {})
+    const run = (await service.snapshot()).runs.find((candidate) => candidate.sessionId === 's1')!
+    await until(() => seen.includes('checkpoint node-complete'))
+    expect(seen).toEqual([
+      'watch adhoc/work in /repos/thing',
+      `edit ${run.id}-work-edit-1`,
+      `edit ${run.id}-work-edit-2`,
+      'checkpoint node-complete'
+    ])
+    const calls = (await service.nodeTranscript(run.id, 'work')).filter((item) => item.kind === 'tool')
+    expect(calls.map((item) => (item.kind === 'tool' ? item.callId : undefined)).slice(-2)).toEqual([
+      `${run.id}-work-edit-1`,
+      `${run.id}-work-edit-2`
+    ])
     service.dispose()
   })
 })

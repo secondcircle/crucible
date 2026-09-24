@@ -29,7 +29,7 @@ export default defineRule({
     include: ['src/**/*.{ts,tsx}', 'scripts/**/*.{ts,mjs,js}', 'resources/workflow-lib/**/*.ts'],
     exclude: ['**/*.d.ts'],
   },
-  mode: 'off',
+  mode: 'shadow',
 
   extract: (edit) => addedComments(edit, { following: 12, preceding: 4 }),
 

@@ -1,0 +1,363 @@
+/* What the rules show outside their board: the mark on a tool call, the note
+   under it, a steered note between chains, and the firing rows the board and
+   the run view's rules tab share. Violet throughout, as teal is a run's. */
+
+.toolhead .rulemark {
+  /* above the row's own expand target, like a path in the summary */
+  position: relative;
+  flex: none;
+  font: 10.5px var(--mono);
+  color: var(--rule);
+  background: none;
+  border: 1px solid var(--rule-line);
+  border-radius: 4px;
+  padding: 0 6px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.toolhead .rulemark:hover {
+  background: var(--rule-ground);
+}
+
+.toolhead .rulemark.shadow,
+.toolhead .rulemark.skip {
+  color: var(--faint);
+  border-color: var(--line);
+  font-style: italic;
+}
+
+.toolout .rulenote {
+  display: block;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--rule-line);
+  color: var(--ink);
+  white-space: pre-wrap;
+}
+
+.toolout .rulenote b {
+  color: var(--rule);
+  font-weight: 600;
+}
+
+.steer {
+  max-width: var(--column);
+  margin: 0 auto 12px;
+  padding: 0 24px;
+}
+
+.steer .box {
+  display: block;
+  width: 100%;
+  text-align: left;
+  border: 1px solid var(--rule-line);
+  border-left: 3px solid var(--rule);
+  border-radius: 8px;
+  background: var(--panel);
+  padding: 8px 12px;
+  font-size: 12.5px;
+  color: var(--ink);
+  cursor: pointer;
+}
+
+.steer .box .who {
+  font: 10.5px var(--mono);
+  color: var(--rule);
+  margin-bottom: 3px;
+  display: flex;
+  gap: 8px;
+}
+
+.steer .box .who .r {
+  margin-left: auto;
+  color: var(--faint);
+}
+
+/* A firing, as one row: what it did, where, in whom, what came of it, how it
+   was delivered and when. */
+.frow,
+.fcolhead {
+  display: grid;
+  grid-template-columns: 76px minmax(0, 1fr) 150px 96px 90px 66px;
+  column-gap: 12px;
+  align-items: center;
+  padding: 6px 10px;
+}
+
+.fcolhead {
+  padding-top: 0;
+  padding-bottom: 4px;
+  font-size: 10.5px;
+  color: var(--faint);
+  letter-spacing: 0.04em;
+}
+
+.fcolhead span:nth-child(n + 4) {
+  text-align: right;
+}
+
+/* The run view's tab has no "in" column: every row is that node. */
+.frow.node,
+.fcolhead.node {
+  grid-template-columns: 76px minmax(0, 1fr) 96px 90px 66px;
+}
+
+.fcolhead.node span:nth-child(n + 3) {
+  text-align: right;
+}
+
+.frow {
+  width: 100%;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  text-align: left;
+  color: inherit;
+  cursor: pointer;
+}
+
+.frow:hover {
+  background: var(--panel);
+  border-color: var(--line);
+}
+
+.frow.focused {
+  background: var(--panel);
+  border-color: var(--lit);
+}
+
+.fact {
+  font: 600 11px var(--mono);
+}
+
+.fact.note {
+  color: var(--warn);
+}
+
+.fact.pass {
+  color: var(--ok);
+}
+
+.fact.log,
+.fact.esc {
+  color: var(--dim);
+}
+
+.fact.block {
+  color: var(--error);
+}
+
+.fact.hold {
+  color: var(--accent2);
+}
+
+.fact.skip {
+  color: var(--warn);
+  font-weight: 400;
+  font-style: italic;
+}
+
+.fact.shadow {
+  color: var(--faint);
+  font-style: italic;
+}
+
+.fwhere {
+  font: 12px var(--mono);
+  color: var(--ink);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fwhere .snip {
+  font: 12px var(--sans, inherit);
+  color: var(--dim);
+}
+
+.fwho {
+  font-size: 11px;
+  color: var(--faint);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fwho .t {
+  color: var(--run);
+}
+
+.fout {
+  font: 11px var(--mono);
+  text-align: right;
+}
+
+.fout.fixed {
+  color: var(--ok);
+}
+
+.fout.reworded {
+  color: var(--dim);
+}
+
+.fout.open {
+  color: var(--warn);
+}
+
+.fout.ignored {
+  color: var(--error);
+}
+
+.fout.none,
+.fdeliv,
+.fage {
+  color: var(--faint);
+}
+
+.fdeliv {
+  font: 10.5px var(--mono);
+  text-align: right;
+}
+
+.fage {
+  font-size: 11px;
+  text-align: right;
+}
+
+/* The run view's door: the header's count, and the node pane's tab. */
+.rvtop .rulecount {
+  font: 12px var(--mono);
+  color: var(--rule);
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+}
+
+.dhead .tabs {
+  display: flex;
+  gap: 2px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  overflow: hidden;
+  margin-left: auto;
+}
+
+.dhead .tabs button {
+  background: none;
+  border: none;
+  padding: 3px 10px;
+  font-size: 11.5px;
+  color: var(--faint);
+}
+
+.dhead .tabs button[aria-selected='true'] {
+  color: var(--ink);
+  background: var(--panel2);
+}
+
+.dhead .tabs button.rl[aria-selected='true'] {
+  color: var(--rule);
+}
+
+.nodefirings {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px 16px;
+  container-type: inline-size;
+}
+
+.nodefirings .nsum {
+  font-size: 12px;
+  color: var(--dim);
+  margin-bottom: 12px;
+  display: flex;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
+.nodefirings .nsum b {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.nodefirings .nsum .rl {
+  color: var(--rule);
+}
+
+.nodefirings .nsum .open {
+  color: var(--warn);
+}
+
+.nodefirings .hint {
+  font-size: 11.5px;
+  color: var(--faint);
+  margin-top: 14px;
+}
+
+/* The run strip's door, beside the run chips. */
+.rchip.rl .g {
+  color: var(--rule);
+}
+
+.gpane .nd .rm {
+  font: 10.5px var(--mono);
+  color: var(--rule);
+  white-space: nowrap;
+}
+
+.runview .dhead .dtitle {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+/* Too narrow for the columns: where it fired takes the first line whole, and
+   the rest of the row sits under it. */
+@container (max-width: 620px) {
+  .fcolhead,
+  .fcolhead.node {
+    display: none;
+  }
+
+  .frow,
+  .frow.node {
+    grid-template-columns: 76px minmax(0, 1fr) auto auto auto;
+    grid-template-areas:
+      'act where where where where'
+      '. who out deliv age';
+    row-gap: 3px;
+  }
+
+  .frow.node {
+    grid-template-areas:
+      'act where where where where'
+      '. . out deliv age';
+  }
+
+  .frow .fact {
+    grid-area: act;
+  }
+
+  .frow .fwhere {
+    grid-area: where;
+  }
+
+  .frow .fwho {
+    grid-area: who;
+  }
+
+  .frow .fout {
+    grid-area: out;
+  }
+
+  .frow .fdeliv {
+    grid-area: deliv;
+  }
+
+  .frow .fage {
+    grid-area: age;
+  }
+}

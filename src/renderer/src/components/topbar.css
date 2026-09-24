@@ -72,6 +72,10 @@
   color: var(--run);
 }
 
+.top .tchip.rules .g {
+  color: var(--rule);
+}
+
 .top .tchip b {
   color: var(--dim);
   font-weight: 600;

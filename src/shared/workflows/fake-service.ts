@@ -1,5 +1,7 @@
 import type { SessionId, TranscriptItem, Unsubscribe } from '../agent/port'
 import type { RunTools } from '../agent/run-tools'
+import type { RuleGate, RuleWatch } from '../rules/gate'
+import { FAKE_EDITS } from '../rules/fake-edits'
 import { artifactKind, artifactName, recordNamesPath } from './artifacts'
 import {
   baseNodeId,
@@ -591,6 +593,14 @@ export interface FakeWorkflowRunOptions {
   readonly workspace?: CannedWorkspace
   /** Shows a file in the OS file manager; absent leaves Reveal unable to act. */
   readonly reveal?: (path: string) => void
+  // The workspace's rules. The node that edits in a scripted run makes the
+  // same two edits “add a comment” makes in a session, through this gate.
+  readonly rules?: RuleGate
+}
+
+/** The node of a scripted run whose edits the rules see. */
+function editingNode(workflow: string): string {
+  return workflow === 'build' ? 'builder' : 'work'
 }
 
 export function createFakeWorkflowRunService({
@@ -598,7 +608,8 @@ export function createFakeWorkflowRunService({
   deliver,
   files,
   workspace = FALLBACK_WORKSPACE,
-  reveal
+  reveal,
+  rules
 }: FakeWorkflowRunOptions = {}): MainWorkflowRunService {
   const listeners = new Set<WorkflowRunListener>()
   const timers = new Map<WorkflowRunId, ReturnType<typeof setTimeout>>()
@@ -608,6 +619,27 @@ export function createFakeWorkflowRunService({
   // seam a continued node's transcript really carries.
   const continued = new Set<string>()
   let minted = 0
+  // `<runId>:<nodeId>` of each node that made the scripted edits: its watch,
+  // and the tool calls its transcript shows.
+  const edited = new Map<string, { readonly watch: RuleWatch; readonly calls: TranscriptItem[] }>()
+
+  /** The editing node's two edits, through the gate, as its transcript will show them. */
+  async function editUnderRules(run: LiveRun, nodeId: string): Promise<void> {
+    if (rules === undefined) return
+    const watch = rules.watch(
+      { kind: 'node', runId: run.id, nodeId, workflow: run.workflow, cwd: run.workspacePath },
+      { steer: () => {} }
+    )
+    const calls: TranscriptItem[] = []
+    edited.set(`${run.id}:${nodeId}`, { watch, calls })
+    await watch.turnStarted()
+    for (const [at, edit] of FAKE_EDITS.entries()) {
+      if (edit.said !== undefined) calls.push({ kind: 'assistant', markdown: edit.said })
+      const callId = `${run.id}-${nodeId}-edit-${at + 1}`
+      const output = await edit.run(watch, callId)
+      calls.push({ kind: 'tool', callId, name: 'edit', summary: edit.summary, ok: true, output })
+    }
+  }
 
   const nowIso = (): string => new Date().toISOString()
 
@@ -792,6 +824,7 @@ export function createFakeWorkflowRunService({
       desc: output.desc
     }))
     changed()
+    if (node.id === editingNode(run.workflow)) void editUnderRules(run, node.id).catch(() => {})
     beat(run, () => {
       node.toolCalls = 7
       node.contextPercent = 14 + index * 8
@@ -825,6 +858,7 @@ export function createFakeWorkflowRunService({
 
       function completeNode(): void {
       beat(run, () => {
+        void edited.get(`${run.id}:${node.id}`)?.watch.checkpoint('node-complete').catch(() => {})
         node.status = 'complete'
         node.endedAt = nowIso()
         delete node.now
@@ -1144,6 +1178,8 @@ export function createFakeWorkflowRunService({
       runId: WorkflowRunId,
       nodeId: string
     ): Promise<readonly TranscriptItem[]> {
+      const edits = edited.get(`${runId}:${nodeId}`)?.calls ?? []
+      if (edits.length > 0) return [...CANNED_NODE_TRANSCRIPT, ...edits]
       if (!continued.has(`${runId}:${nodeId}`)) return CANNED_NODE_TRANSCRIPT
       // The same session, carrying on: everything it had said, then what
       // Crucible told it when it was picked up, then its next turn.

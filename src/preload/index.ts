@@ -38,6 +38,13 @@ import {
 } from '../shared/quota/channels'
 import type { QuotaSnapshot } from '../shared/quota/types'
 import {
+  RULES_EVENT_CHANNEL,
+  RULES_REQUEST_CHANNEL,
+  type RulesEvent,
+  type RulesRequest,
+  type RulesResult
+} from '../shared/rules/channels'
+import {
   SCHEDULE_EVENT_CHANNEL,
   SCHEDULE_REQUEST_CHANNEL,
   type ScheduleEvent,
@@ -173,6 +180,16 @@ contextBridge.exposeInMainWorld('crucible', {
 
     onEvent: (listener: (event: ScheduleEvent) => void): (() => void) =>
       forwarder(SCHEDULE_EVENT_CHANNEL, listener)
+  },
+
+  // Rules: what the ledger says every rule did. Read-only, like the board it
+  // feeds; the hooks that feed the ledger never cross here.
+  rules: {
+    request: (request: RulesRequest): Promise<RulesResult> =>
+      ipcRenderer.invoke(RULES_REQUEST_CHANNEL, request),
+
+    onEvent: (listener: (event: RulesEvent) => void): (() => void) =>
+      forwarder(RULES_EVENT_CHANNEL, listener)
   },
 
   // Monitors: the strip's chips, their detail and the ✗ that stops one. The

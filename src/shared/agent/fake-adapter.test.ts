@@ -6,6 +6,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { AdapterEvent } from './adapter'
 import type { ImageAttachment, QueuedEntry } from './port'
 import { createFakeWorkflowRunService } from '../workflows/fake-service'
+import type { RuleGate } from '../rules/gate'
+import { FAKE_EDIT_PATH, FAKE_EDIT_SAID } from '../rules/fake-edits'
 import {
   createFakeAdapter,
   FAKE_CACHE_MISS,
@@ -947,5 +949,47 @@ describe('what it says about itself', () => {
     await adapter.prompt('s1', 't-1', 'hello')
 
     expect(types(events)).not.toContain('thinking_delta')
+  })
+})
+
+describe('the scripted editor under rules', () => {
+  it('feeds the gate both edits under the ids the transcript keeps, and reports at turn end', async () => {
+    const seen: string[] = []
+    const rules: RuleGate = {
+      watch(agent) {
+        seen.push(`watch ${agent.kind}:${agent.kind === 'session' ? agent.sessionId : ''} in ${agent.cwd}`)
+        return {
+          turnStarted: async () => void seen.push('turn started'),
+          beforeBash: async () => ({}),
+          afterBash: async () => ({}),
+          afterEdit: async (call) => {
+            seen.push(`edit ${call.callId} ${call.path} ${call.before?.includes('Loop over') ? 'drops' : 'adds'}`)
+            return call.before?.includes('Loop over') ? {} : { appendix: '\n\n§ Rule "comments": narrates' }
+          },
+          said: (text) => void seen.push(`said ${text}`),
+          checkpoint: async (at) => {
+            seen.push(`checkpoint ${at}`)
+            return {}
+          }
+        }
+      }
+    }
+    const adapter = createFakeAdapter({ pauseMs: 0, rules })
+    await adapter.bind({ sessionId: 's1', workspacePath: WORKSPACE })
+    await adapter.prompt('s1', 't1', 'add a comment')
+
+    expect(seen).toEqual([
+      `watch session:s1 in ${WORKSPACE}`,
+      'turn started',
+      `edit t1-call-1 ${FAKE_EDIT_PATH} adds`,
+      `said ${FAKE_EDIT_SAID}`,
+      `edit t1-call-2 ${FAKE_EDIT_PATH} drops`,
+      'checkpoint turn-end'
+    ])
+    const tools = (await adapter.transcript('s1')).filter((item) => item.kind === 'tool')
+    expect(tools.slice(-2)).toEqual([
+      expect.objectContaining({ callId: 't1-call-1', output: `Edited ${FAKE_EDIT_PATH} (+1 −0)\n\n§ Rule "comments": narrates` }),
+      expect.objectContaining({ callId: 't1-call-2', output: `Edited ${FAKE_EDIT_PATH} (+0 −1)` })
+    ])
   })
 })

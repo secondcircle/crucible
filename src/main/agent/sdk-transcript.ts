@@ -102,6 +102,7 @@ export function toTranscript(
       const call = calls.get(message.toolCallId)
       items.push({
         kind: 'tool',
+        callId: message.toolCallId,
         name: call?.name ?? message.toolName,
         summary: call?.summary ?? '',
         ok: !message.isError,

@@ -40,6 +40,8 @@ import { piCompactionSettings } from '../../shared/compaction/trigger.ts'
 import { createCompactionWatch } from '../../shared/compaction/watch.ts'
 import { retentionInForce } from '../cache/retention.ts'
 import { forPi, type LoadedSkill } from '../skills/service.ts'
+import { rulesExtension } from '../agent/sdk-rules.ts'
+import type { RuleGate, RuleWatch } from '../../shared/rules/gate.ts'
 import type {
   NodeSession,
   NodeSessionFactory,
@@ -72,13 +74,17 @@ export interface SdkNodeSessionOptions {
   readonly compaction?: () => CompactionSettings
   /** A compaction nobody asked for and nobody is shown; the run log is the report. */
   readonly onCompactionFailure?: (cause: unknown) => void
+  // The workspace's rules, fed the node's edits and bash calls exactly as a
+  // session's are. A hold refuses complete_node instead of following up.
+  readonly rules?: RuleGate
 }
 
 export function createSdkNodeSessionFactory({
   agentDir,
   basePrompt,
   compaction = () => DEFAULT_COMPACTION_SETTINGS,
-  onCompactionFailure = () => {}
+  onCompactionFailure = () => {},
+  rules
 }: SdkNodeSessionOptions): NodeSessionFactory {
   let sdkModule: Promise<Sdk> | undefined
   let modelRuntime: Promise<import('@earendil-works/pi-coding-agent').ModelRuntime> | undefined
@@ -104,6 +110,9 @@ export function createSdkNodeSessionFactory({
       if (model === undefined) throw new Error(`model not found: ${request.model}`)
       const thinkingLevel = (match[3] ?? 'medium') as 'low' | 'medium' | 'high'
 
+      // Set once the rules extension is built; asked when the node completes.
+      const watched: { watch?: RuleWatch } = {}
+
       const customTools: ToolDefinition[] = [
         // Named `read`, so it stands in for π's builtin — and only where the
         // node's list names one, since every custom tool joins the allowlist.
@@ -113,7 +122,9 @@ export function createSdkNodeSessionFactory({
           'Complete Node',
           COMPLETE_NODE_DESCRIPTION,
           completeNodeParameters(request.verdictSchema),
-          (params) => {
+          async (params) => {
+            const held = await watched.watch?.checkpoint('node-complete')
+            if (held?.hold !== undefined) return `Completion is held by the workspace's rules:\n\n${held.hold}`
             const given = (params ?? {}) as { summary?: string; verdict?: unknown }
             return request.onComplete({
               summary: given.summary ?? '',
@@ -220,7 +231,25 @@ export function createSdkNodeSessionFactory({
             // view builds its transcript from the entries, and what the
             // compaction left the conversation at is read back off the same
             // entries when the size is reported.
-          })
+          }),
+          ...(rules === undefined
+            ? []
+            : [
+                rulesExtension({
+                  gate: rules,
+                  agent: {
+                    kind: 'node',
+                    runId: request.runId,
+                    nodeId: request.nodeId,
+                    workflow: request.workflow,
+                    cwd: request.cwd
+                  },
+                  holdsAtSettle: false,
+                  watching: (watch) => {
+                    watched.watch = watch
+                  }
+                })
+              ])
         ]
       })
       await resourceLoader.reload()
@@ -677,7 +706,7 @@ function nodeTool(
   label: string,
   description: string,
   parameters: unknown,
-  answer: (params: unknown) => string
+  answer: (params: unknown) => string | Promise<string>
 ): ToolDefinition {
   return {
     name,
@@ -685,7 +714,7 @@ function nodeTool(
     description,
     parameters: parameters as ToolDefinition['parameters'],
     async execute(_callId: string, params: unknown) {
-      return { content: [{ type: 'text' as const, text: answer(params) }], details: {} }
+      return { content: [{ type: 'text' as const, text: await answer(params) }], details: {} }
     }
   }
 }

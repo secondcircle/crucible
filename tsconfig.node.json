@@ -4,19 +4,24 @@
     "vitest.config.ts",
     "scripts/**/*.ts",
     "resources/workflow-lib/**/*.ts",
+    "resources/rule-lib/**/*.ts",
     "resources/agent-docs/examples/**/*.ts",
     ".crucible/workflows/**/*.ts",
+    ".crucible/rules/**/*.ts",
     "src/shared/**/*.ts",
     "src/main/**/*.ts",
     "src/preload/**/*.ts"
   ],
   "compilerOptions": {
     "composite": true,
-    // What the workflow loader aliases at runtime, resolved for the checker
-    // too, so the shipped examples and this repo's own workflows are
-    // typechecked like everything else.
+    // What the workflow and rule loaders alias at runtime, resolved for the
+    // checker too, so the shipped examples and this repo's own workflows and
+    // rules are typechecked like everything else.
     "paths": {
-      "crucible:workflow": ["./resources/workflow-lib/workflow.ts"]
+      "crucible:workflow": ["./resources/workflow-lib/workflow.ts"],
+      "crucible:rule": ["./resources/rule-lib/rule.ts"],
+      "crucible:rule/extract": ["./resources/rule-lib/extract.ts"],
+      "crucible:rule/test": ["./resources/rule-lib/test.ts"]
     },
     "target": "ES2022",
     "lib": ["ES2023"],

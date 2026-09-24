@@ -1,0 +1,544 @@
+/* The rules board's own rows and reading pane, inside the frame every board
+   shares. */
+
+.board.rulesboard .bsub .src {
+  font-family: var(--mono);
+}
+
+.board.rulesboard .bsub .right {
+  margin-left: auto;
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+.board.rulesboard .seg {
+  display: flex;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  overflow: hidden;
+}
+
+.board.rulesboard .seg button {
+  background: none;
+  border: none;
+  border-right: 1px solid var(--line);
+  padding: 3px 10px;
+  font-size: 11.5px;
+  color: var(--faint);
+}
+
+.board.rulesboard .seg button:last-child {
+  border-right: none;
+}
+
+.board.rulesboard .seg button.on {
+  color: var(--ink);
+  background: var(--panel2);
+}
+
+.board.rulesboard .seg.scope button.on {
+  color: var(--rule);
+}
+
+.board.rulesboard .split {
+  flex: 1;
+  display: flex;
+  gap: 20px;
+  min-height: 0;
+}
+
+.board.rulesboard .scroll {
+  min-width: 0;
+  container-type: inline-size;
+}
+
+.board.rulesboard .ghead.warn h2 {
+  color: var(--warn);
+}
+
+/* A rule that cannot do its job, one row each. */
+.board.rulesboard .hrow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 110px;
+  align-items: center;
+  column-gap: 12px;
+  width: 100%;
+  padding: 7px 10px;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  background: none;
+  text-align: left;
+  color: inherit;
+}
+
+.board.rulesboard .hrow:hover {
+  background: var(--panel);
+  border-color: var(--line);
+}
+
+.board.rulesboard .hrow .what {
+  font-size: 13px;
+  color: var(--ink);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.board.rulesboard .hrow .rn {
+  font: 12.5px var(--mono);
+}
+
+.board.rulesboard .hrow .desc {
+  color: var(--dim);
+  font-size: 12px;
+}
+
+.board.rulesboard .hrow .since {
+  font-size: 11.5px;
+  color: var(--warn);
+  text-align: right;
+  white-space: nowrap;
+}
+
+/* Every rule, with its six columns. */
+.board.rulesboard .rrow,
+.board.rulesboard .rcolhead {
+  display: grid;
+  grid-template-columns: minmax(0, 1.5fr) 150px 190px 170px 92px 84px 70px;
+  column-gap: 12px;
+  align-items: center;
+}
+
+.board.rulesboard .rcolhead {
+  padding: 0 10px 4px;
+  font-size: 10.5px;
+  color: var(--faint);
+  letter-spacing: 0.04em;
+}
+
+.board.rulesboard .rcolhead span:nth-child(n + 5) {
+  text-align: right;
+}
+
+.board.rulesboard .rrow {
+  width: 100%;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  background: none;
+  text-align: left;
+  color: inherit;
+}
+
+.board.rulesboard .rrow:hover {
+  background: var(--panel);
+  border-color: var(--line);
+}
+
+.board.rulesboard .rrow.focused {
+  background: var(--panel);
+  border-color: var(--lit);
+}
+
+.board.rulesboard .rname {
+  font: 12.5px var(--mono);
+  color: var(--ink);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.board.rulesboard .rname .desc {
+  font: 12px var(--sans, inherit);
+  color: var(--dim);
+}
+
+.board.rulesboard .rname .mode {
+  font: 10px var(--mono);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 0 5px;
+  color: var(--faint);
+  margin-right: 6px;
+  vertical-align: 1px;
+}
+
+.board.rulesboard .rname .mode.enforce {
+  color: var(--rule);
+  border-color: var(--rule-line);
+}
+
+.board.rulesboard .rname .mode.shadow {
+  color: var(--dim);
+}
+
+.board.rulesboard .rname .mode.off {
+  font-style: italic;
+}
+
+.board.rulesboard .rreach,
+.board.rulesboard .racts,
+.board.rulesboard .rout,
+.board.rulesboard .rlat,
+.board.rulesboard .rcost {
+  font: 11px var(--mono);
+  color: var(--faint);
+  line-height: 1.5;
+}
+
+.board.rulesboard .rlat,
+.board.rulesboard .rcost,
+.board.rulesboard .rlast {
+  text-align: right;
+}
+
+.board.rulesboard .rlast {
+  font-size: 11px;
+  color: var(--faint);
+}
+
+.board.rulesboard .rreach b,
+.board.rulesboard .rout b,
+.board.rulesboard .rlat b,
+.board.rulesboard .rcost b {
+  color: var(--dim);
+  font-weight: 600;
+}
+
+.board.rulesboard .rreach.err {
+  color: var(--warn);
+  white-space: normal;
+}
+
+.board.rulesboard .racts b {
+  font-weight: 600;
+}
+
+.board.rulesboard .racts .note {
+  color: var(--warn);
+}
+
+.board.rulesboard .racts .pass {
+  color: var(--ok);
+}
+
+.board.rulesboard .racts .esc {
+  color: var(--dim);
+}
+
+.board.rulesboard .racts .block {
+  color: var(--error);
+}
+
+.board.rulesboard .racts .hold {
+  color: var(--accent2);
+}
+
+.board.rulesboard .rout .fixed {
+  color: var(--ok);
+}
+
+.board.rulesboard .rout .open {
+  color: var(--warn);
+}
+
+.board.rulesboard .rout .ignored {
+  color: var(--error);
+}
+
+/* Off rules are listed so the user sees what exists, dimmed and without
+   numbers, because none of them ran. */
+.board.rulesboard .rrow.off .rname {
+  opacity: 0.45;
+}
+
+/* One firing, read whole. */
+.board.rulesboard .read {
+  flex: 0 0 460px;
+  min-width: 0;
+  max-width: 460px;
+  background: var(--bg2);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.board.rulesboard .rhead {
+  padding: 14px 16px 10px;
+  border-bottom: 1px solid var(--line);
+}
+
+.board.rulesboard .rhead .meta {
+  font: 11.5px var(--mono);
+  color: var(--faint);
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.board.rulesboard .rhead .meta .st {
+  border: 1px solid var(--warn-line);
+  color: var(--warn);
+  border-radius: 4px;
+  padding: 0 5px;
+  font-size: 10px;
+}
+
+.board.rulesboard .rhead .meta .st.pass {
+  border-color: var(--ok-line);
+  color: var(--ok);
+}
+
+.board.rulesboard .rhead .meta .st.block {
+  border-color: var(--error-line);
+  color: var(--error);
+}
+
+.board.rulesboard .rhead h3 {
+  font: 600 13.5px/1.4 var(--mono);
+  margin: 6px 0 2px;
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}
+
+.board.rulesboard .rhead h3 .path {
+  color: var(--accent2);
+}
+
+.board.rulesboard .rbody {
+  flex: 1;
+  overflow-y: auto;
+  padding: 14px 16px;
+  font-size: 12.5px;
+  color: var(--dim);
+}
+
+.board.rulesboard .rbody .quiet {
+  color: var(--faint);
+  margin: 0 0 6px;
+}
+
+.board.rulesboard .sec {
+  margin-bottom: 14px;
+}
+
+.board.rulesboard .sec h4 {
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--faint);
+  margin: 0 0 5px;
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  font-weight: 600;
+}
+
+.board.rulesboard .sec h4 .r {
+  margin-left: auto;
+  text-transform: none;
+  letter-spacing: 0;
+  font: 10.5px var(--mono);
+}
+
+.board.rulesboard .codebox {
+  background: var(--code);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 8px 11px;
+  font: 11.5px/1.5 var(--mono);
+  color: var(--dim);
+  white-space: pre;
+  overflow-x: auto;
+}
+
+.board.rulesboard .codebox .hl {
+  color: var(--ink);
+  background: var(--rule-ground);
+  display: inline-block;
+  min-width: 100%;
+}
+
+.board.rulesboard .codebox .del {
+  color: var(--error);
+}
+
+.board.rulesboard .codebox .add {
+  color: var(--ok);
+}
+
+.board.rulesboard .probs {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.board.rulesboard .probs .qname {
+  font: 10.5px var(--mono);
+  color: var(--dim);
+  margin: 4px 0 2px;
+}
+
+.board.rulesboard .prob {
+  display: grid;
+  grid-template-columns: 76px 1fr 40px;
+  gap: 8px;
+  align-items: center;
+  font: 11px var(--mono);
+  color: var(--faint);
+}
+
+.board.rulesboard .prob .bar {
+  height: 6px;
+  border-radius: 3px;
+  background: var(--panel);
+  overflow: hidden;
+}
+
+.board.rulesboard .prob .bar i {
+  display: block;
+  height: 100%;
+  background: var(--faint);
+}
+
+.board.rulesboard .prob.lead {
+  color: var(--ink);
+}
+
+.board.rulesboard .prob.lead .bar i {
+  background: var(--rule);
+}
+
+.board.rulesboard .fb {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--rule);
+  border-radius: 8px;
+  padding: 9px 12px;
+  color: var(--ink);
+  font-size: 12.5px;
+  white-space: pre-wrap;
+}
+
+.board.rulesboard .fb.would {
+  color: var(--dim);
+  border-left-color: var(--line);
+}
+
+.board.rulesboard .fb .who {
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--rule);
+  margin-bottom: 4px;
+}
+
+.board.rulesboard .react {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 9px 12px;
+}
+
+.board.rulesboard .react .line {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  font: 11.5px var(--mono);
+  color: var(--dim);
+  margin-bottom: 4px;
+}
+
+.board.rulesboard .react .line .k {
+  color: var(--faint);
+  flex: none;
+  width: 52px;
+}
+
+.board.rulesboard .react .line .v {
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}
+
+.board.rulesboard .react .codebox {
+  margin-top: 6px;
+}
+
+.board.rulesboard .facts {
+  font: 11.5px var(--mono);
+  color: var(--faint);
+  line-height: 1.9;
+  overflow-wrap: anywhere;
+}
+
+.board.rulesboard .facts b {
+  color: var(--dim);
+  font-weight: 600;
+}
+
+.board.rulesboard .rfoot {
+  padding: 12px 16px;
+  border-top: 1px solid var(--line);
+  display: flex;
+  gap: 8px;
+}
+
+.board.rulesboard .act {
+  flex: 1;
+  padding: 7px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  color: var(--ink);
+  font-size: 12.5px;
+  text-align: center;
+}
+
+.board.rulesboard .act.primary {
+  border-color: var(--accent);
+  color: var(--accent2);
+}
+
+.board.rulesboard .act:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+
+.board.rulesboard .act:disabled {
+  color: var(--faint);
+  cursor: default;
+}
+
+.board.rulesboard .act.quiet {
+  flex: 0 0 auto;
+  color: var(--faint);
+}
+
+/* Beside the reading pane in a narrow window the six columns cannot fit, so
+   each rule keeps its name on a line of its own and its numbers under it. */
+@container (max-width: 860px) {
+  .board.rulesboard .rcolhead {
+    display: none;
+  }
+
+  .board.rulesboard .rrow {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    row-gap: 6px;
+  }
+
+  .board.rulesboard .rrow .rname {
+    grid-column: 1 / -1;
+  }
+
+  .board.rulesboard .rrow .rlat,
+  .board.rulesboard .rrow .rcost,
+  .board.rulesboard .rrow .rlast {
+    text-align: left;
+  }
+}

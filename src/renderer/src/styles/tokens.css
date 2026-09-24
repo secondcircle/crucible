@@ -42,6 +42,11 @@
   /* the ground under it, amber-tinted just enough to read as one surface */
   --warn-bg: #241f16;
   --thinking: #b08cc9;
+  /* a rule's own mark: the rules chip, a rule mark, the rules tab. Violet,
+     because amber already means warning and teal already means a run */
+  --rule: #b48fd9;
+  --rule-line: #4f3f66;
+  --rule-ground: #2e2438;
   --absent-ink: #4a3f47;
   /* merged is its own color: neither running, nor failing, nor open */
   --merged: #c9a2f0;
