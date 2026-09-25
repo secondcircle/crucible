@@ -46,6 +46,10 @@ export function createAppUpdateService(options: AppUpdateOptions): MainAppUpdate
   // The check in flight, if one is: a poll or a click landing on top of it
   // joins it rather than fetching the same version twice.
   let inFlight: Promise<void> | undefined
+  // The copy into the bundle, while one runs. A restart waits for it: killing
+  // the app mid-copy leaves a bundle with half its dependencies, and nothing
+  // repairs it until the next version is published.
+  let assembling: Promise<void> | undefined
   let disposed = false
 
   function snapshot(): AppVersionState {
@@ -83,7 +87,23 @@ export function createAppUpdateService(options: AppUpdateOptions): MainAppUpdate
       if (update.kind === 'ready' && !isNewerVersion(latest, update.version)) return
 
       const tree = await options.stage(latest)
-      await options.assemble(tree, options.bundleRoot)
+      const before = update
+      // The bundle is about to be rewritten, so a version already waiting in
+      // it is no longer a restart away: the pill comes down for the copy.
+      if (!disposed) announce({ kind: 'installing', version: latest })
+      assembling = options.assemble(tree, options.bundleRoot)
+      try {
+        await assembling
+      } catch (cause) {
+        // A failed copy has still touched the bundle. When it held a version
+        // waiting for a restart, that version is gone, so nothing is offered
+        // until a later copy succeeds. Otherwise the running version is what
+        // there is to report, as before.
+        if (!disposed && before.kind !== 'ready') announce(before)
+        throw cause
+      } finally {
+        assembling = undefined
+      }
       if (disposed) return
       // Announced last, and only here: on disk, and a restart away.
       announce({ kind: 'ready', version: latest })
@@ -103,7 +123,12 @@ export function createAppUpdateService(options: AppUpdateOptions): MainAppUpdate
 
   return {
     state: async () => snapshot(),
-    restart: async () => options.relaunch(),
+    restart: async () => {
+      // A failed copy still ends the wait: the app restarts into what the
+      // bundle holds, which is no worse than refusing the click.
+      await assembling?.catch(() => {})
+      options.relaunch()
+    },
     check,
     onEvent(listener: AppVersionListener): Unsubscribe {
       listeners.add(listener)

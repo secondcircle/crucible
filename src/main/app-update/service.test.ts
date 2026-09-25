@@ -89,9 +89,10 @@ describe('the installed app checking for a newer version', () => {
     // derives nothing for an app that is already installed.
     expect(rig.assembled).toEqual([{ tree: '/staging/1.5.0', target: BUNDLE }])
     expect(rig.states).toEqual([
+      { kind: 'installed', version: RUNNING, update: { kind: 'installing', version: '1.5.0' } },
       { kind: 'installed', version: RUNNING, update: { kind: 'ready', version: '1.5.0' } }
     ])
-    expect(await rig.service.state()).toEqual(rig.states[0])
+    expect(await rig.service.state()).toEqual(rig.states[1])
     rig.service.dispose()
   })
 
@@ -147,6 +148,7 @@ describe('the installed app checking for a newer version', () => {
     await settle()
 
     expect(rig.states).toEqual([
+      { kind: 'installed', version: RUNNING, update: { kind: 'installing', version: '1.5.0' } },
       { kind: 'installed', version: RUNNING, update: { kind: 'ready', version: '1.5.0' } }
     ])
     rig.service.dispose()
@@ -169,7 +171,7 @@ describe('the installed app checking for a newer version', () => {
     rig.service.dispose()
   })
 
-  it('announces nothing when the assembly fails', async () => {
+  it('offers no restart when the assembly fails, and goes back to what it said before', async () => {
     const rig = watching('1.5.0')
     rig.plan.assemblyFails = 'EPERM'
     subscribe(rig)
@@ -177,7 +179,10 @@ describe('the installed app checking for a newer version', () => {
     await settle()
 
     expect(rig.staged).toEqual(['1.5.0'])
-    expect(rig.states).toEqual([])
+    expect(rig.states.map((state) => state.kind === 'installed' && state.update)).toEqual([
+      { kind: 'installing', version: '1.5.0' },
+      { kind: 'unchecked' }
+    ])
     expect(rig.failures).toEqual(['EPERM'])
     rig.service.dispose()
   })
@@ -191,7 +196,8 @@ describe('the installed app checking for a newer version', () => {
     await settle()
 
     expect(rig.staged).toEqual(['1.5.0'])
-    expect(rig.states).toHaveLength(1)
+    // Installing, then ready, and nothing after.
+    expect(rig.states).toHaveLength(2)
     rig.service.dispose()
   })
 
@@ -207,6 +213,104 @@ describe('the installed app checking for a newer version', () => {
     expect(rig.staged).toEqual(['1.5.0', '1.6.0'])
     expect(rig.states.at(-1)).toMatchObject({ update: { kind: 'ready', version: '1.6.0' } })
     rig.service.dispose()
+  })
+
+  // The race that left an installed bundle with 11 of its 64 dependencies: a
+  // version was ready, a newer one began copying into the same bundle with
+  // the pill still up, and the click killed the copy halfway.
+  describe('a newer version arriving while one is already ready', () => {
+    function heldAssembly(): {
+      readonly rig: ReturnType<typeof createAppUpdateService>
+      readonly states: AppVersionState[]
+      readonly relaunches: number[]
+      readonly latest: { value: string }
+      readonly finish: () => void
+      readonly fail: (message: string) => void
+      readonly started: () => number
+    } {
+      const latest = { value: '1.5.0' }
+      const states: AppVersionState[] = []
+      const relaunches: number[] = []
+      const pending: Array<{ resolve: () => void; reject: (cause: Error) => void }> = []
+      let calls = 0
+      const rig = createAppUpdateService({
+        version: RUNNING,
+        bundleRoot: BUNDLE,
+        registry: { latest: async () => latest.value },
+        stage: async (version) => `/staging/${version}`,
+        assemble: () => {
+          calls += 1
+          // The first copy finishes at once; later ones wait to be released.
+          if (calls === 1) return Promise.resolve()
+          return new Promise<void>((resolve, reject) => pending.push({ resolve, reject }))
+        },
+        relaunch: () => relaunches.push(1),
+        intervalMs: 60_000
+      })
+      rig.onEvent((state) => states.push(state))
+      return {
+        rig,
+        states,
+        relaunches,
+        latest,
+        finish: () => pending.shift()?.resolve(),
+        fail: (message) => pending.shift()?.reject(new Error(message)),
+        started: () => calls
+      }
+    }
+
+    it('takes the pill down for the copy, then offers the newer version', async () => {
+      const held = heldAssembly()
+      await settle()
+      expect(await held.rig.state()).toMatchObject({ update: { kind: 'ready', version: '1.5.0' } })
+
+      held.latest.value = '1.6.0'
+      const check = held.rig.check()
+      await settle()
+      expect(held.started()).toBe(2)
+      expect(await held.rig.state()).toMatchObject({
+        update: { kind: 'installing', version: '1.6.0' }
+      })
+
+      held.finish()
+      await check
+      expect(await held.rig.state()).toMatchObject({ update: { kind: 'ready', version: '1.6.0' } })
+      held.rig.dispose()
+    })
+
+    it('holds a restart until the copy into the bundle is done', async () => {
+      const held = heldAssembly()
+      await settle()
+      held.latest.value = '1.6.0'
+      const check = held.rig.check()
+      await settle()
+
+      // A click that got in anyway: a window that had not yet heard the pill
+      // come down.
+      const restart = held.rig.restart()
+      await settle()
+      expect(held.relaunches).toEqual([])
+
+      held.finish()
+      await Promise.all([check, restart])
+      expect(held.relaunches).toEqual([1])
+      held.rig.dispose()
+    })
+
+    it('offers nothing after a failed copy, because the ready version was overwritten', async () => {
+      const held = heldAssembly()
+      await settle()
+      held.latest.value = '1.6.0'
+      const check = held.rig.check()
+      await settle()
+
+      held.fail('ENOSPC')
+      await check
+      expect(await held.rig.state()).toMatchObject({
+        update: { kind: 'installing', version: '1.6.0' }
+      })
+      held.rig.dispose()
+    })
   })
 
   it('restarts through the injected relaunch, and never on its own', async () => {

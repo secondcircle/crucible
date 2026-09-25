@@ -941,16 +941,31 @@ export function Shell({
     resumeOpen ||
     settingsOpen
 
-  // What a completed login or logout changes above the port: the models the
-  // credentials now reach.
-  const refetchModels = useCallback((): void => {
+  // Whether the last model fetch failed. A ref, because it only decides what
+  // the next session switch does and has nothing to render.
+  const modelsFailed = useRef(false)
+  const fetchModels = useCallback((): void => {
     void port
       .listModels()
-      .then((listed) => dispatch({ type: 'models', models: listed }))
-      .catch(report)
+      .then((listed) => {
+        modelsFailed.current = false
+        dispatch({ type: 'models', models: listed })
+      })
+      .catch((cause: unknown) => {
+        modelsFailed.current = true
+        report(cause)
+      })
   }, [port, report])
 
-  const auth = useAuth(port, refetchModels)
+  // Without this a failed launch fetch left the model and thinking chips dead
+  // for the whole launch. Opening or creating a session after a failure asks
+  // again, once per session switched to.
+  useEffect(() => {
+    if (modelsFailed.current && activeSessionId !== undefined) fetchModels()
+  }, [activeSessionId, fetchModels])
+
+  // A completed login or logout changes the models the credentials reach.
+  const auth = useAuth(port, fetchModels)
   // Read out here so the effects below depend on what they use rather than on
   // an object that is new every render.
   const { login: liveLogin, closeLogin, refresh: refreshProviders } = auth
@@ -1178,12 +1193,9 @@ export function Shell({
       .snapshot()
       .then((taken) => dispatch({ type: 'snapshot', snapshot: taken }))
       .catch(report)
-    void port
-      .listModels()
-      .then((listed) => dispatch({ type: 'models', models: listed }))
-      .catch(report)
+    fetchModels()
     return stop
-  }, [port, report, restore, restoreChips, refreshQuota, finished, asked, arrive])
+  }, [port, report, restore, restoreChips, refreshQuota, finished, asked, arrive, fetchModels])
 
   useEffect(() => {
     sessionsNow.current = snapshot.sessions

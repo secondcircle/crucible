@@ -92,6 +92,8 @@ export interface ScriptedPort extends AgentPort {
   worktreeRefusal?: string
   /** Set where a test wants a session main could not start. */
   createSessionRefusal?: string
+  /** Set where a test wants the model list to fail, as a broken install's does. */
+  listModelsRefusal?: string
   // Held open where a test wants the rebind still in flight: the change lands
   // when the test says so, the way it lands when main's bind comes back.
   holdWorktree?: boolean
@@ -721,7 +723,11 @@ export function createScriptedPort(initial: Partial<ShellSnapshot> = {}): Script
       emit({ type: 'compacted', sessionId, text, record })
     },
 
-    listModels: () => record('listModels', [], port.models),
+    listModels: () => {
+      if (port.listModelsRefusal === undefined) return record('listModels', [], port.models)
+      calls.push({ op: 'listModels', args: [] })
+      return Promise.reject(new Error(port.listModelsRefusal))
+    },
 
     listProviders: () => record('listProviders', [], port.providers),
 

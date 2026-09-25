@@ -13,6 +13,11 @@ export type UpdateStatus =
   | { readonly kind: 'unchecked' }
   /** The registry's latest is not newer than what runs. */
   | { readonly kind: 'current' }
+  /**
+   * A newer version is being copied into the bundle. The bundle holds neither
+   * version while this lasts, so no restart is offered.
+   */
+  | { readonly kind: 'installing'; readonly version: string }
   /** A newer version is assembled into the bundle; a restart picks it up. */
   | { readonly kind: 'ready'; readonly version: string }
 
@@ -29,7 +34,10 @@ export type AppVersionListener = (state: AppVersionState) => void
 export interface AppUpdateService {
   /** The whole snapshot, asked once at mount so nothing announced early is lost. */
   state(): Promise<AppVersionState>
-  /** Relaunch into whatever the bundle now holds. Only ever the human's click. */
+  /**
+   * Relaunch into whatever the bundle now holds. Only ever the human's click.
+   * An assembly still writing into the bundle is waited out first.
+   */
   restart(): Promise<void>
   /**
    * One check now, the same one the poll runs, settled when it is over:

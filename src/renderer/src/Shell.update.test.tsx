@@ -185,6 +185,25 @@ describe('the version strip', () => {
     await vi.waitFor(() => expect(update.restarts).toHaveLength(2))
   })
 
+  it('takes both restart doors down while a newer version is copied in', async () => {
+    const update = scriptedUpdate(ready)
+    await shellWith(update)
+    await vi.waitFor(() => expect(pill()).not.toBeNull())
+
+    act(() =>
+      update.announce({
+        kind: 'installed',
+        version: INSTALLED,
+        update: { kind: 'installing', version: '0.4.19' }
+      })
+    )
+
+    expect(pill()).toBeNull()
+    expect(screen.queryByRole('button', { name: /Restart into Crucible/ })).toBeNull()
+    expect(strip()).toHaveTextContent('installing 0.4.19…')
+    expect(strip()?.querySelectorAll('button')).toHaveLength(0)
+  })
+
   it('reports a version staged before the window subscribed', async () => {
     const update = scriptedUpdate(ready)
     await shellWith(update)

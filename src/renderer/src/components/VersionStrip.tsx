@@ -59,6 +59,10 @@ export function VersionStrip({
       </div>
       {state.kind === 'dev' ? (
         <span className="vwhen">updates are not checked in dev</span>
+      ) : state.update.kind === 'installing' ? (
+        // The bundle is being rewritten: nothing to click, least of all a
+        // restart, until the copy is done.
+        <span className="vwhen">installing {state.update.version}…</span>
       ) : checking || state.update.kind === 'unchecked' ? (
         // Main's launch check, or the one just asked for: either way one is
         // running, and asking again would only join it.

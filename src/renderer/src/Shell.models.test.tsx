@@ -139,6 +139,47 @@ describe('the model picker', () => {
 
 // Display only, and only on the chip: the picker keeps the port's own labels
 // so an unfamiliar model stays identifiable.
+// A broken install once failed the launch fetch, and nothing asked again: the
+// picker had nothing in it and the thinking chip stayed disabled all launch.
+describe('a model list that failed to load', () => {
+  it('is asked for again when a session is created', async () => {
+    const port = createScriptedPort(
+      oneSession({ model: 'fake/deterministic', thinkingLevel: 'low' })
+    )
+    port.models = MODELS
+    port.listModelsRefusal = "Cannot find package 'typebox'"
+    render(<Shell
+        port={port}
+        workspace={createScriptedWorkspace()}
+        commands={createScriptedCommands()}
+      />)
+    await sessionsShown()
+    await settled()
+    expect(screen.getByRole('button', { name: /^Thinking:/ })).toBeDisabled()
+    const asked = port.calls.filter((call) => call.op === 'listModels').length
+
+    port.listModelsRefusal = undefined
+    await act(async () => {
+      fireEvent.click(screen.getAllByRole('button', { name: 'New session' })[0])
+      await settled()
+    })
+
+    expect(port.calls.filter((call) => call.op === 'listModels')).toHaveLength(asked + 1)
+    expect(screen.getByRole('button', { name: /^Thinking:/ })).toBeEnabled()
+  })
+
+  it('is fetched once at launch when it loads', async () => {
+    const port = await shellWithModels()
+
+    await act(async () => {
+      fireEvent.click(screen.getAllByRole('button', { name: 'New session' })[0])
+      await settled()
+    })
+
+    expect(port.calls.filter((call) => call.op === 'listModels')).toHaveLength(1)
+  })
+})
+
 describe('model aliases', () => {
   it('shows the alias on the chip while the picker keeps the full name', async () => {
     await shellWith(RING_MODELS, OPUS)
