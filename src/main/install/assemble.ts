@@ -28,6 +28,7 @@ import {
   distRoot,
   isRenamedAside,
   launcherPath,
+  STAGED_NEXT,
   swapsAside,
   plistWithValues,
   readTreeShape,
@@ -114,31 +115,38 @@ export async function assembleDesktopApp(
   }
 
   const bundleRoot = bundleRootFor(machine, request.target)
-  const layout = bundleLayout(platform, bundleRoot)
   const version = packageVersion(shape.packageDir)
   const dist = await electronDist(shape, machine)
 
   mkdirSync(bundleRoot, { recursive: true })
-  // Last update's leftovers, which unlock the moment the process that held
-  // them exits. Swept first so a bundle never grows a second generation.
+  const staged = join(bundleRoot, STAGED_NEXT)
+  // A dead run's half-built next version, and the last swap's leftovers,
+  // which unlock the moment the process that held them exits. Swept first so
+  // a bundle never grows a second generation of either.
+  removeBestEffort(staged)
   sweepRenamedAside(bundleRoot)
 
-  copyTree(distRoot(platform, dist), bundleRoot, platform)
-  place(join(bundleRoot, distExecutable(platform)), layout.executable, platform)
-  rmSync(join(layout.resourcesDir, 'default_app.asar'), { force: true })
+  // The whole bundle is assembled under the hidden name and only then swapped
+  // in: an assembly that dies partway — the app quitting out from under its
+  // own updater, a hung copy killed at the timeout, a power cut — must never
+  // leave the launchable name holding half of two versions. One did: it left
+  // a plist naming an executable the copy had already renamed away, and the
+  // Finder called the app damaged.
+  const building = bundleLayout(platform, staged)
+  copyTree(distRoot(platform, dist), staged, platform)
+  place(join(staged, distExecutable(platform)), building.executable, platform)
+  rmSync(join(building.resourcesDir, 'default_app.asar'), { force: true })
+  copyPackage(shape.packageDir, building.appDir, platform)
+  copyDependencies(shape, building.appDir, platform)
+  copyIcon(shape.packageDir, building, platform)
+  // Finished completely — identity, mode, signature — while still under the
+  // hidden name: what the swap publishes is always a launchable bundle.
+  if (platform === 'darwin') await finishMacBundle(staged, building, version, machine)
+  else chmodSync(building.executable, 0o755)
 
-  // The payload is replaced rather than merged, so nothing a previous version
-  // shipped survives into this one. On Windows whatever is locked stays and
-  // is written over by the copy below.
-  removeBestEffort(layout.appDir)
-  copyPackage(shape.packageDir, layout.appDir, platform)
-  copyDependencies(shape, layout.appDir, platform)
+  swapInto(bundleRoot, staged, platform)
 
-  copyIcon(shape.packageDir, layout, platform)
-  if (platform === 'darwin') await finishMacBundle(bundleRoot, layout, version, machine)
-  else chmodSync(layout.executable, 0o755)
-
-  const launcher = await registerLauncher(machine, layout)
+  const launcher = await registerLauncher(machine, bundleLayout(platform, bundleRoot))
 
   return { bundleRoot, version, ...(launcher === undefined ? {} : { launcher }) }
 }
@@ -216,9 +224,8 @@ function copyDependencies(
   platform: Platform
 ): void {
   const into = join(appDir, 'node_modules')
-  // "A nearer root already provided it" is a fact about this run, remembered
-  // here rather than read off the bundle: an existing directory there may be
-  // the previous version's leftover from a removal a locked file refused.
+  // Which names a nearer root already provided. The staged bundle starts
+  // empty, so this run's own memory is the whole truth.
   const placed = new Set<string>()
 
   for (const root of shape.dependencyRoots) {
@@ -228,12 +235,7 @@ function copyDependencies(
       // copying it would nest the app inside itself.
       if (from === shape.packageDir || placed.has(name)) continue
       placed.add(name)
-      const to = join(into, name)
-      // Replaced, never merged, one dependency at a time — the promise
-      // copyPackage keeps for the payload, kept here too because the payload's
-      // own removal may have been refused halfway.
-      removeBestEffort(to)
-      copyTree(from, to, platform)
+      copyTree(from, join(into, name), platform)
     }
   }
 }
@@ -290,13 +292,17 @@ async function finishMacBundle(
   chmodSync(layout.executable, 0o755)
   // The bundle was modified after electron signed it, and a Mac refuses to
   // launch a bundle whose signature no longer matches. Ad-hoc is all an
-  // unsigned local app needs; notarization is somebody else's story.
+  // unsigned local app needs; notarization is somebody else's story. A sign
+  // that *fails* fails the assembly, before the swap can publish an
+  // unlaunchable bundle; only a machine with no codesign binary at all is
+  // tolerated, because electron's own executable signature still stands.
   await machine
     .run('codesign', ['--force', '--deep', '--sign', '-', bundleRoot])
-    .catch(() => {
-      // A missing codesign (no developer tools) is not a reason to leave the
-      // install half-done; the app may still launch, and the installer's
-      // output already told the user what it did.
+    .catch((cause) => {
+      if ((cause as { code?: unknown } | null)?.code === 'ENOENT') return
+      throw new Error(
+        `codesign refused the assembled bundle: ${cause instanceof Error ? cause.message : String(cause)}`
+      )
     })
 }
 
@@ -337,6 +343,48 @@ async function registerLauncher(
 
 function quote(text: string): string {
   return `'${text.replace(/'/g, "''")}'`
+}
+
+/**
+ * The staged next version takes the bundle's real names: two renames per
+ * top-level entry — `Contents` alone on a Mac, electron's dist entries
+ * elsewhere — so the launchable name never holds a half-copied tree, and
+ * whatever the old bundle held that the new version does not ship goes away
+ * with it. Windows can refuse to rename a directory a running process holds
+ * files in; such an entry falls back to the per-file merge, whose own
+ * rename-aside handles each locked file.
+ */
+function swapInto(bundleRoot: string, staged: string, platform: Platform): void {
+  const shipped = readdirSync(staged)
+  for (const entry of shipped) {
+    const from = join(staged, entry)
+    const to = join(bundleRoot, entry)
+    const aside = renamedAside(to)
+    removeBestEffort(aside)
+    try {
+      if (existsSync(to)) renameSync(to, aside)
+      renameSync(from, to)
+    } catch {
+      // The rename the OS refused — Windows, with the entry's files loaded.
+      // What can be removed is removed, and the new version is copied over
+      // the rest per file, renaming aside what is locked.
+      if (!existsSync(to) && existsSync(aside)) renameSync(aside, to)
+      removeBestEffort(to)
+      copyTree(from, to, platform)
+    }
+    // The old generation, gone the moment nothing runs from it; a process
+    // still holding it leaves it for the next run's sweep.
+    removeBestEffort(aside)
+  }
+  // What the old bundle held that the new version does not ship — a previous
+  // install's cruft, on the platforms whose bundles have many top-level
+  // entries. Aside names stay for the sweep.
+  const names = new Set(shipped)
+  for (const entry of readdirSync(bundleRoot)) {
+    if (names.has(entry) || entry === STAGED_NEXT || isRenamedAside(entry)) continue
+    removeBestEffort(join(bundleRoot, entry))
+  }
+  removeBestEffort(staged)
 }
 
 // ------------------------------------------------------------ the file work

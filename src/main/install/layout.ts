@@ -240,6 +240,15 @@ export function assemblesFromHere(
 const RENAMED_ASIDE = '.crucible-old'
 
 /**
+ * Where the next version is assembled, inside the bundle it will become: a
+ * hidden entry beside the bundle's real contents. Inside rather than beside
+ * the bundle because the directory *holding* the bundle may not be writable
+ * (`/Applications`, on most Macs) while the bundle itself is the user's own,
+ * and because staying on the bundle's volume is what keeps the swap a rename.
+ */
+export const STAGED_NEXT = '.crucible-next'
+
+/**
  * Windows locks the running `Crucible.exe` and every DLL it has loaded against
  * write and delete, but allows renaming them within the volume. So a file that
  * cannot be replaced is renamed beside itself and the new one written under

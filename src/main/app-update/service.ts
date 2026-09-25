@@ -46,9 +46,9 @@ export function createAppUpdateService(options: AppUpdateOptions): MainAppUpdate
   // The check in flight, if one is: a poll or a click landing on top of it
   // joins it rather than fetching the same version twice.
   let inFlight: Promise<void> | undefined
-  // The copy into the bundle, while one runs. A restart waits for it: killing
-  // the app mid-copy leaves a bundle with half its dependencies, and nothing
-  // repairs it until the next version is published.
+  // The copy into the bundle, while one runs. A restart waits for it: the
+  // update lands by a whole swap, so a kill mid-copy costs no bundle — but it
+  // would relaunch the old version and orphan the update until the next poll.
   let assembling: Promise<void> | undefined
   let disposed = false
 

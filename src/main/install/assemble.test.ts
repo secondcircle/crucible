@@ -164,11 +164,117 @@ describe('assembling a desktop app on a Mac', () => {
     )
     expect(existsSync(join(target, 'Contents', 'Resources', 'default_app.asar'))).toBe(false)
 
-    // The bundle changed after electron signed it, and a Mac will not launch a
-    // bundle whose signature no longer matches.
+    // Signed while still under the staging name — the swap publishes only a
+    // finished, signed bundle — and the staging directory does not outlive
+    // the assembly.
     expect(ran).toEqual([
-      { command: 'codesign', args: ['--force', '--deep', '--sign', '-', target] }
+      {
+        command: 'codesign',
+        args: ['--force', '--deep', '--sign', '-', join(target, '.crucible-next')]
+      }
     ])
+    expect(existsSync(join(target, '.crucible-next'))).toBe(false)
+  })
+
+  it('carries nothing of the previous install into the refreshed bundle', async () => {
+    const tree = staging('1.5.0', 'darwin')
+    const target = join(root, 'Applications', 'Crucible.app')
+    await assembleDesktopApp({ tree, packageName: NAME, target }, machine('darwin'))
+    // What a real bundle accumulated across in-place refreshes: helpers a
+    // previous version renamed, and strays at the bundle's top level.
+    write(
+      join(target, 'Contents', 'Frameworks', 'Crucible Helper.app', 'stale'),
+      'renamed by an old install'
+    )
+    write(join(target, 'stray'), 'not part of any version')
+
+    await assembleDesktopApp({ tree, packageName: NAME, target }, machine('darwin'))
+
+    expect(existsSync(join(target, 'Contents', 'Frameworks', 'Crucible Helper.app'))).toBe(false)
+    expect(existsSync(join(target, 'stray'))).toBe(false)
+    expect(existsSync(join(target, 'Contents', 'MacOS', 'Crucible'))).toBe(true)
+  })
+
+  it('fails before the swap when codesign refuses, leaving the previous bundle whole', async () => {
+    const tree = staging('1.5.0', 'darwin')
+    const target = join(root, 'Applications', 'Crucible.app')
+    await assembleDesktopApp({ tree, packageName: NAME, target }, machine('darwin'))
+
+    rmSync(join(root, 'staging'), { recursive: true, force: true })
+    staging('1.6.0', 'darwin')
+    const refusing = machine('darwin', {
+      run: async (command) => {
+        if (command === 'codesign') throw new Error('errSecInternalComponent')
+      }
+    })
+
+    await expect(
+      assembleDesktopApp({ tree, packageName: NAME, target }, refusing)
+    ).rejects.toThrow(/codesign refused/)
+    // The launchable name still holds the signed 1.5.0, exactly as it was.
+    const plist = readFileSync(join(target, 'Contents', 'Info.plist'), 'utf8')
+    expect(plist).toContain('<key>CFBundleShortVersionString</key>\n\t<string>1.5.0</string>')
+  })
+
+  it('tolerates a machine with no codesign binary at all', async () => {
+    const tree = staging('1.5.0', 'darwin')
+    const target = join(root, 'Applications', 'Crucible.app')
+    const bare = machine('darwin', {
+      run: async (command) => {
+        if (command === 'codesign') {
+          throw Object.assign(new Error('spawn codesign ENOENT'), { code: 'ENOENT' })
+        }
+      }
+    })
+
+    const outcome = await assembleDesktopApp({ tree, packageName: NAME, target }, bare)
+
+    // Electron's own executable signature still stands, so the install lands.
+    expect(outcome.version).toBe('1.5.0')
+    expect(existsSync(join(target, 'Contents', 'MacOS', 'Crucible'))).toBe(true)
+  })
+})
+
+describe('an assembly that dies partway', () => {
+  // The failure that shipped: an update assembly killed between copying
+  // electron's dist and finishing the bundle left a plist naming an
+  // executable the copy had already renamed away, and the Finder called the
+  // app damaged. Staged whole and swapped by rename, a failed assembly
+  // leaves the launchable names exactly as they were.
+  it('leaves the bundle it was refreshing untouched, and the next run recovers', async () => {
+    const tree = staging('1.5.0', 'linux')
+    const target = join(root, 'opt', 'crucible')
+    await assembleDesktopApp({ tree, packageName: NAME, target }, machine('linux'))
+
+    rmSync(join(root, 'staging'), { recursive: true, force: true })
+    staging('1.6.0', 'linux')
+    // A dependency the copy cannot read fails the assembly after the dist
+    // copy has already run — mid-assembly, where a kill would land.
+    const unreadable = join(root, 'staging', 'node_modules', 'react')
+    chmodSync(unreadable, 0o000)
+    try {
+      await expect(
+        assembleDesktopApp({ tree, packageName: NAME, target }, machine('linux'))
+      ).rejects.toThrow()
+    } finally {
+      chmodSync(unreadable, 0o755)
+    }
+
+    // The bundle still holds 1.5.0 whole; the half-built staging sits beside
+    // it under its hidden name.
+    expect(
+      readFileSync(join(target, 'resources', 'app', 'out', 'main', 'index.js'), 'utf8')
+    ).toContain('1.5.0')
+    expect(readFileSync(join(target, 'libffmpeg.so'), 'utf8')).toBe('binary 1.5.0')
+    expect(existsSync(join(target, '.crucible-next'))).toBe(true)
+
+    // The next assembly sweeps the half-built staging and lands cleanly.
+    const outcome = await assembleDesktopApp({ tree, packageName: NAME, target }, machine('linux'))
+    expect(outcome.version).toBe('1.6.0')
+    expect(existsSync(join(target, '.crucible-next'))).toBe(false)
+    expect(
+      readFileSync(join(target, 'resources', 'app', 'out', 'main', 'index.js'), 'utf8')
+    ).toContain('1.6.0')
   })
 })
 
@@ -301,11 +407,11 @@ describe('what a global install must not drag along', () => {
 
 describe('a refresh that cannot remove everything first', () => {
   // Windows holds files the running app has loaded against delete, yet the
-  // assembler must still leave the bundle holding the new version. A
-  // dependency that survived the failed removal must therefore still be
-  // refreshed — skipping it because it "already exists" reads last version's
-  // leftovers as this run's own work. Reproduced here with a directory the
-  // removal cannot delete, which is what a locked file does to `rmSync`.
+  // assembler must still leave the bundle holding the new version. The swap
+  // renames the whole entry aside, so the locked old files ride out of the
+  // way and the staged entry takes the name; the aside copy stays until a
+  // later sweep can delete it. Reproduced here with a directory the removal
+  // cannot delete, which is what a locked file does to `rmSync`.
   it('still refreshes a dependency the removal left behind', async () => {
     const tree = staging('1.5.0', 'linux')
     const modules = join(root, 'staging', 'node_modules')
@@ -325,7 +431,13 @@ describe('a refresh that cannot remove everything first', () => {
       await assembleDesktopApp({ tree, packageName: NAME, target }, machine('linux'))
       expect(readFileSync(join(bundled, 'react', 'index.js'), 'utf8')).toContain('1.6.0')
     } finally {
-      chmodSync(bundled, 0o755)
+      // The restricted directory may now sit under the renamed-aside entry.
+      for (const path of [
+        bundled,
+        join(target, 'resources.crucible-old', 'app', 'node_modules')
+      ]) {
+        if (existsSync(path)) chmodSync(path, 0o755)
+      }
     }
   })
 })
