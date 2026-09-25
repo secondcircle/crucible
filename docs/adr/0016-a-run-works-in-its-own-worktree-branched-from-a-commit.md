@@ -12,7 +12,9 @@ predecessor completes cleanly. There is still no venue choice — isolation is
 unconditional — and "dirty" stays impossible by construction because a base
 is always a commit, never working-tree state. Session isolation is untouched:
 a session still works in the checkout or in a worktree of its own, chosen
-at creation (ADR 0013).
+at creation (ADR 0013). The worktree is of the run's target repository,
+which is the workspace's own unless the run names another inside the
+workspace folder, and the base commit resolves there (ADR 0035).
 
 ## Consequences
 

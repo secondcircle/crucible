@@ -50,7 +50,7 @@ The workspace folder's own git working directory, where a session works unless i
 _Avoid_: local, live checkout.
 
 **Worktree**:
-A git worktree of the workspace's repository, created for exactly one session to work in place of the checkout, or for exactly one run. Crucible creates worktrees and never deletes them.
+A git worktree created for exactly one session, of the workspace's repository, to work in place of the checkout; or for exactly one run, of that run's target repository. Crucible creates worktrees and never deletes them.
 _Avoid_: venue, sandbox, branch (a worktree holds a branch; it is not one).
 
 **Worktree setup**:
@@ -272,10 +272,19 @@ run as-is.
 _Avoid_: built-in workflow, prefab, template, sample.
 
 **Run**:
-One execution of a workflow, working in a worktree of its own branched from
-a commit named at kickoff. Observed in the UI, never conversed with: its
+One execution of a workflow, working in a worktree of its own target
+repository, branched from a commit named at kickoff. Observed in the UI, never conversed with: its
 questions and results are messages to its orchestrator.
 _Avoid_: job, build, using "workflow" for an execution.
+
+**Target repository**:
+The one git repository a run works in, commits to and reports a branch of:
+the workspace's own repository unless the run names another, a repository
+whose top sits inside the workspace folder. A run has exactly one; the
+workspace still owns the run's workflows, its orchestrator and its place in
+the UI.
+_Avoid_: component repo, subrepo, nested repo, venue (the legacy word for
+where a run works), project.
 
 **Workflow host**:
 The process a workflow file's own code runs in — its `run()`, `plan()`, node

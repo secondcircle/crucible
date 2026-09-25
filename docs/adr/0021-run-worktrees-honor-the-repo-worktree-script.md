@@ -19,7 +19,9 @@ exactly as it does for a session. Crucible then verifies: the reported
 worktree must sit at the requested base commit, and on the continued branch
 when chained. A mismatch or a failure refuses the run at kickoff, script
 output shown, before a node has cost anything. Repositories with no script
-are untouched — plain git plus setup, as before. How the base and branch
+are untouched — plain git plus setup, as before. For a run, the repository
+is its target repository: the scripts are read from the target's
+`.crucible/` and the base resolves there (ADR 0035). How the base and branch
 reach the script (arguments or environment) is the implementation's choice,
 recorded exactly in the agent docs that ship the contract, which are a
 deliverable of equal rank: an agent told "make run worktrees work here" must

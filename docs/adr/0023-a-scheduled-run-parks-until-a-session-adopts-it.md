@@ -9,6 +9,9 @@ contract takes over. Clean completions never demand attention — they land
 on the board as reports. ADR 0017 holds: the board never answers a run, and
 ADR 0002 holds: no session is ever created except by the user's act.
 
+A scheduled run of a workflow that declares a fixed target repository
+fetches and branches from that repository's trunk (ADR 0035).
+
 ## Consequences
 
 Attention for scheduled runs rides a top-bar chip and the Tab walk, not a
