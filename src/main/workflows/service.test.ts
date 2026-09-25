@@ -1,11 +1,15 @@
 // @vitest-environment node
-import { describe, expect, it, vi } from 'vitest'
+import { writeFileSync } from 'node:fs'
+import { join } from 'node:path'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { TranscriptItem } from '../../shared/agent/port'
 import { resumeRefusal, type RunRecord } from '../../shared/workflows/run'
 import type { WorkflowRunEvent } from '../../shared/workflows/service'
 import type { StartRunRequest, WorkflowEngine } from './engine'
 import type { LoadedWorkflow, WorkflowLoader } from './loader'
 import { createLiveWorkflowRunService } from './service'
+import type { TargetRepository } from './target'
+import { cleanupScratch, git, tempDir, tempRepo } from './testing/engine-rig'
 
 function record(overrides: Partial<RunRecord>): RunRecord {
   return {
@@ -33,14 +37,33 @@ function record(overrides: Partial<RunRecord>): RunRecord {
   }
 }
 
-function engineOf(runs: RunRecord[]): WorkflowEngine & { started: StartRunRequest[] } {
+interface EngineStub {
+  // Where the stub says the run's target repository settled, which is the
+  // engine's call and not the service's; the workspace's own by default.
+  readonly settle?: (request: StartRunRequest) => TargetRepository
+  /** What the record the stub hands back says beyond its defaults. */
+  readonly startedAs?: Partial<RunRecord>
+}
+
+function engineOf(
+  runs: RunRecord[],
+  stub: EngineStub = {}
+): WorkflowEngine & { started: StartRunRequest[]; bases: string[] } {
   const started: StartRunRequest[] = []
+  const bases: string[] = []
+  const settle = stub.settle ?? ((request) => ({ path: request.workspacePath }))
   return {
     started,
+    bases,
     runs: () => runs,
+    // The base is asked for the way the engine asks: once the target is
+    // settled, before anything is made.
     async start(request) {
       started.push(request)
-      return record({ id: 'new1' })
+      bases.push(
+        typeof request.base === 'string' ? request.base : await request.base(settle(request))
+      )
+      return record({ id: 'new1', ...stub.startedAs })
     },
     pause: vi.fn(),
     // The record moves the way the engine moves it, so what the tool answers
@@ -91,6 +114,34 @@ const loader: WorkflowLoader = {
         open: () => {
           throw new Error('not under test')
         }
+      },
+      {
+        name: 'create-change',
+        origin: 'workspace',
+        path: '/x/create-change.ts',
+        manifest: {
+          description: 'write a change into whichever repository it is for',
+          inputs: {},
+          target: { required: true },
+          plans: false
+        },
+        open: () => {
+          throw new Error('not under test')
+        }
+      },
+      {
+        name: 'wiki-lint',
+        origin: 'workspace',
+        path: '/x/wiki-lint.ts',
+        manifest: {
+          description: 'lint the component wiki',
+          inputs: {},
+          target: 'components/wiki',
+          plans: false
+        },
+        open: () => {
+          throw new Error('not under test')
+        }
       }
     ]
   },
@@ -102,9 +153,10 @@ const loader: WorkflowLoader = {
 function serviceOver(
   runs: RunRecord[],
   subscribers: Array<() => void> = [],
-  base?: (workspacePath: string) => Promise<string>
+  base?: (repositoryPath: string) => Promise<string>,
+  stub: EngineStub = {}
 ) {
-  const engine = engineOf(runs)
+  const engine = engineOf(runs, stub)
   const service = createLiveWorkflowRunService({
     engine,
     loader,
@@ -120,6 +172,22 @@ describe('the live run service', () => {
     const text = await service.tools.workflows('/repos/thing')
     expect(text).toContain('adhoc (workspace) — one node running a prompt file')
     expect(text).toContain('prompt: a task file')
+  })
+
+  // An orchestrator learns what a workflow needs of its target before it
+  // starts one, rather than from a refusal.
+  it('lists what target a workflow requires or fixes, and nothing for one that declares none', async () => {
+    const { service } = serviceOver([])
+    const text = await service.tools.workflows('/repos/thing')
+    expect(text).toContain(
+      "- create-change (workspace) — write a change into whichever repository it is for\n" +
+        "  target: required — name a repository inside the workspace with crucible_run's `target`"
+    )
+    expect(text).toContain(
+      '- wiki-lint (workspace) — lint the component wiki\n' +
+        '  target: components/wiki — fixed; name it or no target at all'
+    )
+    expect(text).toContain('adhoc (workspace) — one node running a prompt file\n  inputs: prompt: a task file\n- ')
   })
 
   it("describes this session's runs and flags a waiting question", async () => {
@@ -206,11 +274,32 @@ describe('the live run service', () => {
         workspaceName: 'thing',
         workflow: 'triage',
         inputs: {},
-        base: 'refs/remotes/origin/main',
+        base: expect.any(Function),
         scheduled: true
       }
     ])
+    expect(engine.bases).toEqual(['refs/remotes/origin/main'])
     expect(run.id).toBe('new1')
+  })
+
+  // A workflow that fixes its target is the only kind a schedule can land in
+  // another repository, and the trunk it branches from is that repository's.
+  it('fetches the trunk of the target repository a scheduled workflow fixes', async () => {
+    const asked: string[] = []
+    const { engine, service } = serviceOver(
+      [],
+      [],
+      async (repositoryPath) => {
+        asked.push(repositoryPath)
+        return 'refs/remotes/origin/main'
+      },
+      { settle: () => ({ named: 'components/app', path: '/repos/thing/components/app' }) }
+    )
+
+    await service.startScheduled({ workspacePath: '/repos/thing', workflow: 'triage' })
+
+    expect(asked).toEqual(['/repos/thing/components/app'])
+    expect(engine.started[0].workspacePath).toBe('/repos/thing')
   })
 
   it('refuses a scheduled fire whose trunk cannot be resolved', async () => {
@@ -222,7 +311,7 @@ describe('the live run service', () => {
       service.startScheduled({ workspacePath: '/repos/thing', workflow: 'triage' })
     ).rejects.toThrow(/no origin\/HEAD/)
     // Nothing was started: the failure is the schedule's, before a run exists.
-    expect(engine.started).toEqual([])
+    expect(engine.bases).toEqual([])
   })
 
   // An interrupted run reads as what happened and what to do about it: the
@@ -347,6 +436,75 @@ describe('the live run service', () => {
       expect(service.turnStart('s1')).toContain('cd34')
       expect(service.turnStart('s2')).toContain('ef56')
       expect(service.turnStart('s1')).toBeUndefined()
+    })
+  })
+
+  describe('starting a run', () => {
+    afterEach(cleanupScratch)
+
+    it("branches an untargeted run from the session's own HEAD and names no repository", async () => {
+      const workspace = tempRepo()
+      const { engine, service } = serviceOver([], [], undefined, {
+        startedAs: { worktreePath: `${workspace}/.crucible/worktrees/run-new1`, baseCommit: 'abcdef1234' }
+      })
+
+      const said = await service.tools.start('s1', workspace, 'adhoc', {})
+
+      expect(engine.started[0]).not.toHaveProperty('target')
+      expect(engine.bases).toEqual([git(workspace, 'rev-parse', 'HEAD')])
+      expect(said).toBe(
+        `Run new1 of "adhoc" started · branch crucible/run-ab12 · worktree ${workspace}/.crucible/` +
+          'worktrees/run-new1 · base abcdef1.\nIt works unattended and reports back to this session — ' +
+          'check-ins, blockers and completion all arrive here as messages. Ending your turn now is the ' +
+          'normal thing to do.'
+      )
+    })
+
+    it("hands the engine the target as named, and branches from the target's HEAD", async () => {
+      const workspace = tempRepo()
+      const component = tempRepo()
+      writeFileSync(join(component, 'more.txt'), 'more\n')
+      git(component, 'add', '-A')
+      git(component, 'commit', '-q', '-m', 'second')
+      const { engine, service } = serviceOver([], [], undefined, {
+        settle: () => ({ named: 'app', path: component }),
+        startedAs: { targetRepository: 'app' }
+      })
+
+      const said = await service.tools.start('s1', workspace, 'adhoc', {}, { target: ' app ' })
+
+      expect(engine.started[0].target).toBe('app')
+      expect(engine.bases).toEqual([git(component, 'rev-parse', 'HEAD')])
+      expect(engine.bases[0]).not.toBe(git(workspace, 'rev-parse', 'HEAD'))
+      expect(said).toContain('started · repository app · branch crucible/run-ab12 · ')
+    })
+
+    it('leaves a named base to be resolved in the target, untouched', async () => {
+      const workspace = tempRepo()
+      const { engine, service } = serviceOver([], [], undefined, {
+        settle: () => ({ named: 'app', path: join(workspace, 'app') })
+      })
+
+      await service.tools.start('s1', workspace, 'adhoc', {}, { target: 'app', base: ' main ' })
+
+      expect(engine.bases).toEqual(['main'])
+    })
+
+    it('refuses an untargeted run in a workspace folder that is no repository, and starts a targeted one', async () => {
+      const folder = tempDir('crucible-not-a-repo-')
+      const component = tempRepo()
+      const { engine, service } = serviceOver([], [], undefined, {
+        settle: (request) =>
+          request.target === undefined ? { path: request.workspacePath } : { named: 'app', path: component }
+      })
+
+      await expect(service.tools.start('s1', folder, 'adhoc', {})).rejects.toThrow(
+        `${folder} is not inside a git repository, so a run has no commit to branch from.`
+      )
+
+      await service.tools.start('s1', folder, 'adhoc', {}, { target: 'app' })
+      expect(engine.started[1].workspacePath).toBe(folder)
+      expect(engine.bases).toEqual([git(component, 'rev-parse', 'HEAD')])
     })
   })
 

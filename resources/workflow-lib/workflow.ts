@@ -180,8 +180,18 @@ export interface RunContext {
   inputs: Record<string, string>
   /** Absolute path of this run's artifact directory (outside the repo). */
   artifactDir: string
-  /** The run's own worktree: where every node works. */
+  /**
+   * The run's own worktree, of its target repository: where every node
+   * works. For a run that targets a repository inside the workspace, this is
+   * a worktree of that repository, not of the workspace's.
+   */
   cwd: string
+  /**
+   * The workspace folder the run belongs to, whatever repository it targets:
+   * where its workflows live and where the workspace's own files are. Never
+   * a worktree.
+   */
+  workspacePath: string
   /** Execute one agent node; resolves when the node completes. */
   node(id: string, spec: NodeSpec): Promise<NodeResult>
   /** Like node(), but holds the session open for revise() feedback loops. */
@@ -270,11 +280,28 @@ export interface ScheduleSpec {
   check?(ctx: { readonly workspacePath: string }): boolean | Promise<boolean>
 }
 
+/**
+ * Which repository a run of a workflow works in, when the workflow says:
+ * a path relative to the workspace folder naming the top of a git repository
+ * inside it (`'ifs-enr-core-acct-app'`), fixed for every run; or
+ * `{ required: true }`, which refuses a kickoff that names no target.
+ */
+export type TargetDeclaration = string | { readonly required: true }
+
 export interface WorkflowDef {
   /** One line: what a run of this accomplishes. Shown to orchestrators. */
   description: string
   /** Input name -> description. Every input is a path to an existing file. */
   inputs: Record<string, string>
+  /**
+   * The run's target repository. Absent, a run works in whatever the kickoff
+   * names, or the workspace's own repository when it names none. A path
+   * fixes the target: a kickoff naming another is refused, and a scheduled
+   * run lands there with nobody to choose. `{ required: true }` leaves the
+   * choice to each kickoff and refuses one that makes none. `'.'` is the
+   * workspace's own repository, the same as declaring nothing.
+   */
+  target?: TargetDeclaration
   /**
    * Whether the engine commits whatever the run's worktree holds when the
    * run ends (`crucible: <workflow> <run-id>`). Defaults to true; nothing

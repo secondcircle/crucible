@@ -1150,3 +1150,60 @@ describe('investigating a run', () => {
     expect(screen.queryByLabelText('Run d3p8')).toBeNull()
   })
 })
+
+// A run in a repository inside the workspace names that repository by its
+// folder, muted, wherever runs are listed; a run in the workspace's own
+// repository looks exactly as it always has.
+describe('a run that targets a repository inside the workspace', () => {
+  const targeted = (overrides: Partial<RunRecord> = {}): RunRecord =>
+    runOf({
+      targetRepository: 'components/ifs-enr-core-acct-app',
+      worktreePath: '/repos/crucible/components/ifs-enr-core-acct-app/.crucible/worktrees/run-en42',
+      ...overrides
+    })
+
+  it('carries the folder name after the workflow on its chip, and an untargeted chip carries none', async () => {
+    await act(async () => {
+      mount([targeted(), runOf({ id: 'pl41', workflow: 'adhoc' })])
+      await settled()
+    })
+
+    const chips = within(screen.getByRole('toolbar', { name: 'Runs' })).getAllByRole('button')
+    const label = chips[0].querySelector('.repo')
+    expect(label).toHaveTextContent('ifs-enr-core-acct-app')
+    expect(label?.previousElementSibling?.textContent).toBe('build')
+    expect(chips[1].querySelector('.repo')).toBeNull()
+  })
+
+  it('reads repository, branch and base in the run view header', async () => {
+    mount([targeted()])
+    await act(settled)
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /build.*builder/s }))
+      await settled()
+    })
+
+    const where = screen.getByLabelText('Run en42').querySelector('.rvtop .where')
+    expect(where?.textContent).toBe('ifs-enr-core-acct-app · crucible/run-en42 · from 6c90bb0')
+  })
+
+  it('leaves an untargeted run view header as it was', async () => {
+    mount([runOf({})])
+    await act(settled)
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /build.*builder/s }))
+      await settled()
+    })
+
+    const where = screen.getByLabelText('Run en42').querySelector('.rvtop .where')
+    expect(where?.textContent).toBe('crucible/run-en42 · from 6c90bb0')
+  })
+
+  it('labels its ⌘R row after the workflow, and only its row', async () => {
+    await open([targeted(), runOf({ id: 'k2m9', workflow: 'adhoc' })])
+
+    expect(row('en42')?.querySelector('.repo')).toHaveTextContent('ifs-enr-core-acct-app')
+    expect(row('en42')?.querySelector('.repo')?.previousElementSibling?.className).toBe('wf')
+    expect(row('k2m9')?.querySelector('.repo')).toBeNull()
+  })
+})

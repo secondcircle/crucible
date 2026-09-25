@@ -6,7 +6,8 @@
 // mangled call arrived as a plausible object with the verdict silently
 // missing, failed one engine turn later with less to go on, and burned the
 // node's retries (run 779a died exactly this way).
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { execFileSync } from 'node:child_process'
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -16,7 +17,8 @@ import {
   RAISE_BLOCKER_DESCRIPTION,
   completeNodeParameters,
   reopenable,
-  toolCallCount
+  toolCallCount,
+  withWorkspaceContext
 } from './sdk-node-session'
 
 // With no role prompt written for a node, the two tools' descriptions are the
@@ -174,5 +176,67 @@ describe('reopening a node session', () => {
   it('refuses an empty file, which would open as a conversation with no task', () => {
     const path = tempFile('')
     expect(() => reopenable(path)).toThrow('empty')
+  })
+})
+
+// A run that targets a repository inside the workspace hands its nodes the
+// workspace's AGENTS.md as well as the worktree's, walked by the agent
+// runtime's own loader, so what a node is told never depends on where the
+// target's worktree was put.
+describe('the context files of a node in a targeted run', () => {
+  const made: string[] = []
+  afterEach(() => {
+    for (const dir of made.splice(0)) rmSync(dir, { recursive: true, force: true })
+  })
+
+  function sh(cwd: string, ...args: string[]): void {
+    execFileSync('git', args, { cwd, stdio: 'ignore' })
+  }
+
+  /** A workspace with its own AGENTS.md and a component repository with another. */
+  function layout(): { root: string; workspace: string; component: string; agentDir: string } {
+    const root = realpathSync(mkdtempSync(join(tmpdir(), 'crucible-node-context-')))
+    made.push(root)
+    const workspace = join(root, 'workspace')
+    const component = join(workspace, 'app')
+    const agentDir = join(root, 'agent')
+    mkdirSync(component, { recursive: true })
+    mkdirSync(agentDir)
+    writeFileSync(join(workspace, 'AGENTS.md'), 'the workspace\n')
+    writeFileSync(join(component, 'AGENTS.md'), 'the component\n')
+    sh(component, 'init', '-q', '-b', 'main')
+    sh(component, '-c', 'user.email=t@example.invalid', '-c', 'user.name=T', 'add', '-A')
+    sh(component, '-c', 'user.email=t@example.invalid', '-c', 'user.name=T', 'commit', '-q', '-m', 'first')
+    return { root, workspace, component, agentDir }
+  }
+
+  async function contextOf(cwd: string, workspace: string, agentDir: string): Promise<string[]> {
+    const pi = await import('@earendil-works/pi-coding-agent')
+    return withWorkspaceContext(
+      pi.loadProjectContextFiles({ cwd, agentDir }),
+      pi.loadProjectContextFiles({ cwd: workspace, agentDir })
+    ).map((file) => file.content.trim())
+  }
+
+  it('sends each once when the worktree sits under the target inside the workspace', async () => {
+    const { workspace, component, agentDir } = layout()
+    const worktree = join(component, '.crucible', 'worktrees', 'run-1')
+    sh(component, 'worktree', 'add', '-q', '-b', 'crucible/run-1', worktree)
+
+    expect(await contextOf(worktree, workspace, agentDir)).toEqual([
+      'the workspace',
+      'the component'
+    ])
+  })
+
+  it('sends the same when a script put the worktree outside the workspace', async () => {
+    const { root, workspace, component, agentDir } = layout()
+    const worktree = join(root, 'elsewhere', 'wt-1')
+    sh(component, 'worktree', 'add', '-q', '-b', 'wt/1', worktree)
+
+    expect(await contextOf(worktree, workspace, agentDir)).toEqual([
+      'the workspace',
+      'the component'
+    ])
   })
 })

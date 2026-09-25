@@ -2,6 +2,7 @@ import {
   currentNode,
   runCacheMisses,
   runCost,
+  targetFolder,
   type RunRecord
 } from '../../../shared/workflows/run'
 import type { LiveMonitor } from '../../../shared/monitors/monitor'
@@ -47,6 +48,7 @@ export function RunStrip({
           const misses = runCacheMisses(run)
           const parked = run.waiting === true || run.status === 'paused'
           const waiting = node?.waitingOn
+          const repository = targetFolder(run)
           return (
             <button
               key={run.id}
@@ -56,6 +58,7 @@ export function RunStrip({
             >
               <span className={`dot ${run.status}`} />
               <b>{run.workflow}</b>
+              {repository === undefined ? null : <span className="repo">{repository}</span>}
               <span className="node">{chipNodeLabel(run, node)}</span>
               <span className="age">
                 {shortAge(run.startedAt)}

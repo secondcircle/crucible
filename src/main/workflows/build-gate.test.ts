@@ -135,6 +135,7 @@ function driver(repo: string, script: Script = {}): Driver {
     inputs: { intent },
     artifactDir,
     cwd: repo,
+    workspacePath: repo,
     async node(id: string, spec: NodeSpec): Promise<NodeResult> {
       if (nodes.some((seen) => seen.id === id)) throw new Error(`duplicate node id "${id}"`)
       // The engine refuses a node whose declared input is missing, so the

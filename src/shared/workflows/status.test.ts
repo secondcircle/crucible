@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { interruptionNotice, resumeAnswer } from './status'
-import type { RunNode, RunNodeStatus, RunRecord } from './run'
+import { describeRun, interruptionNotice, resumeAnswer } from './status'
+import { targetFolder, type RunNode, type RunNodeStatus, type RunRecord } from './run'
 
 // What an orchestrator is told a resume will do. The rule under every case
 // here: the sentence describes the act the engine performs on the record as it
@@ -94,5 +94,37 @@ describe('what crucible_resume answers', () => {
       'runs again from its prompt'
     )
     expect(resumeAnswer(working, runOf([node('spec', 'complete')]))).toContain('is working again')
+  })
+})
+
+// Once runs can work in repositories inside the workspace, a branch alone
+// reads ambiguously, so the listing names the repository; a run in the
+// workspace's own repository reads exactly as it always has.
+describe('the crucible_runs line of a run', () => {
+  const listed = (extra: Partial<RunRecord>): string =>
+    describeRun({
+      ...runOf([node('work', 'running', { cost: 1.25 })]),
+      status: 'running',
+      branch: 'crucible/run-45c8',
+      ...extra
+    })
+
+  it('names the target repository before the branch', () => {
+    expect(listed({ targetRepository: 'components/app' })).toBe(
+      '- run 45c8 (build) — running · node work running · $1.25 · repository components/app · ' +
+        'crucible/run-45c8'
+    )
+  })
+
+  it("says nothing of a repository for a run in the workspace's own", () => {
+    expect(listed({})).toBe('- run 45c8 (build) — running · node work running · $1.25 · crucible/run-45c8')
+  })
+})
+
+describe('the folder a run is labelled with', () => {
+  it('is the last segment of its target repository, and nothing without one', () => {
+    expect(targetFolder({ targetRepository: 'components/app' })).toBe('app')
+    expect(targetFolder({ targetRepository: 'app' })).toBe('app')
+    expect(targetFolder({})).toBeUndefined()
   })
 })

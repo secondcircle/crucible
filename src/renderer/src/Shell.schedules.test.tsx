@@ -679,3 +679,36 @@ describe('the Tab walk', () => {
     expect(screen.queryByRole('dialog', { name: 'Schedule board' })).toBeNull()
   })
 })
+
+// A schedule whose workflow fixes a target lands its runs in that repository,
+// and the board says which, muted after the workflow and in the facts; a run
+// in the workspace's own repository looks as it always has.
+describe('a scheduled run that targets a repository inside the workspace', () => {
+  it('names the repository on its row and in the reading pane facts', async () => {
+    await openBoard([
+      parkedRun({
+        targetRepository: 'ifs-enr-core-acct-app',
+        worktreePath: '/repos/crucible/ifs-enr-core-acct-app/.crucible/worktrees/run-e7a2'
+      }),
+      finishedRun()
+    ])
+
+    const row = within(board()).getByLabelText('Parked run e7a2')
+    const label = row.querySelector('.rname .repo')
+    expect(label).toHaveTextContent('ifs-enr-core-acct-app')
+    expect(label?.previousElementSibling?.className).toBe('wf')
+    expect(within(board()).getByLabelText('Run d3p8').querySelector('.repo')).toBeNull()
+
+    const facts = screen.getByLabelText('Run reader').querySelector('.facts')
+    expect(facts).toHaveTextContent(
+      'workflow triage · repository ifs-enr-core-acct-app · node label-issues'
+    )
+  })
+
+  it('says nothing of a repository for a run in the workspace repository', async () => {
+    await openBoard([parkedRun()])
+    const facts = screen.getByLabelText('Run reader').querySelector('.facts')
+    expect(facts).not.toHaveTextContent('repository')
+    expect(within(board()).getByLabelText('Parked run e7a2').querySelector('.repo')).toBeNull()
+  })
+})

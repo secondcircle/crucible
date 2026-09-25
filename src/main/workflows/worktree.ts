@@ -19,8 +19,10 @@ import { setUpWorktree } from '../workspace/worktree-setup'
 const WORKTREES = join('.crucible', 'worktrees')
 
 export interface RunWorktreeRequest {
-  /** The workspace checkout the repository lives in. */
-  readonly workspacePath: string
+  // The top of the run's target repository: its scripts are the ones read,
+  // its base is the one resolved, and its worktrees are where a plain-git
+  // worktree goes.
+  readonly repositoryPath: string
   readonly runId: string
   /** Commit-ish the run branches from; resolved to a commit before use. */
   readonly base: string
@@ -39,7 +41,7 @@ export async function createRunWorktree(request: RunWorktreeRequest): Promise<Ru
   // Presence decides, not executability, exactly as it does for a session: a
   // file that exists but cannot be run is a refusal, never a quiet
   // fall-through to git.
-  return hasWorktreeScript(request.workspacePath)
+  return hasWorktreeScript(request.repositoryPath)
     ? await fromScript(request)
     : await fromGit(request)
 }
@@ -47,12 +49,12 @@ export async function createRunWorktree(request: RunWorktreeRequest): Promise<Ru
 // The script reports a *ready* worktree, so setup is never run after it and
 // none of the plain-git path's directories or ignore files are made.
 async function fromScript(request: RunWorktreeRequest): Promise<RunWorktree> {
-  const { workspacePath, runId } = request
+  const { repositoryPath, runId } = request
   // Before the script is invoked at all: a base that names no commit is
   // Crucible's own refusal, not something a script should be handed.
-  const baseCommit = await resolveBase(workspacePath, request.base)
+  const baseCommit = await resolveBase(repositoryPath, request.base)
 
-  const ran = await runWorktreeScript(workspacePath, {
+  const ran = await runWorktreeScript(repositoryPath, {
     base: baseCommit,
     ...(request.branch === undefined ? {} : { branch: request.branch })
   })
@@ -100,26 +102,26 @@ async function fromScript(request: RunWorktreeRequest): Promise<RunWorktree> {
 // Plain git, shaped exactly like a session's fallback worktree: same
 // directory family, same self-ignoring .gitignore.
 async function fromGit(request: RunWorktreeRequest): Promise<RunWorktree> {
-  const { workspacePath, runId } = request
-  const root = join(workspacePath, WORKTREES)
+  const { repositoryPath, runId } = request
+  const root = join(repositoryPath, WORKTREES)
   selfIgnoring(root)
 
   const path = join(root, `run-${runId}`)
   if (existsSync(path)) throw new Error(`the worktree directory already exists: ${path}`)
 
-  const baseCommit = await resolveBase(workspacePath, request.base)
+  const baseCommit = await resolveBase(repositoryPath, request.base)
 
   const branch = request.branch ?? `crucible/run-${runId}`
   const args =
     request.branch === undefined
       ? // A fresh branch at the named commit.
-        ['-C', workspacePath, 'worktree', 'add', '-b', branch, path, baseCommit]
+        ['-C', repositoryPath, 'worktree', 'add', '-b', branch, path, baseCommit]
       : // Continue the predecessor's branch, whose tip is the named commit.
         // Forced, because the branch is still checked out in the
         // predecessor's worktree — kept forever — and git would
         // otherwise refuse the second checkout. The predecessor is done;
         // nothing works there again.
-        ['-C', workspacePath, 'worktree', 'add', '--force', path, branch]
+        ['-C', repositoryPath, 'worktree', 'add', '--force', path, branch]
   const added = await capture('git', args)
   if (added.code !== 0) {
     throw new Error(`git worktree add failed for run ${runId}\n${added.output}`)
@@ -130,7 +132,7 @@ async function fromGit(request: RunWorktreeRequest): Promise<RunWorktree> {
   // there. Nodes run the project's checks, so failing here — before a single
   // node has cost anything — beats a run that spends its budget rediscovering
   // that it cannot build.
-  const setUp = await setUpWorktree(workspacePath, path)
+  const setUp = await setUpWorktree(repositoryPath, path)
   if (!setUp.ok) {
     throw new Error(`the worktree for run ${runId} could not be set up\n${setUp.output}`)
   }
@@ -138,17 +140,17 @@ async function fromGit(request: RunWorktreeRequest): Promise<RunWorktree> {
   return { path, branch, baseCommit }
 }
 
-/** The run's base as a full sha, in the checkout, before anything is made. */
-async function resolveBase(workspacePath: string, base: string): Promise<string> {
+/** The run's base as a full sha, in the target repository, before anything is made. */
+async function resolveBase(repositoryPath: string, base: string): Promise<string> {
   const resolved = await capture('git', [
     '-C',
-    workspacePath,
+    repositoryPath,
     'rev-parse',
     '--verify',
     `${base}^{commit}`
   ])
   if (resolved.code !== 0) {
-    throw new Error(`"${base}" names no commit in ${workspacePath}\n${resolved.output}`)
+    throw new Error(`"${base}" names no commit in ${repositoryPath}\n${resolved.output}`)
   }
   return resolved.stdout.trim()
 }
@@ -210,7 +212,7 @@ export async function checkoutRootOf(directory: string): Promise<string> {
   return gitDir.slice(0, -'/.git'.length)
 }
 
-/** Written once per workspace, exactly as the session-worktree module does. */
+/** Written once per repository, exactly as the session-worktree module does. */
 function selfIgnoring(root: string): void {
   mkdirSync(root, { recursive: true })
   const ignore = join(root, '.gitignore')

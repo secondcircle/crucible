@@ -78,6 +78,8 @@ told" below.
   pending ghosts in the graph from the first moment. Throwing here fails the
   kickoff, which makes it the place for input validation. List only what is
   certain: the plan is a floor, not a guess.
+- `target` — optional: which repository a run works in, below. Absent,
+  whatever the kickoff names, or the workspace's own repository.
 - `schedule` — optional, workspace workflows only: the firing rule, below.
 - `commit` — optional, default `true`: when the run ends, Crucible commits
   whatever its worktree holds as `crucible: <workflow> <run-id>`. Set
@@ -117,6 +119,74 @@ function git(args: string[], cwd: string): Promise<{ ok: boolean; out: string }>
 The shipped `adr-audit` and `build` examples use exactly this helper.
 `plan(inputs)` and a node's `check(outputs)` run in a host too, under the
 same rule; `check` may return a promise, and `plan` is awaited.
+
+## Which repository a run works in
+
+Every run has exactly one **target repository**: the repository its
+worktree is of, where every node works, where its work is committed and
+whose branch its completion names. It is the workspace's own repository
+unless something names another: a git repository whose top sits inside the
+workspace folder, named as a path relative to that folder. The orchestrator
+names one at kickoff with `crucible_run`'s `target`. A workflow can declare
+it instead, in one of two ways:
+
+```ts
+// Every run works in this repository. A kickoff naming another is refused,
+// and a scheduled run, which has nobody to choose, lands here.
+export default workflow({
+  description: 'lint the component wiki',
+  inputs: {},
+  target: 'ifs-enr-core-acct-app',
+  run: async (ctx) => { /* ctx.cwd is a worktree of ifs-enr-core-acct-app */ }
+})
+```
+
+```ts
+// Each kickoff names the repository; one that names none is refused, naming
+// this workflow. For work whose repository varies per request.
+export default workflow({
+  description: 'turn a settled design into a Change in the repository it is for',
+  inputs: { request: 'the design as settled' },
+  target: { required: true },
+  run: async (ctx) => { /* ctx.cwd is a worktree of whichever repository was named */ }
+})
+```
+
+Leave `target` out and the workflow runs wherever the kickoff says, or in
+the workspace's own repository when it says nothing. `target: '.'` is the
+workspace's own repository, which is the same as leaving it out. The
+catalog the orchestrator reads shows a fixed or required target, so it
+knows before it starts a run. A value that is neither a path nor
+`{ required: true }` makes the file fail to load.
+
+What changes for your code in a targeted run:
+
+- `ctx.cwd` is a worktree of the target repository, branched from the
+  target's HEAD, or from the kickoff's `base` resolved in the target. Commit
+  there with ordinary git as always; the engine commits there at the end.
+- `ctx.workspacePath` is the workspace folder, whatever the target: where
+  the workspace's own files are, such as a wiki or a plugin checkout beside
+  the repositories. Never walk up from `ctx.cwd` to find it, because the
+  target's own `.crucible/worktree` script may have put the worktree
+  anywhere.
+- The target's `.crucible/worktree` and `.crucible/worktree-setup` make and
+  prepare the worktree; the workspace's are not run.
+- Nodes see the workspace's `AGENTS.md` and skills as well as the target
+  worktree's, each once, wherever the worktree sits.
+- A successor staged with `ctx.stage` continues in the same target. A
+  successor whose workflow fixes a different target is refused, and the
+  orchestrator is told the chain could not start.
+
+Every problem with a target is refused at kickoff, before a worktree exists
+or a node has cost anything: a path outside the workspace folder, one where
+nothing is, a plain folder of a repository rather than its top, a kickoff
+target that disagrees with a fixed one (two spellings of one path, such as
+`./app/` and `app`, agree), and no target for a workflow that requires one.
+A fixed target is checked the same way, so a workflow naming a repository
+that is not cloned here refuses every run until it is.
+
+Workflows are still found only in the workspace's `.crucible/workflows/` and
+yours: a target repository's own `.crucible/workflows/` is never read.
 
 ## Firing on a schedule
 
@@ -166,7 +236,12 @@ export default workflow({
   before the 30 seconds are up.
 
 What a scheduled fire is: `git fetch --prune origin`, then a run branched from
-the trunk tip, in a worktree of its own, with no inputs and no orchestrator. A
+the trunk tip, in a worktree of its own, with no inputs and no orchestrator.
+Both happen in the run's target repository, so a scheduled workflow that
+declares a fixed `target` fetches and branches from that repository's trunk.
+Nobody is there to name a target, so a scheduled workflow that declares
+`target: { required: true }` has every fire refused, and its schedule shows
+the refusal as a warning on the board. A
 run that finishes clean lands on the schedule board as a one-line summary —
 `outputs.summary` when the workflow returns one — with its `report` artifact
 rendered beside it. A run that stops on a question, a stall or a failure parks
@@ -186,10 +261,12 @@ entirely and the check is not even evaluated.
 
 ## The run context
 
-Every run works in a fresh git worktree branched from a commit named at
-kickoff. `ctx.cwd` is that worktree; every node's tools work there.
-`ctx.artifactDir` is the run's own artifact directory, outside the
-repository — node outputs land there, never in the worktree.
+Every run works in a fresh git worktree of its target repository, branched
+from a commit named at kickoff. `ctx.cwd` is that worktree; every node's
+tools work there. `ctx.workspacePath` is the workspace folder the run belongs
+to, whichever repository it targets. `ctx.artifactDir` is the run's own
+artifact directory, outside the repository — node outputs land there, never
+in the worktree.
 
 - `ctx.node(id, spec)` — one agent node; resolves when it completes. The
   spec:
@@ -227,7 +304,8 @@ repository — node outputs land there, never in the worktree.
     read/bash/edit/write/grep/find/ls.
   - `skills` — skill names this node may use. Omitted means every skill the
     run's worktree offers — workspace, user and built-in, so the shipped
-    `firecrawl` skill included — which is the default and usually right; an
+    `firecrawl` skill included, and in a targeted run the target worktree's
+    and the workspace's both — which is the default and usually right; an
     empty list means none at all, for a node that wants a lean context. A
     name matching no skill is ignored.
 
@@ -349,7 +427,10 @@ what lets you read a file and know what its nodes cost.
 Two things do reach a node from outside the file, and neither is Crucible's
 text. The worktree's `AGENTS.md` (and any in its parent directories) arrives
 the way the model runtime delivers it to every agent it runs, as project
-context appended after the system prompt; that text is the repository's. And
+context appended after the system prompt; that text is the repository's. In
+a run that targets another repository than the workspace's, the workspace's
+`AGENTS.md` (and its parents') arrives beside the target worktree's, each
+file once, wherever the worktree was put. And
 the two tools every node gets carry their own contract in their descriptions:
 
 - `complete_node(summary, verdict?)` — the only way a node finishes. Its

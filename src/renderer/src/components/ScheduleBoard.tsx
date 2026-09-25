@@ -1,6 +1,12 @@
 import { useEffect, useState } from 'react'
 import type { ScheduleView, WorkspaceSchedules } from '../../../shared/schedules/service'
-import { currentNode, runCost, runIsLive, type RunRecord } from '../../../shared/workflows/run'
+import {
+  currentNode,
+  runCost,
+  runIsLive,
+  targetFolder,
+  type RunRecord
+} from '../../../shared/workflows/run'
 import type { ArtifactView } from '../../../shared/workflows/service'
 import { relativeTime } from '../labels'
 import { money, shortAge, since } from '../runs/format'
@@ -171,6 +177,7 @@ export function ScheduleBoard({
                   >
                     <span className="rname">
                       <span className="wf">{run.workflow}</span>{' '}
+                      <RepositoryLabel run={run} />
                       <span className="note">— {parkedNote(run)}</span>
                     </span>
                     <span className="rnode">{node === undefined ? '' : `node: ${node}`}</span>
@@ -235,6 +242,7 @@ export function ScheduleBoard({
                   >
                     <span className="rname">
                       <span className="wf">{run.workflow}</span>{' '}
+                      <RepositoryLabel run={run} />
                       <span className="note">— {completionLine(run)}</span>
                     </span>
                     <span className="rnode">
@@ -273,6 +281,17 @@ export function ScheduleBoard({
         />
       </div>
     </section>
+  )
+}
+
+/** A run in a repository other than the workspace's names it, muted, after its workflow. */
+function RepositoryLabel({ run }: { readonly run: RunRecord }): React.JSX.Element | null {
+  const repository = targetFolder(run)
+  if (repository === undefined) return null
+  return (
+    <>
+      <span className="repo">{repository}</span>{' '}
+    </>
   )
 }
 
@@ -443,6 +462,12 @@ function ReadingPane({
       <div className="rbody">
         <div className="facts">
           workflow <b>{run.workflow}</b>
+          {targetFolder(run) === undefined ? null : (
+            <>
+              {' '}
+              · repository <b>{targetFolder(run)}</b>
+            </>
+          )}
           {parkedNode(run) === undefined ? null : (
             <>
               {' '}

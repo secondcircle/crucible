@@ -1,5 +1,5 @@
 import type { SessionId, TranscriptItem, Unsubscribe } from '../agent/port'
-import type { RunTools } from '../agent/run-tools'
+import type { RunKickoff, RunTools } from '../agent/run-tools'
 import { artifactKind, artifactName, recordNamesPath } from './artifacts'
 import {
   baseNodeId,
@@ -134,6 +134,7 @@ interface LiveRun {
   workspaceName: string
   sessionId?: SessionId
   scheduled?: true
+  targetRepository?: string
   worktreePath?: string
   branch?: string
   baseCommit?: string
@@ -698,13 +699,16 @@ export function createFakeWorkflowRunService({
     workflow,
     inputs,
     sessionId,
-    scheduled
+    scheduled,
+    target
   }: {
     readonly workingDir: string
     readonly workflow: string
     readonly inputs: Readonly<Record<string, string>>
     readonly sessionId?: SessionId
     readonly scheduled?: true
+    // Taken as named: the fake has no disk to judge a target against.
+    readonly target?: string
   }): LiveRun {
     minted += 1
     const id = `fk${minted}${Math.floor(Math.random() * 90 + 10)}`
@@ -723,6 +727,7 @@ export function createFakeWorkflowRunService({
           }))
         : []
     }))
+    const repository = target === undefined ? workingDir : `${workingDir}/${target}`
     const run: LiveRun = {
       id,
       workflow,
@@ -731,7 +736,8 @@ export function createFakeWorkflowRunService({
       workspaceName: lastSegment(workingDir),
       ...(sessionId === undefined ? {} : { sessionId }),
       ...(scheduled === undefined ? {} : { scheduled }),
-      worktreePath: `${workingDir}/.crucible/worktrees/run-${id}`,
+      ...(target === undefined ? {} : { targetRepository: target }),
+      worktreePath: `${repository}/.crucible/worktrees/run-${id}`,
       branch: `crucible/run-${id}`,
       baseCommit: '6c90bb0fake',
       inputs: { ...inputs },
@@ -993,7 +999,9 @@ export function createFakeWorkflowRunService({
     changed()
     tell(
       run,
-      `${runMessageHeader(run)} completed · branch ${run.branch} · ` +
+      `${runMessageHeader(run)} completed · ` +
+        (run.targetRepository === undefined ? '' : `repository ${run.targetRepository} · `) +
+        `branch ${run.branch} · ` +
         `worktree ${run.worktreePath}.\n\nIts work is committed on that branch — pull it in ` +
         'when you judge the moment right. Tell the user what came back.'
     )
@@ -1052,11 +1060,21 @@ export function createFakeWorkflowRunService({
       sessionId: SessionId,
       workingDir: string,
       workflow: string,
-      inputs: Readonly<Record<string, string>>
+      inputs: Readonly<Record<string, string>>,
+      kickoff: RunKickoff = {}
     ): Promise<string> {
-      const run = beginRun({ workingDir, workflow, inputs, sessionId })
+      const target = kickoff.target?.trim()
+      const run = beginRun({
+        workingDir,
+        workflow,
+        inputs,
+        sessionId,
+        ...(target === undefined || target === '' ? {} : { target })
+      })
       return (
-        `Run ${run.id} of "${workflow}" started · branch ${run.branch} · worktree ` +
+        `Run ${run.id} of "${workflow}" started · ` +
+        (run.targetRepository === undefined ? '' : `repository ${run.targetRepository} · `) +
+        `branch ${run.branch} · worktree ` +
         `${run.worktreePath} · base 6c90bb0.\nIt works unattended and reports back to this ` +
         'session. Ending your turn now is the normal thing to do. (Scripted: no cost.)'
       )

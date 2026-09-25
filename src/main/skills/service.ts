@@ -32,9 +32,21 @@ export interface SkillRoots {
 
 // Workspace beats user beats built-in, and π's loader keeps the first skill it
 // meets under a given name — so this order is the precedence. It is
-// deliberately not π's own, which puts user ahead of project.
-export function foldersFor(roots: SkillRoots, workspacePath: string): readonly string[] {
-  return [join(workspacePath, '.crucible', 'skills'), roots.user, roots.builtIn]
+// deliberately not π's own, which puts user ahead of project. A second
+// project folder ranks just below the first: a run's worktree of another
+// repository, with the workspace it belongs to behind it.
+export function foldersFor(
+  roots: SkillRoots,
+  workspacePath: string,
+  beside?: string
+): readonly string[] {
+  const project =
+    beside === undefined || beside === workspacePath ? [workspacePath] : [workspacePath, beside]
+  return [
+    ...project.map((folder) => join(folder, '.crucible', 'skills')),
+    roots.user,
+    roots.builtIn
+  ]
 }
 
 /** Never created here: discovery only ever reads. */
@@ -45,8 +57,9 @@ export function userSkillsPath(home = homedir()): string {
 export interface SkillService {
   // Never rejects. `undefined` means an origin folder is there but could not be
   // read, so the caller keeps the set it holds rather than losing skills the
-  // user still has on disk.
-  resolve(workspacePath: string): Promise<readonly LoadedSkill[] | undefined>
+  // user still has on disk. `beside` is a second project folder, ranked just
+  // below the first.
+  resolve(workspacePath: string, beside?: string): Promise<readonly LoadedSkill[] | undefined>
 }
 
 export interface SkillServiceOptions {
@@ -91,8 +104,11 @@ export function createSkillService({ roots, onDiagnostic }: SkillServiceOptions)
   }
 
   return {
-    async resolve(workspacePath: string): Promise<readonly LoadedSkill[] | undefined> {
-      const folders = foldersFor(roots, workspacePath)
+    async resolve(
+      workspacePath: string,
+      beside?: string
+    ): Promise<readonly LoadedSkill[] | undefined> {
+      const folders = foldersFor(roots, workspacePath, beside)
       const unreadable = unreadableFolders(folders)
       if (unreadable.length > 0) {
         // The load is not even attempted: its answer would be short the skills

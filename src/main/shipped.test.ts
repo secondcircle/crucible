@@ -513,6 +513,50 @@ describe('the shipped workflow-authoring doc', () => {
   })
 })
 
+// A run can target a repository cloned inside the workspace, and the docs are
+// the whole of what an agent has to start one and to write a workflow that
+// fixes or requires one.
+describe('what the shipped docs say about a run target repository', () => {
+  const read = (name: string): string =>
+    readFileSync(join(dirname(shippedDocsIndexPath(APP)), name), 'utf8')
+
+  it('tells an orchestrator how to start a targeted run, and what is refused', () => {
+    const text = read('workflows.md')
+    expect(text).toContain('## Which repository a run works in')
+    expect(text).toContain('"target": "ifs-enr-core-acct-app"')
+    expect(text).toMatch(/path relative to the workspace folder/)
+    expect(text).toMatch(/branches from the target's HEAD/)
+    expect(text).toMatch(/`"base": "main"` is the target's\s+`main`/)
+    expect(text).toMatch(/`target: required`/)
+    expect(text).toMatch(/`target: <path> — fixed`/)
+    expect(text).toMatch(/refused when you call `crucible_run`/)
+    expect(text).toMatch(/successor it stages continues in the same repository/)
+  })
+
+  it('tells an author how to declare a fixed or a required target, and how code finds the workspace', () => {
+    const text = read('workflow-authoring.md')
+    expect(text).toContain("target: 'ifs-enr-core-acct-app',")
+    expect(text).toContain('target: { required: true },')
+    expect(text).toContain('`ctx.workspacePath`')
+    expect(text).toMatch(/Never walk up from `ctx.cwd` to find it/)
+    expect(text).toMatch(/fetches and branches from that repository's trunk/)
+    expect(text).toMatch(/workspace's\s+`AGENTS.md` \(and its parents'\) arrives beside the target worktree's/)
+  })
+
+  it('tells an agent whose scripts a targeted run uses and where its worktree goes', () => {
+    const text = read('worktrees.md')
+    expect(text).toContain('## Runs in a repository inside the workspace')
+    expect(text).toMatch(/that repository's own\s+`.crucible\/worktrees\/`/)
+    expect(text).toMatch(/The workspace's script is not run/)
+  })
+
+  it('are the files that ship, byte for byte', () => {
+    for (const name of ['workflows.md', 'workflow-authoring.md', 'worktrees.md']) {
+      expect(read(name)).toBe(readFileSync(join(APP, 'resources', 'agent-docs', name), 'utf8'))
+    }
+  })
+})
+
 describe('the shipped worktrees doc', () => {
   const doc = (): string =>
     readFileSync(join(dirname(shippedDocsIndexPath(APP)), 'worktrees.md'), 'utf8')

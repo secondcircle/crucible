@@ -36,10 +36,10 @@ export const RUN_TOOLS: readonly RunToolDefinition[] = [
     name: 'crucible_workflows',
     label: 'List Workflows',
     description:
-      'List the Crucible workflows this workspace can run: name, description and the inputs each expects. ' +
-      'A workflow is a TypeScript definition of automated agent work; running one starts a run — a team of ' +
-      'fresh agents working in a worktree of its own. Call this before crucible_run when you are not sure ' +
-      'of a name or its inputs.',
+      'List the Crucible workflows this workspace can run: name, description, the inputs each expects, and ' +
+      'the target repository a workflow fixes or requires. A workflow is a TypeScript definition of ' +
+      'automated agent work; running one starts a run — a team of fresh agents working in a worktree of ' +
+      'its own. Call this before crucible_run when you are not sure of a name, its inputs or its target.',
     parameters: []
   },
   {
@@ -50,6 +50,15 @@ export const RUN_TOOLS: readonly RunToolDefinition[] = [
       'never from the working tree — so uncommitted work here is invisible to it; commit first if the run ' +
       'must see it. By default the run branches from the HEAD of your working directory; pass `base` to ' +
       'branch from another commit-ish (for example the trunk).\n\n' +
+      'A run has exactly one target repository: the one its worktree is of, where every node works, where ' +
+      'its work is committed and whose branch its completion names. By default that is this workspace\'s ' +
+      'own repository. When the change belongs in a git repository cloned inside the workspace folder, ' +
+      'pass `target` with its path relative to that folder (for example "ifs-enr-core-acct-app"); the run ' +
+      'then branches from that repository\'s HEAD, or from `base` resolved there, and nothing of it happens ' +
+      'in the workspace\'s repository. A workflow may fix its target (then name that one or none) or ' +
+      'require one (then you must name it); crucible_workflows says which. A target that is not the top ' +
+      'of a git repository inside the workspace folder, or that disagrees with the workflow, is refused ' +
+      'before anything is spent.\n\n' +
       'Inputs are file paths: write the input file first (a prompt, an intent document), then pass its ' +
       'path. The run works unattended and reports back to this session — check-ins, blockers, errors and ' +
       'completion all arrive here as messages. Kicking off a run and ending your turn is a normal, quiet ' +
@@ -70,7 +79,15 @@ export const RUN_TOOLS: readonly RunToolDefinition[] = [
       {
         name: 'base',
         description:
-          'Commit-ish the run branches from. Defaults to HEAD of your working directory.',
+          'Commit-ish the run branches from, resolved in the run\'s target repository. Defaults to HEAD of ' +
+          'your working directory, or of the target repository when you name one.',
+        optional: true
+      },
+      {
+        name: 'target',
+        description:
+          'The run\'s target repository: a git repository inside the workspace folder, as a path relative ' +
+          'to that folder, e.g. "ifs-enr-core-acct-app". Omit for the workspace\'s own repository.',
         optional: true
       }
     ]
@@ -125,6 +142,13 @@ export const RUN_TOOLS: readonly RunToolDefinition[] = [
   }
 ]
 
+// Where a run starts from, both halves optional: the commit-ish it branches
+// from and the target repository it works in, as the tool call named them.
+export interface RunKickoff {
+  readonly base?: string
+  readonly target?: string
+}
+
 export function runTool(name: RunToolName): RunToolDefinition {
   const found = RUN_TOOLS.find((tool) => tool.name === name)
   if (found === undefined) throw new Error(`${name} is not a workflow run tool.`)
@@ -143,7 +167,7 @@ export interface RunTools {
     workingDir: string,
     workflow: string,
     inputs: Readonly<Record<string, string>>,
-    base?: string
+    kickoff?: RunKickoff
   ): Promise<string>
   list(sessionId: SessionId): Promise<string>
   answer(sessionId: SessionId, runId: string, message: string): Promise<string>

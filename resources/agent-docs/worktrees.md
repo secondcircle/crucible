@@ -5,7 +5,10 @@ one of two places: the workspace's own checkout, or a git worktree created for
 that session alone. The user picks in the composer, before the session's first
 message, with the chip that reads `◇ checkout` or `⑂ <branch>`.
 
-Workflow runs get worktrees too, one each, and never the checkout.
+Workflow runs get worktrees too, one each, and never the checkout. A run's
+worktree is of its **target repository**: the workspace's own repository, or
+a git repository cloned inside the workspace folder that the run named (see
+"Runs in a repository inside the workspace" below).
 
 This page tells you how the creation works, so that when the user asks you to
 make worktrees work in this repository you can write the script and it works
@@ -30,15 +33,17 @@ claiming an isolated dev slot.
 
 ## When Crucible runs the script
 
-Crucible looks for a file at `.crucible/worktree` inside the workspace folder,
-both when the user flips a session's chip and when a run needs its worktree.
+Crucible looks for a file at `.crucible/worktree` inside the repository the
+worktree is of: the workspace folder when the user flips a session's chip,
+and the run's target repository when a run needs its worktree, which is the
+workspace folder too unless the run targets a repository inside it.
 
 - The file is there: it is the whole mechanism. Crucible runs it and uses what
   it reports. There is no fallback behind it, and a file that exists but fails
   is a failure the user sees, never a quiet retry with git. Presence decides,
   not executability: a file Crucible cannot execute is a failure too.
 - The file is not there: Crucible runs plain `git worktree add` from the
-  checkout, under `.crucible/worktrees/`. A session gets a branch
+  checkout, under `.crucible/worktrees/` in that same repository. A session gets a branch
   `crucible/<random>` off the checkout's current HEAD; a run gets
   `crucible/run-<id>` at its base commit, or a forced checkout of the branch
   it continues. Crucible also drops a `.gitignore` containing `*` in
@@ -47,13 +52,14 @@ both when the user flips a session's chip and when a run needs its worktree.
 
 ## The script contract
 
-Write it at `.crucible/worktree` inside the workspace folder, and make it
-executable (`chmod +x .crucible/worktree`). Crucible refuses to run a file it
+Write it at `.crucible/worktree` at the top of the repository whose worktrees
+it makes, and make it executable (`chmod +x .crucible/worktree`). Crucible refuses to run a file it
 cannot execute and shows the user why, so do not skip this.
 
 Any language. The shebang decides.
 
-Crucible runs it with the checkout as the working directory and no arguments.
+Crucible runs it with that repository's checkout as the working directory and
+no arguments.
 What it is making is told through two environment variables, and which of them
 exist is how the script knows which of the three jobs this is:
 
@@ -66,7 +72,9 @@ exist is how the script knows which of the three jobs this is:
 Unset means the variable is not in the environment at all, so
 `[ -n "${CRUCIBLE_WORKTREE_BRANCH:-}" ]` is the whole test. The base always
 arrives as a full sha, resolved in the checkout before the script is invoked,
-so there is nothing to interpret and nothing to look up.
+so there is nothing to interpret and nothing to look up. For a run, that
+checkout is the run's target repository, so the sha is always one of that
+repository's commits.
 
 What to do in each case:
 
@@ -180,8 +188,9 @@ So Crucible runs `.crucible/worktree-setup` inside every worktree it creates
 with plain git, before anything else uses it. That is every worktree in a
 repository with no `.crucible/worktree`: sessions and runs alike.
 
-Write it at `.crucible/worktree-setup` inside the workspace folder and make it
-executable (`chmod +x .crucible/worktree-setup`). Any language.
+Write it at `.crucible/worktree-setup` at the top of the repository whose
+worktrees it prepares, and make it executable
+(`chmod +x .crucible/worktree-setup`). Any language.
 
 Crucible runs it with **the new worktree** as the working directory, with no
 arguments and no Crucible-specific environment variables. Exit 0 means ready;
@@ -211,6 +220,27 @@ lockfile has not moved, borrowing the checkout's dependencies is sound and
 instant. This repository's own script does exactly that, and falls back to a
 real `npm ci` when the lockfile differs. Read `.crucible/worktree-setup` here
 for the pattern.
+
+## Runs in a repository inside the workspace
+
+A workspace folder can hold other git repositories cloned inside it, and a
+run can target one of them (`crucible_run`'s `target`, or the workflow's own
+declaration; `workflows.md` beside this file has the details). Everything on
+this page then applies to that repository, and none of it to the
+workspace's:
+
+- Its `.crucible/worktree` makes the run's worktree, with the contract and
+  the verification above unchanged. The workspace's script is not run.
+- With no script there, the worktree goes under that repository's own
+  `.crucible/worktrees/`, on a branch `crucible/run-<id>`, and its
+  `.crucible/worktree-setup` runs in it.
+- `CRUCIBLE_WORKTREE_BASE` is one of that repository's commits: its HEAD
+  by default, or the run's `base` resolved there.
+
+So to make runs work in such a repository, write the scripts in that
+repository, exactly as this page describes, as if it were a workspace of its
+own. Sessions are untouched: a session's worktree is always of the
+workspace's own repository.
 
 ## Branch names are throwaway
 

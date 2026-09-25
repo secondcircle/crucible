@@ -2,7 +2,8 @@ import type {
   NodeSpec,
   PlannedNode,
   ReviseOptions,
-  RunContext
+  RunContext,
+  TargetDeclaration
 } from '../../../../resources/workflow-lib/workflow.ts'
 
 // What crosses between the main process and a workflow host: one symmetric
@@ -51,10 +52,33 @@ export interface WorkflowManifest {
   readonly description: string
   readonly inputs: Readonly<Record<string, string>>
   readonly commit?: boolean
+  /** The target repository the file declares, exactly as written. */
+  readonly target?: TargetDeclaration
   /** Whether the file declares `plan()`. */
   readonly plans: boolean
   /** Present when the file declares a schedule; `cron` only when it is text. */
   readonly schedule?: { readonly cron?: string; readonly checks: boolean }
+}
+
+/**
+ * Why a file's `target` is not one of the two shapes it may take, or nothing
+ * when it is. Checked where the file is loaded, so a malformed declaration
+ * fails the listing that read it rather than a kickoff that trusted it.
+ */
+export function targetDeclarationProblem(target: unknown): string | undefined {
+  if (target === undefined) return undefined
+  if (typeof target === 'string') {
+    return target.trim() === '' ? 'an empty target' : undefined
+  }
+  if (
+    typeof target === 'object' &&
+    target !== null &&
+    (target as { required?: unknown }).required === true &&
+    Object.keys(target).length === 1
+  ) {
+    return undefined
+  }
+  return 'a target that is neither a path nor { required: true }'
 }
 
 /** A node spec as it crosses the wire: the `check` function becomes a flag. */
@@ -86,7 +110,12 @@ export type HostRequests = {
   plan: { params: { inputs: Record<string, string> }; result: PlannedNode[] }
   scheduleCheck: { params: { workspacePath: string }; result: boolean }
   run: {
-    params: { inputs: Record<string, string>; artifactDir: string; cwd: string }
+    params: {
+      inputs: Record<string, string>
+      artifactDir: string
+      cwd: string
+      workspacePath: string
+    }
     result: Record<string, unknown> | undefined
   }
   /** `spec.check(outputs, verdict)` of the node request named, run where the function lives. */

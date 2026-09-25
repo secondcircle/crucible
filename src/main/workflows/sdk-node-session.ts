@@ -1,4 +1,4 @@
-import { statSync } from 'node:fs'
+import { realpathSync, statSync } from 'node:fs'
 import type {
   AgentSession,
   ToolDefinition
@@ -172,6 +172,7 @@ export function createSdkNodeSessionFactory({
           : pi.SessionManager.open(reopenable(request.resumeToken), request.sessionDir, request.cwd)
 
       const skills = request.skills ?? []
+      const workspace = request.workspace
       // Assigned once, below, and read late: the compaction hook is built
       // before the session it compacts exists.
       const held: { session?: AgentSession } = {}
@@ -202,6 +203,16 @@ export function createSdkNodeSessionFactory({
             ...(request.system === undefined ? {} : { system: request.system })
           }),
         appendSystemPromptOverride: () => [],
+        ...(workspace === undefined
+          ? {}
+          : {
+              agentsFilesOverride: (base: { agentsFiles: ContextFile[] }) => ({
+                agentsFiles: withWorkspaceContext(
+                  base.agentsFiles,
+                  pi.loadProjectContextFiles({ cwd: workspace, agentDir })
+                )
+              })
+            }),
         extensionFactories: [
           compactionExtension({
             ask: (instruction, signal) => {
@@ -284,6 +295,42 @@ interface NodeSkills {
  * asks for this on every lull in a node's stream, and a long node's
  * transcript is megabytes.
  */
+/** One project context file, as the agent runtime loads and sends it. */
+export interface ContextFile {
+  path: string
+  content: string
+}
+
+/**
+ * The context files of a node whose run targets another repository than the
+ * workspace's: the workspace's, walked from the workspace folder, then the
+ * worktree's own. A file both walks reach is sent once, so a worktree inside
+ * the workspace folder and one a script put anywhere else tell a node the
+ * same things.
+ */
+export function withWorkspaceContext(
+  worktreeFiles: readonly ContextFile[],
+  workspaceFiles: readonly ContextFile[]
+): ContextFile[] {
+  const seen = new Set<string>()
+  const merged: ContextFile[] = []
+  for (const file of [...workspaceFiles, ...worktreeFiles]) {
+    const key = canonical(file.path)
+    if (seen.has(key)) continue
+    seen.add(key)
+    merged.push(file)
+  }
+  return merged
+}
+
+function canonical(path: string): string {
+  try {
+    return realpathSync(path)
+  } catch {
+    return path
+  }
+}
+
 export function toolCallCount(messages: readonly StoredMessage[]): number {
   let count = 0
   for (const message of messages) if (message.role === 'toolResult') count += 1

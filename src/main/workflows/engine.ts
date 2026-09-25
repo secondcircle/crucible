@@ -34,6 +34,7 @@ import type { WorkflowLoader } from './loader'
 import type { NodeSession, NodeSessionFactory } from './node-session'
 import type { RunStore } from './store'
 import { checkVerdict } from './verdict'
+import { settleTarget, targetPath, type TargetAsk, type TargetRepository } from './target'
 import { commitRunWorktree, createRunWorktree, type RunWorktree } from './worktree'
 
 // The engine: executes runs, one seam away from agents and one away from the
@@ -78,8 +79,15 @@ export interface StartRunRequest {
   /** The workflow's name, resolved through the origin ladder. */
   readonly workflow: string
   readonly inputs: Readonly<Record<string, string>>
-  /** Commit-ish the run branches from. */
-  readonly base: string
+  // The target repository as the kickoff named it, a path relative to the
+  // workspace folder. Absent names none, which leaves it to the workflow's
+  // declaration or, failing that, the workspace's own repository.
+  readonly target?: string
+  // Commit-ish the run branches from, resolved in the run's target
+  // repository; or how to find one there, asked once that repository is
+  // settled, because a default base is read from the repository the run
+  // works in.
+  readonly base: string | ((target: TargetRepository) => Promise<string>)
 }
 
 export interface WorkflowEngine {
@@ -180,6 +188,7 @@ interface LiveRun {
   workspaceName: string
   sessionId?: SessionId
   scheduled?: true
+  targetRepository?: string
   worktreePath?: string
   branch?: string
   baseCommit?: string
@@ -367,12 +376,18 @@ export function createWorkflowEngine(options: EngineOptions): WorkflowEngine {
   }
 
   async function start(request: StartRunRequest): Promise<RunRecord> {
-    return startInternal(request, {})
+    return startInternal(request)
   }
 
+  // A chained successor continues its predecessor's branch in its
+  // predecessor's target repository; a kickoff names its own target, or not.
   async function startInternal(
     request: StartRunRequest,
-    chain: { readonly branch?: string; readonly after?: WorkflowRunId }
+    chain?: {
+      readonly after: WorkflowRunId
+      readonly branch?: string
+      readonly targetRepository?: string
+    }
   ): Promise<RunRecord> {
     const resolved = await loader.resolve(request.workspacePath, request.workflow)
     const { manifest } = resolved
@@ -396,6 +411,21 @@ export function createWorkflowEngine(options: EngineOptions): WorkflowEngine {
       }
     }
 
+    const ask: TargetAsk =
+      chain === undefined
+        ? { by: 'kickoff', ...(request.target === undefined ? {} : { named: request.target }) }
+        : {
+            by: 'chain',
+            ...(chain.targetRepository === undefined ? {} : { named: chain.targetRepository })
+          }
+    const target = await settleTarget({
+      workspacePath: request.workspacePath,
+      workflow: resolved.name,
+      ...(manifest.target === undefined ? {} : { declared: manifest.target }),
+      ask
+    })
+    const base = typeof request.base === 'string' ? request.base : await request.base(target)
+
     // The process the workflow's code runs in, for the plan and then the run.
     // Anything that fails between here and the run starting kills it: a host
     // with no run to serve is a leaked process.
@@ -409,10 +439,10 @@ export function createWorkflowEngine(options: EngineOptions): WorkflowEngine {
 
       id = mintId()
       worktree = await createRunWorktree({
-        workspacePath: request.workspacePath,
+        repositoryPath: target.path,
         runId: id,
-        base: request.base,
-        ...(chain.branch === undefined ? {} : { branch: chain.branch })
+        base,
+        ...(chain?.branch === undefined ? {} : { branch: chain.branch })
       })
     } catch (cause) {
       host.kill()
@@ -428,6 +458,7 @@ export function createWorkflowEngine(options: EngineOptions): WorkflowEngine {
       workspaceName: request.workspaceName,
       ...(request.sessionId === undefined ? {} : { sessionId: request.sessionId }),
       ...(request.scheduled === true ? { scheduled: true as const } : {}),
+      ...(target.named === undefined ? {} : { targetRepository: target.named }),
       worktreePath: worktree.path,
       branch: worktree.branch,
       baseCommit: worktree.baseCommit,
@@ -450,7 +481,7 @@ export function createWorkflowEngine(options: EngineOptions): WorkflowEngine {
           }))
         })
       ),
-      ...(chain.after === undefined ? {} : { after: chain.after }),
+      ...(chain === undefined ? {} : { after: chain.after }),
       createdAt: nowIso(),
       startedAt: nowIso()
     }
@@ -469,7 +500,13 @@ export function createWorkflowEngine(options: EngineOptions): WorkflowEngine {
     }
     handles.set(id, handle)
     save(run)
-    log?.({ event: 'run_started', runId: id, workflow: resolved.name, branch: worktree.branch })
+    log?.({
+      event: 'run_started',
+      runId: id,
+      workflow: resolved.name,
+      branch: worktree.branch,
+      ...(target.named === undefined ? {} : { targetRepository: target.named })
+    })
 
     // The run continues on its own; kickoff is over. A crash in the executor
     // is recorded on the run, never thrown at nobody.
@@ -500,6 +537,10 @@ export function createWorkflowEngine(options: EngineOptions): WorkflowEngine {
     const replay = resumed !== undefined
     const artifacts = store.artifactDir(run.id)
     const cwd = run.worktreePath ?? run.workspacePath
+    // What a node knows never depends on where the target's worktree went:
+    // a run in another repository than the workspace's hands its nodes the
+    // workspace too, whose context its worktree does not carry.
+    const besideWorkspace = run.targetRepository === undefined ? undefined : run.workspacePath
 
     const pauseAsked = (): boolean => handle.desired === 'paused'
     const cancelAsked = (): boolean => handle.cancelRequested
@@ -858,8 +899,12 @@ export function createWorkflowEngine(options: EngineOptions): WorkflowEngine {
       let blockerRaised: { reason: string; details?: string; artifact?: string } | undefined
 
       // Resolved against the run's own worktree, so the project-local origin
-      // is the branch this run is working on.
-      const nodeSkills = narrowSkills((await skills?.resolve(cwd)) ?? [], spec.skills)
+      // is the branch this run is working on; a run in another repository
+      // than the workspace's also gets the workspace's own, ranked below it.
+      const nodeSkills = narrowSkills(
+        (await skills?.resolve(cwd, besideWorkspace)) ?? [],
+        spec.skills
+      )
 
       // The record currently carrying this session; revisions swap it. It is
       // assigned below, once there is a session to carry.
@@ -875,6 +920,7 @@ export function createWorkflowEngine(options: EngineOptions): WorkflowEngine {
           sessionDir: store.sessionDir(run.id),
           ...(job.resume === undefined ? {} : { resumeToken: job.resume }),
           nodeId: id,
+          ...(besideWorkspace === undefined ? {} : { workspace: besideWorkspace }),
           // The workflow's system prompt or none; the engine writes neither
           // a role nor a standing prompt for a node.
           ...(spec.system === undefined ? {} : { system: spec.system }),
@@ -1507,6 +1553,7 @@ export function createWorkflowEngine(options: EngineOptions): WorkflowEngine {
       inputs: run.inputs,
       artifactDir: artifacts,
       cwd,
+      workspacePath: run.workspacePath,
       node: (id, spec) => track(runNode(id, spec)),
       openNode: (id, spec) =>
         new Promise<OpenNode>((resolve, reject) => {
@@ -1605,7 +1652,13 @@ export function createWorkflowEngine(options: EngineOptions): WorkflowEngine {
               inputs: staged.inputs,
               base: run.finalCommit ?? run.baseCommit ?? 'HEAD'
             },
-            { ...(run.branch === undefined ? {} : { branch: run.branch }), after: run.id }
+            {
+              after: run.id,
+              ...(run.branch === undefined ? {} : { branch: run.branch }),
+              ...(run.targetRepository === undefined
+                ? {}
+                : { targetRepository: run.targetRepository })
+            }
           )
         } catch (cause) {
           tell(
@@ -1641,6 +1694,7 @@ export function createWorkflowEngine(options: EngineOptions): WorkflowEngine {
     // a compaction keeps of this message: the outputs and every artifact are
     // under it, and an agent picking the work up cold has to be told where.
     const where = [
+      run.targetRepository === undefined ? undefined : `repository ${run.targetRepository}`,
       run.branch === undefined ? undefined : `branch ${run.branch}`,
       run.worktreePath === undefined ? undefined : `worktree ${run.worktreePath}`,
       run.dir === undefined ? undefined : `record ${join(run.dir, 'run.json')}`
@@ -1713,6 +1767,15 @@ export function createWorkflowEngine(options: EngineOptions): WorkflowEngine {
 
     resuming.add(runId)
     try {
+      // A run never moves to another repository, so one whose target is gone
+      // is refused rather than carried on in the workspace's.
+      if (run.targetRepository !== undefined && !existsSync(targetPath(run))) {
+        throw new Error(
+          `The run "${runId}" cannot resume: its target repository is gone ` +
+            `(${targetPath(run)}). Resume puts the node it stopped on back to work in the same ` +
+            'repository and never moves a run to another.'
+        )
+      }
       // The same worktree is the whole promise of resuming, so a run whose
       // worktree is gone is refused rather than given a new one.
       if (run.worktreePath === undefined || !existsSync(run.worktreePath)) {

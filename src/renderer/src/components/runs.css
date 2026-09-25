@@ -44,6 +44,13 @@
   color: var(--accent2);
 }
 
+/* The target repository of a run outside the workspace's own, muted beside
+   the workflow it qualifies. */
+.runchip .repo {
+  font: 11px var(--mono);
+  color: var(--faint);
+}
+
 .runchip .age {
   font: 11px var(--mono);
   color: var(--faint);
@@ -1161,6 +1168,16 @@
   font-weight: 700;
   font-size: 13px;
   width: 64px;
+}
+
+/* The target repository of a run outside the workspace's own, muted. */
+.runrow .repo {
+  font: 11px var(--mono);
+  color: var(--faint);
+  max-width: 160px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* Where the workspace lives now that the bands do the grouping. */

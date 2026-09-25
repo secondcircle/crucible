@@ -66,6 +66,7 @@ function recordingContext(
     inputs: { brief: '/in/brief.md' },
     artifactDir: '/artifacts',
     cwd: '/worktree',
+    workspacePath: '/workspace',
     async node(id, spec) {
       calls.push(`node ${id}`)
       // The engine validates through the spec's check where one is declared.
@@ -127,6 +128,7 @@ export default workflow({
   description: 'the contract workflow',
   inputs: { brief: 'what to build' },
   commit: false,
+  target: { required: true },
   plan: (inputs) => [{ id: 'first', outputs: { out: { file: 'first.md', desc: 'd' } } }],
   schedule: { cron: '*/5 * * * *', check: ({ workspacePath }) => workspacePath.endsWith('yes') },
   run: async (ctx) => {
@@ -144,7 +146,7 @@ export default workflow({
     held.close()
     await ctx.derive('/artifacts/split.md', 'first')
     const staged = await ctx.stage({ workflow: 'next', inputs: { brief: ctx.inputs.brief } })
-    return { answer, gate, before, after, revised: revised.summary, staged, cwd: ctx.cwd, dir: ctx.artifactDir }
+    return { answer, gate, before, after, revised: revised.summary, staged, cwd: ctx.cwd, workspace: ctx.workspacePath, dir: ctx.artifactDir }
   }
 })
 `
@@ -153,6 +155,7 @@ const FULL_DEF: WorkflowDef = {
   description: 'the contract workflow',
   inputs: { brief: 'what to build' },
   commit: false,
+  target: { required: true },
   plan: () => [{ id: 'first', outputs: { out: { file: 'first.md', desc: 'd' } } }],
   schedule: { cron: '*/5 * * * *', check: ({ workspacePath }) => workspacePath.endsWith('yes') },
   run: async (ctx) => {
@@ -179,6 +182,7 @@ const FULL_DEF: WorkflowDef = {
       revised: revised.summary,
       staged,
       cwd: ctx.cwd,
+      workspace: ctx.workspacePath,
       dir: ctx.artifactDir
     }
   }
@@ -227,6 +231,7 @@ describe.each([
       description: 'the contract workflow',
       inputs: { brief: 'what to build' },
       commit: false,
+      target: { required: true },
       plans: true,
       schedule: { cron: '*/5 * * * *', checks: true }
     })
@@ -265,6 +270,7 @@ describe.each([
       revised: 'review·r1 done',
       staged: 'run→next',
       cwd: '/worktree',
+      workspace: '/workspace',
       dir: '/artifacts'
     })
   })
@@ -360,6 +366,34 @@ describe('workflow host process', () => {
     await expect(host.manifest()).rejects.toThrow(
       /the workflow host exited with code 3\n.*this file is broken on purpose/s
     )
+  })
+
+  it('refuses a target that is neither a path nor { required: true }', async () => {
+    const host = forked(`
+      import { workflow } from 'crucible:workflow'
+      export default workflow({
+        description: 'targets badly',
+        inputs: {},
+        target: { repository: 'x' },
+        run: async () => {}
+      })
+    `)
+    await expect(host.manifest()).rejects.toThrow(
+      /declares a target that is neither a path nor \{ required: true \}/
+    )
+  })
+
+  it('carries a fixed target into the manifest as written', async () => {
+    const host = forked(`
+      import { workflow } from 'crucible:workflow'
+      export default workflow({
+        description: 'targets one repository',
+        inputs: {},
+        target: 'components/app',
+        run: async () => {}
+      })
+    `)
+    expect((await host.manifest()).target).toBe('components/app')
   })
 
   it('reports a file that is not a workflow at all', async () => {

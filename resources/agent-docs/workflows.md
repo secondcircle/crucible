@@ -13,10 +13,11 @@ To write a new workflow, read `workflow-authoring.md` beside this file.
 ## The five tools
 
 - `crucible_workflows` — the catalog this workspace can reach: name,
-  description, inputs.
+  description, inputs, and the target repository a workflow fixes or
+  requires.
 - `crucible_run` — start a run. Takes the workflow name, an `inputs` JSON
-  object mapping input names to absolute file paths, and an optional `base`
-  commit-ish.
+  object mapping input names to absolute file paths, an optional `base`
+  commit-ish, and an optional `target` repository.
 - `crucible_runs` — where this session's runs stand.
 - `crucible_answer` — answer the question a run raised, by run id.
 - `crucible_resume` — put a stopped run back to work, by run id.
@@ -35,6 +36,61 @@ The run gets a fresh worktree, branched from a commit:
 
 A run never sees uncommitted work. If the run must build on something you
 have not committed, commit it first; there is no other way in, by design.
+
+## Which repository a run works in
+
+A run has exactly one **target repository**: the repository its worktree is
+of, where every node works, where its work is committed at the end, and
+whose branch and worktree its completion names. By default that is the
+workspace's own repository.
+
+A workspace folder is not always one repository. When it holds other git
+repositories cloned inside it and the change belongs in one of them, name it
+with `target`, as a path relative to the workspace folder:
+
+```json
+{ "workflow": "adhoc", "inputs": { "prompt": "/tmp/task.md" }, "target": "ifs-enr-core-acct-app" }
+```
+
+The run then does everything a run does in that repository, and nothing in
+the workspace's:
+
+- Its worktree is of the target. With no `.crucible/worktree` script in the
+  target, it goes under the target's own `.crucible/worktrees/`; the
+  target's `.crucible/worktree` and `.crucible/worktree-setup` are the ones
+  that apply, never the workspace's.
+- It branches from the target's HEAD, not your working directory's. A
+  `base` resolves in the target too: `"base": "main"` is the target's
+  `main`.
+- Its nodes work in that worktree, and still get the workspace's
+  `AGENTS.md` and skills as well as the target's.
+- Its completion, failure and cancellation messages, the "started" answer
+  and `crucible_runs` all name the repository, before its branch and
+  worktree. Pull the work in from that repository.
+- A successor it stages continues in the same repository, and resuming it
+  continues there too.
+
+A target can sit at any depth and can be a submodule; what counts is that
+the path names the top of a git repository inside the workspace folder.
+`"."`, or any spelling of the workspace folder itself, is the same as naming
+none, and `./app/` is the same as `app`. The workspace folder itself need not
+be a git repository to start a run that names a target; a run that names
+none is refused there, as it always was.
+
+A workflow can settle the target for you. `crucible_workflows` shows it:
+
+- `target: <path> — fixed` — every run of it works there. Name that
+  repository or name none.
+- `target: required` — every kickoff must name one. Pick the repository
+  the request is about.
+
+Everything wrong with a target is refused when you call `crucible_run`,
+before any worktree is made or anything is spent, with an error naming the
+path or the workflow: a path outside the workspace folder, a path where
+nothing is, a plain folder of some repository rather than its top, a target
+that disagrees with the one the workflow fixes, and a missing target for a
+workflow that requires one. Crucible never picks a target on its own; fix
+the call and start it again.
 
 Once the run is started, end your turn. The run works without you and
 reports back here; polling `crucible_runs` while nothing is waiting buys
@@ -55,8 +111,9 @@ Every message a run sends starts with `⚑ Crucible run <id>`:
   user when it is theirs to weigh, while the run keeps working.
 - **A stall.** A node went quiet without completing. Look at what it was
   asked to do and send a corrective instruction the same way.
-- **Completion.** The message names the run's branch and worktree. The work
-  is committed there; nothing merges on its own, ever. Pulling it in is your
+- **Completion.** The message names the run's branch and worktree, and its
+  target repository when that is not the workspace's own. The work is
+  committed there; nothing merges on its own, ever. Pulling it in is your
   judgment: merge or cherry-pick when the moment is right, resolve conflicts
   with this session's context, and tell the user what came back. Mid-task,
   it is fine to finish what you are doing first.
@@ -90,7 +147,8 @@ loop; otherwise continuing is what you want.
 Resume when the user asks, or when this conversation's own judgment says the
 work is still wanted. Never as a reflex to seeing the interruption message:
 if the spend is theirs to weigh, put it to them first. A run whose worktree
-is gone cannot be resumed, and the refusal says so.
+is gone cannot be resumed, and neither can one whose target repository is
+gone; the refusal says so and names the path.
 
 The user watches runs in the run strip above the chat and can open a
 full-screen view of any run, but they never talk to a run's agents — every

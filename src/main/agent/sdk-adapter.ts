@@ -540,6 +540,7 @@ export function createSdkAdapter({
             workflow?: string
             inputs?: Record<string, string> | string
             base?: string
+            target?: string
             runId?: string
             message?: string
             how?: string
@@ -554,7 +555,10 @@ export function createSdkAdapter({
                 workspacePath,
                 given.workflow ?? '',
                 parseInputs(given.inputs),
-                given.base
+                {
+                  ...(given.base === undefined ? {} : { base: given.base }),
+                  ...(given.target === undefined ? {} : { target: given.target })
+                }
               )
             )
           }

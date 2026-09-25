@@ -94,6 +94,12 @@
   font-size: 12px;
 }
 
+/* The target repository of a run outside the workspace's own, muted. */
+.board.schedules .rname .repo {
+  font: 11px var(--mono);
+  color: var(--faint);
+}
+
 .board.schedules .rnode {
   font: 11px var(--mono);
   color: var(--faint);

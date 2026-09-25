@@ -31,6 +31,9 @@ export function describeRun(run: RunRecord): string {
     `run ${run.id} (${run.workflow}) — ${statusPhrase(run)}`,
     node === undefined ? undefined : `node ${node.id} ${node.status}`,
     cost === undefined ? undefined : `$${cost.toFixed(2)}`,
+    // A branch reads ambiguously once runs span repositories, so a run outside
+    // the workspace's own names the one its branch is in.
+    run.targetRepository === undefined ? undefined : `repository ${run.targetRepository}`,
     run.branch,
     run.waiting === true && run.question !== undefined
       ? `⚑ waiting on an answer: ${run.question.reason.split('\n')[0]}`

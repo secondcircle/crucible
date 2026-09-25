@@ -1,6 +1,12 @@
 import { useState } from 'react'
 import type { SessionState, WorkspaceState } from '../../../shared/agent/port'
-import { currentNode, runIsLive, runCost, type RunRecord } from '../../../shared/workflows/run'
+import {
+  currentNode,
+  runIsLive,
+  runCost,
+  targetFolder,
+  type RunRecord
+} from '../../../shared/workflows/run'
 import { UNTITLED } from '../labels'
 import { bandsOf, runsHeadline } from '../runs/bands'
 import { money, shortAge, since } from '../runs/format'
@@ -97,6 +103,7 @@ export function RunsOverview({
                 const live = runIsLive(run)
                 const parked = live && run.waiting === true
                 const dismissed = run.dismissedAt !== undefined
+                const repository = targetFolder(run)
                 // A failed run has its own treatment and is never dimmed —
                 // until it is dismissed, which is the whole point of
                 // dismissing: the row stops shouting.
@@ -116,6 +123,9 @@ export function RunsOverview({
                   >
                     <span className={`dot ${run.status}`} />
                     <span className="wf">{run.workflow}</span>
+                    {repository === undefined ? null : (
+                      <span className="repo">{repository}</span>
+                    )}
                     <span className="ws">{run.workspaceName}</span>
                     <span className="id">{run.id}</span>
                     <span className="st">{statusText(run)}</span>

@@ -40,6 +40,11 @@ export interface NodeSessionRequest {
   readonly resumeToken?: string
   /** "provider/model-id:thinkingLevel". */
   readonly model: string
+  // The workspace folder of a run whose target repository is not the
+  // workspace's own: its AGENTS.md files reach the node beside the
+  // worktree's, never twice, wherever the target's worktree was put. Absent
+  // for a run in the workspace's repository, whose worktree carries them.
+  readonly workspace?: string
   // The node this session is for, by its id in the run. For logs and for
   // fakes that script one node differently from another; it reaches no
   // prompt.

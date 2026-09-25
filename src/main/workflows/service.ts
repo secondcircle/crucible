@@ -1,7 +1,7 @@
 import { readFile, stat } from 'node:fs/promises'
 import { basename, join } from 'node:path'
 import type { SessionId, TranscriptItem, Unsubscribe } from '../../shared/agent/port'
-import type { RunTools } from '../../shared/agent/run-tools'
+import type { RunKickoff, RunTools } from '../../shared/agent/run-tools'
 import { artifactKind, recordNamesPath } from '../../shared/workflows/artifacts'
 import type { ResumeKind } from '../../shared/workflows/run'
 import { createTurnStart, describeRun, resumeAnswer } from '../../shared/workflows/status'
@@ -12,6 +12,7 @@ import type {
   ScheduledFireRequest,
   WorkflowRunListener
 } from '../../shared/workflows/service'
+import type { TargetDeclaration } from './authoring'
 import type { StartRunRequest, WorkflowEngine } from './engine'
 import type { WorkflowLoader } from './loader'
 import { scheduledBase } from './scheduled-base'
@@ -31,9 +32,10 @@ export interface LiveWorkflowRunOptions {
   readonly loader: WorkflowLoader
   /** Called when the engine's state changed; wired to engine.onChanged. */
   readonly changes: { subscribe(listener: () => void): void }
-  // Where a scheduled fire branches from: the trunk tip, fetched fresh. An
-  // argument so the rule is drivable without a repository.
-  readonly base?: (workspacePath: string) => Promise<string>
+  // Where a scheduled fire branches from: the trunk tip of the run's target
+  // repository, fetched fresh. An argument so the rule is drivable without a
+  // repository.
+  readonly base?: (repositoryPath: string) => Promise<string>
   /** Shows a file in the OS file manager; absent leaves Reveal unable to act. */
   readonly reveal?: (path: string) => void
 }
@@ -108,7 +110,7 @@ export function createLiveWorkflowRunService({
             .join('; ')
           return `- ${workflow.name} (${workflow.origin}) — ${workflow.manifest.description}${
             inputs === '' ? '' : `\n  inputs: ${inputs}`
-          }`
+          }${targetLine(workflow.manifest.target)}`
         })
         .join('\n')
     },
@@ -118,26 +120,39 @@ export function createLiveWorkflowRunService({
       workingDir: string,
       workflow: string,
       inputs: Readonly<Record<string, string>>,
-      base?: string
+      kickoff: RunKickoff = {}
     ): Promise<string> {
-      const root = await checkoutRootOf(workingDir).catch(() => {
-        throw new Error(
-          `${workingDir} is not inside a git repository, so a run has no commit to branch from.`
-        )
-      })
+      // A workspace folder that is no repository may still start runs in the
+      // repositories inside it; only a run in its own repository is refused.
+      const repository = await checkoutRootOf(workingDir).catch(() => undefined)
+      const root = repository ?? workingDir
+      const named = given(kickoff.base)
+      const target = given(kickoff.target)
       const request: StartRunRequest = {
         workspacePath: root,
         workspaceName: basename(root),
         sessionId,
         workflow,
         inputs,
-        // The session's own HEAD — the worktree's when it works in one —
-        // unless the agent named another commit.
-        base: base === undefined || base.trim() === '' ? await headOf(workingDir) : base.trim()
+        ...(target === undefined ? {} : { target }),
+        base: async (settled) => {
+          if (settled.named !== undefined) return named ?? (await headOf(settled.path))
+          if (repository === undefined) {
+            throw new Error(
+              `${workingDir} is not inside a git repository, so a run has no commit to branch ` +
+                'from. Name a `target` to run in a git repository inside it.'
+            )
+          }
+          // The session's own HEAD — the worktree's when it works in one —
+          // unless the agent named another commit.
+          return named ?? (await headOf(workingDir))
+        }
       }
       const run = await engine.start(request)
       return (
-        `Run ${run.id} of "${run.workflow}" started · branch ${run.branch} · ` +
+        `Run ${run.id} of "${run.workflow}" started · ` +
+        (run.targetRepository === undefined ? '' : `repository ${run.targetRepository} · `) +
+        `branch ${run.branch} · ` +
         `worktree ${run.worktreePath} · base ${(run.baseCommit ?? '').slice(0, 7)}.\n` +
         'It works unattended and reports back to this session — check-ins, blockers and ' +
         'completion all arrive here as messages. Ending your turn now is the normal thing to do.'
@@ -260,15 +275,15 @@ export function createLiveWorkflowRunService({
     turnStart,
 
     // The whole of what a scheduled fire is beyond an ordinary run: the trunk
-    // for a base, nothing handed in, nobody to report to, and the marker that
-    // puts it on the schedule board.
+    // of its target repository for a base, nothing handed in, nobody to
+    // report to, and the marker that puts it on the schedule board.
     async startScheduled(fire: ScheduledFireRequest) {
       return engine.start({
         workspacePath: fire.workspacePath,
         workspaceName: basename(fire.workspacePath),
         workflow: fire.workflow,
         inputs: {},
-        base: await base(fire.workspacePath),
+        base: (target) => base(target.path),
         scheduled: true
       })
     },
@@ -283,4 +298,22 @@ export function createLiveWorkflowRunService({
       engine.dispose()
     }
   }
+}
+
+/** A tool argument with something in it, trimmed; blank is the same as absent. */
+function given(argument: string | undefined): string | undefined {
+  const trimmed = argument?.trim()
+  return trimmed === undefined || trimmed === '' ? undefined : trimmed
+}
+
+/** What an orchestrator has to know about a workflow's target before it starts one. */
+function targetLine(target: TargetDeclaration | undefined): string {
+  if (target === undefined) return ''
+  if (typeof target === 'object') {
+    return (
+      '\n  target: required — name a repository inside the workspace with ' +
+      "crucible_run's `target`"
+    )
+  }
+  return `\n  target: ${target} — fixed; name it or no target at all`
 }

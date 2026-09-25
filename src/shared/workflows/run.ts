@@ -187,7 +187,12 @@ export interface RunRecord {
   // marks where the run came from and changes nothing about what a run is.
   // Runs started by agents or any other path never carry it.
   readonly scheduled?: true
-  /** The run's own worktree; every run gets one. */
+  // The run's target repository, as a path relative to the workspace folder:
+  // the repository its worktree, branch and commits are of. Absent is the
+  // workspace's own repository, which is also what every record written
+  // before runs could target anything else means.
+  readonly targetRepository?: string
+  /** The run's own worktree, of its target repository; every run gets one. */
   readonly worktreePath?: string
   readonly branch?: string
   /** The commit the run branched from, named at kickoff. */
@@ -261,6 +266,16 @@ export function isContinuedNodeMessage(text: string): boolean {
 // scanning a transcript sees at a glance which messages nobody typed. It is a
 // protocol, so it is spelled once.
 export const RUN_MESSAGE_PREFIX = '⚑ Crucible run'
+
+/**
+ * The target repository's folder name, which is how every surface names it;
+ * nothing for a run in the workspace's own repository, which no surface names.
+ */
+export function targetFolder(run: Pick<RunRecord, 'targetRepository'>): string | undefined {
+  if (run.targetRepository === undefined) return undefined
+  const segments = run.targetRepository.split(/[\\/]/).filter((segment) => segment !== '')
+  return segments.at(-1)
+}
 
 /** Opens a message from a run to its orchestrator, and marks it as one. */
 export function runMessageHeader(run: Pick<RunRecord, 'id' | 'workflow'>): string {

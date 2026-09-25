@@ -10,6 +10,7 @@ import {
   runIsLive,
   runStop,
   stoppedNodes,
+  targetFolder,
   type ResumeKind,
   type RunArtifact,
   type RunNode,
@@ -189,6 +190,7 @@ export function WorkflowRunView({
   }, [openArtifact, openRow, onOpenArtifact])
   const cost = money(runCost(run))
   const question = run.question
+  const repository = targetFolder(run)
   // A run with no nodes has no node to scope to, so the switch is not offered
   // at all — a half that could never be pressed is worse than no switch — and
   // the rail shows what the run has: its own list.
@@ -208,6 +210,12 @@ export function WorkflowRunView({
           {live ? ageSuffix(shortAge(run.startedAt)) : ageSuffix(since(run.endedAt))}
         </span>
         <span className="where">
+          {repository === undefined ? null : (
+            <>
+              <b>{repository}</b>
+              {run.branch === undefined ? null : ' · '}
+            </>
+          )}
           {run.branch === undefined ? null : <b>{run.branch}</b>}
           {run.baseCommit === undefined ? null : <> · from <b>{run.baseCommit.slice(0, 7)}</b></>}
         </span>

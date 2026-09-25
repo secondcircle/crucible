@@ -93,6 +93,35 @@ describe('the three origins', () => {
     expect(reported).toEqual([])
   })
 
+  // A run in another repository than the workspace's works in a worktree of
+  // that repository, and still gets the workspace's own skills behind it.
+  it('ranks a second project folder below the first and above the user', async () => {
+    const worktree = join(root, 'target-worktree')
+    const worktreeOrigin = join(worktree, '.crucible', 'skills')
+    expect(foldersFor({ builtIn, user }, worktree, workspace)).toEqual([
+      worktreeOrigin,
+      projectOrigin(),
+      user,
+      builtIn
+    ])
+    // The same folder twice is one folder.
+    expect(foldersFor({ builtIn, user }, workspace, workspace)).toEqual([
+      projectOrigin(),
+      user,
+      builtIn
+    ])
+
+    writeSkill(worktreeOrigin, 'review', 'name: review\ndescription: the target\u2019s\n')
+    writeSkill(projectOrigin(), 'review', 'name: review\ndescription: the workspace\u2019s\n')
+    writeSkill(projectOrigin(), 'wiki', 'name: wiki\ndescription: the workspace\u2019s\n')
+    writeSkill(user, 'wiki', 'name: wiki\ndescription: the user\u2019s\n')
+
+    const skills = (await service().resolve(worktree, workspace)) ?? []
+    expect(named(skills)).toEqual(['review', 'wiki'])
+    expect(skills.find((skill) => skill.name === 'review')?.description).toBe('the target\u2019s')
+    expect(skills.find((skill) => skill.name === 'wiki')?.description).toBe('the workspace\u2019s')
+  })
+
   it('reads no folder of π\u2019s own', async () => {
     writeSkill(join(workspace, '.pi', 'skills'), 'theirs', 'name: theirs\ndescription: π\u2019s\n')
 

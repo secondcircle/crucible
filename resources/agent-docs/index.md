@@ -17,8 +17,9 @@ matches what you were asked about.
 - `jira.md` — read this when the user asks to connect a repository to Jira, or
   when the issue board says Jira is not set up here.
 - `workflows.md` — read this when you are orchestrating workflow runs: what
-  the crucible_* tools do, what a run's messages mean, and how finished work
-  comes back.
+  the crucible_* tools do, what a run's messages mean, how finished work
+  comes back, and how to start a run in a repository cloned inside the
+  workspace folder.
 - `workflow-authoring.md` — read this when the user asks you to write or
   change a workflow. Crucible ships no workflows, only the complete examples
   in `examples/` that this page names — authoring one is how a workspace

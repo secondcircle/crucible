@@ -9,6 +9,7 @@ import type {
 import {
   createRpc,
   effectOver,
+  targetDeclarationProblem,
   type Channel,
   type HostRequests,
   type MainRequests,
@@ -61,9 +62,9 @@ const rpc = createRpc<MainRequests, HostRequests>(channel, {
     return Boolean(await check({ workspacePath }))
   },
 
-  run: async ({ inputs, artifactDir, cwd }) => {
+  run: async ({ inputs, artifactDir, cwd, workspacePath }) => {
     const loaded = await def()
-    const outputs = await loaded.run(runContext(inputs, artifactDir, cwd))
+    const outputs = await loaded.run(runContext(inputs, artifactDir, cwd, workspacePath))
     return outputs === null || outputs === undefined ? undefined : outputs
   },
 
@@ -80,7 +81,8 @@ const rpc = createRpc<MainRequests, HostRequests>(channel, {
 function runContext(
   inputs: Record<string, string>,
   artifactDir: string,
-  cwd: string
+  cwd: string,
+  workspacePath: string
 ): RunContext {
   const wire = (spec: NodeSpec): { nodeRequest: number; spec: WireNodeSpec } => {
     const nodeRequest = nextNodeRequest++
@@ -93,6 +95,7 @@ function runContext(
     inputs,
     artifactDir,
     cwd,
+    workspacePath,
     node: async (id, spec): Promise<NodeResult> => {
       const sent = wire(spec)
       return rpc.request('node', { id, spec: sent.spec, nodeRequest: sent.nodeRequest })
@@ -147,6 +150,7 @@ function manifestOf(loaded: WorkflowDef): WorkflowManifest {
     description: loaded.description,
     inputs: { ...loaded.inputs },
     ...(loaded.commit === undefined ? {} : { commit: loaded.commit }),
+    ...(loaded.target === undefined ? {} : { target: loaded.target }),
     plans: typeof loaded.plan === 'function',
     ...(schedule === undefined || schedule === null
       ? {}
@@ -183,6 +187,10 @@ function checkDef(file: string, loaded: unknown): WorkflowDef {
   }
   if (typeof candidate.run !== 'function') {
     throw new Error(`The workflow at ${file} has no run().`)
+  }
+  const targetProblem = targetDeclarationProblem(candidate.target)
+  if (targetProblem !== undefined) {
+    throw new Error(`The workflow at ${file} declares ${targetProblem}.`)
   }
   return candidate as WorkflowDef
 }

@@ -145,7 +145,8 @@ export function createWorkflowHost(
         return await rpc.request('run', {
           inputs: { ...context.inputs },
           artifactDir: context.artifactDir,
-          cwd: context.cwd
+          cwd: context.cwd,
+          workspacePath: context.workspacePath
         })
       } finally {
         serving = undefined
@@ -177,6 +178,7 @@ export function inProcessHost(def: WorkflowDef): WorkflowHost {
         description: def.description,
         inputs: { ...def.inputs },
         ...(def.commit === undefined ? {} : { commit: def.commit }),
+        ...(def.target === undefined ? {} : { target: def.target }),
         plans: typeof def.plan === 'function',
         ...(def.schedule === undefined
           ? {}
