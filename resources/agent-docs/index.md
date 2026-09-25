@@ -11,6 +11,9 @@ matches what you were asked about.
 - `worktrees.md` — read this when the user asks to make worktrees work with
   Crucible here, when a worktree is missing dependencies or setup, or when
   asked how a session's or a run's worktree is created or cleaned up.
+- `file-tree.md` — read this when the user wants the file tree or `@file`
+  search to show something git ignores, such as a folder of nested
+  repositories, or to hide something it lists.
 - `jira.md` — read this when the user asks to connect a repository to Jira, or
   when the issue board says Jira is not set up here.
 - `workflows.md` — read this when you are orchestrating workflow runs: what

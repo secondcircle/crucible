@@ -192,3 +192,82 @@ describe('what the file tree lists', () => {
     await expect(listFiles(root)).resolves.toEqual(['kept.ts'])
   })
 })
+
+// `.crucible/files.json`: what git leaves out that a person still wants to
+// open, and what nobody wants to see even when git lists it.
+describe('a workspace that says what to show and hide', () => {
+  /** A repository holding repositories of its own, the outer one ignoring them. */
+  function repoOfRepos(config: unknown): string {
+    const root = tempRepo({
+      '.gitignore': 'kairos/\nsecrets.env\n',
+      'README.md': '',
+      'secrets.env': '',
+      '.crucible/files.json': JSON.stringify(config)
+    })
+    const files: Record<string, string> = {
+      'kairos/api/.gitignore': 'dist/\n',
+      'kairos/api/src/main.go': '',
+      'kairos/api/dist/bundle.js': '',
+      'kairos/api/node_modules/left/index.js': '',
+      'kairos/web/index.ts': '',
+      'other/lone.ts': ''
+    }
+    for (const [path, body] of Object.entries(files)) {
+      mkdirSync(join(root, path, '..'), { recursive: true })
+      writeFileSync(join(root, path), body, 'utf8')
+    }
+    mkdirSync(join(root, 'kairos/api/.git'))
+    mkdirSync(join(root, 'kairos/web/.git'))
+    // An untracked nested repository, which git lists as one opaque entry.
+    mkdirSync(join(root, 'other/.git'))
+    return root
+  }
+
+  it('lists what git ignores when a pattern shows it, and nothing it did not ask for', async () => {
+    const root = repoOfRepos({ show: ['kairos'] })
+
+    const listed = await listFiles(root)
+
+    expect(listed).toContain('kairos/api/src/main.go')
+    expect(listed).toContain('kairos/web/index.ts')
+    // The nested repository's own .gitignore still holds inside it.
+    expect(listed).not.toContain('kairos/api/dist/bundle.js')
+    // Hidden by default, whatever else is shown.
+    expect(listed).not.toContain('kairos/api/node_modules/left/index.js')
+    expect(listed).not.toContain('secrets.env')
+  })
+
+  it('takes a glob, and a single ignored file by name', async () => {
+    const root = repoOfRepos({ show: ['kairos/*/src/**', 'secrets.env', 'other/**'] })
+
+    const listed = await listFiles(root)
+
+    expect(listed).toContain('kairos/api/src/main.go')
+    expect(listed).not.toContain('kairos/web/index.ts')
+    expect(listed).toContain('secrets.env')
+    // The files stand in for git's one entry for the untracked repository.
+    expect(listed).toContain('other/lone.ts')
+    expect(listed).not.toContain('other/')
+  })
+
+  it('hides what it names, git’s own listing included, in place of the default', async () => {
+    const root = repoOfRepos({ show: ['kairos'], hide: ['README.md', 'src'] })
+
+    const listed = await listFiles(root)
+
+    expect(listed).not.toContain('README.md')
+    expect(listed).not.toContain('kairos/api/src/main.go')
+    // Naming a hide list replaces the default rather than adding to it.
+    expect(listed).toContain('kairos/api/node_modules/left/index.js')
+  })
+
+  it('changes nothing without the file, or with one that is not JSON', async () => {
+    const root = repoOfRepos({})
+    writeFileSync(join(root, '.crucible/files.json'), '{ not json', 'utf8')
+
+    const listed = await listFiles(root)
+
+    expect(listed).not.toContain('kairos/api/src/main.go')
+    expect(listed).toContain('README.md')
+  })
+})

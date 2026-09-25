@@ -3,6 +3,7 @@ import { readdir, readFile, stat } from 'node:fs/promises'
 import type { Dirent } from 'node:fs'
 import { isAbsolute, join, relative, resolve, sep } from 'node:path'
 import type { FileStatus, FileTree } from '../../shared/workspace/service'
+import { matches, readFileViewConfig, type FileViewConfig } from './file-view-config'
 
 // Kept apart from the service so the walk and the ignore rules can be tested
 // against a temp folder, with no process or event stream in the way.
@@ -13,10 +14,64 @@ const ALWAYS_SKIPPED = '.git'
 /** A folder this big is a mistake to walk, not a workspace to search. */
 const WALK_LIMIT = 20_000
 
-/** Workspace-relative and `/`-separated, whichever of the two paths answers. */
+/**
+ * Workspace-relative and `/`-separated, whichever of the two paths answers,
+ * with `.crucible/files.json` applied on top: what it shows added, what it
+ * hides taken away.
+ */
 export async function listFiles(workspacePath: string): Promise<readonly string[]> {
-  const tracked = await gitFiles(workspacePath)
-  return tracked ?? (await walk(workspacePath))
+  const [tracked, config] = await Promise.all([
+    gitFiles(workspacePath),
+    readFileViewConfig(workspacePath)
+  ])
+  const listed = tracked ?? (await walk(workspacePath))
+  return withFileViewConfig(workspacePath, listed, config)
+}
+
+async function withFileViewConfig(
+  workspacePath: string,
+  listed: readonly string[],
+  config: FileViewConfig
+): Promise<readonly string[]> {
+  const hidden = (path: string): boolean => matches(config.hide, path)
+  const shown = new Set<string>()
+  for (const pattern of config.show) {
+    for (const path of await shownUnder(workspacePath, pattern.base, hidden)) {
+      if (pattern.test.test(path)) shown.add(path)
+    }
+  }
+  if (shown.size === 0 && config.hide.length === 0) return listed
+
+  const all = new Set(listed.filter((path) => !hidden(path)))
+  for (const path of shown) all.add(path)
+  // Git lists a nested repository it does not track as one `inner/` entry. A
+  // shown folder's files stand in for it.
+  for (const path of all) {
+    if (path.endsWith('/') && [...shown].some((one) => one.startsWith(path))) all.delete(path)
+  }
+  return [...all].sort()
+}
+
+// A shown pattern's own files: the one file it names, or every file in the
+// folder it starts from, walked past the workspace's ignore rules.
+async function shownUnder(
+  workspacePath: string,
+  base: string,
+  hidden: (path: string) => boolean
+): Promise<readonly string[]> {
+  const start = base === '' ? workspacePath : join(workspacePath, base)
+  let found
+  try {
+    found = await stat(start)
+  } catch {
+    return []
+  }
+  if (found.isFile()) return hidden(base) ? [] : [base]
+  if (!found.isDirectory()) return []
+  const prefix = base === '' ? '' : `${base}/`
+  return (await walk(start, { ignores: 'nested', hidden: (path) => hidden(`${prefix}${path}`) })).map(
+    (path) => `${prefix}${path}`
+  )
 }
 
 // Which of the paths are files, in the order they were asked about. Answered
@@ -183,18 +238,20 @@ function ignored(
  * 24,000-file workspace took 46-71 ms of held loop per character typed.
  * Exported so a test can hold it to that without a repository in the way.
  */
-export async function walk(workspacePath: string): Promise<readonly string[]> {
+export async function walk(
+  workspacePath: string,
+  options: WalkOptions = {}
+): Promise<readonly string[]> {
   const found: string[] = []
+  const hidden = options.hidden ?? (() => false)
 
   async function visit(
     folder: string,
-    inherited: readonly { readonly folder: string; readonly rules: readonly IgnoreRule[] }[]
+    inherited: readonly { readonly folder: string; readonly rules: readonly IgnoreRule[] }[],
+    nested: boolean
   ): Promise<void> {
     if (found.length >= WALK_LIMIT) return
     const relativeFolder = toPosix(relative(workspacePath, folder))
-    const own = await readIgnoreRules(folder)
-    const rules =
-      own.length === 0 ? inherited : [...inherited, { folder: relativeFolder, rules: own }]
 
     let entries: Dirent[]
     try {
@@ -204,6 +261,17 @@ export async function walk(workspacePath: string): Promise<readonly string[]> {
       return
     }
 
+    // Inside a repository of its own, that repository's ignore rules apply
+    // whatever the walk was asked to skip. The start folder's own `.git` is
+    // the workspace's, whose rules are the ones being skipped.
+    const inRepository =
+      nested ||
+      (folder !== workspacePath && entries.some((entry) => entry.name === ALWAYS_SKIPPED))
+    const own =
+      options.ignores === 'nested' && !inRepository ? [] : await readIgnoreRules(folder)
+    const rules =
+      own.length === 0 ? inherited : [...inherited, { folder: relativeFolder, rules: own }]
+
     for (const entry of [...entries].sort((left, right) => left.name.localeCompare(right.name))) {
       if (entry.name === ALWAYS_SKIPPED) continue
       const full = join(folder, entry.name)
@@ -211,18 +279,29 @@ export async function walk(workspacePath: string): Promise<readonly string[]> {
       // Symlinked folders are not followed: a workspace is a folder, not a
       // graph.
       if (entry.isDirectory()) {
-        if (ignored(rules, path, true)) continue
-        await visit(full, rules)
+        if (hidden(path) || ignored(rules, path, true)) continue
+        await visit(full, rules, inRepository)
         continue
       }
       if (!entry.isFile()) continue
-      if (ignored(rules, path, false)) continue
+      if (hidden(path) || ignored(rules, path, false)) continue
       found.push(path)
     }
   }
 
-  await visit(workspacePath, [])
+  await visit(workspacePath, [], false)
   return found
+}
+
+interface WalkOptions {
+  /**
+   * `all`, the default, honors every .gitignore on the way down. `nested`
+   * honors only those inside a repository of its own below the start: what a
+   * shown folder needs, where the workspace's rules are the ones overridden.
+   */
+  readonly ignores?: 'all' | 'nested'
+  /** Never listed or walked into; given the path relative to the start. */
+  readonly hidden?: (path: string) => boolean
 }
 
 function toPosix(path: string): string {
