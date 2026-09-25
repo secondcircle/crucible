@@ -33,11 +33,6 @@ export function shippedWorkflowLibPath(root: string): string {
   return join(root, SHIPPED_DIRECTORY, 'workflow-lib', 'workflow.ts')
 }
 
-/** The directory `crucible:rule`, `crucible:rule/extract` and `crucible:rule/test` resolve into. */
-export function shippedRuleLibPath(root: string): string {
-  return join(root, SHIPPED_DIRECTORY, 'rule-lib')
-}
-
 export function shippedRolePromptPath(root: string): string {
   return join(root, SHIPPED_DIRECTORY, 'prompts', 'role-coding-agent.md')
 }

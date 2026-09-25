@@ -1,5 +1,4 @@
 import { writeFile } from 'node:fs/promises'
-import { homedir } from 'node:os'
 import { join } from 'node:path'
 import {
   app,
@@ -30,17 +29,13 @@ import { withLogging } from './agent/with-logging'
 import { type CommandChannel, serveCommandChannel } from './commands/channel'
 import { selectCommandService } from './commands/select-service'
 import { createSkillService, userSkillsPath } from './skills/service'
-import { shippedRuleLibPath, shippedSkillsPath, shippedSystemPrompt } from './shipped'
+import { shippedSkillsPath, shippedSystemPrompt } from './shipped'
 import { type ExhibitKeyChannel, serveExhibitKeyChannel } from './exhibits/channel'
 import { forwardRendererOutput } from './log/renderer-output'
 import { createFileSink } from './log/sink'
 import { type NeedsYouChannel, serveNeedsYouChannel } from './needs-you/channel'
 import { selectNeedsYouService } from './needs-you/select-service'
 import type { LiveNeedsYouService } from './needs-you/service'
-import { serveRulesChannel, type RulesChannel } from './rules/channel'
-import type { SpawnRuleHost } from './rules/host/host'
-import { installCrucibleCommand } from './rules/shim'
-import { createRulesSystem } from './rules/system'
 import { serveScheduleChannel, type ScheduleChannel } from './schedules/channel'
 import { selectScheduleService } from './schedules/select-service'
 import { type QuotaChannel, serveQuotaChannel } from './quota/channel'
@@ -233,41 +228,6 @@ const spawnHost: SpawnHost = (workflowFile, authoringModule) =>
     { stdio: 'pipe' }
   )
 
-// A workspace's rules run in a utility process of their own, one per
-// workspace for as long as the launch, so a rule that hangs holds only that.
-const spawnRuleHost: SpawnRuleHost = (workspacePath, libDir) =>
-  utilityProcess.fork(join(app.getAppPath(), 'out', 'main', 'rule-host.js'), [workspacePath, libDir], {
-    stdio: 'pipe'
-  })
-
-// Before the engine and the adapter, whose agent loops all feed it. Both
-// flavors run the same rules; the fake one answers every judged item from a
-// canned judge, so nothing leaves the machine and nothing is billed.
-const rules = createRulesSystem({
-  stateDir: app.getPath('userData'),
-  libDir: shippedRuleLibPath(app.getAppPath()),
-  spawn: spawnRuleHost,
-  judge: decideFlavor(process.env.CRUCIBLE_AGENT, app.isPackaged).flavor === 'sdk' ? 'jev' : 'canned',
-  home: homedir(),
-  log: (event, fields) => log.append({ source: 'main', event, ...fields })
-})
-
-// `crucible rules …` from any agent's bash, run by this very build.
-try {
-  installCrucibleCommand(join(app.getPath('userData'), 'bin'), {
-    execPath: process.execPath,
-    script: join(app.getAppPath(), 'out', 'main', 'rules-cli.js'),
-    libDir: shippedRuleLibPath(app.getAppPath()),
-    stateDir: app.getPath('userData')
-  })
-} catch (cause) {
-  log.append({
-    source: 'main',
-    event: 'crucible_command_unavailable',
-    message: cause instanceof Error ? cause.message : String(cause)
-  })
-}
-
 const workflowRuns = selectWorkflowRunService(
   decideFlavor(process.env.CRUCIBLE_AGENT, app.isPackaged).flavor,
   log,
@@ -288,7 +248,6 @@ const workflowRuns = selectWorkflowRunService(
     // instead of reporting into nothing.
     sessionExists: (sessionId) => store.session(sessionId) !== undefined,
     monitors: monitors.nodes,
-    rules: rules.gate,
     deliver: (sessionId, text) => {
       if (inbox === undefined) {
         throw new Error('no shell is up to carry a run message yet')
@@ -351,8 +310,7 @@ const { adapter, flavor } = selectAdapter(
   app.isPackaged,
   workflowRuns.tools,
   monitors.tools,
-  questions,
-  rules.gate
+  questions
 )
 
 // One flavor decision governs every seam, so a fake-flavor launch reads no
@@ -494,7 +452,6 @@ let needsYouChannel: NeedsYouChannel | undefined
 let needsYou: LiveNeedsYouService | undefined
 let workflowRunChannel: WorkflowRunChannel | undefined
 let scheduleChannel: ScheduleChannel | undefined
-let rulesChannel: RulesChannel | undefined
 let monitorChannel: MonitorChannel | undefined
 let exhibitKeyChannel: ExhibitKeyChannel | undefined
 
@@ -526,7 +483,6 @@ function openWindow(reason?: 'activate'): void {
   needsYouChannel = serveNeedsYouChannel(needsYou, window)
   workflowRunChannel = serveWorkflowRunChannel(workflowRuns, window)
   scheduleChannel = serveScheduleChannel(schedules.service, window)
-  rulesChannel = serveRulesChannel(rules.service, window)
   monitorChannel = serveMonitorChannel(monitors, window)
   exhibitKeyChannel = serveExhibitKeyChannel(window)
   // ⌘R is the global runs view (Q15). Taken here, before the menu can spend
@@ -583,8 +539,6 @@ app.on('will-quit', () => {
   channel?.dispose()
   scheduleChannel?.dispose()
   schedules.service.dispose()
-  rulesChannel?.dispose()
-  rules.dispose()
   workflowRunChannel?.dispose()
   workflowRuns.dispose()
   monitorChannel?.dispose()

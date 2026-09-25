@@ -55,7 +55,7 @@ describe('a restored conversation', () => {
       { kind: 'user', text: 'Render the palette as tokens.' },
       { kind: 'thinking', text: 'one file, referenced everywhere' },
       { kind: 'assistant', markdown: 'Reading the mock first.' },
-      { kind: 'tool', callId: 'c1', name: 'read', summary: 'mock-a.html', ok: true, output: '--accent:#e07a4f' },
+      { kind: 'tool', name: 'read', summary: 'mock-a.html', ok: true, output: '--accent:#e07a4f' },
       { kind: 'assistant', markdown: 'Done: `--accent` is the one accent.' }
     ])
   })
@@ -123,7 +123,7 @@ describe('a restored conversation', () => {
     )
 
     expect(items).toEqual([
-      { kind: 'tool', callId: 'c9', name: 'bash', summary: '', ok: false, output: 'exit 1' }
+      { kind: 'tool', name: 'bash', summary: '', ok: false, output: 'exit 1' }
     ])
   })
 

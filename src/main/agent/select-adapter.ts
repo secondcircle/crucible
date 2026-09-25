@@ -4,7 +4,6 @@ import { createFakeAdapter, type FakePanel } from '../../shared/agent/fake-adapt
 import type { AskTools } from '../../shared/agent/ask-tool'
 import type { MonitorTools } from '../../shared/agent/monitor-tools'
 import type { RunTools } from '../../shared/agent/run-tools'
-import type { RuleGate } from '../../shared/rules/gate'
 import type { LogSink } from '../log/sink'
 import type { SkillService } from '../skills/service'
 import { createSdkAdapter } from './sdk-adapter'
@@ -82,10 +81,7 @@ export function selectAdapter(
   monitors?: MonitorTools,
   // And the ask tool beside those: the fake raises questions from a prompt so
   // the dock is drivable with no model at all.
-  ask?: AskTools,
-  // The rules ride every flavor too: the fake's scripted edits go through the
-  // same gate an SDK session's hooks do.
-  rules?: RuleGate
+  ask?: AskTools
 ): SelectedAdapter {
   const { flavor, requested, reason } = decideFlavor(process.env.CRUCIBLE_AGENT, packaged)
 
@@ -106,15 +102,13 @@ export function selectAdapter(
             ...(sdk.openExternal === undefined ? {} : { openExternal: sdk.openExternal }),
             ...(sdk.compactionSettings === undefined
               ? {}
-              : { compactionSettings: sdk.compactionSettings }),
-            ...(rules === undefined ? {} : { rules })
+              : { compactionSettings: sdk.compactionSettings })
           })
         : createFakeAdapter({
             panel,
             ...(runs === undefined ? {} : { runs }),
             ...(monitors === undefined ? {} : { monitors }),
-            ...(ask === undefined ? {} : { ask }),
-            ...(rules === undefined ? {} : { rules })
+            ...(ask === undefined ? {} : { ask })
           })
   }
 }

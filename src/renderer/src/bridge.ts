@@ -8,7 +8,6 @@ import type { CommandRequest, CommandResult } from '../../shared/commands/channe
 import type { NeedsYouRequest, NeedsYouResult } from '../../shared/needs-you/channels'
 import type { QuotaRequest, QuotaResult } from '../../shared/quota/channels'
 import type { QuotaSnapshot } from '../../shared/quota/types'
-import type { RulesEvent, RulesRequest, RulesResult } from '../../shared/rules/channels'
 import type {
   ScheduleEvent,
   ScheduleRequest,
@@ -81,12 +80,6 @@ export interface CrucibleSchedules {
   onEvent(listener: (event: ScheduleEvent) => void): () => void
 }
 
-/** The rules half, read-only. */
-export interface CrucibleRules {
-  request(request: RulesRequest): Promise<RulesResult>
-  onEvent(listener: (event: RulesEvent) => void): () => void
-}
-
 /** The monitor half, shaped like the run half for the same reason. */
 export interface CrucibleMonitors {
   request(request: MonitorRequestMessage): Promise<MonitorResult>
@@ -117,7 +110,6 @@ declare global {
       needsYou?: CrucibleNeedsYou
       workflowRuns?: CrucibleWorkflowRuns
       schedules?: CrucibleSchedules
-      rules?: CrucibleRules
       monitors?: CrucibleMonitors
       exhibitKeys?: CrucibleExhibitKeys
     }
@@ -212,14 +204,6 @@ export function schedulesBridge(): CrucibleSchedules {
     throw new Error('renderer: window.crucible.schedules is missing — the preload did not load')
   }
   return schedules
-}
-
-export function rulesBridge(): CrucibleRules {
-  const rules = window.crucible?.rules
-  if (rules === undefined) {
-    throw new Error('renderer: window.crucible.rules is missing — the preload did not load')
-  }
-  return rules
 }
 
 export function monitorsBridge(): CrucibleMonitors {

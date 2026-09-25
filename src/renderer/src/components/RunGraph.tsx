@@ -25,8 +25,7 @@ export function RunGraph({
   shownId,
   fullScreen,
   onPick,
-  onToggleFullScreen,
-  ruleFirings
+  onToggleFullScreen
 }: {
   readonly nodes: readonly RunNode[]
   /** The node the detail column is showing, whose own edges are lit. */
@@ -34,8 +33,6 @@ export function RunGraph({
   readonly fullScreen: boolean
   readonly onPick: (nodeId: string) => void
   readonly onToggleFullScreen: () => void
-  /** How many times the workspace's rules fired in each node; absent where no rules are declared. */
-  readonly ruleFirings?: ReadonlyMap<string, number>
 }): React.JSX.Element {
   const layout = useMemo(() => layOutGraph(nodes), [nodes])
   const canvas = useRef<HTMLDivElement>(null)
@@ -158,11 +155,6 @@ export function RunGraph({
               >
                 <span className="ndtop">
                   <span className="nm">{face.id}</span>
-                  {(ruleFirings?.get(card.id) ?? 0) === 0 ? null : (
-                    <span className="rm" aria-label={`${ruleFirings?.get(card.id)} rule firings`}>
-                      § {ruleFirings?.get(card.id)}
-                    </span>
-                  )}
                   <span className="st">{face.status}</span>
                 </span>
                 {face.facts === undefined ? null : <span className="facts">{face.facts}</span>}

@@ -9,12 +9,13 @@ import type {
 import {
   createRpc,
   effectOver,
+  type Channel,
   type HostRequests,
   type MainRequests,
+  type Message,
   type WireNodeSpec,
   type WorkflowManifest
 } from './protocol.ts'
-import { openParentChannel } from '../../host/parent-channel.ts'
 
 // The workflow host: where a repository's workflow code runs. One process per
 // workflow file, started by the main process, which stays the engine — every
@@ -31,7 +32,7 @@ if (workflowFile === undefined || authoringModule === undefined) {
   process.exit(2)
 }
 
-const channel = openParentChannel('workflow host')
+const channel = openChannel()
 
 // Loaded once, on the first request that needs it, so a file that throws at
 // import reports through the request that asked rather than by dying.
@@ -184,6 +185,38 @@ function checkDef(file: string, loaded: unknown): WorkflowDef {
     throw new Error(`The workflow at ${file} has no run().`)
   }
   return candidate as WorkflowDef
+}
+
+/** Electron's parent port when there is one; Node's IPC channel otherwise. */
+function openChannel(): Channel {
+  const parentPort = (
+    process as unknown as {
+      parentPort?: {
+        postMessage(message: unknown): void
+        on(event: 'message', listener: (event: { data: Message }) => void): void
+        start?(): void
+      }
+    }
+  ).parentPort
+  if (parentPort !== undefined) {
+    parentPort.start?.()
+    return {
+      post: (message) => parentPort.postMessage(message),
+      onMessage: (listener) => parentPort.on('message', (event) => listener(event.data))
+    }
+  }
+  if (typeof process.send !== 'function') {
+    process.stderr.write('workflow host: no channel to the main process\n')
+    process.exit(2)
+  }
+  return {
+    post: (message) => {
+      process.send?.(message)
+    },
+    onMessage: (listener) => {
+      process.on('message', (message) => listener(message as Message))
+    }
+  }
 }
 
 // The host has nothing to say on its own: it lives as long as the channel

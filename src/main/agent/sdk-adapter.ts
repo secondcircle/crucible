@@ -86,8 +86,6 @@ import {
 } from './sdk-events.ts'
 import { sanitizeTitle, TITLE_INSTRUCTION, titleInput } from './sdk-titler.ts'
 import { branchSummaryExtension } from './sdk-branch-summary.ts'
-import { rulesExtension } from './sdk-rules.ts'
-import type { RuleGate } from '../../shared/rules/gate.ts'
 import {
   PI_COMPACTION_SETTINGS,
   autoCompactionEvent,
@@ -212,8 +210,7 @@ export function createSdkAdapter({
   openExternal,
   log,
   askCompaction,
-  compactionSettings = () => DEFAULT_COMPACTION_SETTINGS,
-  rules
+  compactionSettings = () => DEFAULT_COMPACTION_SETTINGS
 }: {
   // The same model the fake's scripts call and the same model the shell reads:
   // the tools registered below are its three behaviors and nothing more.
@@ -255,9 +252,6 @@ export function createSdkAdapter({
   // re-armed: a session's turn compacts between tool rounds at the size this
   // says, and the shell's between-turn rules read the same setting.
   readonly compactionSettings?: () => CompactionSettings
-  // The workspace's rules, fed every edit, write and bash call this session's
-  // agent makes. Absent — as in `prove:sdk` — means no rule sees anything.
-  readonly rules?: RuleGate
 }): ConversationAdapter {
   const agentDir = crucibleAgentDir(homedir())
   const listeners = new Set<AdapterEventListener>()
@@ -408,8 +402,8 @@ export function createSdkAdapter({
       // A Crucible-owned custom-instructions mechanism is deferred, so a file
       // dropped into the agent dir must not become one by accident.
       appendSystemPromptOverride: () => [],
-      // The only extensions a session runs, all Crucible's own: π's branch
-      // summarizer with its reply cap taken off, first.
+      // The one extension a session runs, and Crucible's own: π's branch
+      // summarizer with its reply cap taken off.
       extensionFactories: [
         branchSummaryExtension({
           generate: pi.generateBranchSummary,
@@ -450,16 +444,7 @@ export function createSdkAdapter({
             const live = sessions.get(sessionId)?.compacting
             if (live !== undefined) live.written = { stored, text }
           }
-        }),
-        ...(rules === undefined
-          ? []
-          : [
-              rulesExtension({
-                gate: rules,
-                agent: { kind: 'session', sessionId, cwd: workspacePath },
-                holdsAtSettle: true
-              })
-            ])
+        })
       ]
     })
     await resourceLoader.reload()

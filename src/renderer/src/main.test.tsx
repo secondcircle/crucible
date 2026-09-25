@@ -130,11 +130,6 @@ function pageWithPreload(
         }),
         onEvent: (): (() => void) => () => {}
       },
-      // No workspace has a rules folder, so no rules chip renders.
-      rules: {
-        request: async (): Promise<{ ok: true; value: unknown }> => ({ ok: true, value: undefined }),
-        onEvent: (): (() => void) => () => {}
-      },
       monitors: {
         request: async (): Promise<{ ok: true; value: unknown }> => ({
           ok: true,

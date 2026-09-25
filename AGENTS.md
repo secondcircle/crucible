@@ -82,10 +82,7 @@ printing the model id and the date, exiting non-zero unless it saw
 with explicit human authorization; the human may run it or direct an agent to
 execute and record it. Paste its stdout beside that authorization in the
 evidence file. It is never part of `npm test`, and `npm test` constructs no SDK
-adapter at all. `npm run prove:rules` is the same kind of proof for rules,
-under the same authorization: run in a checkout whose rules include a judged
-one, it sends one item to the real judge through the app's own rules path
-and prints the firing as the ledger recorded it.
+adapter at all.
 
 Other scripts: `npm run lint`, `npm run typecheck`, `npm test`.
 

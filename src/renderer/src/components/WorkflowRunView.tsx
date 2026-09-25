@@ -36,11 +36,7 @@ import { ArtifactReader } from './ArtifactReader'
 import { InvestigateButton } from './InvestigateButton'
 import { RunGraph } from './RunGraph'
 import { Transcript } from './Transcript'
-import { didLabel, formatDollars, formatTook, tally, type FiringView } from '../../../shared/rules/board'
-import { FiringColumns, FiringRow } from '../rules/FiringRow'
-import { marksByCall, RuleMarksContext, type RuleMarks } from '../rules/marks'
 import './runs.css'
-import './rules.css'
 import './monitors.css'
 
 /** What the graph pane is worth before anyone has dragged it. */
@@ -86,8 +82,7 @@ export function WorkflowRunView({
   onInvestigate,
   onClose,
   fullScreen,
-  onToggleFullScreen,
-  rules
+  onToggleFullScreen
 }: {
   readonly run: RunRecord
   readonly canGoToSession: boolean
@@ -119,16 +114,6 @@ export function WorkflowRunView({
   // before the reader, and the reader before the run.
   readonly fullScreen: boolean
   readonly onToggleFullScreen: () => void
-  // This run's rule firings, newest first, for the node counts, the header's
-  // count, the rules tab and the marks in a node's transcript. Absent where
-  // the workspace declares no rules.
-  readonly rules?: {
-    readonly firings: readonly FiringView[]
-    /** Opens the board scoped to this run, on a firing when one is named. */
-    readonly onOpen: (firingId?: string) => void
-    /** A tool call "Open in the conversation" asked for, in one of this run's nodes. */
-    readonly focus?: { readonly nodeId: string; readonly callId: string; readonly asked: number }
-  }
 }): React.JSX.Element {
   // Follows the run's own frontier until the user picks a node; their pick
   // then stands until they pick again or the node leaves the record.
@@ -139,45 +124,6 @@ export function WorkflowRunView({
     run.nodes[0]
 
   const now = useClock(shown?.waitingOn !== undefined)
-
-  // The node pane's two faces: its transcript, or the rules that fired in it.
-  const [tab, setTab] = useState<'transcript' | 'rules'>('transcript')
-  const focusAsked = rules?.focus?.asked
-  const focusNode = rules?.focus?.nodeId
-  const [answered, setAnswered] = useState<number | undefined>(undefined)
-  if (focusAsked !== undefined && focusNode !== undefined && focusAsked !== answered) {
-    setAnswered(focusAsked)
-    setPicked(focusNode)
-    setTab('transcript')
-  }
-  const ruleCounts = useMemo(() => {
-    if (rules === undefined) return undefined
-    const counts = new Map<string, number>()
-    for (const view of rules.firings) {
-      if (view.firing.agent.kind !== 'node') continue
-      counts.set(view.firing.agent.nodeId, (counts.get(view.firing.agent.nodeId) ?? 0) + 1)
-    }
-    return counts
-  }, [rules])
-  const nodeFirings = useMemo(
-    () =>
-      rules === undefined || shown === undefined
-        ? []
-        : rules.firings.filter((view) => view.firing.agent.kind === 'node' && view.firing.agent.nodeId === shown.id),
-    [rules, shown]
-  )
-  const nodeMarks: RuleMarks | undefined = useMemo(
-    () =>
-      rules === undefined
-        ? undefined
-        : {
-            byCall: marksByCall(nodeFirings),
-            onOpen: rules.onOpen,
-            ...(rules.focus === undefined ? {} : { focus: rules.focus })
-          },
-    [rules, nodeFirings]
-  )
-  const openFirings = rules?.firings.filter((view) => view.came?.outcome === 'open').length ?? 0
 
   const [items, setItems] = useState<readonly TranscriptItem[]>([])
   const fetchedFor = useRef<string>('')
@@ -269,12 +215,6 @@ export function WorkflowRunView({
           {cost === '' ? '' : `${cost} · `}
           {nodeProgress(run)}
         </span>
-        {rules === undefined || rules.firings.length === 0 ? null : (
-          <button className="rulecount" onClick={() => rules.onOpen()}>
-            § {rules.firings.length} rule firing{rules.firings.length === 1 ? '' : 's'}
-            {openFirings > 0 ? ` · ${openFirings} open` : ''}
-          </button>
-        )}
         {canGoToSession ? (
           // Quiet while the run is stopped: Resume is the one primary there,
           // because it is the one act that moves the run.
@@ -336,7 +276,6 @@ export function WorkflowRunView({
             shownId={shown?.id}
             fullScreen={fullScreen}
             onToggleFullScreen={onToggleFullScreen}
-            {...(ruleCounts === undefined ? {} : { ruleFirings: ruleCounts })}
             onPick={(nodeId) => {
               // Picking a node in the graph is also a way out of the
               // reader: that node's transcript is what it asks for.
@@ -374,26 +313,7 @@ export function WorkflowRunView({
           ) : (
             <>
               <div className="dhead">
-                {rules === undefined ? (
-                  <div className="n">{shown.id}</div>
-                ) : (
-                  <div className="dtitle">
-                    <div className="n">{shown.id}</div>
-                    <div className="tabs" role="tablist" aria-label="Node pane">
-                      <button role="tab" aria-selected={tab === 'transcript'} onClick={() => setTab('transcript')}>
-                        transcript
-                      </button>
-                      <button
-                        role="tab"
-                        className="rl"
-                        aria-selected={tab === 'rules'}
-                        onClick={() => setTab('rules')}
-                      >
-                        § rules · {nodeFirings.length}
-                      </button>
-                    </div>
-                  </div>
-                )}
+                <div className="n">{shown.id}</div>
                 <div className="facts">
                   {shown.model === undefined ? null : (
                     <span>
@@ -432,16 +352,10 @@ export function WorkflowRunView({
                 )}
               </div>
 
-              {tab === 'rules' && rules !== undefined ? (
-                <NodeFirings firings={nodeFirings} now={now} onOpen={rules.onOpen} />
-              ) : (
-                <RuleMarksContext.Provider value={nodeMarks}>
-                  <Transcript
-                    items={transcriptWithSeams(run, shown, items, now)}
-                    sessionId={`run-${run.id}-${shown.id}`}
-                  />
-                </RuleMarksContext.Provider>
-              )}
+              <Transcript
+                items={transcriptWithSeams(run, shown, items, now)}
+                sessionId={`run-${run.id}-${shown.id}`}
+              />
 
               <NodeStrip run={run} node={shown} onOpen={onOpenArtifact} />
             </>
@@ -473,83 +387,6 @@ export function WorkflowRunView({
         )}
       </div>
     </section>
-  )
-}
-
-/** The rules tab: what fired in one node, and the door to each firing on the board. */
-function NodeFirings({
-  firings,
-  now,
-  onOpen
-}: {
-  readonly firings: readonly FiringView[]
-  readonly now: number
-  readonly onOpen: (firingId?: string) => void
-}): React.JSX.Element {
-  const counts = tally(firings)
-  // Counted as each row says it, so a shadow rule's notes read "would note".
-  const did = new Map<string, number>()
-  for (const { firing } of firings) {
-    if (firing.skip === undefined) did.set(didLabel(firing), (did.get(didLabel(firing)) ?? 0) + 1)
-  }
-  const acted = [...did.entries()]
-  const came = (['fixed', 'reworded', 'ignored'] as const).filter((outcome) => counts.came[outcome] > 0)
-  return (
-    <div className="nodefirings" aria-label="Rule firings in this node">
-      <div className="nsum">
-        <span>
-          <b>{firings.length}</b> firing{firings.length === 1 ? '' : 's'} in this node
-        </span>
-        {acted.length === 0 ? null : (
-          <span>
-            {acted.map(([action, count], at) => (
-              <span key={action}>
-                {at === 0 ? '' : ' · '}
-                {action.endsWith('note') ? (
-                  <b className="rl">
-                    {count} {action}
-                  </b>
-                ) : (
-                  `${count} ${action}`
-                )}
-              </span>
-            ))}
-          </span>
-        )}
-        {came.length === 0 && counts.came.open === 0 ? null : (
-          <span>
-            {came.map((outcome) => `${counts.came[outcome]} ${outcome}`).join(' · ')}
-            {counts.came.open === 0 ? null : (
-              <>
-                {came.length === 0 ? '' : ' · '}
-                <b className="open">{counts.came.open} open</b>
-              </>
-            )}
-          </span>
-        )}
-        {counts.took === undefined ? null : (
-          <span>
-            {formatDollars(counts.dollars)} · {formatTook(counts.took.p50)} p50
-          </span>
-        )}
-      </div>
-      {firings.length === 0 ? null : (
-        <>
-          <FiringColumns node />
-          {firings.map((view) => (
-            <FiringRow
-              key={view.firing.id}
-              view={view}
-              now={now}
-              node
-              sessionTitle={() => undefined}
-              onClick={() => onOpen(view.firing.id)}
-            />
-          ))}
-        </>
-      )}
-      <p className="hint">Click a firing to read it whole on the rules board, scoped to this run.</p>
-    </div>
   )
 }
 

@@ -17,8 +17,6 @@ import { ASK_TOOL, bindAskTool, type AskRequest, type AskTools } from './ask-too
 import { isWakeMessage, monitorCallSummary } from '../monitors/wording'
 import { isAnswerBatch } from '../questions/wording'
 import type { RunTools } from './run-tools'
-import type { RuleGate, RuleWatch } from '../rules/gate'
-import { FAKE_EDITS } from '../rules/fake-edits'
 import { planCompaction, settleCompaction } from '../compaction/compaction'
 import type { CompactionRecord, CompactionTrigger } from '../compaction/record'
 import type {
@@ -234,25 +232,14 @@ export interface FakePanel {
 interface PanelCall {
   readonly name: PanelToolName | string
   readonly summary: string
-  /** Said before the call is made. */
-  readonly said?: readonly string[]
-  readonly answer: (callId: string) => string | Promise<string>
+  readonly answer: () => string | Promise<string>
 }
 
 /** A tool turn instead of the standard script: its calls, then its closing. */
 interface ScriptedToolTurn {
   readonly calls: readonly PanelCall[]
   readonly closing: readonly string[]
-  /** Once the closing is said and the queues are empty, before the turn ends. */
-  readonly ended?: () => Promise<void>
 }
-
-// What the scripted editor says after its two edits, so the rule mark, the
-// note under it and the outcome are all reachable without a paid call.
-const RULE_EDITS_DELTAS: readonly string[] = [
-  'Both edits are in. The rules board shows what the comments rule made of them, ',
-  'and nothing was sent anywhere to judge it.'
-]
 
 // Said after a panel turn, so the reply names where the work went rather than
 // leaving the chat silent. A closing turn gets its own line below.
@@ -647,8 +634,7 @@ export function createFakeAdapter({
   panel,
   runs,
   monitors,
-  ask,
-  rules
+  ask
 }: {
   /** Zero runs the script on microtasks. */
   readonly pauseMs?: number
@@ -663,9 +649,6 @@ export function createFakeAdapter({
   // And the ask behavior beside them, so the questions dock is drivable
   // without a model: “ask me 2” puts two questions in it.
   readonly ask?: AskTools
-  // The workspace's rules, fed the scripted edits “add a comment” makes, so a
-  // rule mark and its firing are reachable with no model and no judge.
-  readonly rules?: RuleGate
 } = {}): ConversationAdapter {
   const listeners = new Set<AdapterEventListener>()
   const conversations = new Map<string, Conversation>()
@@ -1026,42 +1009,7 @@ export function createFakeAdapter({
     }
   }
 
-  // One watch per session for as long as the adapter lives, so an item a
-  // rule left open is followed from one turn to the next.
-  const watches = new Map<SessionId, RuleWatch>()
-
-  // “add a comment”: two edits through the rule gate, the first adding a
-  // comment that only narrates and the second deleting it again.
-  function rulesScript(bound: Bound, sessionId: SessionId, text: string): ScriptedToolTurn | undefined {
-    if (rules === undefined || !/^\s*add a comment\b/i.test(text)) return undefined
-    let watch = watches.get(sessionId)
-    if (watch === undefined) {
-      // A note steered in by the gate is on the ledger; the script reads nothing.
-      watch = rules.watch(
-        { kind: 'session', sessionId, cwd: bound.conversation.workspacePath },
-        { steer: () => {} }
-      )
-      watches.set(sessionId, watch)
-    }
-    const watching = watch
-    return {
-      calls: FAKE_EDITS.map((edit, at) => ({
-        name: 'edit',
-        summary: edit.summary,
-        ...(edit.said === undefined ? {} : { said: [edit.said] }),
-        answer: async (callId: string) => {
-          if (at === 0) await watching.turnStarted()
-          return edit.run(watching, callId)
-        }
-      })),
-      closing: RULE_EDITS_DELTAS,
-      ended: async () => {
-        await watching.checkpoint('turn-end')
-      }
-    }
-  }
-
-  /** Whichever scripted turn claims the prompt: questions, monitors, runs, rules. */
+  /** Whichever scripted turn claims the prompt: questions, monitors, runs. */
   function toolScript(
     bound: Bound,
     sessionId: SessionId,
@@ -1070,8 +1018,7 @@ export function createFakeAdapter({
     return (
       askScript(sessionId, text) ??
       monitorScript(bound, sessionId, text) ??
-      runScript(bound, sessionId, text) ??
-      rulesScript(bound, sessionId, text)
+      runScript(bound, sessionId, text)
     )
   }
 
@@ -1424,7 +1371,7 @@ export function createFakeAdapter({
       let ok = true
       let output: string
       try {
-        output = await call.answer(callId)
+        output = await call.answer()
       } catch (cause) {
         // The failure path is the model's own text, which is what a real
         // failed call would carry.
@@ -1433,7 +1380,7 @@ export function createFakeAdapter({
       }
       emit({ type: 'tool_ended', sessionId, turnId, callId, ok, output })
       add(output)
-      pending.push({ kind: 'tool', callId, name: call.name, summary: call.summary, ok, output })
+      pending.push({ kind: 'tool', name: call.name, summary: call.summary, ok, output })
       return true
     }
 
@@ -1477,7 +1424,6 @@ export function createFakeAdapter({
       add(output)
       pending.push({
         kind: 'tool',
-        callId,
         name: scripted.name,
         summary: scripted.summary,
         ok: scripted.ok,
@@ -1577,7 +1523,6 @@ export function createFakeAdapter({
     // by the same boundary a steering message lands at.
     async function toolTurn(turn: ScriptedToolTurn): Promise<void> {
       for (const call of turn.calls) {
-        if (call.said !== undefined && !(await say(call.said))) return finish()
         if (!(await scriptedCall(call))) return finish()
         if (!(await boundary())) return finish()
       }
@@ -1591,7 +1536,6 @@ export function createFakeAdapter({
         if (stopped !== undefined) return finish()
         if (bound.steering.length + bound.followUp.length + bound.shares.length === 0) break
       }
-      await turn.ended?.()
       finish()
     }
 

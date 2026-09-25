@@ -44,9 +44,6 @@ export interface NodeSessionRequest {
   // fakes that script one node differently from another; it reaches no
   // prompt.
   readonly nodeId: string
-  /** The run and the workflow the node belongs to, which is how its rule firings are filed. */
-  readonly runId: string
-  readonly workflow: string
   // The workflow's own system prompt for this node, sent whole and unchanged
   // after Crucible's node base. Absent means the base alone; the model's
   // stock prompt is never sent. Either way the runtime still appends what

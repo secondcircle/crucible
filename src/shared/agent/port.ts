@@ -373,9 +373,6 @@ export type TranscriptItem =
   | { readonly kind: 'thinking'; readonly text: string; readonly seconds?: number }
   | {
       readonly kind: 'tool'
-      // The call's own id, which is what a rule mark is joined on. Absent
-      // where no id was kept.
-      readonly callId?: string
       readonly name: string
       readonly summary: string
       readonly ok: boolean

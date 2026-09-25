@@ -15,8 +15,6 @@ import { seamFacts } from '../cache/format'
 import { compactionFacts } from '../compaction/format'
 import { pathPieces } from '../files/named-path'
 import { useNamedPath } from '../files/path-links'
-import { withoutAppendix } from '../../../shared/rules/gate'
-import { InlineNote, RuleMark, SteeredNote, useRuleMarks } from '../rules/marks'
 import { Markdown } from './Markdown'
 import { PathButton } from './PathLink'
 import './cache-strip.css'
@@ -50,7 +48,6 @@ export function Transcript({
   const scroller = useRef<HTMLDivElement>(null)
   const content = useRef<HTMLOListElement>(null)
   const following = useRef(true)
-  const marks = useRuleMarks()
   // Where the reader is, recorded as they scroll rather than read off the node
   // when the column goes. By the time any effect could read it the box is
   // already display:none, and a hidden box answers 0.
@@ -117,13 +114,6 @@ export function Transcript({
     latest.scrollIntoView?.({ block: 'center' })
   }, [missJump])
 
-  // A call asked for from the rules board is where the reader goes, so the
-  // stream stops pulling them back down.
-  const focusAsked = marks?.focus?.asked
-  useLayoutEffect(() => {
-    if (focusAsked !== undefined) following.current = false
-  }, [focusAsked])
-
   // Coming back: the bottom for a reader who was following the stream, their
   // own place for one who was not. A layout effect, so the return is never
   // painted at the wrong offset first.
@@ -157,25 +147,13 @@ export function Transcript({
         {groupIntoChains(items).map((row) => (
           // The session is part of the key, so what a reader opened in one
           // session can never be what another session shows opened.
-          <Fragment key={`${sessionId}:${row.key}`}>
-            <li>
-              {row.kind === 'chain' ? (
-                <Chain chain={row.chain} />
-              ) : (
-                <Item item={row.item} invocations={invocations} />
-              )}
-            </li>
-            {row.kind === 'chain' && marks !== undefined
-              ? row.chain.calls
-                  .flatMap((call) => (call.callId === undefined ? [] : (marks.byCall.get(call.callId) ?? [])))
-                  .filter((view) => view.firing.delivery === 'steered')
-                  .map((view) => (
-                    <li key={view.firing.id}>
-                      <SteeredNote view={view} onOpen={marks.onOpen} />
-                    </li>
-                  ))
-              : null}
-          </Fragment>
+          <li key={`${sessionId}:${row.key}`}>
+            {row.kind === 'chain' ? (
+              <Chain chain={row.chain} />
+            ) : (
+              <Item item={row.item} invocations={invocations} />
+            )}
+          </li>
         ))}
       </ol>
     </div>
@@ -391,15 +369,6 @@ export function sameChain(
 const Chain = memo(function Chain({ chain }: { readonly chain: ToolChain }): React.JSX.Element {
   const [open, setOpen] = useState(false)
   const counts = countsText(chain.counts)
-  const focus = useRuleMarks()?.focus
-  const holdsFocus = focus !== undefined && chain.calls.some((call) => call.callId === focus.callId)
-  const focusAsked = holdsFocus ? focus.asked : undefined
-  // Each ask opens the chain once; the reader may close it again after.
-  const [answered, setAnswered] = useState<number | undefined>(undefined)
-  if (focusAsked !== undefined && focusAsked !== answered) {
-    setAnswered(focusAsked)
-    setOpen(true)
-  }
 
   return (
     <div className={`chain ${chain.state}${open ? ' open' : ''}`}>
@@ -496,25 +465,7 @@ function SummaryPath({ text }: { readonly text: string }): React.JSX.Element {
 const Call = memo(function Call({ call }: { readonly call: ToolItem }): React.JSX.Element {
   const [open, setOpen] = useState(false)
   const tail = useRef<HTMLPreElement>(null)
-  const row = useRef<HTMLDivElement>(null)
-  const { name, ok, running } = call
-  const marks = useRuleMarks()
-  const fired = call.callId === undefined ? undefined : marks?.byCall.get(call.callId)
-  // A note read inline is drawn under the mark rather than as raw output, so
-  // the text the tool itself produced is shown as it was.
-  const inline = (fired ?? []).filter((view) => view.firing.delivery === 'inline' && view.firing.read !== undefined)
-  const output =
-    inline.length === 0 ? call.output : withoutAppendix(call.output, inline.map((view) => view.firing.read!))
-  const focusAsked =
-    marks?.focus !== undefined && marks.focus.callId === call.callId ? marks.focus.asked : undefined
-  const [answered, setAnswered] = useState<number | undefined>(undefined)
-  if (focusAsked !== undefined && focusAsked !== answered) {
-    setAnswered(focusAsked)
-    setOpen(true)
-  }
-  useEffect(() => {
-    if (focusAsked !== undefined) row.current?.scrollIntoView?.({ block: 'center' })
-  }, [focusAsked])
+  const { name, output, ok, running } = call
   // One slot for both phases, so a call does not jump as it starts running.
   const summary = callSummary(call)
 
@@ -533,7 +484,7 @@ const Call = memo(function Call({ call }: { readonly call: ToolItem }): React.JS
   return (
     // A question is amber here as it is in the dock, so the history shows the
     // ask for what it was. State still wins: a call that failed stays red.
-    <div className={`tool ${state}${name === ASK_TOOL ? ' ask' : ''}`} ref={row}>
+    <div className={`tool ${state}${name === ASK_TOOL ? ' ask' : ''}`}>
       {/* Two controls, side by side rather than one inside the other: the
           expand button is laid over the whole row, and the path in the summary
           sits above it. Nesting them made every key that reached the path
@@ -558,17 +509,11 @@ const Call = memo(function Call({ call }: { readonly call: ToolItem }): React.JS
         <span className="toolsummary">
           {name === SKILL_TOOL ? skillSummary(summary) : <Summary text={summary} />}
         </span>
-        {fired === undefined || marks === undefined
-          ? null
-          : fired.map((view) => <RuleMark key={view.firing.id} view={view} onOpen={marks.onOpen} />)}
         <span className="toolstate">{said}</span>
       </div>
-      {(running || open) && (output !== '' || inline.length > 0) ? (
+      {(running || open) && output !== '' ? (
         <pre className="toolout" ref={tail}>
           {output}
-          {inline.map((view) => (
-            <InlineNote key={view.firing.id} view={view} />
-          ))}
         </pre>
       ) : null}
     </div>
