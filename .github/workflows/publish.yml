@@ -22,11 +22,7 @@ jobs:
   publish:
     runs-on: ubuntu-latest
     steps:
-      # Full history: the comments rule's scenarios replay real commits from
-      # this repository, and a shallow clone has none of them.
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
       - uses: actions/setup-node@v4
         with:
