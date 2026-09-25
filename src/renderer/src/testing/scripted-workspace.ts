@@ -9,6 +9,7 @@ import type {
   WorkspaceService,
   WorktreeCreation
 } from '../../../shared/workspace/service'
+import { resolveBeside } from '../files/document-links'
 import {
   redactKeys,
   type ConnectOutcome,
@@ -162,7 +163,7 @@ export function createScriptedWorkspace(files: readonly string[] = []): Scripted
       const prefix = `${directory}/`
       return Promise.resolve(
         paths.filter((path) =>
-          outside.has(path)
+          outside.has(path) || outside.has(resolveBeside(`${directory}/.`, path))
             ? true
             : listed.has(path.startsWith(prefix) ? path.slice(prefix.length) : path)
         )

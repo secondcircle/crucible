@@ -605,6 +605,69 @@ describe('a bare web address outside the chat', () => {
   })
 })
 
+// A markdown file in the panel links to the files beside it, the way a wiki
+// does, and its front matter is metadata rather than the first paragraph.
+describe('a written link in a markdown document', () => {
+  it('opens the file beside the document, and leaves a dead one as written', async () => {
+    const port = createScriptedPort(
+      oneSession({
+        panel: {
+          tabs: [
+            {
+              id: 'wiki',
+              title: 'INDEX.md',
+              kind: 'markdown',
+              shownAt: '2026-08-19T14:14:00.000Z',
+              path: '/elsewhere/wiki/kairos/INDEX.md'
+            }
+          ],
+          activeTabId: 'wiki'
+        }
+      })
+    )
+    port.exhibits.set(
+      'wiki',
+      [
+        '---',
+        'title: Kairos',
+        'read_when: "Read when the task touches Kairos"',
+        '---',
+        '# Kairos',
+        '',
+        '- [Messaging](messaging/INDEX.md): producers and consumers.',
+        '- [Glossary](../glossary.md#hard): the labels.',
+        '- [Gone](gone.md): never written.',
+        '- Run `CONTEXT.md` as an example.'
+      ].join('\n')
+    )
+    const workspace = createScriptedWorkspace(FILES)
+    workspace.elsewhere = [
+      '/elsewhere/wiki/kairos/messaging/INDEX.md',
+      '/elsewhere/wiki/glossary.md'
+    ]
+    render(<Shell port={port} workspace={workspace} commands={createScriptedCommands()} />)
+    await sessionsShown()
+    await settled()
+
+    const panel = screen.getByLabelText('Context panel')
+    expect(within(panel).getByText('read_when').tagName).toBe('DT')
+    expect(within(panel).getByText('Read when the task touches Kairos').tagName).toBe('DD')
+    expect(within(panel).queryByRole('separator')).toBeNull()
+
+    expect(within(panel).getByRole('button', { name: 'Messaging' })).toHaveClass(
+      'pathlink',
+      'link'
+    )
+    expect(within(panel).getByText(/\[Gone\]\(gone\.md\)/)).toBeInTheDocument()
+    expect(within(panel).getByText('CONTEXT.md').tagName).toBe('CODE')
+
+    await click(within(panel).getByRole('button', { name: 'Glossary' }))
+    expect(opens(port)).toEqual([
+      ['s1', '/elsewhere/wiki/glossary.md', { keep: false, view: { kind: 'rendered' } }]
+    ])
+  })
+})
+
 describe('where a path is not a link', () => {
   it('is not one in the user’s own message', async () => {
     await shell()

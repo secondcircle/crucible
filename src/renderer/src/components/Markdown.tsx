@@ -1,6 +1,7 @@
-import { createElement, memo, type ReactNode } from 'react'
+import { createElement, memo, useContext, type ReactNode } from 'react'
 import { isLocalAddress } from '../../../shared/agent/local-address'
-import { useNamedPath } from '../files/path-links'
+import { DocumentLinksContext } from '../files/document-links'
+import { PathLinksContext, useNamedPath } from '../files/path-links'
 import { AddressButton, PathButton } from './PathLink'
 import { isWebAddress, webAddressIn } from './web-address'
 import './markdown.css'
@@ -11,13 +12,69 @@ import './markdown.css'
 // renders markdown sits inside a document that re-renders on every port
 // event. An open artifact of a megabyte used to be re-parsed 6.7 times a
 // second while a run progressed, for a document that had not changed.
+//
+// `document` is for a markdown file read as a file rather than a message: its
+// YAML front matter is metadata, not the first paragraph.
 export const Markdown = memo(function Markdown({
-  markdown
+  markdown,
+  document = false
 }: {
   markdown: string
+  document?: boolean
 }): React.JSX.Element {
-  return <div className="markdown">{blocks(markdown)}</div>
+  const front = document ? frontMatter(markdown) : undefined
+  return (
+    <div className="markdown">
+      {front === undefined ? null : (
+        <dl className="frontmatter">
+          {front.fields.map(([name, value], index) => (
+            <div key={index}>
+              <dt>{name}</dt>
+              <dd>{inline(value)}</dd>
+            </div>
+          ))}
+        </dl>
+      )}
+      {blocks(front === undefined ? markdown : front.rest)}
+    </div>
+  )
 })
+
+/**
+ * A `---` fence on the very first line, closed by another, with nothing but
+ * `key: value` lines (and their indented continuations) between. Anything else
+ * is not front matter and renders as the markdown it is.
+ */
+function frontMatter(source: string):
+  | {
+      readonly fields: readonly (readonly [string, string])[]
+      readonly rest: string
+    }
+  | undefined {
+  const lines = source.split('\n')
+  if (lines[0]?.trim() !== '---') return undefined
+  const close = lines.findIndex((line, index) => index > 0 && line.trim() === '---')
+  if (close < 0) return undefined
+  const fields: [string, string][] = []
+  for (const line of lines.slice(1, close)) {
+    if (line.trim() === '') continue
+    const field = /^([A-Za-z0-9_-]+):\s*(.*)$/.exec(line)
+    if (field !== null) fields.push([field[1], field[2]])
+    else if (/^\s/.test(line) && fields.length > 0) {
+      const last = fields[fields.length - 1]
+      last[1] = `${last[1]} ${line.trim()}`.trim()
+    } else return undefined
+  }
+  return {
+    fields: fields.map(([name, value]) => [name, unquoted(value)] as const),
+    rest: lines.slice(close + 1).join('\n')
+  }
+}
+
+function unquoted(value: string): string {
+  const quoted = /^(["'])([\s\S]*)\1$/.exec(value.trim())
+  return quoted === null ? value.trim() : quoted[2]
+}
 
 /** A line that opens a block of its own, which is where a paragraph stops. */
 const BLOCK_START = /^\s*(```|#{1,6}\s|[-*+]\s|\d+\.\s|>\s?|\||(-{3,}|\*{3,}|_{3,})\s*$)/
@@ -228,8 +285,9 @@ function CodeSpan({ text }: { readonly text: string }): React.JSX.Element {
 }
 
 // Three doors and no fourth: the context panel for a file this agent named
-// and for a local address, the OS browser for every other web address, and
-// the text as written for anything else — nothing else is ever handed out.
+// (or, in a document, a file beside it) and for a local address, the OS
+// browser for every other web address, and the text as written for anything
+// else — nothing else is ever handed out.
 function Link({
   label,
   href
@@ -237,14 +295,21 @@ function Link({
   readonly label: string
   readonly href: string
 }): React.JSX.Element {
-  const named = useNamedPath(href)
+  const document = useContext(DocumentLinksContext)
+  const surrounding = useContext(PathLinksContext)
+  // A link into a heading opens the file it is in; the fragment is dropped.
+  const hash = href.indexOf('#')
+  const file = hash < 0 ? href : href.slice(0, hash)
+  const named = useNamedPath(file, document)
   const shown = label === '' ? href : label
 
   if (named !== undefined) {
     return (
-      <PathButton named={named} look="link">
-        {shown}
-      </PathButton>
+      <PathLinksContext.Provider value={document ?? surrounding}>
+        <PathButton named={named} look="link">
+          {shown}
+        </PathButton>
+      </PathLinksContext.Provider>
     )
   }
   if (!/^(https?:|mailto:)/i.test(href)) return <>{`[${label}](${href})`}</>

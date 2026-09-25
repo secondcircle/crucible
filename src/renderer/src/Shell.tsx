@@ -3359,6 +3359,7 @@ export function Shell({
                     }
               }
               port={port}
+              service={service}
               changed={filesChanged}
               inFront={inFront}
               onCopyLocation={(location) =>

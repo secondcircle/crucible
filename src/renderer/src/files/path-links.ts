@@ -189,8 +189,10 @@ export function usePathLinks({
  * The file this text names, once the disk has said it is one; nothing until
  * then, and nothing for text that could not be naming a file at all.
  */
-export function useNamedPath(text: string): NamedPath | undefined {
-  const links = useContext(PathLinksContext)
+export function useNamedPath(text: string, own?: PathLinks): NamedPath | undefined {
+  const surrounding = useContext(PathLinksContext)
+  // A document on screen resolves its written links against its own folder.
+  const links = own ?? surrounding
   const named = useMemo(() => namedPath(text), [text])
   const path = named?.path
 

@@ -95,3 +95,31 @@
   text-decoration-style: solid;
   text-decoration-color: currentcolor;
 }
+
+/* A document's front matter: small, quiet, above the body it describes. */
+.markdown .frontmatter {
+  display: grid;
+  gap: 2px;
+  margin: 0;
+  padding: 8px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  font-size: 12px;
+  background: var(--panel);
+  color: var(--dim);
+}
+
+.markdown .frontmatter > div {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  column-gap: 12px;
+}
+
+.markdown .frontmatter dt {
+  font-family: var(--mono, ui-monospace, monospace);
+  color: var(--faint);
+}
+
+.markdown .frontmatter dd {
+  margin: 0;
+}

@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { AgentPort, PanelState, PanelTab, SessionId } from '../../../shared/agent/port'
+import type { WorkspaceService } from '../../../shared/workspace/service'
+import { DocumentLinksContext, useDocumentLinks } from '../files/document-links'
 import { useExhibitBody, type ExhibitBody } from '../panel/use-exhibit-body'
 import { AddressRow } from './AddressRow'
 import { guestSrc, shownLocation } from './exhibit-location'
@@ -62,6 +64,7 @@ export function ContextPanel({
   sessionId,
   layout,
   port,
+  service,
   changed = 0,
   inFront = true,
   onCopyLocation,
@@ -73,6 +76,8 @@ export function ContextPanel({
   readonly sessionId: SessionId
   readonly layout: PanelLayout
   readonly port: AgentPort
+  // What a markdown document's links are checked against: the disk.
+  readonly service: WorkspaceService
   // How many times the session's directory has changed on disk. The shown
   // file follows it: a count rather than a flag, so two changes in a row are
   // two re-reads.
@@ -289,6 +294,8 @@ export function ContextPanel({
           sessionId={sessionId}
           tab={active}
           body={body}
+          reads={reads}
+          service={service}
           inFront={inFront}
           viewRef={viewRef}
           onNavigate={navigate}
@@ -317,6 +324,8 @@ function Exhibit({
   sessionId,
   tab,
   body,
+  reads,
+  service,
   inFront,
   viewRef,
   onNavigate
@@ -325,6 +334,9 @@ function Exhibit({
   readonly tab: PanelTab | undefined
   /** The text, for the tabs that are read as text. Absent until it lands. */
   readonly body: ExhibitBody | undefined
+  /** How many times the text has been read, which retires a document's links. */
+  readonly reads: number
+  readonly service: WorkspaceService
   readonly inFront: boolean
   readonly viewRef: React.RefObject<ExhibitWebview | null>
   readonly onNavigate: (url: string) => void
@@ -368,7 +380,7 @@ function Exhibit({
       {tab === undefined ? null : tab.kind === 'binary' ? (
         <BinaryExhibit bytes={tab.bytes} />
       ) : readsText(tab) ? (
-        <TextExhibit tab={tab} body={body} />
+        <TextExhibit tab={tab} body={body} reads={reads} service={service} />
       ) : !attaches ? (
         <p className="exhibit-failure">Loads when Crucible is in front.</p>
       ) : (
@@ -424,10 +436,14 @@ function extensionOf(path: string): string {
 // second copy of the same fact.
 function TextExhibit({
   tab,
-  body
+  body,
+  reads,
+  service
 }: {
   readonly tab: Extract<PanelTab, { readonly kind: 'markdown' | 'source' }>
   readonly body: ExhibitBody | undefined
+  readonly reads: number
+  readonly service: WorkspaceService
 }): React.JSX.Element | null {
   if (body === undefined) return null
   // The tab stays open whatever a failure says: curation is the agent's.
@@ -441,9 +457,28 @@ function TextExhibit({
       />
     )
   }
+  return <MarkdownDocument path={tab.path} text={body.text} reads={reads} service={service} />
+}
+
+// A markdown file as a file: its links reach the files beside it, as a wiki's
+// do, and its front matter reads as metadata.
+function MarkdownDocument({
+  path,
+  text,
+  reads,
+  service
+}: {
+  readonly path: string
+  readonly text: string
+  readonly reads: number
+  readonly service: WorkspaceService
+}): React.JSX.Element {
+  const links = useDocumentLinks({ service, file: path, epoch: reads })
   return (
     <div className="mdview">
-      <Markdown markdown={body.text} />
+      <DocumentLinksContext.Provider value={links}>
+        <Markdown markdown={text} document />
+      </DocumentLinksContext.Provider>
     </div>
   )
 }
