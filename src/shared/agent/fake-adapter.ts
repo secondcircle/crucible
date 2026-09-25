@@ -679,11 +679,6 @@ export function createFakeAdapter({
   let liveLogin: FakeLogin | undefined
   let minted = 0
   let prompts = 0
-  // In every tool call id, because turn ids start over each launch while the
-  // rules ledger keeps the call ids its firings were about for good: an id a
-  // later launch minted again would put an old firing's mark on a new call.
-  // π's own call ids are unique already, so only this flavor needs it.
-  const launch = globalThis.crypto.randomUUID().slice(0, 8)
 
   function emit(event: AdapterEvent): void {
     // A copy, so a listener that unsubscribes while being called does not
@@ -1370,12 +1365,11 @@ export function createFakeAdapter({
 
     // One counter for the whole turn, so no two of its calls can share an id:
     // a message delivered mid-turn makes calls of its own, and a repeated id
-    // would have them land on top of the calls already in the transcript. The
-    // launch salt does the same across launches, for the ledger's sake.
+    // would have them land on top of the calls already in the transcript.
     let calls = 0
     const nextCallId = (): string => {
       calls += 1
-      return `${turnId}-${launch}-call-${calls}`
+      return `${turnId}-call-${calls}`
     }
 
     /** False once the script has been abandoned, which ends every loop. */

@@ -978,41 +978,18 @@ describe('the scripted editor under rules', () => {
     await adapter.bind({ sessionId: 's1', workspacePath: WORKSPACE })
     await adapter.prompt('s1', 't1', 'add a comment')
 
-    const tools = (await adapter.transcript('s1')).filter((item) => item.kind === 'tool')
-    const [first, second] = tools.slice(-2).map((item) => (item.kind === 'tool' ? item.callId : ''))
     expect(seen).toEqual([
       `watch session:s1 in ${WORKSPACE}`,
       'turn started',
-      `edit ${first} ${FAKE_EDIT_PATH} adds`,
+      `edit t1-call-1 ${FAKE_EDIT_PATH} adds`,
       `said ${FAKE_EDIT_SAID}`,
-      `edit ${second} ${FAKE_EDIT_PATH} drops`,
+      `edit t1-call-2 ${FAKE_EDIT_PATH} drops`,
       'checkpoint turn-end'
     ])
+    const tools = (await adapter.transcript('s1')).filter((item) => item.kind === 'tool')
     expect(tools.slice(-2)).toEqual([
-      expect.objectContaining({ callId: first, output: `Edited ${FAKE_EDIT_PATH} (+1 −0)\n\n§ Rule "comments": narrates` }),
-      expect.objectContaining({ callId: second, output: `Edited ${FAKE_EDIT_PATH} (+0 −1)` })
+      expect.objectContaining({ callId: 't1-call-1', output: `Edited ${FAKE_EDIT_PATH} (+1 −0)\n\n§ Rule "comments": narrates` }),
+      expect.objectContaining({ callId: 't1-call-2', output: `Edited ${FAKE_EDIT_PATH} (+0 −1)` })
     ])
-    expect(first).not.toBe(second)
-  })
-
-  // The rules ledger keeps the call id of every firing for good, and a session
-  // lives on across launches while turn ids start over, so a call id a later
-  // launch minted again would carry an old launch's firing as its own mark.
-  it('gives a tool call an id no later launch can mint again', async () => {
-    const callIds = async (): Promise<readonly string[]> => {
-      const adapter = createFakeAdapter({ pauseMs: 0 })
-      await adapter.bind({ sessionId: 's1', workspacePath: WORKSPACE })
-      await adapter.prompt('s1', 't-1', 'add a comment')
-      return (await adapter.transcript('s1')).flatMap((item) =>
-        item.kind === 'tool' && item.callId !== undefined ? [item.callId] : []
-      )
-    }
-
-    const first = await callIds()
-    const relaunched = await callIds()
-
-    expect(first.length).toBeGreaterThan(0)
-    expect(relaunched).toHaveLength(first.length)
-    for (const callId of relaunched) expect(first).not.toContain(callId)
   })
 })
