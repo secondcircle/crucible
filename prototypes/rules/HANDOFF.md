@@ -18,7 +18,7 @@ The classifier is **Jev**, TypeSafe AI's "System One" model. You send a state (t
 - a runner (`test`, `explain`, `survey`);
 - label mining from git history.
 
-One real rule, **comments**, enforces Crucible's comment doctrine. It was measured against Crucible's own history with about 7,700 real Jev calls.
+One real rule, **comments**, enforces Crucible's comment doctrine. It was measured against Crucible's own history with about 8,000 real Jev calls.
 
 **Not built.** Anything in the app. There's no π hook, no live loop, no rule host process, no ledger, no feedback to a running agent, and no UI. Nothing in `src/` knows rules exist. The rule file sits at `mode: 'off'`.
 
@@ -34,13 +34,13 @@ Branch `prototype/rules-jev`:
 | `prototypes/rules/experiments/wording.ts` | The question-wording experiment |
 | `prototypes/rules/docs/design-sketch.md` | The design as sketched: API, triggers, actions, ledger, judges, testing, the rules Crucible would run on itself |
 | `prototypes/rules/docs/comments-rule-results.md` | The comments rule explained in plain terms, with a real request and response, and the measurements |
-| `prototypes/rules/results/` | Survey data as HTML reports and gzipped JSON: `survey-v1-three-nouls`, `wording-experiment`, `survey-v2-purpose-choice` (the final rule) |
+| `prototypes/rules/results/` | Survey data: the first version (three yes/no questions), the wording experiment, and the final version |
 | `eslint.config.mjs` | `prototypes/**` added to the ignores; the only change outside the prototype |
 
 Local to this machine and gitignored:
 - **`prototypes/rules/local/`.** The original brainstorm and design drafts. They're built on examples from a work repository and quote its code, and this repo is public, so they're never to be committed. They also hold a snapshot of TypeSafe's agent skill and SDK types.
 - **`prototypes/rules/.env`.** Holds `TYPESAFE_API_KEY`.
-- **`prototypes/rules/.cache/jev/`.** About 7,700 cached answers, keyed by (model, state, questions). Re-running anything already asked is free. Without the cache, the full survey costs about $0.10 and 20 minutes.
+- **`prototypes/rules/.cache/jev/`.** About 8,000 cached answers, keyed by (model, state, questions). Re-running anything already asked is free. Without the cache, the full survey costs about $0.10 and 20 minutes.
 
 To run it: `cd prototypes/rules && npm install`, then `node src/cli.ts test comments`, `explain comments <path:line> [--at <rev>]`, or `survey comments`. Each takes `--extract-only` for a free run with no network.
 
@@ -109,15 +109,9 @@ Plus `hold` at node completion, for rules about something missing.
 - **Three yes/no questions (describes, explains why, references) barely separated removed from kept:** AUC 0.54 to 0.58, where 0.5 is chance.
 - **Comment length alone is the strongest signal.** 43% of rejected comments run over 2 lines, against 6% of kept ones. Structure alone (line count, JSDoc-or-not, trailing-or-not) reaches AUC 0.73. Adding Jev's answers brings it to 0.78. On 1-2 line comments, where length can't help, Jev gives 0.68 against 0.59 for structure.
 - **A single `choice` over what the comment is doing (`narrates`, `why`, `contract`, `pointer`, `label`) beat every yes/no wording tried:** AUC 0.676 against 0.55 to 0.65. With it, a `note` matched the police 77% of the time on a balanced sample of 400 short comments. The final rule uses it.
-- **The final rule over the whole corpus** (3,435 comments, `results/survey-v2-purpose-choice.*`):
-  - 75% of its `note`s were comments the police rejected;
-  - it noted 58% of all rejected comments, escalated some, and passed 28%;
-  - it passed 68% of kept comments and noted 16%;
-  - 15% of everything went to `escalate`.
-- **Jev alone, over every comment, is weak (AUC 0.53).** Long comments, which are mostly rejections, tend to be real explanations, so Jev calls them `why`, and the line count is what flags them. On 1-2 line comments, where Jev decides alone, its `note`s are right 56% of the time, against a 34% base rate of rejection.
 - **Much of the disagreement is label noise, not Jev.** The police is an editor, not a classifier: it deleted genuine why-comments to save space, and kept descriptive field docs. On what a comment is doing, Jev's answer looked right in nearly every disagreement read by hand. Agreement with the police is capped by the police's own consistency. Clean, hand-made labels would be needed to measure Jev itself.
 - **Latency:** one call alone took about 450 ms. At 10 concurrent calls the median was 2.6 s (p99 4.7 s), so the early-access service throttles. Sequential single-call latency and how often builder edits add a comment weren't measured.
-- **Cost:** about 7,700 calls in total, roughly $0.20. A typical comment item is 300 to 800 input tokens.
+- **Cost:** about 8,000 calls in total, roughly $0.25. A typical comment item is 300 to 800 input tokens.
 
 ### Labels mined from history
 

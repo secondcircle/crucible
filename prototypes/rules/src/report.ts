@@ -46,22 +46,12 @@ export function surveyHtml(opts: {
   const count = (v: Verdict) => rows.filter((r) => r.label.verdict === v).length
   const judgedRows = rows.filter((r) => r.result?.answers)
 
-  // One signal per noul, and one per option of a choice (its probability), each scored by AUC.
-  const signals: { name: string; value: (r: Row) => number }[] = questions.flatMap((q) => {
-    const first = judgedRows[0]?.result?.answers?.[q] as { type: string; probabilities?: Record<string, number> } | undefined
-    if (first?.type === 'choice') {
-      return Object.keys(first.probabilities ?? {}).map((opt) => ({
-        name: `${q} = ${opt}`,
-        value: (r: Row) => (r.result!.answers![q] as { probabilities: Record<string, number> }).probabilities[opt] ?? 0,
-      }))
-    }
-    return [{ name: q, value: (r: Row) => (r.result!.answers![q] as { noul: number }).noul }]
-  })
-  const perQuestion = signals.map(({ name, value }) => {
-    const pos = judgedRows.filter((r) => violation(r.label.verdict)).map(value)
-    const neg = judgedRows.filter((r) => !violation(r.label.verdict)).map(value)
+  const perQuestion = questions.map((q) => {
+    const val = (r: Row) => (r.result!.answers![q] as { noul: number }).noul
+    const pos = judgedRows.filter((r) => violation(r.label.verdict)).map(val)
+    const neg = judgedRows.filter((r) => !violation(r.label.verdict)).map(val)
     const mean = (xs: number[]) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : NaN)
-    return { q: name, pos, neg, auc: auc(pos, neg), meanPos: mean(pos), meanNeg: mean(neg) }
+    return { q, pos, neg, auc: auc(pos, neg), meanPos: mean(pos), meanNeg: mean(neg) }
   })
 
   const actions = ['note', 'escalate', 'pass', 'unjudged'] as const
@@ -81,13 +71,7 @@ export function surveyHtml(opts: {
   const tn = cell('kept', 'pass')
 
   const answerCells = (r: Row) =>
-    questions
-      .map((q) => {
-        const a = r.result?.answers?.[q] as { noul?: number; choice?: string; confidence?: number; score?: number } | undefined
-        const shown = !a ? '–' : a.noul !== undefined ? a.noul.toFixed(2) : a.choice !== undefined ? `${a.choice} ${a.confidence!.toFixed(2)}` : a.score!.toFixed(2)
-        return `<td class="num">${shown}</td>`
-      })
-      .join('')
+    questions.map((q) => `<td class="num">${r.result?.answers ? (r.result.answers[q] as { noul: number }).noul.toFixed(2) : '–'}</td>`).join('')
 
   const table = (list: Row[]) => `
     <table>
@@ -139,7 +123,7 @@ export function surveyHtml(opts: {
     opts.judged
       ? `
   <h2>How well each question separates violations from kept comments</h2>
-  <div class="dim">AUC: the chance a random police-rejected comment scores higher than a random kept one. 0.5 is a coin flip, 1.0 is perfect. A signal that should be low on violations (a kept-kind option, or <code>explainsWhy</code>) reads as 1 − AUC.</div>
+  <div class="dim">AUC: the chance a random police-rejected comment scores higher than a random kept one. 0.5 is a coin flip, 1.0 is perfect. For <code>explainsWhy</code> lower is the right direction, so read it as 1 − AUC.</div>
   ${perQuestion
     .map(
       (p) => `<div class="q"><code>${esc(p.q)}</code>
