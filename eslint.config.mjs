@@ -10,8 +10,7 @@ const DANGEROUS_HTML =
 
 export default tseslint.config(
   // .crucible holds workflow records, not app code.
-  // prototypes/ holds throwaway experiments with their own toolchain.
-  { ignores: ['out/**', 'dist/**', 'logs/**', 'node_modules/**', '.crucible/**', 'prototypes/**'] },
+  { ignores: ['out/**', 'dist/**', 'logs/**', 'node_modules/**', '.crucible/**'] },
   js.configs.recommended,
   tseslint.configs.recommended,
   {
