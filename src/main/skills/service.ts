@@ -3,6 +3,7 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 import type { Skill } from '@earendil-works/pi-coding-agent'
 import { crucibleAgentDir } from '../agent/paths.ts'
+import { piModules } from '../agent/pi-modules.ts'
 
 // The file format and the discovery rules stay π's; Crucible decides only
 // which folders are read and in what order.
@@ -99,7 +100,7 @@ export function createSkillService({ roots, onDiagnostic }: SkillServiceOptions)
   let sdkModule: Promise<Sdk> | undefined
 
   function sdk(): Promise<Sdk> {
-    sdkModule ??= import('@earendil-works/pi-coding-agent')
+    sdkModule ??= piModules.codingAgent()
     return sdkModule
   }
 

@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { SessionState, WorkspaceState } from '../../../shared/agent/port'
 import {
   currentNode,
@@ -8,14 +8,17 @@ import {
   type RunRecord
 } from '../../../shared/workflows/run'
 import { UNTITLED } from '../labels'
-import { bandsOf, runsHeadline } from '../runs/bands'
+import { runsHeadline, shownBands } from '../runs/bands'
+import { RUN_PAGE } from '../runs/page'
 import { money, shortAge, since } from '../runs/format'
 import { InvestigateButton } from './InvestigateButton'
+import { ShowMore } from './ShowMore'
 import './runs.css'
 
 // Every run across every workspace, in three bands: running, needs you, done.
 // A run with an orchestrator gets Go to session, and the record outlives the
-// run, so finished work is reachable here too.
+// run, so finished work is reachable here too: Done opens on its newest page,
+// grows at its foot, and the filter reaches the rest of history.
 
 // How a clearing act ended: `cleared` means the snapshot will re-band the row
 // and take its button away; `kept` — declined, refused or failed, reported by
@@ -51,7 +54,27 @@ export function RunsOverview({
   readonly onInvestigate: (runId: string) => Promise<void>
   readonly onClose: () => void
 }): React.JSX.Element {
-  const bands = bandsOf(runs)
+  // Both last exactly as long as the view is open: every ⌘R opens on the
+  // newest page of Done with nothing filtered.
+  const [filter, setFilter] = useState('')
+  const [doneShown, setDoneShown] = useState(RUN_PAGE)
+  const box = useRef<HTMLInputElement>(null)
+  const needle = filter.trim()
+  const titleOf = (run: RunRecord): string | undefined =>
+    run.sessionId === undefined
+      ? undefined
+      : sessions.find((candidate) => candidate.id === run.sessionId)?.title
+  const bands = shownBands(runs, { filter, doneShown, titleOf })
+
+  // Typing starts filtering the moment the view is up.
+  useEffect(() => {
+    box.current?.focus()
+  }, [])
+
+  function clearFilter(): void {
+    setFilter('')
+    box.current?.focus()
+  }
   // Rows with a clearing act in flight. Tied to the outcome, not the click:
   // a declined, refused or failed act hands the button back rather than
   // leaving it dead on a row that still needs clearing. Counted from the
@@ -74,6 +97,29 @@ export function RunsOverview({
       <header className="gvtop">
         <span className="t">Runs</span>
         <span className="count">{runsHeadline(runs)}</span>
+        <span className="filter">
+          <input
+            ref={box}
+            value={filter}
+            placeholder="filter: workflow, workspace, repo, id, session"
+            aria-label="Filter runs"
+            spellCheck={false}
+            onChange={(typed) => setFilter(typed.target.value)}
+            onKeyDown={(pressed) => {
+              if (pressed.key !== 'Escape' || filter === '') return
+              // The first Escape is the filter's; only the next one reaches
+              // the window and closes the view.
+              pressed.stopPropagation()
+              pressed.preventDefault()
+              setFilter('')
+            }}
+          />
+          {filter === '' ? null : (
+            <button className="clr" title="clear" aria-label="clear" onClick={clearFilter}>
+              ×
+            </button>
+          )}
+        </span>
         <button className="btn x" onClick={onClose}>
           esc
         </button>
@@ -84,13 +130,21 @@ export function RunsOverview({
             No runs yet. An agent starts one with the crucible_run tool; ask for a workflow in
             any session.
           </p>
+        ) : bands.length === 0 ? (
+          <p className="gvempty">
+            No run matches “{needle}”.
+            <br />
+            <button className="btn" onClick={clearFilter}>
+              Clear filter
+            </button>
+          </p>
         ) : (
           bands.map((band) => (
             <div className="band" key={band.band}>
               <div className="bandhead">
                 <span className={`n${band.band === 'needsYou' ? ' hot' : ''}`}>{band.name}</span>
                 <span className="rule" />
-                <span className="k">{band.runs.length}</span>
+                <span className="k">{band.count}</span>
               </div>
               {band.runs.map((run) => {
                 const session =
@@ -122,17 +176,32 @@ export function RunsOverview({
                     key={run.id}
                   >
                     <span className={`dot ${run.status}`} />
-                    <span className="wf">{run.workflow}</span>
+                    <span className="wf">
+                      <Lit text={run.workflow} needle={needle} />
+                    </span>
                     {repository === undefined ? null : (
-                      <span className="repo">{repository}</span>
+                      <span className="repo">
+                        <Lit text={repository} needle={needle} />
+                      </span>
                     )}
-                    <span className="ws">{run.workspaceName}</span>
-                    <span className="id">{run.id}</span>
+                    <span className="ws">
+                      <Lit text={run.workspaceName} needle={needle} />
+                    </span>
+                    <span className="id">
+                      <Lit text={run.id} needle={needle} />
+                    </span>
                     <span className="st">{statusText(run)}</span>
                     <span className="sess">
                       {run.sessionId !== undefined ? (
                         <>
-                          from <em>{session?.title ?? UNTITLED}</em>
+                          from{' '}
+                          <em>
+                            {session?.title === undefined ? (
+                              UNTITLED
+                            ) : (
+                              <Lit text={session.title} needle={needle} />
+                            )}
+                          </em>
                         </>
                       ) : (
                         <span className="un">unattended</span>
@@ -189,11 +258,31 @@ export function RunsOverview({
                   </div>
                 )
               })}
+              {band.more === undefined ? null : (
+                <ShowMore
+                  more={band.more}
+                  onMore={() => setDoneShown((shown) => shown + RUN_PAGE)}
+                />
+              )}
             </div>
           ))
         )}
       </div>
     </section>
+  )
+}
+
+/** The first place the filter matched, marked; the text as it is otherwise. */
+function Lit({ text, needle }: { readonly text: string; readonly needle: string }) {
+  const at = needle === '' ? -1 : text.toLowerCase().indexOf(needle.toLowerCase())
+  if (at === -1) return <>{text}</>
+  const end = at + needle.length
+  return (
+    <>
+      {text.slice(0, at)}
+      <mark>{text.slice(at, end)}</mark>
+      {text.slice(end)}
+    </>
   )
 }
 

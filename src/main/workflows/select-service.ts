@@ -8,6 +8,7 @@ import {
   createFakeWorkflowRunService,
   type FakeArtifactFiles
 } from '../../shared/workflows/fake-service'
+import type { WorkflowRunId } from '../../shared/workflows/run'
 import type { MainWorkflowRunService } from '../../shared/workflows/service'
 import type { CacheRecorder } from '../cache/ledger'
 import type { Flavor } from '../agent/select-adapter'
@@ -145,7 +146,7 @@ export function selectWorkflowRunService(
     })
   })
 
-  const changeListeners = new Set<() => void>()
+  const changeListeners = new Set<(runId: WorkflowRunId) => void>()
   const engine = createWorkflowEngine({
     loader,
     store,
@@ -177,8 +178,8 @@ export function selectWorkflowRunService(
         log.append({ source: 'main', event: 'skill_diagnostic', ...diagnostic })
       }
     }),
-    onChanged: () => {
-      for (const listener of [...changeListeners]) listener()
+    onChanged: (runId) => {
+      for (const listener of [...changeListeners]) listener(runId)
     },
     log: (event) =>
       log.append({ source: 'main', event: 'workflow_engine', ...event })
@@ -188,7 +189,7 @@ export function selectWorkflowRunService(
     engine,
     loader,
     changes: {
-      subscribe(listener: () => void): void {
+      subscribe(listener: (runId: WorkflowRunId) => void): void {
         changeListeners.add(listener)
       }
     },

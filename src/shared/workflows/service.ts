@@ -24,14 +24,39 @@ export interface RunsSnapshot {
 }
 
 export type WorkflowRunEvent =
-  // The whole state after any change, like the port's `state` event: nothing
-  // is patched, so a dropped frame self-heals on the next one.
-  | { readonly type: 'runs'; readonly snapshot: RunsSnapshot }
+  // The records that changed since the last beat, each one whole. History
+  // grows without bound and a beat fires many times a second while a run
+  // works, so resending every record would cost more with every run ever
+  // made. No record is ever removed, so a listener folds these into the
+  // snapshot it holds with `withChangedRuns` and has the whole state again.
+  | { readonly type: 'runs'; readonly changed: readonly RunRecord[] }
   // ⌘R, taken in main before the menu can spend it on reload; the renderer
   // hears it here and toggles the global runs view.
   | { readonly type: 'toggle-overview' }
 
 export type WorkflowRunListener = (event: WorkflowRunEvent) => void
+
+/**
+ * `held` with each changed record in place of its older self, and any record
+ * it did not hold yet added, newest first as every snapshot is.
+ */
+export function withChangedRuns(
+  held: readonly RunRecord[],
+  changed: readonly RunRecord[]
+): readonly RunRecord[] {
+  if (changed.length === 0) return held
+  const fresh = new Map(changed.map((run) => [run.id, run]))
+  const next = held.map((run) => {
+    const replacement = fresh.get(run.id)
+    if (replacement === undefined) return run
+    fresh.delete(run.id)
+    return replacement
+  })
+  if (fresh.size === 0) return next
+  return [...fresh.values(), ...next].sort((left, right) =>
+    right.createdAt.localeCompare(left.createdAt)
+  )
+}
 
 export interface WorkflowRunService {
   snapshot(): Promise<RunsSnapshot>

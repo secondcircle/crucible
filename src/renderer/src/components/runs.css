@@ -1104,8 +1104,58 @@
   color: var(--dim);
 }
 
-.gvtop .x {
+/* The filter takes the free width, the way the issue board's does, and
+   pushes esc to the end of the row. */
+.gvtop .filter {
   margin-left: auto;
+  position: relative;
+}
+
+.gvtop .filter input {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  color: var(--ink);
+  font: 12px var(--mono);
+  padding: 3px 26px 3px 9px;
+  width: 260px;
+  outline: none;
+}
+
+.gvtop .filter input:focus {
+  border-color: var(--accent);
+}
+
+.gvtop .filter input::placeholder {
+  color: var(--faint);
+}
+
+.gvtop .filter .clr {
+  position: absolute;
+  right: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+  border: none;
+  background: none;
+  color: var(--faint);
+  cursor: pointer;
+  font-size: 13px;
+  line-height: 1;
+  padding: 2px;
+}
+
+.gvtop .filter .clr:hover {
+  color: var(--ink);
+}
+
+.runsoverview mark {
+  background: color-mix(in srgb, var(--accent) 28%, transparent);
+  color: inherit;
+  border-radius: 2px;
+}
+
+.gvempty .btn {
+  margin-top: 12px;
 }
 
 .gvbody {
@@ -1242,5 +1292,33 @@
 
 .runrow .spend {
   font: 11.5px var(--mono);
+  color: var(--faint);
+}
+
+/* The foot of a capped Done band. Every property is set here because the
+   sidebar's own .more would otherwise leak into it. */
+.runsoverview .more {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  width: 100%;
+  border: 1px dashed var(--line);
+  border-radius: 10px;
+  background: none;
+  color: var(--dim);
+  font-size: 12.5px;
+  padding: 9px 14px;
+  cursor: pointer;
+  margin-top: 2px;
+}
+
+.runsoverview .more:hover {
+  border-color: var(--faint);
+  color: var(--ink);
+}
+
+.runsoverview .more .older {
+  font: 11px var(--mono);
   color: var(--faint);
 }

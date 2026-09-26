@@ -3,7 +3,7 @@ import { basename, join } from 'node:path'
 import type { SessionId, TranscriptItem, Unsubscribe } from '../../shared/agent/port'
 import type { RunKickoff, RunTools } from '../../shared/agent/run-tools'
 import { artifactKind, recordNamesPath } from '../../shared/workflows/artifacts'
-import type { ResumeKind } from '../../shared/workflows/run'
+import type { ResumeKind, WorkflowRunId } from '../../shared/workflows/run'
 import { createTurnStart, describeRun, resumeAnswer } from '../../shared/workflows/status'
 import type {
   ArtifactView,
@@ -30,8 +30,8 @@ const BROADCAST_MS = 150
 export interface LiveWorkflowRunOptions {
   readonly engine: WorkflowEngine
   readonly loader: WorkflowLoader
-  /** Called when the engine's state changed; wired to engine.onChanged. */
-  readonly changes: { subscribe(listener: () => void): void }
+  /** Called with the run whose record changed; wired to engine.onChanged. */
+  readonly changes: { subscribe(listener: (runId: WorkflowRunId) => void): void }
   // Where a scheduled fire branches from: the trunk tip of the run's target
   // repository, fetched fresh. An argument so the rule is drivable without a
   // repository.
@@ -52,16 +52,25 @@ export function createLiveWorkflowRunService({
 }: LiveWorkflowRunOptions): MainWorkflowRunService {
   const listeners = new Set<WorkflowRunListener>()
   let broadcastTimer: ReturnType<typeof setTimeout> | undefined
+  // The runs that changed since the last beat. Only these cross, so a beat
+  // costs what the working runs weigh, however much history sits beside them.
+  const changedIds = new Set<WorkflowRunId>()
 
-  function snapshotNow(): RunsSnapshot {
+  async function snapshotNow(): Promise<RunsSnapshot> {
+    await engine.ready
     return { runs: engine.runs() }
   }
 
-  changes.subscribe(() => {
+  changes.subscribe((runId) => {
+    changedIds.add(runId)
     if (broadcastTimer !== undefined) return
     broadcastTimer = setTimeout(() => {
       broadcastTimer = undefined
-      const event = { type: 'runs', snapshot: snapshotNow() } as const
+      // Read now, not when the change was noted: the beat carries each
+      // record as it stands at the moment it is sent.
+      const changed = engine.runs().filter((run) => changedIds.has(run.id))
+      changedIds.clear()
+      const event = { type: 'runs', changed } as const
       for (const listener of [...listeners]) listener(event)
     }, BROADCAST_MS)
   })
@@ -160,6 +169,7 @@ export function createLiveWorkflowRunService({
     },
 
     async list(sessionId: SessionId): Promise<string> {
+      await engine.ready
       const runs = engine.runs().filter((run) => run.sessionId === sessionId)
       if (runs.length === 0) return 'This session has no workflow runs.'
       return runs.map(describeRun).join('\n')
@@ -174,6 +184,7 @@ export function createLiveWorkflowRunService({
     // authorization, and the run keeps reporting to the orchestrator its
     // record names.
     async resume(_sessionId: SessionId, runId: string, kind?: ResumeKind): Promise<string> {
+      await engine.ready
       // Read before the act: once the run is working, where it stopped is no
       // longer on the record to name.
       const before = engine.runs().find((candidate) => candidate.id === runId)
@@ -199,6 +210,8 @@ export function createLiveWorkflowRunService({
   })
 
   return {
+    // Waits for the records on disk: an answer short of them would read to
+    // the scheduler as schedules that never fired.
     async snapshot(): Promise<RunsSnapshot> {
       return snapshotNow()
     },
@@ -211,6 +224,7 @@ export function createLiveWorkflowRunService({
     },
 
     async pause(runId: string): Promise<void> {
+      await engine.ready
       engine.pause(runId)
     },
 
@@ -219,14 +233,17 @@ export function createLiveWorkflowRunService({
     },
 
     async cancel(runId: string): Promise<void> {
+      await engine.ready
       engine.cancel(runId)
     },
 
     async dismiss(runId: string): Promise<void> {
+      await engine.ready
       engine.dismiss(runId)
     },
 
     async adopt(runId: string, sessionId: SessionId): Promise<void> {
+      await engine.ready
       engine.adopt(runId, sessionId)
     },
 
@@ -235,6 +252,7 @@ export function createLiveWorkflowRunService({
     },
 
     async artifact(runId: string, path: string): Promise<ArtifactView> {
+      await engine.ready
       gate(runId, path)
       const kind = artifactKind(path)
       let bytes: number
@@ -265,6 +283,7 @@ export function createLiveWorkflowRunService({
     },
 
     async revealArtifact(runId: string, path: string): Promise<void> {
+      await engine.ready
       gate(runId, path)
       if (reveal === undefined) throw new Error('This launch cannot open a file manager.')
       reveal(path)

@@ -295,17 +295,21 @@ export function rig(
 // The same app started again over the same records and the same repository:
 // its engine sweeps what the last one left mid-flight, and its node sessions
 // are a fresh script.
-export function relaunch(
+export async function relaunch(
   before: Rig,
   defs: Record<string, WorkflowDef>,
   scriptFor: (nodeId: string) => NodeScript,
   options: Omit<RigOptions, 'repo' | 'stateDir'> = {}
-): Rig {
+): Promise<Rig> {
   // What the quit does before the process goes: the store writes whatever it
   // was holding. Without it a relaunch would read a record a write behind,
   // which is a different test — the one about tolerating staleness.
   before.store.flush()
-  return rig(defs, scriptFor, { ...options, repo: before.repo, stateDir: before.stateDir })
+  const after = rig(defs, scriptFor, { ...options, repo: before.repo, stateDir: before.stateDir })
+  // Launched means the records are read and swept, which is what every test
+  // of a relaunch goes on to look at.
+  await after.engine.ready
+  return after
 }
 
 /** The run store a rig's engine writes through, with its own write interval. */
@@ -318,7 +322,9 @@ export function rigStore(stateDir: string): RunStore {
 // What the next launch would read. The store writes off the caller's thread,
 // so a test reading the disk asks for what it is still holding first — which
 // is what the quit does anyway.
-export function recordsOnDisk(rig: Pick<Rig, 'store' | 'stateDir'>): readonly RunRecord[] {
+export async function recordsOnDisk(
+  rig: Pick<Rig, 'store' | 'stateDir'>
+): Promise<readonly RunRecord[]> {
   rig.store.flush()
   return createRunStore(rig.stateDir).load()
 }

@@ -648,8 +648,10 @@ export function createFakeWorkflowRunService({
     })
   }
 
+  // A handful of canned records, so every one of them rides every change
+  // rather than this service tracking which one moved.
   function changed(): void {
-    const event = { type: 'runs', snapshot: snapshotNow() } as const
+    const event = { type: 'runs', changed: records as readonly RunRecord[] } as const
     for (const listener of [...listeners]) listener(event)
   }
 

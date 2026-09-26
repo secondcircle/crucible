@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { describe, expect, it } from 'vitest'
 import { runIsLive, type RunRecord } from './run'
-import type { MainWorkflowRunService } from './service'
+import { withChangedRuns, type MainWorkflowRunService } from './service'
 import { createFakeWorkflowRunService, memoryArtifactFiles } from './fake-service'
 
 async function until(what: () => boolean, ms = 4000): Promise<void> {
@@ -361,7 +361,7 @@ describe('the fake flavor\u2019s artifacts', () => {
   function watch(service: MainWorkflowRunService): (runId: string) => RunRecord | undefined {
     let runs: readonly RunRecord[] = []
     service.onEvent((event) => {
-      if (event.type === 'runs') runs = event.snapshot.runs
+      if (event.type === 'runs') runs = withChangedRuns(runs, event.changed)
     })
     return (runId) => runs.find((run) => run.id === runId)
   }

@@ -4,7 +4,15 @@
 // `RunStatus`, so every case is written out here rather than sampled.
 import { describe, expect, it } from 'vitest'
 import type { RunRecord, RunStatus } from '../../../shared/workflows/run'
-import { bandOf, bandsOf, finishedToday, runIsWorking, runsHeadline } from './bands'
+import {
+  bandOf,
+  bandsOf,
+  finishedToday,
+  runIsWorking,
+  runMatches,
+  runsHeadline,
+  shownBands
+} from './bands'
 
 const NOW = new Date('2026-08-21T14:00:00.000Z').getTime()
 
@@ -218,5 +226,78 @@ describe('the header line', () => {
     expect(finishedToday(runs, NOW)).toBe(1)
     expect(bandsOf(runs)[0]?.runs).toHaveLength(2)
     expect(runsHeadline(runs, NOW)).toBe('nothing running · 1 finished today')
+  })
+})
+
+describe('the bands ⌘R draws', () => {
+  const finished = (count: number): RunRecord[] =>
+    Array.from({ length: count }, (_, at) =>
+      runOf({
+        id: `d${String(at).padStart(3, '0')}`,
+        status: 'complete',
+        endedAt: new Date(NOW - (at + 1) * 60_000).toISOString()
+      })
+    )
+  const none = (): undefined => undefined
+
+  it('cuts Done to the rows asked for and counts the whole band', () => {
+    const [done] = shownBands(finished(45), { filter: '', doneShown: 20, titleOf: none })
+    expect(done?.runs).toHaveLength(20)
+    expect(done?.count).toBe(45)
+    expect(done?.more).toEqual({ next: 20, older: 25 })
+  })
+
+  it('leaves Running and Needs you whole whatever Done shows', () => {
+    const live = Array.from({ length: 30 }, (_, at) => runOf({ id: `r${at}` }))
+    const bands = shownBands([...live, ...finished(3)], {
+      filter: '',
+      doneShown: 1,
+      titleOf: none
+    })
+    expect(bands.map((band) => [band.band, band.runs.length, band.count])).toEqual([
+      ['running', 30, 30],
+      ['done', 1, 3]
+    ])
+    expect(bands[0]?.more).toBeUndefined()
+  })
+
+  it('lifts the cap while filtering and counts the matches', () => {
+    const [done] = shownBands(finished(45), { filter: 'd0', doneShown: 20, titleOf: none })
+    expect(done?.runs).toHaveLength(45)
+    expect(done?.count).toBe(45)
+    expect(done?.more).toBeUndefined()
+  })
+
+  it('reads the session title through the lookup it is handed', () => {
+    const run = runOf({ status: 'complete', endedAt: '2026-08-21T13:00:00.000Z' })
+    const titled = shownBands([run], {
+      filter: 'rounding',
+      doneShown: 20,
+      titleOf: () => 'ledger rounding fix'
+    })
+    expect(titled[0]?.runs).toEqual([run])
+    expect(shownBands([run], { filter: 'rounding', doneShown: 20, titleOf: none })).toEqual([])
+  })
+})
+
+describe('what the filter matches', () => {
+  const run = runOf({ id: '3566', workflow: 'upstream-fix', targetRepository: 'apps/kairos-api' })
+
+  it('is the words the row shows, case-insensitively', () => {
+    expect(runMatches(run, 'UPSTREAM', undefined)).toBe(true)
+    expect(runMatches(run, 'crucible', undefined)).toBe(true)
+    expect(runMatches(run, 'kairos', undefined)).toBe(true)
+    expect(runMatches(run, '356', undefined)).toBe(true)
+    expect(runMatches(run, 'sync', 'upstream sync')).toBe(true)
+  })
+
+  it('is not a field the row does not show', () => {
+    // The repository is shown by its folder alone.
+    expect(runMatches(run, 'apps/', undefined)).toBe(false)
+    expect(runMatches(run, 'run-en42', undefined)).toBe(false)
+  })
+
+  it('is everything when blank', () => {
+    expect(runMatches(run, '   ', undefined)).toBe(true)
   })
 })

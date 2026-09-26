@@ -1,4 +1,5 @@
-import type { RunRecord } from '../../../shared/workflows/run'
+import { targetFolder, type RunRecord } from '../../../shared/workflows/run'
+import { paged, type MoreRows } from './page'
 
 // ⌘R groups by what a run wants from you, not by where it ran: running, needs
 // you, done. The workspace is a column on the row instead.
@@ -48,6 +49,64 @@ export function bandsOf(runs: readonly RunRecord[]): readonly RunBand[] {
     name,
     runs: runs.filter((run) => bandOf(run) === band).sort(newestFirst(band))
   })).filter((held) => held.runs.length > 0)
+}
+
+/** A band as ⌘R draws it: the rows on screen, and what its head counts. */
+export interface ShownBand {
+  readonly band: Band
+  readonly name: string
+  readonly runs: readonly RunRecord[]
+  // Every run in the band, or every match while filtering — never only what
+  // is on screen, which would hide that more history exists.
+  readonly count: number
+  /** Only ever on Done, and only while older runs are held back. */
+  readonly more?: MoreRows
+}
+
+export interface ShownBandsOptions {
+  /** What the filter box holds; blank filters nothing. */
+  readonly filter: string
+  /** How many Done rows are drawn while the filter is blank. */
+  readonly doneShown: number
+  /** The title of the session a run reports to, when that session still exists. */
+  readonly titleOf: (run: RunRecord) => string | undefined
+}
+
+// Done opens on its newest page and grows at the foot. Running and Needs you
+// are never cut: those runs are asking for something. A filter searches all
+// history, so it lifts the cap, and a band with no match is gone like an
+// empty one.
+export function shownBands(
+  runs: readonly RunRecord[],
+  { filter, doneShown, titleOf }: ShownBandsOptions
+): readonly ShownBand[] {
+  const needle = filter.trim().toLowerCase()
+  const wanted =
+    needle === '' ? runs : runs.filter((run) => runMatches(run, needle, titleOf(run)))
+  return bandsOf(wanted).map((held) => {
+    if (held.band !== 'done' || needle !== '') return { ...held, count: held.runs.length }
+    const { rows, more } = paged(held.runs, doneShown)
+    return {
+      ...held,
+      runs: rows,
+      count: held.runs.length,
+      ...(more === undefined ? {} : { more })
+    }
+  })
+}
+
+// The words a row shows, and only those: workflow, target repository,
+// workspace, run id and session title. Case-insensitive, anywhere in the word.
+export function runMatches(
+  run: RunRecord,
+  filter: string,
+  sessionTitle: string | undefined
+): boolean {
+  const needle = filter.trim().toLowerCase()
+  if (needle === '') return true
+  return [run.workflow, targetFolder(run), run.workspaceName, run.id, sessionTitle].some(
+    (field) => field !== undefined && field.toLowerCase().includes(needle)
+  )
 }
 
 // Newest first inside every band. A settled run's news is when it ended; a

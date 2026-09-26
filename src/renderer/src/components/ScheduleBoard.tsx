@@ -10,6 +10,7 @@ import {
 import type { ArtifactView } from '../../../shared/workflows/service'
 import { relativeTime } from '../labels'
 import { money, shortAge, since } from '../runs/format'
+import { paged, RUN_PAGE } from '../runs/page'
 import {
   completionLine,
   lastOutcome,
@@ -25,6 +26,7 @@ import {
   warningText
 } from '../schedules/board'
 import { ArtifactBody } from './ArtifactReader'
+import { ShowMore } from './ShowMore'
 import './board-frame.css'
 import './schedule-board.css'
 
@@ -84,6 +86,8 @@ export function ScheduleBoard({
   const [taking, setTaking] = useState<string | undefined>(undefined)
   // Rows the user dismissed, gone in the same frame; the record follows.
   const [dismissed, setDismissed] = useState<readonly string[]>([])
+  // Recent runs open on their newest page every time the board does.
+  const [recentShown, setRecentShown] = useState(RUN_PAGE)
 
   useEffect(() => {
     const tick = setInterval(() => setNow(Date.now()), TICK_MS)
@@ -94,6 +98,7 @@ export function ScheduleBoard({
   const declared = schedules?.schedules ?? []
   const parked = parkedRuns(runs, workspacePath).filter((run) => !dismissed.includes(run.id))
   const recent = recentRuns(runs, workspacePath).filter((run) => !dismissed.includes(run.id))
+  const recentPage = paged(recent, recentShown)
   const selected =
     [...parked, ...recent].find((run) => run.id === selectedRunId) ?? parked[0] ?? recent[0]
 
@@ -228,7 +233,7 @@ export function ScheduleBoard({
                   settled runs stay until dismissed; click one to read its report
                 </span>
               </div>
-              {recent.map((run) => {
+              {recentPage.rows.map((run) => {
                 const state = recentStateCell(run)
                 const live = runIsLive(run)
                 const node = currentNode(run)
@@ -260,6 +265,12 @@ export function ScheduleBoard({
                   </button>
                 )
               })}
+              {recentPage.more === undefined ? null : (
+                <ShowMore
+                  more={recentPage.more}
+                  onMore={() => setRecentShown((shown) => shown + RUN_PAGE)}
+                />
+              )}
             </div>
           )}
         </div>

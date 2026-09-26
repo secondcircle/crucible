@@ -400,14 +400,19 @@ describe('the global runs view', () => {
 
     expect(count()).toBe('2 running · 3 need you · 1 finished today')
 
+    // Records are never removed, only moved: these finish, long enough ago
+    // not to count as today.
+    const lastWeek = new Date(Date.now() - 7 * 24 * 3_600_000).toISOString()
+    const settledLongAgo = (id: string): RunRecord =>
+      runOf({ id, status: 'complete', endedAt: lastWeek })
     await act(async () => {
-      workflowRuns.setRuns([runOf({ id: 'd1', status: 'complete', endedAt: new Date().toISOString() })])
+      workflowRuns.setRuns(['en42', 'zz11', 'n1', 'n2', 'n3'].map(settledLongAgo))
       await settled()
     })
     expect(count()).toBe('nothing running · 1 finished today')
 
     await act(async () => {
-      workflowRuns.setRuns([runOf({ id: 'n3', status: 'failed' })])
+      workflowRuns.setRuns([runOf({ id: 'n3', status: 'failed' }), settledLongAgo('d1')])
       await settled()
     })
     expect(count()).toBe('nothing running · 1 needs you')

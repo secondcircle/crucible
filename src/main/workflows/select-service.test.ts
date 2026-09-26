@@ -21,6 +21,7 @@ vi.mock('./engine', () => ({
     stood.options.push(options)
     return {
       runs: () => [],
+      ready: Promise.resolve(),
       start: () => Promise.reject(new Error('not this test')),
       pause: () => {},
       resume: () => Promise.reject(new Error('not this test')),

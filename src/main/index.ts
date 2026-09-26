@@ -25,6 +25,7 @@ import { forkedAssembler } from './app-update/forked-assembler'
 import { bundleRootFromExecutable } from './install/layout'
 import { readPackageIdentity } from './install/package-json'
 import { decideFlavor, selectAdapter } from './agent/select-adapter'
+import { warmPiIn } from './agent/pi-modules'
 import { withLogging } from './agent/with-logging'
 import { type CommandChannel, serveCommandChannel } from './commands/channel'
 import { selectCommandService } from './commands/select-service'
@@ -128,6 +129,13 @@ log.append({
   event: 'cache_retention',
   retention: retention.retention,
   decidedBy: retention.source
+})
+
+// π's code is first imported in a worker, so the thousands of files it opens
+// cost the main thread nothing; the entry is one more thing the main build
+// produces. Before the quota store and the adapters, the first to ask for π.
+warmPiIn(join(app.getAppPath(), 'out', 'main', 'pi-warm.js'), (outcome) => {
+  log.append({ source: 'main', event: 'pi_warm', ...outcome })
 })
 
 // Crucible's own state file in Crucible's own directory: nothing of π's is read

@@ -64,11 +64,11 @@ describe('run store', () => {
     await landed(() => existsSync(join(root, 'bb22', 'run.json')))
 
     const again = createRunStore(root)
-    expect(again.load().map((run) => run.id)).toEqual(['bb22', 'aa11'])
+    expect((await again.load()).map((run) => run.id)).toEqual(['bb22', 'aa11'])
   })
 
-  it('answers nothing for a root that does not exist yet', () => {
-    expect(createRunStore(join(tempRoot(), 'never-made')).load()).toEqual([])
+  it('answers nothing for a root that does not exist yet', async () => {
+    expect(await createRunStore(join(tempRoot(), 'never-made')).load()).toEqual([])
   })
 
   it('keeps transcripts per node, revision ids included', async () => {
@@ -208,11 +208,11 @@ describe('what a write costs the caller', () => {
     // Held for the interval, which outlasts this test by a minute: what is on
     // disk is still the first write, whenever this looks.
     await settled()
-    expect(createRunStore(root).load()[0].status).toBe('complete')
+    expect((await createRunStore(root).load())[0].status).toBe('complete')
 
     store.flush()
 
-    expect(createRunStore(root).load()[0].status).toBe('interrupted')
+    expect((await createRunStore(root).load())[0].status).toBe('interrupted')
     expect(
       JSON.parse(readFileSync(join(root, 'jj00', 'transcripts', 'builder.json'), 'utf8'))
     ).toEqual([{ kind: 'assistant', markdown: 'last word' }])

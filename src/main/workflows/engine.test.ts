@@ -197,7 +197,7 @@ describe('the engine end to end', () => {
     expect(ending?.text).toContain(run.branch ?? '')
 
     // The record outlives the engine: a fresh store loads it whole.
-    const reloaded = recordsOnDisk(launched)
+    const reloaded = await recordsOnDisk(launched)
     expect(reloaded[0].id).toBe(run.id)
     expect(reloaded[0].status).toBe('complete')
   })
@@ -296,7 +296,7 @@ describe('the engine end to end', () => {
 
     // The chip's mark: the run counts it, and the record outlives the engine.
     expect(run.nodes[0].cacheMisses).toBe(1)
-    expect(recordsOnDisk(missed)[0].nodes[0].cacheMisses).toBe(1)
+    expect((await recordsOnDisk(missed))[0].nodes[0].cacheMisses).toBe(1)
 
     // A miss inside a run never becomes a message to the orchestrator: what
     // it says is what it always says, and nothing about cache is in it.
@@ -513,7 +513,7 @@ describe('the engine end to end', () => {
   // Quitting is the only way a record outlives the engine that was writing
   // it: dispose() cannot outlive the process, so whatever it was mid-sentence
   // about is still on disk saying "running" when the next launch reads it.
-  it('lays to rest the runs a previous launch left mid-flight', () => {
+  it('lays to rest the runs a previous launch left mid-flight', async () => {
     const stateDir = tempDir('crucible-engine-relaunch-')
     const store = createRunStore(stateDir)
     store.save({
@@ -544,6 +544,7 @@ describe('the engine end to end', () => {
       deliver: () => {},
       onChanged: () => {}
     })
+    await engine.ready
 
     const [run] = engine.runs()
     // Interrupted, never failed: the app went away, the work did not go wrong.
@@ -559,11 +560,93 @@ describe('the engine end to end', () => {
     expect(run.noticePending).toBe(true)
     // Written through, so the next launch reads the settled record.
     store.flush()
-    expect(store.load()[0].status).toBe('interrupted')
+    expect((await store.load())[0].status).toBe('interrupted')
 
     // And it is a record, not a ghost: the live-only operations say so
     // plainly rather than pretending to work.
     expect(() => engine.cancel('aa11')).toThrow(/not live/)
+  })
+})
+
+// History only grows, and the launch cannot wait on it: the records on disk
+// are read after the engine is up, and nothing that names one by id acts
+// before they are in.
+describe('the records a launch reads', () => {
+  function historyIn(stateDir: string, count: number): void {
+    const store = createRunStore(stateDir)
+    for (let at = 0; at < count; at += 1) {
+      store.save({
+        id: `h${String(at).padStart(3, '0')}`,
+        workflow: 'solo',
+        status: 'complete',
+        workspacePath: '/somewhere',
+        workspaceName: 'somewhere',
+        inputs: {},
+        nodes: [],
+        createdAt: new Date(Date.UTC(2026, 0, 1, 0, at)).toISOString(),
+        endedAt: new Date(Date.UTC(2026, 0, 1, 1, at)).toISOString()
+      })
+    }
+    store.flush()
+  }
+
+  it('are read after the engine is up, never while it is being made', async () => {
+    const stateDir = tempDir('crucible-engine-history-')
+    historyIn(stateDir, 40)
+
+    const { engine } = rig({ solo: oneNode }, () => () => {}, { stateDir })
+    expect(engine.runs()).toHaveLength(0)
+
+    await engine.ready
+    expect(engine.runs()).toHaveLength(40)
+    expect(engine.runs()[0].id).toBe('h039')
+  })
+
+  it('are all in before a run started at launch mints its id, and it goes first', async () => {
+    const stateDir = tempDir('crucible-engine-history-')
+    historyIn(stateDir, 5)
+    const { engine, repo } = rig(
+      { solo: oneNode },
+      () => (prompt, tools) => {
+        writeFileSync(outputPath(prompt, 'report.md'), 'the report\n')
+        tools.complete({ summary: 'done' })
+      },
+      { stateDir }
+    )
+    const task = join(repo, 'task.md')
+    writeFileSync(task, 'the task\n')
+
+    const started = await engine.start(startRequest(repo, 'solo', { prompt: task }))
+
+    expect(engine.runs().map((run) => run.id)).toEqual([
+      started.id,
+      'h004',
+      'h003',
+      'h002',
+      'h001',
+      'h000'
+    ])
+    await until(() => engine.runs()[0].status === 'complete')
+  })
+
+  it('name the run that changed on every change', async () => {
+    const changed: string[] = []
+    const { engine, repo } = rig(
+      { solo: oneNode },
+      () => (prompt, tools) => {
+        writeFileSync(outputPath(prompt, 'report.md'), 'the report\n')
+        tools.complete({ summary: 'done' })
+      },
+      { onChanged: (runId) => changed.push(runId) }
+    )
+    const task = join(repo, 'task.md')
+    writeFileSync(task, 'the task\n')
+
+    const started = await engine.start(startRequest(repo, 'solo', { prompt: task }))
+    await until(() => engine.runs()[0].status === 'complete')
+
+    expect(changed.length).toBeGreaterThan(0)
+    expect(new Set(changed)).toEqual(new Set([started.id]))
   })
 })
 
@@ -979,7 +1062,7 @@ describe('dismissing and adopting a run', () => {
     expect(engine.runs()[0].status).toBe('complete')
     expect(existsSync(engine.runs()[0].worktreePath ?? '')).toBe(true)
 
-    const reloaded = recordsOnDisk(settled)
+    const reloaded = await recordsOnDisk(settled)
     expect(reloaded[0].dismissedAt).toBe(stamped)
   })
 
@@ -1024,7 +1107,7 @@ describe('dismissing and adopting a run', () => {
 
     engine.adopt(runId, 'investigator-9')
     expect(engine.runs()[0].sessionId).toBe('investigator-9')
-    expect(recordsOnDisk(settled)[0].sessionId).toBe('investigator-9')
+    expect((await recordsOnDisk(settled))[0].sessionId).toBe('investigator-9')
 
     // A run already owned by that session is a quiet no-op.
     engine.adopt(runId, 'investigator-9')
@@ -1056,7 +1139,7 @@ describe('dismissing and adopting a run', () => {
       })
     )
 
-    const loaded = recordsOnDisk(settled)
+    const loaded = await recordsOnDisk(settled)
     expect(loaded.find((run) => run.id === 'old1')?.dir).toBe(older)
     expect(loaded.find((run) => run.id === runId)?.dir).toBe(join(stateDir, runId))
   })
@@ -1138,7 +1221,7 @@ describe('a run with no orchestrator', () => {
     await until(() => engine.runs()[0].status === 'failed')
 
     expect(delivered).toEqual([])
-    const reloaded = recordsOnDisk(parked)[0]
+    const reloaded = (await recordsOnDisk(parked))[0]
     expect(reloaded.scheduled).toBe(true)
     expect(reloaded.sessionId).toBeUndefined()
     expect(reloaded.status).toBe('failed')

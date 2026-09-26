@@ -114,6 +114,7 @@ import {
   userTextOf,
   type StoredMessage
 } from './sdk-transcript.ts'
+import { piModules } from './pi-modules.ts'
 import { markTurnContext } from './turn-context.ts'
 import { createUsageCache, sumUsage, type StoredUsage } from './usage.ts'
 
@@ -314,7 +315,7 @@ export function createSdkAdapter({
   const summaryFailures = new Map<SessionId, string>()
 
   function sdk(): Promise<Sdk> {
-    sdkModule ??= import('@earendil-works/pi-coding-agent')
+    sdkModule ??= piModules.codingAgent()
     return sdkModule
   }
 
@@ -1495,7 +1496,7 @@ export function createSdkAdapter({
 
     async listModels(): Promise<readonly ModelInfo[]> {
       const [pi, available] = await Promise.all([
-        import('@earendil-works/pi-ai'),
+        piModules.ai(),
         runtime().then((models) => models.getAvailable())
       ])
       return available
@@ -1532,7 +1533,7 @@ export function createSdkAdapter({
       if (input === undefined) return undefined
 
       const [pi, models, model] = await Promise.all([
-        import('@earendil-works/pi-ai'),
+        piModules.ai(),
         runtime(),
         resolveModel(TITLE_MODEL)
       ])

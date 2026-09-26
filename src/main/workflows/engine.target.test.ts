@@ -150,7 +150,7 @@ describe('a run that targets a repository inside the workspace', () => {
     const done = engine.runs()[0]
     expect(done.targetRepository).toBe('app')
     // What the next launch reads back says which repository the run was in.
-    expect(recordsOnDisk(target)[0].targetRepository).toBe('app')
+    expect((await recordsOnDisk(target))[0].targetRepository).toBe('app')
     expect(done.workspacePath).toBe(workspace)
     expect(done.worktreePath).toBe(join(component, '.crucible', 'worktrees', `run-${run.id}`))
     // HEAD is the target's, never the workspace's.

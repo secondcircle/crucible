@@ -75,6 +75,34 @@
   border-color: var(--lit);
 }
 
+/* The foot of the capped recent runs, drawn as ⌘R draws Done's. Every
+   property is set because the sidebar's own .more would leak in. */
+.board.schedules .more {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  width: 100%;
+  border: 1px dashed var(--line);
+  border-radius: 8px;
+  background: none;
+  color: var(--dim);
+  font-size: 12.5px;
+  padding: 7px 10px;
+  cursor: pointer;
+  margin-top: 4px;
+}
+
+.board.schedules .more:hover {
+  border-color: var(--faint);
+  color: var(--ink);
+}
+
+.board.schedules .more .older {
+  font: 11px var(--mono);
+  color: var(--faint);
+}
+
 .board.schedules .rname {
   font-size: 13px;
   color: var(--ink);

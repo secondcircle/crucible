@@ -93,6 +93,10 @@ export interface StartRunRequest {
 export interface WorkflowEngine {
   /** Every record the engine knows, live and finished, newest first. */
   runs(): readonly RunRecord[]
+  // Settles once every record on disk has been read and swept. Until then
+  // `runs()` holds none of them; every method here that can name one by id
+  // waits for this first, and the service's snapshot does too.
+  readonly ready: Promise<void>
   /** Resolves at kickoff; the run continues in the background. */
   start(request: StartRunRequest): Promise<RunRecord>
   pause(runId: WorkflowRunId): void
@@ -143,8 +147,8 @@ export interface EngineOptions {
   // about waiting — means nodes get no monitor tools and never wait;
   // production always passes it.
   readonly monitors?: NodeMonitors
-  /** Fired after any record change; the service fans it out. */
-  readonly onChanged: () => void
+  /** Fired after any change to a record, naming it; the service fans it out. */
+  readonly onChanged: (runId: WorkflowRunId) => void
   readonly log?: (event: Record<string, unknown>) => void
   /** "provider/model-id:thinkingLevel" for nodes that name none. */
   readonly defaultModel?: string
@@ -264,7 +268,7 @@ export function createWorkflowEngine(options: EngineOptions): WorkflowEngine {
   } = options
 
   // Everything ever recorded, newest first; live handles by id beside it.
-  const records: LiveRun[] = [...(store.load() as unknown as LiveRun[])]
+  const records: LiveRun[] = []
   const handles = new Map<WorkflowRunId, Handle>()
   let disposed = false
 
@@ -272,12 +276,34 @@ export function createWorkflowEngine(options: EngineOptions): WorkflowEngine {
 
   const nowIso = (): string => new Date().toISOString()
 
+  // Read without holding the main thread: history only grows, and reading it
+  // inline held the launch for seconds before the window existed.
+  const ready: Promise<void> = store.load().then(
+    (loaded) => {
+      if (disposed) return
+      for (const record of loaded as unknown as LiveRun[]) {
+        try {
+          sweep(record)
+        } catch (cause) {
+          // One malformed record must not cost the launch the rest of history.
+          log?.({
+            event: 'run_record_unsweepable',
+            runId: record.id,
+            message: cause instanceof Error ? cause.message : String(cause)
+          })
+        }
+        records.push(record)
+      }
+    },
+    () => {}
+  )
+
   // The sessions a running record's nodes were holding died with the process,
   // so the record is a lie the moment it is read back. Settle it as
   // interrupted — the app went away, the work did not go wrong — and only a
   // deliberate Resume moves it from here.
-  for (const stale of records) {
-    if (stale.status !== 'running' && stale.status !== 'paused') continue
+  function sweep(stale: LiveRun): void {
+    if (stale.status !== 'running' && stale.status !== 'paused') return
     stale.status = 'interrupted'
     stale.error =
       stale.error === undefined
@@ -304,15 +330,15 @@ export function createWorkflowEngine(options: EngineOptions): WorkflowEngine {
       delete node.now
       delete node.waitingOn
     }
-    // No shell exists this early, so delivery is not even attempted: the
-    // record carries the debt until the session next wakes.
+    // Delivery is not attempted here: the record carries the debt until the
+    // session's next user turn, which is when notices are delivered.
     if (stale.sessionId !== undefined) stale.noticePending = true
     store.save(stale as RunRecord)
   }
 
   function save(run: LiveRun): void {
     store.save(run as RunRecord)
-    onChanged()
+    onChanged(run.id)
   }
 
   function requireRecord(runId: WorkflowRunId): LiveRun {
@@ -389,6 +415,8 @@ export function createWorkflowEngine(options: EngineOptions): WorkflowEngine {
       readonly targetRepository?: string
     }
   ): Promise<RunRecord> {
+    // A fresh id is only fresh against every id on disk.
+    await ready
     const resolved = await loader.resolve(request.workspacePath, request.workflow)
     const { manifest } = resolved
 
@@ -1747,6 +1775,7 @@ export function createWorkflowEngine(options: EngineOptions): WorkflowEngine {
    * workflow that no longer resolves — all before anything can cost money.
    */
   async function resumeRun(runId: WorkflowRunId, kind: ResumeKind = 'continue'): Promise<void> {
+    await ready
     const run = requireRecord(runId)
     if (run.status === 'paused') {
       const handle = handles.get(runId)
@@ -1855,6 +1884,8 @@ export function createWorkflowEngine(options: EngineOptions): WorkflowEngine {
       return records as readonly RunRecord[]
     },
 
+    ready,
+
     start,
 
     pause(runId: WorkflowRunId): void {
@@ -1929,6 +1960,7 @@ export function createWorkflowEngine(options: EngineOptions): WorkflowEngine {
       runId: WorkflowRunId,
       nodeId: string
     ): Promise<readonly TranscriptItem[]> {
+      await ready
       requireRecord(runId)
       return store.readTranscript(runId, nodeId)
     },

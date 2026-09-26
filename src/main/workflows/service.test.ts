@@ -56,6 +56,7 @@ function engineOf(
     started,
     bases,
     runs: () => runs,
+    ready: Promise.resolve(),
     // The base is asked for the way the engine asks: once the target is
     // settled, before anything is made.
     async start(request) {
@@ -152,7 +153,7 @@ const loader: WorkflowLoader = {
 
 function serviceOver(
   runs: RunRecord[],
-  subscribers: Array<() => void> = [],
+  subscribers: Array<(runId: string) => void> = [],
   base?: (repositoryPath: string) => Promise<string>,
   stub: EngineStub = {}
 ) {
@@ -238,12 +239,12 @@ describe('the live run service', () => {
   it('coalesces a burst of engine changes into one runs event', async () => {
     vi.useFakeTimers()
     try {
-      const subscribers: Array<() => void> = []
+      const subscribers: Array<(runId: string) => void> = []
       const { service } = serviceOver([record({})], subscribers)
       const events: WorkflowRunEvent[] = []
       service.onEvent((event) => events.push(event))
 
-      for (let burst = 0; burst < 20; burst += 1) subscribers[0]()
+      for (let burst = 0; burst < 20; burst += 1) subscribers[0]('ab12')
       expect(events).toHaveLength(0)
       await vi.advanceTimersByTimeAsync(200)
       expect(events).toHaveLength(1)
@@ -251,6 +252,75 @@ describe('the live run service', () => {
     } finally {
       vi.useRealTimers()
     }
+  })
+
+  it('carries only the records that changed, each as it stands when the beat goes out', async () => {
+    vi.useFakeTimers()
+    try {
+      const subscribers: Array<(runId: string) => void> = []
+      const history = Array.from({ length: 500 }, (_, at) =>
+        record({ id: `h${at}`, status: 'complete', sessionId: undefined })
+      )
+      const working = record({ id: 'cd34' })
+      const runs = [working, ...history]
+      const { service } = serviceOver(runs, subscribers)
+      const events: WorkflowRunEvent[] = []
+      service.onEvent((event) => events.push(event))
+
+      subscribers[0]('cd34')
+      subscribers[0]('h7')
+      subscribers[0]('cd34')
+      // Moved again after the change was noted: the beat reads it at send time.
+      runs[0] = { ...working, waiting: true }
+      await vi.advanceTimersByTimeAsync(200)
+
+      expect(events).toHaveLength(1)
+      const [event] = events
+      if (event?.type !== 'runs') throw new Error('expected a runs event')
+      expect(event.changed.map((run) => run.id)).toEqual(['cd34', 'h7'])
+      expect(event.changed[0]?.waiting).toBe(true)
+
+      // A beat forgets what it carried.
+      subscribers[0]('h9')
+      await vi.advanceTimersByTimeAsync(200)
+      const next = events[1]
+      if (next?.type !== 'runs') throw new Error('expected a runs event')
+      expect(next.changed.map((run) => run.id)).toEqual(['h9'])
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('answers a snapshot, and a listing, only once the records on disk are read', async () => {
+    let read: () => void = () => {}
+    const engine = {
+      ...engineOf([record({ id: 'cd34' })]),
+      ready: new Promise<void>((resolve) => {
+        read = resolve
+      })
+    }
+    const service = createLiveWorkflowRunService({
+      engine,
+      loader,
+      changes: { subscribe: () => {} }
+    })
+
+    let answered: readonly RunRecord[] | undefined
+    let listed: string | undefined
+    void service.snapshot().then((snapshot) => {
+      answered = snapshot.runs
+    })
+    void service.tools.list('s1').then((text) => {
+      listed = text
+    })
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    expect(answered).toBeUndefined()
+    expect(listed).toBeUndefined()
+
+    read()
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(answered?.map((run) => run.id)).toEqual(['cd34'])
+    expect(listed).toContain('cd34')
   })
 
   // A scheduled fire is an ordinary run with three things settled for it: the

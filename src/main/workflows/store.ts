@@ -1,5 +1,5 @@
-import { mkdirSync, readdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs'
-import { readFile, rename, unlink, writeFile } from 'node:fs/promises'
+import { mkdirSync, renameSync, unlinkSync, writeFileSync } from 'node:fs'
+import { readdir, readFile, rename, unlink, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { TranscriptItem } from '../../shared/agent/port'
 import type { RunRecord, WorkflowRunId } from '../../shared/workflows/run'
@@ -23,8 +23,10 @@ import type { RunRecord, WorkflowRunId } from '../../shared/workflows/run'
 const WRITE_INTERVAL_MS = 3000
 
 export interface RunStore {
-  /** Every persisted record, newest first. Unreadable ones are skipped. */
-  load(): readonly RunRecord[]
+  // Every persisted record, newest first; unreadable ones are skipped. Read
+  // off the caller's thread: there is one file per run ever made, and on a
+  // machine where every open is slow a thousand of them took seconds.
+  load(): Promise<readonly RunRecord[]>
   /** Schedules a write of the record; rate-limited and coalesced per run. */
   save(run: RunRecord): void
   /** The run's own directory: run.json, artifacts/, sessions/, transcripts/. */
@@ -164,31 +166,36 @@ export function createRunStore(
   }
 
   return {
-    load(): readonly RunRecord[] {
+    async load(): Promise<readonly RunRecord[]> {
       let entries: readonly string[]
       try {
-        entries = readdirSync(root, { withFileTypes: true })
+        entries = (await readdir(root, { withFileTypes: true }))
           .filter((entry) => entry.isDirectory())
           .map((entry) => entry.name)
       } catch {
         return []
       }
-      const records: RunRecord[] = []
-      for (const name of entries) {
-        const path = join(root, name, 'run.json')
-        try {
-          const record = JSON.parse(readFileSync(path, 'utf8')) as RunRecord
-          if (typeof record.id === 'string' && typeof record.workflow === 'string') {
+      const read = await Promise.all(
+        entries.map(async (name): Promise<RunRecord | undefined> => {
+          const path = join(root, name, 'run.json')
+          try {
+            const record = JSON.parse(await readFile(path, 'utf8')) as RunRecord
+            if (typeof record.id !== 'string' || typeof record.workflow !== 'string') {
+              return undefined
+            }
             // Backfilled rather than trusted: the directory the record was
             // read from is where it lives, whatever a record written before
             // the field existed says.
-            records.push({ ...record, dir: join(root, name) })
+            return { ...record, dir: join(root, name) }
+          } catch (cause) {
+            onFailure?.(path, cause)
+            return undefined
           }
-        } catch (cause) {
-          onFailure?.(path, cause)
-        }
-      }
-      return records.sort((left, right) => right.createdAt.localeCompare(left.createdAt))
+        })
+      )
+      return read
+        .filter((record): record is RunRecord => record !== undefined)
+        .sort((left, right) => right.createdAt.localeCompare(left.createdAt))
     },
 
     save(run: RunRecord): void {

@@ -346,6 +346,65 @@ describe('the board groups', () => {
   })
 })
 
+describe('a long history of recent runs', () => {
+  // Newest first by id: r00 ended an hour ago, r44 forty-five hours ago.
+  const history = (count: number): RunRecord[] =>
+    Array.from({ length: count }, (_, at) => {
+      const id = `r${String(at).padStart(2, '0')}`
+      return runOf({ id, status: 'complete', endedAt: ago(at + 1) })
+    })
+
+  const recentGroup = (): HTMLElement => within(board()).getByLabelText('Recent runs')
+
+  it('opens on the newest 20, counting every one, and adds 20 more at the foot', async () => {
+    await openBoard(history(45))
+
+    let rows = rowsIn('Recent runs')
+    expect(rows).toHaveLength(20)
+    expect(rows[0]).toBe('Run r00')
+    expect(rows[19]).toBe('Run r19')
+    expect(recentGroup().querySelector('.ghead .cnt')).toHaveTextContent('45')
+
+    act(() => {
+      fireEvent.click(within(recentGroup()).getByRole('button', { name: 'Show 20 more · 25 older' }))
+    })
+    rows = rowsIn('Recent runs')
+    expect(rows).toHaveLength(40)
+    expect(rows[20]).toBe('Run r20')
+    // The last batch says its real size.
+    act(() => {
+      fireEvent.click(within(recentGroup()).getByRole('button', { name: 'Show 5 more · 5 older' }))
+    })
+    expect(rowsIn('Recent runs')).toHaveLength(45)
+    expect(within(recentGroup()).queryByRole('button', { name: /^Show \d+ more/ })).toBeNull()
+    expect(recentGroup().querySelector('.ghead .cnt')).toHaveTextContent('45')
+  })
+
+  it('opens on the newest 20 again every time the board does', async () => {
+    await openBoard(history(30))
+    act(() => {
+      fireEvent.click(within(recentGroup()).getByRole('button', { name: 'Show 10 more · 10 older' }))
+    })
+    expect(rowsIn('Recent runs')).toHaveLength(30)
+
+    await act(async () => {
+      fireEvent.keyDown(document, { key: 'Escape' })
+      await settled()
+    })
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Schedule board' }))
+      await settled()
+    })
+    expect(rowsIn('Recent runs')).toHaveLength(20)
+  })
+
+  it('draws no foot while every recent run fits', async () => {
+    await openBoard(history(20))
+    expect(rowsIn('Recent runs')).toHaveLength(20)
+    expect(within(recentGroup()).queryByRole('button', { name: /^Show \d+ more/ })).toBeNull()
+  })
+})
+
 describe('the controls on a schedule row', () => {
   it('flips the toggle in the same frame and tells the service', async () => {
     const { scheduleService } = await openBoard()

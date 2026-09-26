@@ -1,4 +1,5 @@
 import type { ModelRuntime } from '@earendil-works/pi-coding-agent'
+import { piModules } from '../agent/pi-modules'
 import type { AuthLike } from './store'
 
 // Credentials come through π rather than from its files: π rotates tokens
@@ -18,7 +19,7 @@ export function createPiCredentials(): Credentials {
   const types = new Map<string, 'oauth' | 'api_key'>()
 
   function models(): Promise<ModelRuntime> {
-    runtime ??= import('@earendil-works/pi-coding-agent').then((pi) => pi.ModelRuntime.create())
+    runtime ??= piModules.codingAgent().then((pi) => pi.ModelRuntime.create())
     return runtime
   }
 

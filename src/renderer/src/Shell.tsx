@@ -44,10 +44,11 @@ import {
   type RunRecord,
   type WorkflowRunId
 } from '../../shared/workflows/run'
-import type {
-  ArtifactView,
-  RunsSnapshot,
-  WorkflowRunService
+import {
+  withChangedRuns,
+  type ArtifactView,
+  type RunsSnapshot,
+  type WorkflowRunService
 } from '../../shared/workflows/service'
 import { useIssueBoards } from './board/use-boards'
 import { BashDrawer, type RunView } from './components/BashDrawer'
@@ -442,7 +443,7 @@ export function Shell({
   // What a raised cancel confirm owes its asker: the row's button waits on
   // this to learn whether the run is on its way out or still working.
   const cancelChoice = useRef<((chose: 'cancelled' | 'kept') => void) | undefined>(undefined)
-  /** The engine's records, whole on every event. */
+  /** The engine's records, whole: the first snapshot with every change folded in. */
   const [runsSnapshot, setRunsSnapshot] = useState<RunsSnapshot | undefined>(undefined)
   const [monitorsSnapshot, setMonitorsSnapshot] = useState<MonitorsSnapshot | undefined>(
     undefined
@@ -1056,8 +1057,9 @@ export function Shell({
     return stop
   }, [scheduleService])
 
-  // The run seam: one snapshot, then whole snapshots on every change. ⌘R
-  // arrives here too when main intercepted it before the menu could.
+  // The run seam: one snapshot, then the records each change touched, folded
+  // into it. ⌘R arrives here too when main intercepted it before the menu
+  // could.
   useEffect(() => {
     if (workflowRuns === undefined) return
     const take = (taken: RunsSnapshot): void => {
@@ -1065,7 +1067,9 @@ export function Shell({
       setRunsSnapshot(taken)
     }
     const stop = workflowRuns.onEvent((event) => {
-      if (event.type === 'runs') take(event.snapshot)
+      // Folded into the ref, not the state: two changes landing in one batch
+      // must both reach the records, and the ref is always the newest.
+      if (event.type === 'runs') take({ runs: withChangedRuns(runsNow.current, event.changed) })
       if (event.type === 'toggle-overview') toggleRuns()
     })
     void workflowRuns

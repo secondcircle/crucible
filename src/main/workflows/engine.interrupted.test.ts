@@ -108,7 +108,7 @@ describe('the startup sweep', () => {
     const mid = before.engine.runs()[0]
     const lastSeen = mid.nodes[1].lastActivityAt
 
-    const after = relaunch(before, { gated }, planThenPark)
+    const after = await relaunch(before, { gated }, planThenPark)
     const run = after.engine.runs()[0]
 
     expect(run.id).toBe(runId)
@@ -127,18 +127,18 @@ describe('the startup sweep', () => {
     // The session the cut node was working in is named on its record: that
     // is what resume reopens.
     expect(run.nodes[1].sessionToken).toBeDefined()
-    // The orchestrator has not been told: no shell exists this early, so the
-    // debt rides on the record.
+    // The orchestrator has not been told: that waits for its next user turn,
+    // so the debt rides on the record.
     expect(run.noticePending).toBe(true)
     expect(after.delivered).toEqual([])
     // Written through, so the next launch reads the settled record.
-    expect(recordsOnDisk(after)[0].status).toBe('interrupted')
+    expect((await recordsOnDisk(after))[0].status).toBe('interrupted')
 
     // A record, not a ghost: the live-only operations say so plainly.
     expect(() => after.engine.cancel(runId)).toThrow(/not live/)
   })
 
-  it('owes no notice for a run with no orchestrator, and leaves a failed run failed', () => {
+  it('owes no notice for a run with no orchestrator, and leaves a failed run failed', async () => {
     const stateDir = tempDir('crucible-sweep-')
     const store = createRunStore(stateDir)
     store.save({
@@ -173,6 +173,7 @@ describe('the startup sweep', () => {
       deliver: () => {},
       onChanged: () => {}
     })
+    await engine.ready
 
     const unattended = engine.runs().find((run) => run.id === 'aa11')
     expect(unattended?.status).toBe('interrupted')
@@ -202,7 +203,7 @@ describe('resume', () => {
 
     const cwds: string[] = []
     const continued: boolean[] = []
-    const after = relaunch(before, { gated }, () => (prompt, tools) => {
+    const after = await relaunch(before, { gated }, () => (prompt, tools) => {
       cwds.push(tools.cwd)
       continued.push(tools.continued)
       writeFileSync(outputPath(tools.taskPrompt, 'verdict.md'), 'approved\n')
@@ -262,7 +263,7 @@ describe('resume', () => {
     // The continued node blocks without a line of activity, so no stats
     // snapshot has happened yet: the record must still say what the first
     // life spent.
-    const after = relaunch(before, { gated }, () => (_prompt, tools) => {
+    const after = await relaunch(before, { gated }, () => (_prompt, tools) => {
       tools.block({ reason: 'which way?' })
     })
     await after.engine.resume(runId)
@@ -282,7 +283,7 @@ describe('resume', () => {
     // The reopened session reports what it spent before the quit as well as
     // after, the way a session file does; the record must add one turn's
     // worth, not the whole conversation twice.
-    const after = relaunch(before, { gated }, () => finishTheGate)
+    const after = await relaunch(before, { gated }, () => finishTheGate)
     await after.engine.resume(runId)
     await until(() => after.engine.runs()[0].status === 'complete')
 
@@ -301,7 +302,7 @@ describe('resume', () => {
     const firstLife = await before.engine.nodeTranscript(runId, 'gate')
     expect(firstLife.length).toBeGreaterThan(0)
 
-    const after = relaunch(before, { gated }, () => finishTheGate)
+    const after = await relaunch(before, { gated }, () => finishTheGate)
     await after.engine.resume(runId)
     await until(() => after.engine.runs()[0].status === 'complete')
 
@@ -314,7 +315,7 @@ describe('resume', () => {
 
   it('clears a dismissal, because a run that is working again must show', async () => {
     const { before, runId } = await interruptedRun()
-    const after = relaunch(before, { gated }, () => finishTheGate)
+    const after = await relaunch(before, { gated }, () => finishTheGate)
 
     // Dismissing an interrupted run stamps once and moves nothing else.
     after.engine.dismiss(runId)
@@ -331,7 +332,7 @@ describe('resume', () => {
 
   it('refuses a complete run, a running one, and a second resume racing the first', async () => {
     const { before, runId } = await interruptedRun()
-    const after = relaunch(before, { gated }, () => async (_prompt, tools) => {
+    const after = await relaunch(before, { gated }, () => async (_prompt, tools) => {
       // Slow enough that the second resume lands while the first is working.
       await new Promise((resolve) => setTimeout(resolve, 40))
       writeFileSync(outputPath(tools.taskPrompt, 'verdict.md'), 'approved\n')
@@ -356,7 +357,7 @@ describe('resume', () => {
     const worktree = before.engine.runs()[0].worktreePath ?? ''
     rmSync(worktree, { recursive: true, force: true })
 
-    const after = relaunch(before, { gated }, () => () => {
+    const after = await relaunch(before, { gated }, () => () => {
       throw new Error('no node may run')
     })
     await expect(after.engine.resume(runId)).rejects.toThrow(worktree)
@@ -367,7 +368,7 @@ describe('resume', () => {
   it('refuses with the loader’s own error when the workflow no longer resolves', async () => {
     const { before, runId } = await interruptedRun()
     // The workflow file is gone from this launch's ladder.
-    const after = relaunch(before, {}, () => () => {})
+    const after = await relaunch(before, {}, () => () => {})
 
     await expect(after.engine.resume(runId)).rejects.toThrow('No workflow is named "gated".')
     expect(after.engine.runs()[0].status).toBe('interrupted')
@@ -391,7 +392,7 @@ describe('resume', () => {
 
     // Denying every session is what a removed sidebar entry looks like to
     // resume: the run's recorded orchestrator is not there any more.
-    const denied = relaunch(
+    const denied = await relaunch(
       before,
       { gated: asking },
       () => (prompt, tools) => {
@@ -497,7 +498,7 @@ describe('a clean restart', () => {
     const cut = before.engine.runs()[0].nodes[1]
 
     const openings: string[] = []
-    const after = relaunch(before, { gated }, () => (prompt, tools) => {
+    const after = await relaunch(before, { gated }, () => (prompt, tools) => {
       openings.push(prompt)
       writeFileSync(outputPath(prompt, 'verdict.md'), 'approved\n')
       tools.complete({ summary: 'judged it fresh' })
@@ -535,7 +536,7 @@ describe('a clean restart', () => {
     })
     expect(before.engine.runs()[0].nodes[1].sessionToken).toBeUndefined()
 
-    const after = relaunch(
+    const after = await relaunch(
       before,
       { gated },
       () => (prompt, tools) => {
@@ -566,7 +567,7 @@ describe('a clean restart', () => {
     // deleted, or a state directory that moved.
     const record = createRunStore(before.stateDir)
     before.store.flush()
-    const saved = record.load()[0]
+    const saved = (await record.load())[0]
     record.save({
       ...saved,
       nodes: saved.nodes.map((node) =>
@@ -650,7 +651,7 @@ describe('a clean restart', () => {
     )
 
     // Life 2: a clean restart. `gate·r1` completes, the builder parks, quit.
-    const second = relaunch(first, { threeStep }, (nodeId) =>
+    const second = await relaunch(first, { threeStep }, (nodeId) =>
       nodeId === 'gate' ? write('verdict.md', 'judged it fresh') : park
     )
     await second.engine.resume(started.id, 'clean-restart')
@@ -666,7 +667,7 @@ describe('a clean restart', () => {
     )
 
     // Life 3: a plain resume. Only the builder goes back to work.
-    const third = relaunch(second, { threeStep }, () => (_prompt, tools) => {
+    const third = await relaunch(second, { threeStep }, () => (_prompt, tools) => {
       writeFileSync(outputPath(tools.taskPrompt, 'report.md'), 'the report\n')
       tools.complete({ summary: 'built it' })
     })
@@ -718,7 +719,7 @@ describe('what a resumed run does not do again', () => {
     before.engine.answer(started.id, 'ship it')
     await until(() => before.engine.runs()[0].nodes.some((node) => node.status === 'blocked'))
 
-    const after = relaunch(before, { gated: asking }, () => (_prompt, tools) => {
+    const after = await relaunch(before, { gated: asking }, () => (_prompt, tools) => {
       tools.complete({ summary: 'judged it' })
     })
     await after.engine.resume(started.id)
@@ -752,7 +753,7 @@ describe('what a resumed run does not do again', () => {
     const { before, runId } = await interruptedRun({ gated: telling }, planThenPark)
     expect(before.delivered.filter((message) => message.text.includes('the spec is in'))).toHaveLength(1)
 
-    const after = relaunch(before, { gated: telling }, () => (_prompt, tools) => {
+    const after = await relaunch(before, { gated: telling }, () => (_prompt, tools) => {
       tools.complete({ summary: 'judged it' })
     })
     await after.engine.resume(runId)
@@ -795,7 +796,7 @@ describe('what a resumed run does not do again', () => {
     await until(() => before.engine.runs()[0].waiting === true)
     expect(gateRuns).toBe(1)
 
-    const after = relaunch(before, { gated: gating }, () => (prompt, tools) => {
+    const after = await relaunch(before, { gated: gating }, () => (prompt, tools) => {
       writeFileSync(outputPath(tools.taskPrompt, 'report.md'), prompt.slice(0, 10))
       tools.complete({ summary: 'fixed it' })
     })
@@ -855,7 +856,7 @@ describe('what a resumed run does not do again', () => {
     await until(() => before.engine.runs()[0].waiting === true)
     expect(calls).toBe(1)
 
-    const after = relaunch(before, { solo: twice }, () => (_prompt, tools) => {
+    const after = await relaunch(before, { solo: twice }, () => (_prompt, tools) => {
       tools.complete({ summary: 'did the work' })
     })
     await after.engine.resume(started.id)
@@ -904,7 +905,7 @@ describe('resume and held-open nodes', () => {
     expect(before.engine.runs()[0].nodes[0].status).toBe('complete')
     const reviewToken = before.engine.runs()[0].nodes[0].sessionToken
 
-    const after = relaunch(before, { gated: reviewing }, (nodeId) =>
+    const after = await relaunch(before, { gated: reviewing }, (nodeId) =>
       nodeId === 'review'
         ? (_prompt, tools) => {
             writeFileSync(outputPath(tools.taskPrompt, 'review.md'), 'approved\n')
@@ -949,7 +950,7 @@ describe('resume and held-open nodes', () => {
     const started = await before.engine.start(startRequest(before.repo, 'gated', { intent }))
     await until(() => before.engine.runs()[0].waiting === true)
 
-    const after = relaunch(before, { gated: reviewing }, (nodeId) =>
+    const after = await relaunch(before, { gated: reviewing }, (nodeId) =>
       nodeId === 'review'
         ? (_prompt, tools) => {
             writeFileSync(outputPath(tools.taskPrompt, 'review.md'), 'approved\n')
@@ -1007,7 +1008,7 @@ describe('resume and held-open nodes', () => {
     )?.sessionToken
     expect(reviewToken).toBeDefined()
 
-    const after = relaunch(before, { gated: reviewing }, (nodeId) =>
+    const after = await relaunch(before, { gated: reviewing }, (nodeId) =>
       nodeId === 'review'
         ? (_prompt, tools) => {
             writeFileSync(outputPath(tools.taskPrompt, 'review.md'), 'approved\n')
@@ -1097,6 +1098,7 @@ describe('resume and held-open nodes', () => {
           : (_prompt, tools) => tools.complete({ summary: 'fixed it' }),
       { repo: before.repo, stateDir: before.stateDir, log: (event) => logged.push(event) }
     )
+    await after.engine.ready
     const swept = after.engine.runs()[0]
     expect(swept.status).toBe('interrupted')
     expect(swept.nodes.find((node) => node.id === 'review')?.status).toBe('complete')
@@ -1134,7 +1136,7 @@ describe('resume and held-open nodes', () => {
 describe('the interruption notice', () => {
   it('is delivered when the session wakes, once, and the clear survives a restart', async () => {
     const { before, runId } = await interruptedRun()
-    const after = relaunch(before, { gated }, planThenPark)
+    const after = await relaunch(before, { gated }, planThenPark)
     expect(after.engine.runs()[0].noticePending).toBe(true)
 
     // Nobody else's turn wakes it.
@@ -1155,12 +1157,12 @@ describe('the interruption notice', () => {
     after.engine.deliverNotices('orchestrator-1')
     expect(after.delivered).toHaveLength(1)
     expect(after.engine.runs()[0].noticePending).toBeUndefined()
-    expect(recordsOnDisk(after)[0].noticePending).toBeUndefined()
+    expect((await recordsOnDisk(after))[0].noticePending).toBeUndefined()
   })
 
   it('stays owed when delivery fails, and lands on the next wake', async () => {
     const { before } = await interruptedRun()
-    const after = relaunch(before, { gated }, planThenPark)
+    const after = await relaunch(before, { gated }, planThenPark)
 
     after.refuseDelivery(true)
     after.engine.deliverNotices('orchestrator-1')
@@ -1175,7 +1177,7 @@ describe('the interruption notice', () => {
 
   it('says the run was resumed when it has been, rather than repeating the quit', async () => {
     const { before, runId } = await interruptedRun()
-    const after = relaunch(before, { gated }, () => async (_prompt, tools) => {
+    const after = await relaunch(before, { gated }, () => async (_prompt, tools) => {
       await new Promise((resolve) => setTimeout(resolve, 60))
       writeFileSync(outputPath(tools.taskPrompt, 'verdict.md'), 'approved\n')
       tools.complete({ summary: 'judged it' })
@@ -1203,7 +1205,7 @@ describe('the interruption notice', () => {
 
   it('is settled by any message that reaches the orchestrator', async () => {
     const { before, runId } = await interruptedRun()
-    const after = relaunch(before, { gated }, () => (_prompt, tools) => {
+    const after = await relaunch(before, { gated }, () => (_prompt, tools) => {
       tools.block({ reason: 'which way again?' })
     })
 
@@ -1213,7 +1215,7 @@ describe('the interruption notice', () => {
     await until(() => after.engine.runs()[0].waiting === true)
     expect(after.delivered.at(-1)?.text).toContain('raised a blocker')
     expect(after.engine.runs()[0].noticePending).toBeUndefined()
-    expect(recordsOnDisk(after)[0].noticePending).toBeUndefined()
+    expect((await recordsOnDisk(after))[0].noticePending).toBeUndefined()
 
     after.engine.deliverNotices('orchestrator-1')
     expect(after.delivered.filter((message) => message.text.includes('was interrupted'))).toEqual(
@@ -1223,7 +1225,7 @@ describe('the interruption notice', () => {
 
   it('is owed to whichever session adopts the run', async () => {
     const { before, runId } = await interruptedRun()
-    const after = relaunch(before, { gated }, planThenPark)
+    const after = await relaunch(before, { gated }, planThenPark)
 
     after.engine.adopt(runId, 'orchestrator-2')
     // Adoption moves the seat and settles nothing: the new session's next

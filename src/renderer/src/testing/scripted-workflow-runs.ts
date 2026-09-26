@@ -7,10 +7,12 @@ import type {
 } from '../../../shared/workflows/service'
 
 // Answers the run seam the way main does but moves nothing by itself: a test
-// changes the records and the event goes out whole, like the engine's.
+// changes the records and every one it hands in goes out as changed. Main
+// never removes a record, and neither may a test: one left out stays where
+// the shell last saw it.
 export interface ScriptedWorkflowRuns extends WorkflowRunService {
   readonly calls: ReadonlyArray<{ readonly op: string; readonly args: readonly string[] }>
-  /** Replaces the records and announces the new snapshot. */
+  /** Replaces the records and announces each of them as changed. */
   setRuns(runs: readonly RunRecord[]): void
   /** ⌘R the way main announces it after intercepting the chord. */
   emitToggle(): void
@@ -36,7 +38,7 @@ export function createScriptedWorkflowRuns(
 
     setRuns(next: readonly RunRecord[]): void {
       runs = next
-      for (const listener of [...listeners]) listener({ type: 'runs', snapshot: { runs } })
+      for (const listener of [...listeners]) listener({ type: 'runs', changed: next })
     },
 
     emitToggle(): void {

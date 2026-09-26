@@ -314,7 +314,7 @@ describe('a quit that catches a node with a monitor live', () => {
     await built.engine.start(startRequest(built.repo, 'solo', { prompt }))
     await until(() => built.engine.runs()[0].nodes[0].waitingOn !== undefined)
 
-    const after = relaunch(built, { solo: oneNode }, () => () => {}, {
+    const after = await relaunch(built, { solo: oneNode }, () => () => {}, {
       monitors: scriptedMonitors()
     })
     const node = after.engine.runs()[0].nodes[0]

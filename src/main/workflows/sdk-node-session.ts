@@ -38,6 +38,7 @@ import {
 import type { CompactionTrigger } from '../../shared/compaction/record.ts'
 import { piCompactionSettings } from '../../shared/compaction/trigger.ts'
 import { createCompactionWatch } from '../../shared/compaction/watch.ts'
+import { piModules } from '../agent/pi-modules.ts'
 import { retentionInForce } from '../cache/retention.ts'
 import { forPi, type LoadedSkill } from '../skills/service.ts'
 import type {
@@ -84,7 +85,7 @@ export function createSdkNodeSessionFactory({
   let modelRuntime: Promise<import('@earendil-works/pi-coding-agent').ModelRuntime> | undefined
 
   function sdk(): Promise<Sdk> {
-    sdkModule ??= import('@earendil-works/pi-coding-agent')
+    sdkModule ??= piModules.codingAgent()
     return sdkModule
   }
 
