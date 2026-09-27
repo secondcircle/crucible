@@ -283,7 +283,7 @@ describe('the run view', () => {
   })
 })
 
-describe('the global runs view', () => {
+describe('the workspace runs view', () => {
   it('opens on ⌘R, bands every run by what it wants from you, and closes on Esc', async () => {
     mount([
       runOf({}),
@@ -298,8 +298,6 @@ describe('the global runs view', () => {
         id: 'd3p8',
         workflow: 'adhoc',
         status: 'complete',
-        workspacePath: '/repos/resume-site',
-        workspaceName: 'resume-site',
         sessionId: undefined,
         endedAt: '2026-08-20T11:00:00.000Z'
       })
@@ -311,7 +309,7 @@ describe('the global runs view', () => {
       await settled()
     })
 
-    const view = screen.getByLabelText('All runs')
+    const view = screen.getByLabelText('Workspace runs')
     expect(bands()).toEqual(['Running', 'Needs you', 'Done'])
     expect(rowsOf('Running')).toEqual(['en42'])
     expect(rowsOf('Needs you')).toEqual(['f7k1'])
@@ -324,25 +322,60 @@ describe('the global runs view', () => {
       fireEvent.keyDown(document, { key: 'Escape' })
       await settled()
     })
-    expect(screen.queryByLabelText('All runs')).toBeNull()
+    expect(screen.queryByLabelText('Workspace runs')).toBeNull()
   })
 
-  it('shows the workspace as a column on the row, with no grouping left', async () => {
+  it('lists the workspace on screen and nothing of any other, not even in the count', async () => {
     await open([
       runOf({}),
       runOf({
         id: 'k2m9',
         workspacePath: '/repos/resume-site',
         workspaceName: 'resume-site',
-        sessionId: 's2'
+        waiting: true,
+        sessionId: undefined
       })
     ])
 
-    expect(
-      [...document.querySelectorAll('.runrow .ws')].map((column) => column.textContent)
-    ).toEqual(['crucible', 'resume-site'])
-    // The workspace heading of the old view is gone entirely.
-    expect(screen.getByLabelText('All runs').querySelector('.wsgroup')).toBeNull()
+    expect(document.querySelector('.gvtop .t')?.textContent).toBe('Runs · crucible')
+    expect(rowsOf('Running')).toEqual(['en42'])
+    expect(row('k2m9')).toBeNull()
+    expect(bands()).toEqual(['Running'])
+    expect(count()).toBe('1 running')
+    // Every row is this workspace's, so none of them names it.
+    expect(document.querySelector('.runrow .ws')).toBeNull()
+  })
+
+  it('closes when the user switches workspace, and reopens on the new one', async () => {
+    const { port } = mount([
+      runOf({}),
+      runOf({
+        id: 'k2m9',
+        workspacePath: '/repos/resume-site',
+        workspaceName: 'resume-site',
+        sessionId: undefined
+      })
+    ])
+    await act(settled)
+    await act(async () => {
+      fireEvent.keyDown(document, { key: 'r', metaKey: true })
+      await settled()
+    })
+    expect(screen.getByLabelText('Workspace runs')).toBeInTheDocument()
+
+    await act(async () => {
+      await port.activateWorkspace('w2')
+      await settled()
+    })
+    expect(screen.queryByLabelText('Workspace runs')).toBeNull()
+
+    await act(async () => {
+      fireEvent.keyDown(document, { key: 'r', metaKey: true })
+      await settled()
+    })
+    expect(document.querySelector('.gvtop .t')?.textContent).toBe('Runs · resume-site')
+    expect(rowsOf('Running')).toEqual(['k2m9'])
+    expect(row('en42')).toBeNull()
   })
 
   it('leaves an empty band out rather than heading nothing', async () => {
@@ -355,7 +388,7 @@ describe('the global runs view', () => {
     await open([])
 
     expect(bands()).toEqual([])
-    expect(screen.getByLabelText('All runs')).toHaveTextContent('No runs yet')
+    expect(screen.getByLabelText('Workspace runs')).toHaveTextContent('No runs in crucible yet')
   })
 
   it('puts the newest first inside a band', async () => {
@@ -425,7 +458,7 @@ describe('the global runs view', () => {
       workflowRuns.emitToggle()
       await settled()
     })
-    expect(screen.getByLabelText('All runs')).toBeInTheDocument()
+    expect(screen.getByLabelText('Workspace runs')).toBeInTheDocument()
   })
 
   it('Go to session lands in the orchestrator session', async () => {
@@ -441,7 +474,7 @@ describe('the global runs view', () => {
       await settled()
     })
     expect(port.calls).toContainEqual({ op: 'activateSession', args: ['s1'] })
-    expect(screen.queryByLabelText('All runs')).toBeNull()
+    expect(screen.queryByLabelText('Workspace runs')).toBeNull()
   })
 
   // Start session offered a chat that knew nothing about the run. Investigate
@@ -451,9 +484,7 @@ describe('the global runs view', () => {
       runOf({}),
       runOf({
         id: 'g8x2',
-        sessionId: undefined,
-        workspacePath: '/repos/resume-site',
-        workspaceName: 'resume-site'
+        sessionId: undefined
       })
     ])
 
@@ -1040,9 +1071,7 @@ describe('investigating a run', () => {
         status: 'failed',
         endedAt: '2026-08-20T11:00:00.000Z',
         error: 'the builder never wrote its changes file',
-        dir: '/state/workflow-runs/fail',
-        workspacePath: '/repos/resume-site',
-        workspaceName: 'resume-site'
+        dir: '/state/workflow-runs/fail'
       })
     ])
     await act(settled)
@@ -1058,8 +1087,8 @@ describe('investigating a run', () => {
 
     const created = port.calls.find((call) => call.op === 'createSession')
     const prompted = port.calls.find((call) => call.op === 'prompt')
-    // The session is made in the run's own workspace, not the active one.
-    expect(created?.args).toEqual(['w2'])
+    // The session is made in the run's own workspace.
+    expect(created?.args).toEqual(['w1'])
     const sessionId = String(prompted?.args[0])
     // Adopted before the prompt went out, so crucible_runs already lists it.
     expect(workflowRuns.calls).toContainEqual({ op: 'adopt', args: ['fail', sessionId] })
@@ -1076,7 +1105,7 @@ describe('investigating a run', () => {
     expect(text).toContain('/state/workflow-runs/fail')
     // Echoed in the transcript, and the region is gone: you land in the chat.
     expect(screen.getByText(/Investigate Crucible run fail/)).toBeTruthy()
-    expect(screen.queryByLabelText('All runs')).toBeNull()
+    expect(screen.queryByLabelText('Workspace runs')).toBeNull()
   })
 
   it('disables the button for the whole flight, so one click makes one session', async () => {
@@ -1115,18 +1144,6 @@ describe('investigating a run', () => {
       await settled()
     })
     expect(port.calls.filter((call) => call.op === 'createSession')).toHaveLength(1)
-  })
-
-  it('says why it cannot act when the run workspace is not in the sidebar', async () => {
-    await open([
-      runOf({ id: 'away', workspacePath: '/repos/elsewhere', workspaceName: 'elsewhere' })
-    ])
-
-    const button = investigateIn('away')
-    expect(button?.disabled).toBe(true)
-    expect(button?.title).toBe(
-      'Add elsewhere to the sidebar first — an investigation runs in a session of its own.'
-    )
   })
 
   it('is offered in the run view header too, whatever the run status', async () => {

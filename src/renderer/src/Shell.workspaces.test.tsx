@@ -239,14 +239,24 @@ describe('the order the list is in', () => {
   it('reorders nothing anywhere else: the runs overview keeps its own order', async () => {
     await sidebar({
       runs: [
-        runOf({ id: 'en1', status: 'complete', endedAt: ago(60_000) }),
+        // Recent work in camping lifts it in the sidebar, and it lists in
+        // camping's own overview, never in this one.
+        runOf({ id: 'away', status: 'complete', endedAt: ago(30_000) }),
+        runOf({
+          id: 'en1',
+          status: 'complete',
+          endedAt: ago(60_000),
+          sessionId: 's2',
+          workspacePath: '/repos/crucible',
+          workspaceName: 'crucible'
+        }),
         runOf({
           id: 'en2',
           status: 'complete',
           endedAt: ago(20 * 60_000),
-          sessionId: 's3',
-          workspacePath: '/repos/baypool',
-          workspaceName: 'baypool'
+          sessionId: 's1',
+          workspacePath: '/repos/crucible',
+          workspaceName: 'crucible'
         })
       ]
     })
@@ -257,9 +267,9 @@ describe('the order the list is in', () => {
     })
 
     expect(listed()).toEqual(['baypool', 'camping', 'crucible', 'financial', 'train-4-tomorrow'])
-    expect([...document.querySelectorAll('.runrow .ws')].map((row) => row.textContent)).toEqual([
-      'camping',
-      'baypool'
+    expect([...document.querySelectorAll('.runrow .id')].map((row) => row.textContent)).toEqual([
+      'en1',
+      'en2'
     ])
   })
 })

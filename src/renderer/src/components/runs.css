@@ -1084,7 +1084,7 @@
   margin-left: auto;
 }
 
-/* ---------- the global runs view ---------- */
+/* ---------- the workspace runs view (⌘R) ---------- */
 
 .gvtop {
   display: flex;
@@ -1097,6 +1097,12 @@
 .gvtop .t {
   font-weight: 700;
   font-size: 15px;
+  white-space: nowrap;
+}
+
+.gvtop .t .where {
+  font-weight: 400;
+  color: var(--accent2);
 }
 
 .gvtop .count {
@@ -1225,16 +1231,6 @@
   font: 11px var(--mono);
   color: var(--faint);
   max-width: 160px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-/* Where the workspace lives now that the bands do the grouping. */
-.runrow .ws {
-  font: 11.5px var(--mono);
-  color: var(--accent2);
-  width: 104px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;

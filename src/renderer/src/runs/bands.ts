@@ -1,8 +1,8 @@
 import { targetFolder, type RunRecord } from '../../../shared/workflows/run'
 import { paged, type MoreRows } from './page'
 
-// ⌘R groups by what a run wants from you, not by where it ran: running, needs
-// you, done. The workspace is a column on the row instead.
+// ⌘R groups one workspace's runs by what each wants from you: running, needs
+// you, done.
 
 export type Band = 'running' | 'needsYou' | 'done'
 
@@ -95,8 +95,9 @@ export function shownBands(
   })
 }
 
-// The words a row shows, and only those: workflow, target repository,
-// workspace, run id and session title. Case-insensitive, anywhere in the word.
+// The words a row shows, and only those: workflow, target repository, run id
+// and session title. Case-insensitive, anywhere in the word. Not the
+// workspace: every row in ⌘R is the one workspace's, so no row shows it.
 export function runMatches(
   run: RunRecord,
   filter: string,
@@ -104,7 +105,7 @@ export function runMatches(
 ): boolean {
   const needle = filter.trim().toLowerCase()
   if (needle === '') return true
-  return [run.workflow, targetFolder(run), run.workspaceName, run.id, sessionTitle].some(
+  return [run.workflow, targetFolder(run), run.id, sessionTitle].some(
     (field) => field !== undefined && field.toLowerCase().includes(needle)
   )
 }

@@ -545,7 +545,7 @@ describe('nothing refreshes on its own', () => {
       await settled()
     })
 
-    expect(screen.getByLabelText('All runs')).toBeInTheDocument()
+    expect(screen.getByLabelText('Workspace runs')).toBeInTheDocument()
     expect(reloads).toEqual([])
     expect(ops(port).slice(callsBefore)).not.toContain('exhibit')
   })

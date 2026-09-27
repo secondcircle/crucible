@@ -285,7 +285,6 @@ describe('what the filter matches', () => {
 
   it('is the words the row shows, case-insensitively', () => {
     expect(runMatches(run, 'UPSTREAM', undefined)).toBe(true)
-    expect(runMatches(run, 'crucible', undefined)).toBe(true)
     expect(runMatches(run, 'kairos', undefined)).toBe(true)
     expect(runMatches(run, '356', undefined)).toBe(true)
     expect(runMatches(run, 'sync', 'upstream sync')).toBe(true)
@@ -295,6 +294,8 @@ describe('what the filter matches', () => {
     // The repository is shown by its folder alone.
     expect(runMatches(run, 'apps/', undefined)).toBe(false)
     expect(runMatches(run, 'run-en42', undefined)).toBe(false)
+    // Every row is the one workspace's, so none shows it.
+    expect(runMatches(run, 'crucible', undefined)).toBe(false)
   })
 
   it('is everything when blank', () => {

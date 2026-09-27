@@ -215,7 +215,7 @@ describe('Done over a long history', () => {
     expect(rowsOf('Done')).toHaveLength(40)
 
     await toggle()
-    expect(screen.queryByLabelText('All runs')).toBeNull()
+    expect(screen.queryByLabelText('Workspace runs')).toBeNull()
     await toggle()
 
     expect(rowsOf('Done')).toHaveLength(20)
@@ -273,16 +273,9 @@ describe('the filter', () => {
     expect(foot()).toBeNull()
   })
 
-  it('matches workflow, workspace, repository, run id and session title', async () => {
+  it('matches workflow, repository, run id and session title', async () => {
     const runs = [
       runOf({ id: 'wf01', workflow: 'research', status: 'complete', endedAt: ago(1) }),
-      runOf({
-        id: 'ws01',
-        workspacePath: '/repos/resume-site',
-        workspaceName: 'resume-site',
-        status: 'complete',
-        endedAt: ago(2)
-      }),
       runOf({
         id: 'rp01',
         targetRepository: 'components/kairos-api',
@@ -299,7 +292,6 @@ describe('the filter', () => {
       return rowsOf('Done')
     }
     expect(matching('RESEARCH')).toEqual(['wf01'])
-    expect(matching('resume')).toEqual(['ws01'])
     expect(matching('kairos')).toEqual(['rp01'])
     expect(matching('3566')).toEqual(['3566'])
     expect(matching('rounding')).toEqual(['se01'])
@@ -338,7 +330,7 @@ describe('the filter', () => {
     type('zzz-nothing')
 
     expect(bands()).toEqual([])
-    const view = screen.getByLabelText('All runs')
+    const view = screen.getByLabelText('Workspace runs')
     expect(view).toHaveTextContent('No run matches “zzz-nothing”.')
 
     act(() => {
@@ -370,11 +362,11 @@ describe('the filter', () => {
     type('d001')
 
     await escapeFrom(filterBox())
-    expect(screen.getByLabelText('All runs')).toBeInTheDocument()
+    expect(screen.getByLabelText('Workspace runs')).toBeInTheDocument()
     expect(filterBox()).toHaveValue('')
     expect(rowsOf('Done')).toHaveLength(3)
 
     await escapeFrom(filterBox())
-    expect(screen.queryByLabelText('All runs')).toBeNull()
+    expect(screen.queryByLabelText('Workspace runs')).toBeNull()
   })
 })

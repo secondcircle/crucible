@@ -177,7 +177,7 @@ export interface RunRecord {
   readonly status: RunStatus
   /** The workspace checkout the run belongs to. */
   readonly workspacePath: string
-  /** What the global view groups by. */
+  /** The workspace's display name, for messages that name it. */
   readonly workspaceName: string
   // The orchestrator session. Every question and the completion go to its
   // agent; absent only for an unattended run — one a schedule fired, which

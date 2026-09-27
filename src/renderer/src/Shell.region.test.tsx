@@ -150,7 +150,7 @@ const OCCUPANTS: readonly {
   },
   {
     name: 'the runs overview',
-    surface: 'All runs',
+    surface: 'Workspace runs',
     role: 'region',
     open: () => press('r', { metaKey: true })
   },
@@ -265,7 +265,7 @@ describe('one occupant at a time', () => {
 
     await click('Settings')
 
-    expect(screen.queryByLabelText('All runs')).toBeNull()
+    expect(screen.queryByLabelText('Workspace runs')).toBeNull()
     expect(screen.getByRole('dialog', { name: 'Settings' })).toBeInTheDocument()
   })
 
@@ -284,13 +284,13 @@ describe('one occupant at a time', () => {
     await click('Open run')
 
     expect(screen.getByLabelText('Run en7')).toBeInTheDocument()
-    expect(screen.getByLabelText('All runs')).toBeInTheDocument()
+    expect(screen.getByLabelText('Workspace runs')).toBeInTheDocument()
 
     // Esc unwinds one surface, landing back on the overview it came from.
     await press('Escape')
 
     expect(screen.queryByLabelText('Run en7')).toBeNull()
-    expect(screen.getByLabelText('All runs')).toBeInTheDocument()
+    expect(screen.getByLabelText('Workspace runs')).toBeInTheDocument()
   })
 })
 

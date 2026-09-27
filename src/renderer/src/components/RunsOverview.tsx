@@ -15,10 +15,12 @@ import { InvestigateButton } from './InvestigateButton'
 import { ShowMore } from './ShowMore'
 import './runs.css'
 
-// Every run across every workspace, in three bands: running, needs you, done.
-// A run with an orchestrator gets Go to session, and the record outlives the
-// run, so finished work is reachable here too: Done opens on its newest page,
-// grows at its foot, and the filter reaches the rest of history.
+// One workspace's runs, in three bands: running, needs you, done. Nothing of
+// any other workspace reaches it, not even a count, and the filter searches
+// only this workspace's history. A run with an orchestrator gets Go to
+// session, and the record outlives the run, so finished work is reachable
+// here too: Done opens on its newest page, grows at its foot, and the filter
+// reaches the rest of history.
 
 // How a clearing act ended: `cleared` means the snapshot will re-band the row
 // and take its button away; `kept` — declined, refused or failed, reported by
@@ -27,6 +29,7 @@ export type RunActOutcome = 'cleared' | 'kept'
 
 export function RunsOverview({
   runs,
+  workspaceName,
   workspaces,
   sessions,
   onOpenRun,
@@ -37,7 +40,10 @@ export function RunsOverview({
   onInvestigate,
   onClose
 }: {
+  /** This workspace's runs and no other's. */
   readonly runs: readonly RunRecord[]
+  /** The workspace they belong to, which the header names. */
+  readonly workspaceName: string
   readonly workspaces: readonly WorkspaceState[]
   readonly sessions: readonly SessionState[]
   readonly onOpenRun: (runId: string) => void
@@ -93,15 +99,17 @@ export function RunsOverview({
   }
 
   return (
-    <section className="runsoverview" aria-label="All runs">
+    <section className="runsoverview" aria-label="Workspace runs">
       <header className="gvtop">
-        <span className="t">Runs</span>
+        <span className="t">
+          Runs <span className="where">· {workspaceName}</span>
+        </span>
         <span className="count">{runsHeadline(runs)}</span>
         <span className="filter">
           <input
             ref={box}
             value={filter}
-            placeholder="filter: workflow, workspace, repo, id, session"
+            placeholder="filter: workflow, repo, id, session"
             aria-label="Filter runs"
             spellCheck={false}
             onChange={(typed) => setFilter(typed.target.value)}
@@ -127,8 +135,8 @@ export function RunsOverview({
       <div className="gvbody">
         {runs.length === 0 ? (
           <p className="gvempty">
-            No runs yet. An agent starts one with the crucible_run tool; ask for a workflow in
-            any session.
+            No runs in {workspaceName} yet. An agent starts one with the crucible_run tool; ask
+            for a workflow in any of its sessions.
           </p>
         ) : bands.length === 0 ? (
           <p className="gvempty">
@@ -184,9 +192,6 @@ export function RunsOverview({
                         <Lit text={repository} needle={needle} />
                       </span>
                     )}
-                    <span className="ws">
-                      <Lit text={run.workspaceName} needle={needle} />
-                    </span>
                     <span className="id">
                       <Lit text={run.id} needle={needle} />
                     </span>

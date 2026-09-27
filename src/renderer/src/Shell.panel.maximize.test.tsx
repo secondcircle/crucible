@@ -603,11 +603,11 @@ describe('escape', () => {
       fireEvent.keyDown(document, { key: 'r', metaKey: true })
     })
     await settled()
-    expect(screen.getByLabelText('All runs')).toBeInTheDocument()
+    expect(screen.getByLabelText('Workspace runs')).toBeInTheDocument()
     expect(place()).toBe('maximized')
 
     await escape()
-    expect(screen.queryByLabelText('All runs')).toBeNull()
+    expect(screen.queryByLabelText('Workspace runs')).toBeNull()
     expect(place()).toBe('maximized')
 
     await escape()
@@ -789,7 +789,7 @@ describe('an Escape out of a shown page', () => {
     })
     await settled()
     await guestEscape(keys)
-    expect(screen.getByLabelText('All runs')).toBeInTheDocument()
+    expect(screen.getByLabelText('Workspace runs')).toBeInTheDocument()
 
     await guestEscape(keys)
     await guestEscape(keys)
@@ -807,7 +807,7 @@ describe('an Escape out of a shown page', () => {
 
     await guestEscape(keys)
 
-    expect(screen.getByLabelText('All runs')).toBeInTheDocument()
+    expect(screen.getByLabelText('Workspace runs')).toBeInTheDocument()
     expect(place()).toBe('maximized')
   })
 
@@ -1132,6 +1132,6 @@ describe('overlays over a maximized panel', () => {
     await click(exitControl())
 
     expect(place()).toBe('split')
-    expect(screen.getByLabelText('All runs')).toBeInTheDocument()
+    expect(screen.getByLabelText('Workspace runs')).toBeInTheDocument()
   })
 })

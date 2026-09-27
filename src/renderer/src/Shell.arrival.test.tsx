@@ -169,7 +169,7 @@ describe('what an arrival closes', () => {
     await switchSession()
 
     expect(screen.queryByLabelText('Run en42')).toBeNull()
-    expect(screen.queryByLabelText('All runs')).toBeNull()
+    expect(screen.queryByLabelText('Workspace runs')).toBeNull()
   })
 
   it('takes the Settings sheet off', async () => {
@@ -338,7 +338,7 @@ describe('the ways a session is arrived at', () => {
     await click('Go to session')
     await settled()
 
-    expect(screen.queryByLabelText('All runs')).toBeNull()
+    expect(screen.queryByLabelText('Workspace runs')).toBeNull()
   })
 
   it('is activating a workspace, which lands on a session of its own', async () => {

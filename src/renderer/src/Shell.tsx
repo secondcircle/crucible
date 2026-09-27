@@ -142,7 +142,9 @@ type Occupant =
   | { readonly kind: 'schedules'; readonly workspaceId: WorkspaceId }
   | { readonly kind: 'tree' }
   | { readonly kind: 'settings'; readonly section: SettingsSection }
-  | { readonly kind: 'runs' }
+  // The workspace whose runs the overview lists, which is the one on screen
+  // when ⌘R opened it.
+  | { readonly kind: 'runs'; readonly workspaceId: WorkspaceId }
   | { readonly kind: 'run'; readonly runId: WorkflowRunId }
   | { readonly kind: 'cache' }
   | { readonly kind: 'resume' }
@@ -494,12 +496,16 @@ export function Shell({
   /** Esc's unwind: the topmost surface only, so a stack comes apart in order. */
   const closeTopOfRegion = useCallback((): void => setRegion((up) => up.slice(0, -1)), [])
   // ⌘R toggles: it closes the runs surfaces when either is up, and otherwise
-  // takes the region over from whatever had it.
-  const toggleRuns = useCallback(
-    (): void =>
-      setRegion((up) => (up.some((one) => one.kind === 'runs') ? [] : [{ kind: 'runs' }])),
-    []
-  )
+  // takes the region over from whatever had it, on the workspace on screen.
+  // Read from the ref so the toggle stays one function for the whole launch:
+  // the run seam subscribes with it.
+  const toggleRuns = useCallback((): void => {
+    const workspaceId = railNow.current.activeWorkspaceId
+    setRegion((up) => {
+      if (up.some((one) => one.kind === 'runs')) return []
+      return workspaceId === undefined ? up : [{ kind: 'runs', workspaceId }]
+    })
+  }, [])
 
   const { snapshot, models, views } = state
   const activeWorkspaceId = snapshot.activeWorkspaceId
@@ -652,6 +658,11 @@ export function Shell({
   const resumeOpen = occupant?.kind === 'resume'
   /** The overview stays under an opened run, so Esc unwinds back onto it. */
   const runsOverviewOpen = region.some((one) => one.kind === 'runs')
+  // ⌘R lists the workspace on screen and nothing of any other.
+  const workspaceRuns = useMemo(
+    () => (active === undefined ? [] : allRuns.filter((one) => one.workspacePath === active.path)),
+    [allRuns, active]
+  )
   const openRunId = occupant?.kind === 'run' ? occupant.runId : undefined
   const openRun = openRunId === undefined ? undefined : allRuns.find((r) => r.id === openRunId)
   // A reopened tree is a loading panel until its fetch lands, so occupying the
@@ -905,6 +916,11 @@ export function Shell({
   if (occupant?.kind === 'issues' && !issuesOpen) setRegion([])
   if (occupant?.kind === 'schedules' && !schedulesOpen) setRegion([])
   if (occupant?.kind === 'tree' && session === undefined) setRegion([])
+  // The overview is the workspace's: switching away closes it, and a run
+  // opened above it goes with it.
+  if (region.some((one) => one.kind === 'runs' && one.workspaceId !== activeWorkspaceId)) {
+    setRegion([])
+  }
 
   // A confirm names the session it was raised on, so the render that lands an
   // activation drops it: left up, its copy would read as being about the chat
@@ -3276,7 +3292,8 @@ export function Shell({
 
               {runsOverviewOpen ? (
                 <RunsOverview
-                  runs={allRuns}
+                  runs={workspaceRuns}
+                  workspaceName={active?.name ?? ''}
                   workspaces={snapshot.workspaces}
                   sessions={snapshot.sessions}
                   onOpenRun={openWorkflowRun}
