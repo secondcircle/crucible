@@ -77,7 +77,9 @@ told" below.
 - `plan(inputs)` — optional. The nodes certain to run, so they appear as
   pending ghosts in the graph from the first moment. Throwing here fails the
   kickoff, which makes it the place for input validation. List only what is
-  certain: the plan is a floor, not a guess.
+  certain: the plan is a floor, not a guess. An entry's `parents` are the
+  ids it will follow, so its ghost draws its edges before it starts; once the
+  node starts, a `from` in its spec replaces them, and without one they stand.
 - `target` — optional: which repository a run works in, below. Absent,
   whatever the kickoff names, or the workspace's own repository.
 - `schedule` — optional, workspace workflows only: the firing rule, below.

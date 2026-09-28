@@ -1,5 +1,5 @@
 import { nodeChains, type RunNode } from '../../../shared/workflows/run'
-import { readFlow } from './flow'
+import { readFlow, runOrder } from './flow'
 import { money, nodeDuration, shortModel } from './format'
 import { readLoops, type Loop, type LoopReading, type NodeSpot } from './loops'
 import { readSteps } from './steps'
@@ -119,11 +119,13 @@ export function layOutGraph(nodes: readonly RunNode[]): GraphLayout {
   const flow = readFlow(nodes)
   const parentsOf = (node: RunNode): readonly string[] => flow.get(node) ?? []
 
+  const components = componentOrder(nodes, parentsOf, index)
+
   // Loops are read from what has run: a planned node hangs off the bottom of
   // the drawing, never in a round's column.
-  const reading = walkedLoops(nodes)
+  const reading = walkedLoops(nodes, components)
   const rows = rowsOf(nodes, parentsOf, reading)
-  const columns = columnsOf(nodes, parentsOf, reading, rows, cardWidth)
+  const columns = columnsOf(nodes, parentsOf, reading, rows, cardWidth, components)
 
   const raw: GraphCard[] = nodes.map((node) => {
     const layer = rows.get(node.id) ?? 0
@@ -196,20 +198,62 @@ export function layOutGraph(nodes: readonly RunNode[]): GraphLayout {
   }
 }
 
+const SPINE: NodeSpot = { kind: 'spine' }
+
 /**
  * The loops of a record, read from the nodes that have run and mapped back
  * onto the whole of it: a node that has not started is on the spine, wherever
- * a round number in its id might otherwise have put it.
+ * a round number in its id might otherwise have put it. A loop whose nodes
+ * the record's edges leave in more than one component is no loop either.
  */
-function walkedLoops(nodes: readonly RunNode[]): LoopReading {
+function walkedLoops(
+  nodes: readonly RunNode[],
+  components: readonly (readonly string[])[]
+): LoopReading {
   const walked = nodes.filter((node) => node.status !== 'pending')
   const read = readLoops(walked)
+  return joinedLoops(
+    nodes,
+    {
+      spots: nodes.map((node) => {
+        const at = walked.indexOf(node)
+        return at === -1 ? SPINE : read.spots[at]
+      }),
+      loops: read.loops
+    },
+    components
+  )
+}
+
+// A round's column is measured from its loop's first card, and every
+// component is placed and shifted on its own, so a loop reaching across two
+// of them would scatter its rounds over the canvas.
+function joinedLoops(
+  nodes: readonly RunNode[],
+  reading: LoopReading,
+  components: readonly (readonly string[])[]
+): LoopReading {
+  const componentOf = new Map<string, number>()
+  components.forEach((members, at) => {
+    for (const id of members) componentOf.set(id, at)
+  })
+  const spanned = reading.loops.map(() => new Set<number | undefined>())
+  reading.spots.forEach((spot, at) => {
+    if (spot.kind === 'loop') spanned[spot.loop].add(componentOf.get(nodes[at].id))
+  })
+  const kept: Loop[] = []
+  const renumbered = reading.loops.map((loop, at) => {
+    if (spanned[at].size !== 1) return undefined
+    kept.push(loop)
+    return kept.length - 1
+  })
   return {
-    spots: nodes.map((node) => {
-      const at = walked.indexOf(node)
-      return at === -1 ? { kind: 'spine' } : read.spots[at]
+    spots: reading.spots.map((spot) => {
+      if (spot.kind !== 'loop') return spot
+      const loop = renumbered[spot.loop]
+      return loop === undefined ? SPINE : { ...spot, loop }
     }),
-    loops: read.loops
+    loops: kept
   }
 }
 
@@ -417,10 +461,10 @@ function columnsOf(
   parentsOf: (node: RunNode) => readonly string[],
   reading: LoopReading,
   rows: Map<string, number>,
-  cardWidth: number
+  cardWidth: number,
+  components: readonly (readonly string[])[]
 ): Map<string, number> {
   const byId = new Map(nodes.map((node) => [node.id, node]))
-  const index = new Map(nodes.map((node, at) => [node.id, at]))
   const spots = spotsById(nodes, reading)
   const leads = leadingNodes(nodes, reading)
   const left = new Map<string, number>()
@@ -498,7 +542,7 @@ function columnsOf(
   }
 
   let componentStart = 0
-  for (const component of componentOrder(nodes, parentsOf, index)) {
+  for (const component of components) {
     const members = component.map((id) => byId.get(id) as RunNode)
     const deepest = Math.max(...members.map((node) => rows.get(node.id) ?? 0))
     const reserved = new Map<number, Span[]>()
@@ -571,7 +615,10 @@ function leadingNodes(nodes: readonly RunNode[], reading: LoopReading): Map<numb
   return leads
 }
 
-/** Weakly connected components, in order of the first node the record names. */
+/**
+ * Weakly connected components, left to right in the order the run walked into
+ * them, so rounds nobody joined with an edge still read in the order they ran.
+ */
 function componentOrder(
   nodes: readonly RunNode[],
   parentsOf: (node: RunNode) => readonly string[],
@@ -594,6 +641,11 @@ function componentOrder(
     }
   }
   const groups = new Map<string, string[]>()
+  const walkedAt = new Map<string, number>()
+  runOrder(nodes).forEach((at, place) => {
+    const root = find(nodes[at].id)
+    if (!walkedAt.has(root)) walkedAt.set(root, place)
+  })
   for (const node of nodes) {
     const root = find(node.id)
     const held = groups.get(root)
@@ -601,7 +653,7 @@ function componentOrder(
     else held.push(node.id)
   }
   return [...groups.entries()]
-    .sort(([a], [b]) => (index.get(a) ?? 0) - (index.get(b) ?? 0))
+    .sort(([a], [b]) => (walkedAt.get(a) ?? 0) - (walkedAt.get(b) ?? 0))
     .map(([, members]) => members)
 }
 

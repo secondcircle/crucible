@@ -1018,3 +1018,78 @@ describe('what an edge means', () => {
     expect(edgeState(edge('planner', 'builder'), settled, undefined)).toBe('walked')
   })
 })
+
+// Run cdc9 as recorded: three assess rounds the workflow never joined with
+// `from`, the build that followed the last of them, and a review the plan
+// forecast with no parents. Only what the layout reads is kept.
+describe('rounds the record never joined with an edge', () => {
+  const at = (time: string): Partial<RunNode> => ({ startedAt: `2026-09-28T${time}:00.000Z` })
+  const CDC9: RunNode[] = [
+    nodeOf('assess', [], at('13:52')),
+    nodeOf('build', ['assess-3'], { ...at('14:30'), status: 'running', endedAt: undefined }),
+    nodeOf('review', [], { status: 'pending', startedAt: undefined, endedAt: undefined }),
+    nodeOf('assess-2', [], at('14:00')),
+    nodeOf('assess-3', [], at('14:24'))
+  ]
+  const layout = layOutGraph(CDC9)
+
+  it('stands the rounds left to right in the order they ran, each at the top of its own column', () => {
+    const rounds = ['assess', 'assess-2', 'assess-3'].map((id) => card(layout, id))
+    expect(rounds.map((one) => one.layer)).toEqual([0, 0, 0])
+    expect(rounds[0].x).toBeLessThan(rounds[1].x)
+    expect(rounds[1].x).toBeLessThan(rounds[2].x)
+    // Nothing else lands between two rounds.
+    const between = layout.cards.filter(
+      (one) => one.layer === 0 && one.x > rounds[0].x && one.x < rounds[2].x
+    )
+    expect(between.map((one) => one.id)).toEqual(['assess-2'])
+  })
+
+  it('sits the build straight under the one round it followed', () => {
+    expect(card(layout, 'build').x).toBe(card(layout, 'assess-3').x)
+    expect(card(layout, 'build').layer).toBe(card(layout, 'assess-3').layer + 1)
+    expect(layout.edges.map((edge) => [`${edge.from}→${edge.to}`, edge.route.kind])).toEqual([
+      ['assess-3→build', 'direct']
+    ])
+  })
+
+  it('keeps the unconnected ghost out of the way, and draws nothing over anything', () => {
+    expect(card(layout, 'review').x).toBeGreaterThanOrEqual(
+      card(layout, 'assess-3').x + layout.cardWidth
+    )
+    expectNothingOverlaps(layout)
+    expectNoEdgeCrossesACard(layout)
+    expectExtentHoldsEverything(layout)
+    expect(layOutGraph(CDC9.map((node) => ({ ...node })))).toEqual(layout)
+  })
+
+  it('still draws the rounds as a loop once the record joins them', () => {
+    const joined = layOutGraph(
+      CDC9.map((node) =>
+        node.id === 'assess-2'
+          ? { ...node, parents: ['assess'] }
+          : node.id === 'assess-3'
+            ? { ...node, parents: ['assess-2'] }
+            : node.id === 'review'
+              ? { ...node, parents: ['build'] }
+              : node
+      )
+    )
+    const route = (from: string, to: string): string | undefined =>
+      joined.edges.find((edge) => edge.from === from && edge.to === to)?.route.kind
+
+    expect(['assess', 'assess-2', 'assess-3'].map((id) => card(joined, id).layer)).toEqual([
+      0, 0, 0
+    ])
+    expect(card(joined, 'assess').x).toBeLessThan(card(joined, 'assess-2').x)
+    expect(card(joined, 'assess-2').x).toBeLessThan(card(joined, 'assess-3').x)
+    expect(route('assess', 'assess-2')).toBe('across')
+    expect(route('assess-2', 'assess-3')).toBe('across')
+    // Out of the loop the run resumes under its first round, as every loop does.
+    expect(route('assess-3', 'build')).toBe('return')
+    expect(card(joined, 'build').x).toBe(card(joined, 'assess').x)
+    expect(card(joined, 'review').x).toBe(card(joined, 'build').x)
+    expectNothingOverlaps(joined)
+    expectNoEdgeCrossesACard(joined)
+  })
+})

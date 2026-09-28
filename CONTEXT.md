@@ -374,7 +374,8 @@ In the run graph, a stretch of nodes whose base name recurs with rising round
 numbers (`review-1`, `review-2`), inferred from ids alone, never declared by
 the workflow. Each **round** runs from one occurrence of the leading name to
 the next and is drawn as one column; rounds go left to right off the main
-line, and the main line resumes under the first round.
+line, and the main line resumes under the first round. Rounds the record's
+edges leave apart are drawn as the separate pieces they are, not as a loop.
 _Avoid_: cycle (a run record has none), iteration, retry, revision (that is
 the engine's `·rN` record of a replayed node).
 
