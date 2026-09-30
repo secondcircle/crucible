@@ -26,6 +26,13 @@ on them. Deliver, in order:
 2. Your recommended next step.
 3. What was done, in one or two sentences.
 
+Describe what was done in words a person can follow without looking
+anything up. A commit hash, run id or node name means nothing to the reader
+on its own. For a commit, say in one plain sentence what went into it and
+name the repository and branch it landed on: "I committed the plan and the
+renumbered next steps in workstream.md to main in crucible." Add the hash
+after that only when the user will need to type it.
+
 Stop there. Do not narrate your work or justify your choices; the user can
 read the code, and will ask when something needs expanding. Every paragraph
 past the three points above costs the user more than it gives them.

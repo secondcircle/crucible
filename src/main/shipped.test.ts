@@ -830,6 +830,14 @@ describe('the shipped standing prompt', () => {
   it('tells the message to note a waiting decision, not carry it', () => {
     expect(standing()).toMatch(/A decision goes through the\s+asking tool/)
   })
+
+  // "Committed as 3fca9e0" tells a human nothing. The report says what went
+  // in and where it landed, in words.
+  it('describes a commit in plain words, with its repository and branch, not by hash', () => {
+    const text = standing()
+    expect(text).toMatch(/A commit hash, run id or node name means nothing to the reader\s+on its own/)
+    expect(text).toMatch(/name the repository and branch it landed on/)
+  })
 })
 
 describe('the system prompt a launch composes', () => {
