@@ -19,7 +19,7 @@ import {
 import { readingOf } from '../../shared/workflows/reader'
 import type { WorkflowManifest } from '../workflows/host/host'
 import type { LoadedWorkflow, SurveyedWorkflow, WorkflowSurveyor } from '../workflows/loader'
-import { sourcesHash, workflowSources } from './sources'
+import { detachedReading, rootedReading, sourcesHash, workflowSources } from './sources'
 import type { CatalogStore } from './store'
 
 // The workflow catalog: every workflow a workspace on screen can run, each
@@ -94,12 +94,15 @@ export function createWorkflowCatalog({
   const opened = new Map<string, OpenWorkspace>()
   const watchers = new Map<string, () => void>()
   // By workflow file: one file can be in several workspaces' catalogs (a
-  // user workflow is in all of them), and it is one reading.
+  // user workflow is in all of them), and it is one reading. Two files can
+  // want one key, too: the same bytes at two paths, as two worktrees of one
+  // repository hold them, are one reading, made once and shown in both.
   const wanted = new Map<string, Wanted>()
   // This launch's failures, by key: a key that failed is not asked again
   // until the files or the reader move it.
   const failures = new Map<string, string>()
-  const queue: { readonly path: string; readonly key: string }[] = []
+  // Keys, since a key is the work: whichever file wants it, it is read once.
+  const queue: string[] = []
   const inFlight = new Set<string>()
   // Starting a host to ask `plan()` costs a process, so its answer is kept
   // for as long as the files it came from are the same.
@@ -109,11 +112,16 @@ export function createWorkflowCatalog({
 
   const keyOf = (reader: CatalogReaderSettings, hash: string): string => `${readerKey(reader)}\n${hash}`
 
-  function stateOf(path: string, key: string): ReadingState {
-    const kept = store.reading(path, readerKey(store.reader()))
-    if (kept !== undefined && kept.key === key) return { status: 'read', reading: kept.reading }
-    const last = kept === undefined ? {} : { last: kept.reading }
-    const failure = failures.get(key)
+  // Looked up by the source set's hash, which is what the reading is of, and
+  // rooted in this file so its quotes link to this file's lines.
+  function stateOf(want: Wanted): ReadingState {
+    const reader = readerKey(store.reader())
+    const kept = store.reading(reader, want.hash)
+    if (kept !== undefined) return { status: 'read', reading: rootedReading(kept, want.path) }
+    const lastHash = store.lastRead(want.path, reader)
+    const lastKept = lastHash === undefined ? undefined : store.reading(reader, lastHash)
+    const last = lastKept === undefined ? {} : { last: rootedReading(lastKept, want.path) }
+    const failure = failures.get(want.key)
     return failure === undefined
       ? { status: 'reading', ...last }
       : { status: 'failed', error: failure, ...last }
@@ -164,7 +172,7 @@ export function createWorkflowCatalog({
     const manifest = manifestFacts(workflow.manifest)
     const reader = store.reader()
     const key = keyOf(reader, hash)
-    wanted.set(workflow.path, {
+    const want: Wanted = {
       path: workflow.path,
       hash,
       key,
@@ -175,8 +183,10 @@ export function createWorkflowCatalog({
         manifest,
         ...(planned === undefined ? {} : { plan: planned })
       }
-    })
-    const reading = stateOf(workflow.path, key)
+    }
+    wanted.set(workflow.path, want)
+    store.holds(want.path, readerKey(reader), hash)
+    const reading = stateOf(want)
     return {
       kind: 'workflow',
       name: workflow.name,
@@ -207,7 +217,7 @@ export function createWorkflowCatalog({
           for (const entry of open.entries) {
             if (entry.kind === 'workflow' && entry.reading.status === 'reading') {
               const want = wanted.get(entry.path)
-              if (want !== undefined) enqueue(want.path, want.key)
+              if (want !== undefined) enqueue(want.key)
             }
           }
         } catch (cause) {
@@ -248,54 +258,57 @@ export function createWorkflowCatalog({
     }, debounceMs)
   }
 
-  function enqueue(path: string, key: string): void {
-    if (inFlight.has(key) || queue.some((job) => job.key === key)) return
-    queue.push({ path, key })
+  function enqueue(key: string): void {
+    if (inFlight.has(key) || queue.includes(key)) return
+    queue.push(key)
     pump()
   }
 
   function pump(): void {
     while (!disposed && inFlight.size < concurrency && queue.length > 0) {
-      const job = queue.shift() as { readonly path: string; readonly key: string }
-      const want = wanted.get(job.path)
-      // Superseded while it waited: an edit or a new reader asked for another.
-      if (want === undefined || want.key !== job.key) continue
-      inFlight.add(job.key)
+      const key = queue.shift() as string
+      // Superseded while it waited, if no file wants it now: an edit or a new
+      // reader asked for another. Any file that does is as good as another,
+      // since they hold the same bytes.
+      const want = [...wanted.values()].find((candidate) => candidate.key === key)
+      if (want === undefined) continue
+      inFlight.add(key)
       void readOne(want).finally(() => {
-        inFlight.delete(job.key)
+        inFlight.delete(key)
         pump()
       })
     }
   }
 
   async function readOne(want: Wanted): Promise<void> {
+    const reader = readerKey(want.request.reader)
     try {
       const answer = await within(read(want.request), readTimeoutMs, 'The reader did not answer in time.')
       const reading = readingOf(answer.reply, want.request, now().toISOString())
-      store.keep(want.path, readerKey(want.request.reader), { key: want.key, reading })
+      // The last good reading of every file that holds these bytes, not only
+      // the one whose request it was.
+      const holders = [...wanted.values()].filter((other) => other.hash === want.hash).map((other) => other.path)
+      store.keep(reader, want.hash, detachedReading(reading, want.path), holders)
       failures.delete(want.key)
-      log?.({ event: 'catalog_read', path: want.path, reader: readerKey(want.request.reader) })
+      log?.({ event: 'catalog_read', path: want.path, reader })
     } catch (cause) {
       failures.set(want.key, messageOf(cause))
       log?.({ event: 'catalog_read_failed', path: want.path, message: messageOf(cause) })
     }
-    restate(want.path)
+    // Every file that wanted the key is answered, in every workspace.
+    restate()
   }
 
   /** An entry with its reading state as it stands now. */
   function current(entry: CatalogEntry): CatalogEntry {
     if (entry.kind !== 'workflow') return entry
     const want = wanted.get(entry.path)
-    return want === undefined ? entry : { ...entry, reading: stateOf(entry.path, want.key) }
+    return want === undefined ? entry : { ...entry, reading: stateOf(want) }
   }
 
-  /** Every open workspace's entry for a file, or for every file, stated again. */
-  function restate(path?: string): void {
-    for (const open of opened.values()) {
-      open.entries = open.entries?.map((entry) =>
-        path === undefined || entry.path === path ? current(entry) : entry
-      )
-    }
+  /** Every open workspace's entries, stated again. */
+  function restate(): void {
+    for (const open of opened.values()) open.entries = open.entries?.map(current)
     changed()
   }
 
@@ -322,10 +335,11 @@ export function createWorkflowCatalog({
       for (const [path, want] of wanted) {
         const key = keyOf(reader, want.hash)
         wanted.set(path, { ...want, key, request: { ...want.request, reader } })
+        store.holds(path, readerKey(reader), want.hash)
       }
       restate()
       for (const want of wanted.values()) {
-        if (stateOf(want.path, want.key).status === 'reading') enqueue(want.path, want.key)
+        if (stateOf(want).status === 'reading') enqueue(want.key)
       }
     },
 

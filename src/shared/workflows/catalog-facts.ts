@@ -127,10 +127,15 @@ export interface CatalogStatus {
 }
 
 export function catalogStatus(snapshot: CatalogSnapshot): CatalogStatus {
-  // A user workflow appears in every workspace's catalog; it is one file and counts once.
+  // A user workflow appears in every workspace's catalog; it is one file and
+  // counts once, by its state where it runs: shadowed in one workspace and
+  // live in another, it is the live one's reading that is counted.
   const byPath = new Map<string, CatalogEntry>()
   for (const catalog of snapshot.workspaces) {
-    for (const entry of catalog.entries) byPath.set(entry.path, entry)
+    for (const entry of catalog.entries) {
+      if (entry.kind !== 'workflow' && byPath.has(entry.path)) continue
+      byPath.set(entry.path, entry)
+    }
   }
   let read = 0
   let reading = 0

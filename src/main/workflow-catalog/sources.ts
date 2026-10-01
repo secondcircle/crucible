@@ -1,7 +1,13 @@
 import { createHash } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
-import type { WorkflowSourceFile } from '../../shared/workflows/catalog'
+import type {
+  QuotedPrompt,
+  ReadAgent,
+  SourceQuote,
+  WorkflowReading,
+  WorkflowSourceFile
+} from '../../shared/workflows/catalog'
 
 // What a reader is shown of a workflow: its file and every local file it
 // imports, followed as far as they go. The same set is what a reading is
@@ -82,6 +88,38 @@ async function firstReadable(base: string, read: ReadText): Promise<string | und
     }
   }
   return undefined
+}
+
+// A reading's quotes name absolute paths so a page can link to the line, but
+// the reading itself is of bytes, not of a place: the same source set at two
+// paths is one reading. So it is kept with every quote naming its file by
+// label, as the reader was shown it, and rooted again in whichever workflow
+// file it is shown for.
+
+/** The reading with every quote naming its file by label, relative to the workflow's folder. */
+export function detachedReading(reading: WorkflowReading, workflowPath: string): WorkflowReading {
+  const folder = dirname(workflowPath)
+  return quotesMoved(reading, (file) => labelOf(folder, file))
+}
+
+/** The reading with every quote naming its file where it lies beside this workflow file. */
+export function rootedReading(reading: WorkflowReading, workflowPath: string): WorkflowReading {
+  const folder = dirname(workflowPath)
+  return quotesMoved(reading, (label) => resolve(folder, label))
+}
+
+function quotesMoved(reading: WorkflowReading, move: (file: string) => string): WorkflowReading {
+  const quote = <Q extends SourceQuote>(cited: Q): Q => ({ ...cited, file: move(cited.file) })
+  const agents = reading.agents.map((agent): ReadAgent => {
+    const { model, system, prompt, ...rest } = agent
+    return {
+      ...rest,
+      ...(model === undefined ? {} : { model: { ...model, quote: quote(model.quote) } }),
+      ...(system === undefined ? {} : { system: quote<QuotedPrompt>(system) }),
+      ...(prompt === undefined ? {} : { prompt: quote<QuotedPrompt>(prompt) })
+    }
+  })
+  return { ...reading, agents }
 }
 
 function labelOf(folder: string, path: string): string {
