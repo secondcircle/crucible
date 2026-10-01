@@ -506,3 +506,18 @@
   font: 600 17px var(--mono);
   margin-top: 3px;
 }
+
+/* A choice from a list, drawn as the threshold field is. */
+.ksel {
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  padding: 3px 8px;
+  background: var(--bg2);
+  color: var(--ink);
+  font: 12.5px var(--font);
+  max-width: 260px;
+}
+
+.ksel:disabled {
+  color: var(--faint);
+}

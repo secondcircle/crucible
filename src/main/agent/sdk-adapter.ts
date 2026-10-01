@@ -85,6 +85,8 @@ import {
   type SkillsInForce
 } from './sdk-events.ts'
 import { sanitizeTitle, TITLE_INSTRUCTION, titleInput } from './sdk-titler.ts'
+import type { WorkflowReadAnswer, WorkflowReadRequest } from '../../shared/workflows/catalog.ts'
+import { READER_INSTRUCTION, readerMessage } from '../../shared/workflows/reader.ts'
 import { branchSummaryExtension } from './sdk-branch-summary.ts'
 import {
   PI_COMPACTION_SETTINGS,
@@ -1564,6 +1566,38 @@ export function createSdkAdapter({
       return usage === undefined
         ? { title }
         : { title, spend: { tokens: usage.totalTokens, cost: usage.cost.total } }
+    },
+
+    // One request of its own — its own system prompt, no tools, one message —
+    // so it reads no session's cached prefix and nothing of it lands in one.
+    async readWorkflow(request: WorkflowReadRequest): Promise<WorkflowReadAnswer> {
+      const [pi, models, model] = await Promise.all([
+        piModules.ai(),
+        runtime(),
+        resolveModel(request.reader.model)
+      ])
+      // Asked for only where the model reasons at that level; π's own marker
+      // for no thinking is carried as no level at all.
+      const noThinking = pi.getSupportedThinkingLevels({ ...model, reasoning: false })[0]
+      const supported = pi.getSupportedThinkingLevels(model) as readonly string[]
+      const reasoning =
+        request.reader.effort !== noThinking && supported.includes(request.reader.effort)
+          ? (request.reader.effort as SdkThinkingLevel)
+          : undefined
+      const answer = await models.completeSimple(
+        model,
+        {
+          systemPrompt: READER_INSTRUCTION,
+          messages: [{ role: 'user', content: readerMessage(request), timestamp: Date.now() }]
+        },
+        reasoning === undefined ? undefined : { reasoning }
+      )
+      // A reply the provider cut is half a JSON object: refused here, naming why.
+      if (answer.stopReason !== 'stop') {
+        const detail = answer.errorMessage === undefined ? '' : `: ${answer.errorMessage}`
+        throw new Error(`The reader's reply ended with stop reason "${answer.stopReason}"${detail}.`)
+      }
+      return { reply: pi.contentText(answer.content) }
     },
 
     async setThinkingLevel(sessionId: SessionId, level: ThinkingLevel): Promise<void> {

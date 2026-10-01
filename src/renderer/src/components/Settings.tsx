@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import type {
   AgentPort,
   AuthMethod,
+  ModelInfo,
   ProviderState,
   SessionId,
   SessionState,
@@ -13,7 +14,11 @@ import {
   type CompactionSettings
 } from '../../../shared/compaction/settings'
 import type { WorkspaceService } from '../../../shared/workspace/service'
-import { tokens } from '../labels'
+import type { CatalogSnapshot, WorkflowCatalogService } from '../../../shared/workflows/catalog'
+import { catalogStatus } from '../../../shared/workflows/catalog-facts'
+import { sameReader, type CatalogReaderSettings } from '../../../shared/workflows/catalog-settings'
+import { modelName } from '../catalog/format'
+import { relativeTime, tokens } from '../labels'
 import type { AskedPrompt, Auth } from '../settings/use-auth'
 import { ResearchPane } from './ResearchPane'
 import './settings.css'
@@ -22,7 +27,7 @@ import './settings.css'
 // recomputed on demand from π's per-message numbers.
 
 /** A row in the rail. Only sections that exist are listed. */
-export type SettingsSection = 'providers' | 'usage' | 'research' | 'compaction'
+export type SettingsSection = 'providers' | 'usage' | 'research' | 'compaction' | 'catalog'
 
 // The rail's whole content. Adding a section here costs no layout anywhere,
 // which is the point of the fixed card.
@@ -42,6 +47,12 @@ const SECTIONS: readonly {
     label: 'Compaction',
     glyph: '↯',
     subtitle: 'When an agent rewrites its own context'
+  },
+  {
+    id: 'catalog',
+    label: 'Workflow catalog',
+    glyph: '⚑',
+    subtitle: 'Who reads the workflow files, and how far it has got'
   }
 ]
 
@@ -64,7 +75,8 @@ export function Settings({
   workspaceOpen,
   sessions,
   activeSessionId,
-  contextPercent
+  contextPercent,
+  catalog
 }: {
   readonly section: SettingsSection
   readonly onSection: (section: SettingsSection) => void
@@ -81,6 +93,11 @@ export function Settings({
   readonly activeSessionId?: SessionId
   /** The meter's own percentage, which stays path-based. */
   readonly contextPercent?: number
+  /** The workflow catalog's seam and what it last said; absent hides nothing but its state. */
+  readonly catalog?: {
+    readonly service: WorkflowCatalogService
+    readonly snapshot?: CatalogSnapshot
+  }
 }): React.JSX.Element {
   const shown = SECTIONS.find((candidate) => candidate.id === section) ?? SECTIONS[0]
 
@@ -127,6 +144,8 @@ export function Settings({
                 <ResearchPane workspace={workspace} />
               ) : section === 'compaction' ? (
                 <CompactionPane port={port} />
+              ) : section === 'catalog' ? (
+                <CatalogPane port={port} catalog={catalog} />
               ) : (
                 <UsagePane
                   port={port}
@@ -274,6 +293,177 @@ function CompactionPane({ port }: { readonly port: AgentPort }): React.JSX.Eleme
         deleted — the transcript and the session tree keep every message.
         A conversation that has sat idle long enough to lose its prompt cache is compacted before
         it does, so the next message is billed against the small context instead of the whole one.
+      </p>
+    </div>
+  )
+}
+
+/** The levels π names, for a model the port did not list and so did not describe. */
+const EVERY_LEVEL = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh']
+
+// Which model reads the workflow files, and what the catalog has made of them.
+// A change moves the controls in the frame of the choice and rereads every
+// workflow in the background; nothing here waits on a reading.
+function CatalogPane({
+  port,
+  catalog
+}: {
+  readonly port: AgentPort
+  readonly catalog?: { readonly service: WorkflowCatalogService; readonly snapshot?: CatalogSnapshot }
+}): React.JSX.Element {
+  const [models, setModels] = useState<readonly ModelInfo[] | undefined>(undefined)
+  // What was chosen before the catalog said so, dropped once it does.
+  const [ahead, setAhead] = useState<CatalogReaderSettings | undefined>(undefined)
+  const [failure, setFailure] = useState<string | undefined>(undefined)
+  const snapshot = catalog?.snapshot
+
+  useEffect(() => {
+    let current = true
+    port
+      .listModels()
+      .then((listed) => {
+        if (current) setModels(listed)
+      })
+      .catch(() => {
+        if (current) setModels([])
+      })
+    return () => {
+      current = false
+    }
+  }, [port])
+
+  // Dropped in the render the catalog agrees in, so the control never flashes back.
+  if (ahead !== undefined && snapshot !== undefined && sameReader(ahead, snapshot.reader)) {
+    setAhead(undefined)
+  }
+
+  const reader = ahead ?? snapshot?.reader
+  const listed = models ?? []
+  const choices =
+    reader === undefined || listed.some((model) => model.id === reader.model)
+      ? listed.map((model) => ({ id: model.id, label: model.label }))
+      : [{ id: reader.model, label: modelName(reader.model) }, ...listed.map((model) => ({ id: model.id, label: model.label }))]
+  const levelsOf = (model: string): readonly string[] =>
+    listed.find((candidate) => candidate.id === model)?.thinkingLevels ?? EVERY_LEVEL
+  const levels = reader === undefined ? [] : levelsOf(reader.model)
+
+  function write(next: CatalogReaderSettings): void {
+    if (catalog === undefined) return
+    setAhead(next)
+    setFailure(undefined)
+    void catalog.service.setReader(next).catch((cause: unknown) => {
+      setAhead(undefined)
+      setFailure(cause instanceof Error ? cause.message : String(cause))
+    })
+  }
+
+  const status = snapshot === undefined ? undefined : catalogStatus(snapshot)
+  const troubles =
+    snapshot === undefined
+      ? []
+      : [
+          ...new Map(
+            snapshot.workspaces
+              .flatMap((workspace) => workspace.entries)
+              .flatMap((entry) =>
+                entry.kind === 'broken'
+                  ? [[entry.path, { name: entry.name, error: `does not load: ${entry.error}` }] as const]
+                  : entry.kind === 'workflow' && entry.reading.status === 'failed'
+                    ? [[entry.path, { name: entry.name, error: entry.reading.error }] as const]
+                    : []
+              )
+          ).values()
+        ]
+
+  return (
+    <div className="pane">
+      <div className="prov">
+        <span className="pname">Reader model</span>
+        <span className="pmeta nodot">Reads each workflow file once, and again when it changes</span>
+        <select
+          className="ksel"
+          aria-label="Reader model"
+          disabled={reader === undefined || catalog === undefined}
+          value={reader?.model ?? ''}
+          onChange={(changed) => {
+            if (reader === undefined) return
+            const model = changed.target.value
+            const offered = levelsOf(model)
+            const effort = offered.includes(reader.effort)
+              ? reader.effort
+              : offered.includes('medium')
+                ? 'medium'
+                : (offered.at(-1) ?? reader.effort)
+            write({ model, effort })
+          }}
+        >
+          {choices.map((choice) => (
+            <option key={choice.id} value={choice.id}>
+              {choice.label}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      <div className="prov">
+        <span className="pname">Effort</span>
+        <span className="pmeta nodot">How hard the reader thinks</span>
+        <select
+          className="ksel"
+          aria-label="Reader effort"
+          disabled={reader === undefined || catalog === undefined}
+          value={reader?.effort ?? ''}
+          onChange={(changed) => {
+            if (reader !== undefined) write({ ...reader, effort: changed.target.value })
+          }}
+        >
+          {levels.map((level) => (
+            <option key={level} value={level}>
+              {level}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      {failure === undefined ? null : (
+        <p className="pfail" role="alert">
+          {failure}
+        </p>
+      )}
+
+      <h4>The catalog</h4>
+      {status === undefined ? (
+        <p className="pempty">The catalog has not answered yet.</p>
+      ) : (
+        <div className="cards" aria-label="Catalog state">
+          <Card label="Read" value={String(status.read)} />
+          <Card label="Reading" value={String(status.reading)} />
+          <Card label="Failed" value={String(status.failed + status.broken)} />
+          <Card
+            label="Last read"
+            value={status.lastReadAt === undefined ? '—' : relativeTime(status.lastReadAt)}
+          />
+        </div>
+      )}
+
+      {troubles.length === 0 ? null : (
+        <table aria-label="Catalog failures">
+          <tbody>
+            {troubles.map((trouble) => (
+              <tr key={`${trouble.name}:${trouble.error}`}>
+                <td>{trouble.name}</td>
+                <td>{trouble.error}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+
+      <p className="note">
+        A reading is one call to this model with the workflow file and the local files it imports.
+        It is kept until those files change, and only readings by the model chosen here are shown,
+        so changing it reads every workflow again in the background. A reading that fails is tried
+        again when its file next changes or Crucible next starts.
       </p>
     </div>
   )

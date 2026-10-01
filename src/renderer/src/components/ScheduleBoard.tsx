@@ -27,6 +27,7 @@ import {
 } from '../schedules/board'
 import { ArtifactBody } from './ArtifactReader'
 import { ShowMore } from './ShowMore'
+import { WorkflowName } from './WorkflowName'
 import './board-frame.css'
 import './schedule-board.css'
 
@@ -181,7 +182,7 @@ export function ScheduleBoard({
                     onClick={() => onSelectRun(run.id)}
                   >
                     <span className="rname">
-                      <span className="wf">{run.workflow}</span>{' '}
+                      <WorkflowName className="wf" workspacePath={run.workspacePath} name={run.workflow} />{' '}
                       <RepositoryLabel run={run} />
                       <span className="note">— {parkedNote(run)}</span>
                     </span>
@@ -211,6 +212,7 @@ export function ScheduleBoard({
               declared.map((view) => (
                 <ScheduleRow
                   key={view.workflow}
+                  workspacePath={workspacePath}
                   view={view}
                   enabled={enabledOf(view)}
                   allPaused={allPaused}
@@ -246,7 +248,7 @@ export function ScheduleBoard({
                     onClick={() => onSelectRun(run.id)}
                   >
                     <span className="rname">
-                      <span className="wf">{run.workflow}</span>{' '}
+                      <WorkflowName className="wf" workspacePath={run.workspacePath} name={run.workflow} />{' '}
                       <RepositoryLabel run={run} />
                       <span className="note">— {completionLine(run)}</span>
                     </span>
@@ -307,6 +309,7 @@ function RepositoryLabel({ run }: { readonly run: RunRecord }): React.JSX.Elemen
 }
 
 function ScheduleRow({
+  workspacePath,
   view,
   enabled,
   allPaused,
@@ -316,6 +319,7 @@ function ScheduleRow({
   onToggle,
   onRunNow
 }: {
+  readonly workspacePath: string
   readonly view: ScheduleView
   readonly enabled: boolean
   readonly allPaused: boolean
@@ -330,7 +334,8 @@ function ScheduleRow({
   return (
     <div className={`srow${paused ? ' off' : ''}`} aria-label={`Schedule ${view.workflow}`}>
       <span className="sname">
-        {view.workflow} <span className="desc">— {view.description}</span>
+        <WorkflowName workspacePath={workspacePath} name={view.workflow} />{' '}
+        <span className="desc">— {view.description}</span>
       </span>
       <span className="scron">
         {view.cadence === undefined ? null : (
@@ -466,13 +471,17 @@ function ReadingPane({
           )}
         </div>
         <h3>
-          {run.workflow} — {parked ? parkedNote(run) : completionLine(run)}
+          <WorkflowName workspacePath={run.workspacePath} name={run.workflow} /> —{' '}
+          {parked ? parkedNote(run) : completionLine(run)}
         </h3>
       </div>
 
       <div className="rbody">
         <div className="facts">
-          workflow <b>{run.workflow}</b>
+          workflow{' '}
+          <b>
+            <WorkflowName workspacePath={run.workspacePath} name={run.workflow} />
+          </b>
           {targetFolder(run) === undefined ? null : (
             <>
               {' '}

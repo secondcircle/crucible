@@ -37,6 +37,7 @@ import { ArtifactReader } from './ArtifactReader'
 import { InvestigateButton } from './InvestigateButton'
 import { RunGraph } from './RunGraph'
 import { Transcript } from './Transcript'
+import { WorkflowName } from './WorkflowName'
 import './runs.css'
 import './monitors.css'
 
@@ -200,7 +201,7 @@ export function WorkflowRunView({
   return (
     <section className="runview" aria-label={`Run ${run.id}`}>
       <header className="rvtop">
-        <span className="wf">{run.workflow}</span>
+        <WorkflowName className="wf" workspacePath={run.workspacePath} name={run.workflow} />
         <span className="id">run {run.id}</span>
         <span className={`stat ${run.status}`}>
           {run.status === 'interrupted' ? '◌ interrupted · app quit' : run.status}

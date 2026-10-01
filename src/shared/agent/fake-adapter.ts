@@ -12,6 +12,8 @@ import type {
 } from './adapter'
 import type { PanelToolName, PanelTools } from './panel-tools'
 import { isRunMessage } from '../workflows/run'
+import { cannedReply } from '../workflows/canned-readings'
+import type { WorkflowReadAnswer, WorkflowReadRequest } from '../workflows/catalog'
 import { bindMonitorTools, type MonitorTools } from './monitor-tools'
 import { ASK_TOOL, bindAskTool, type AskRequest, type AskTools } from './ask-tool'
 import { isWakeMessage, monitorCallSummary } from '../monitors/wording'
@@ -142,6 +144,9 @@ const CANNED_PROVIDERS: readonly ProviderState[] = [
 // Long enough that a turn visibly streams, short enough that it is over in
 // about two seconds. Tests pass zero and wait on no clock.
 const DEFAULT_PAUSE_MS = 45
+
+/** How many pauses a canned workflow reading takes: long enough to be seen reading. */
+const READ_PAUSES = 30
 
 const THINKING_DELTAS: readonly string[] = [
   'The reply has to show every region of the shell: ',
@@ -1788,6 +1793,16 @@ export function createFakeAdapter({
       if (said === undefined || said.item.kind !== 'user') return undefined
       const title = fakeTitle(said.item.text)
       return title === '' ? undefined : { title }
+    },
+
+    // Canned prose with citations found in the files as they stand, after a
+    // pause long enough that the catalog's reading state is there to see.
+    async readWorkflow(request: WorkflowReadRequest): Promise<WorkflowReadAnswer> {
+      await new Promise<void>((resolve) => {
+        if (pauseMs <= 0) queueMicrotask(resolve)
+        else setTimeout(resolve, pauseMs * READ_PAUSES)
+      })
+      return { reply: cannedReply(request) }
     },
 
     async setThinkingLevel(sessionId: SessionId, level: ThinkingLevel): Promise<void> {

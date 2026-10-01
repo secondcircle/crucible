@@ -22,6 +22,7 @@ import {
   type WorkflowRunId
 } from '../../shared/workflows/run'
 import { interruptionNotice } from '../../shared/workflows/status'
+import { ENGINE_DEFAULT_MODEL } from '../../shared/workflows/node-model'
 import type { MonitorOwner } from '../../shared/monitors/monitor'
 import type { NodeMonitors } from '../../shared/monitors/service'
 import { lostMonitorsNotice } from '../../shared/monitors/wording'
@@ -260,7 +261,7 @@ export function createWorkflowEngine(options: EngineOptions): WorkflowEngine {
     monitors,
     onChanged,
     log,
-    defaultModel = 'anthropic/claude-opus-5-5:high',
+    defaultModel = ENGINE_DEFAULT_MODEL,
     pollMs = 1000,
     watchdogMs = 15_000,
     quietAbortMs = 5 * 60_000,

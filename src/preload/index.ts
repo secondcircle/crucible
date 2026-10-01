@@ -64,6 +64,13 @@ import {
   type WorkflowRunResult
 } from '../shared/workflows/channels'
 import {
+  CATALOG_EVENT_CHANNEL,
+  CATALOG_REQUEST_CHANNEL,
+  type CatalogEvent,
+  type CatalogRequest,
+  type CatalogResult
+} from '../shared/workflows/catalog-channels'
+import {
   MONITOR_EVENT_CHANNEL,
   MONITOR_REQUEST_CHANNEL,
   type MonitorEvent,
@@ -173,6 +180,16 @@ contextBridge.exposeInMainWorld('crucible', {
 
     onEvent: (listener: (event: ScheduleEvent) => void): (() => void) =>
       forwarder(SCHEDULE_EVENT_CHANNEL, listener)
+  },
+
+  // The workflow catalog: what each workflow of the workspace on screen does,
+  // as a model read it. Questions and one setting; runs never cross here.
+  catalog: {
+    request: (request: CatalogRequest): Promise<CatalogResult> =>
+      ipcRenderer.invoke(CATALOG_REQUEST_CHANNEL, request),
+
+    onEvent: (listener: (event: CatalogEvent) => void): (() => void) =>
+      forwarder(CATALOG_EVENT_CHANNEL, listener)
   },
 
   // Monitors: the strip's chips, their detail and the ✗ that stops one. The

@@ -38,6 +38,7 @@ import {
 import type { CompactionTrigger } from '../../shared/compaction/record.ts'
 import { piCompactionSettings } from '../../shared/compaction/trigger.ts'
 import { createCompactionWatch } from '../../shared/compaction/watch.ts'
+import { NODE_DEFAULT_EFFORT } from '../../shared/workflows/node-model.ts'
 import { piModules } from '../agent/pi-modules.ts'
 import { retentionInForce } from '../cache/retention.ts'
 import { forPi, type LoadedSkill } from '../skills/service.ts'
@@ -103,7 +104,7 @@ export function createSdkNodeSessionFactory({
       if (match === null) throw new Error(`bad model spec "${request.model}"`)
       const model = models.getModel(match[1], match[2])
       if (model === undefined) throw new Error(`model not found: ${request.model}`)
-      const thinkingLevel = (match[3] ?? 'medium') as 'low' | 'medium' | 'high'
+      const thinkingLevel = (match[3] ?? NODE_DEFAULT_EFFORT) as 'low' | 'medium' | 'high'
 
       const customTools: ToolDefinition[] = [
         // Named `read`, so it stands in for π's builtin — and only where the

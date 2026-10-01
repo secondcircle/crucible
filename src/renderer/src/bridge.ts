@@ -13,6 +13,11 @@ import type {
   ScheduleRequest,
   ScheduleResult
 } from '../../shared/schedules/channels'
+import type {
+  CatalogEvent,
+  CatalogRequest,
+  CatalogResult
+} from '../../shared/workflows/catalog-channels'
 import type { ExhibitKeyEvent } from '../../shared/exhibits/channels'
 import type { WorkspaceRequest, WorkspaceResult } from '../../shared/workspace/channels'
 import type { WorkspaceEvent } from '../../shared/workspace/service'
@@ -80,6 +85,12 @@ export interface CrucibleSchedules {
   onEvent(listener: (event: ScheduleEvent) => void): () => void
 }
 
+/** The workflow catalog half, shaped like the schedule half. */
+export interface CrucibleCatalog {
+  request(request: CatalogRequest): Promise<CatalogResult>
+  onEvent(listener: (event: CatalogEvent) => void): () => void
+}
+
 /** The monitor half, shaped like the run half for the same reason. */
 export interface CrucibleMonitors {
   request(request: MonitorRequestMessage): Promise<MonitorResult>
@@ -110,6 +121,7 @@ declare global {
       needsYou?: CrucibleNeedsYou
       workflowRuns?: CrucibleWorkflowRuns
       schedules?: CrucibleSchedules
+      catalog?: CrucibleCatalog
       monitors?: CrucibleMonitors
       exhibitKeys?: CrucibleExhibitKeys
     }
@@ -204,6 +216,14 @@ export function schedulesBridge(): CrucibleSchedules {
     throw new Error('renderer: window.crucible.schedules is missing — the preload did not load')
   }
   return schedules
+}
+
+export function catalogBridge(): CrucibleCatalog {
+  const catalog = window.crucible?.catalog
+  if (catalog === undefined) {
+    throw new Error('renderer: window.crucible.catalog is missing — the preload did not load')
+  }
+  return catalog
 }
 
 export function monitorsBridge(): CrucibleMonitors {

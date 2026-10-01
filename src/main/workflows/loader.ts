@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto'
 import { readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
+import type { WorkflowOrigin } from '../../shared/workflows/catalog'
 import { createWorkflowHost, type SpawnHost, type WorkflowHost, type WorkflowManifest } from './host/host'
 
 // Workflows resolve like Commands, minus the built-in rung: two origins,
@@ -14,7 +15,7 @@ import { createWorkflowHost, type SpawnHost, type WorkflowHost, type WorkflowMan
 // manifest — the declarations, minus the functions — and a way to open a
 // fresh host for the run.
 
-export type WorkflowOrigin = 'user' | 'workspace'
+export type { WorkflowOrigin }
 
 export interface WorkflowRoots {
   /** `~/.crucible/workflows`. */
@@ -44,6 +45,33 @@ export interface WorkflowLoader {
   resolve(workspacePath: string, name: string): Promise<LoadedWorkflow>
 }
 
+export interface WorkflowSurveyor {
+  /**
+   * Every file in both folders, for a person to look at: the winners loaded,
+   * a file that will not load with why, and a user file a workspace file of
+   * the same name wins over with the file that wins. Sorted by name, the
+   * winner first. What `list` and `resolve` accept is untouched by it.
+   */
+  survey(workspacePath: string): Promise<readonly SurveyedWorkflow[]>
+}
+
+export type SurveyedWorkflow =
+  | { readonly kind: 'loaded'; readonly workflow: LoadedWorkflow }
+  | {
+      readonly kind: 'broken'
+      readonly name: string
+      readonly origin: WorkflowOrigin
+      readonly path: string
+      readonly error: string
+    }
+  | {
+      readonly kind: 'shadowed'
+      readonly name: string
+      readonly path: string
+      /** The workspace file that wins. */
+      readonly winner: string
+    }
+
 export interface WorkflowLoaderOptions {
   readonly roots: WorkflowRoots
   /** Absolute path of the shipped authoring module, `crucible:workflow`. */
@@ -65,7 +93,7 @@ export function createWorkflowLoader({
   authoringModule,
   spawn,
   onUnloadable
-}: WorkflowLoaderOptions): WorkflowLoader {
+}: WorkflowLoaderOptions): WorkflowLoader & WorkflowSurveyor {
   // A manifest is read by starting a process, so one is kept for as long as
   // the file it came from has the same bytes; the next listing after an edit
   // reads it afresh. A run never uses this — it opens a host of its own,
@@ -77,17 +105,23 @@ export function createWorkflowLoader({
 
   /** Workspace beats user: the winner is the last one found. */
   function discover(workspacePath: string): Map<string, Found> {
+    const winners = new Map<string, Found>()
+    for (const found of everyFile(workspacePath)) winners.set(found.name, found)
+    return winners
+  }
+
+  function everyFile(workspacePath: string): readonly Found[] {
     const folders: readonly { origin: WorkflowOrigin; path: string }[] = [
       { origin: 'user', path: roots.user },
       { origin: 'workspace', path: join(workspacePath, '.crucible', 'workflows') }
     ]
-    const winners = new Map<string, Found>()
-    for (const folder of folders) {
-      for (const name of workflowNames(folder.path)) {
-        winners.set(name, { name, origin: folder.origin, path: join(folder.path, `${name}.ts`) })
-      }
-    }
-    return winners
+    return folders.flatMap((folder) =>
+      workflowNames(folder.path).map((name) => ({
+        name,
+        origin: folder.origin,
+        path: join(folder.path, `${name}.ts`)
+      }))
+    )
   }
 
   async function readManifest(found: Found): Promise<WorkflowManifest> {
@@ -150,8 +184,42 @@ export function createWorkflowLoader({
         )
       }
       return load(found)
+    },
+
+    async survey(workspacePath: string): Promise<readonly SurveyedWorkflow[]> {
+      const winners = discover(workspacePath)
+      const files = everyFile(workspacePath)
+      const surveyed = await Promise.all(
+        files.map(async (found): Promise<SurveyedWorkflow> => {
+          const winner = winners.get(found.name)
+          if (winner !== undefined && winner.path !== found.path) {
+            return { kind: 'shadowed', name: found.name, path: found.path, winner: winner.path }
+          }
+          try {
+            return { kind: 'loaded', workflow: await load(found) }
+          } catch (cause) {
+            onUnloadable?.(found.path, cause)
+            return { kind: 'broken', ...found, error: loadError(cause) }
+          }
+        })
+      )
+      const rank = (entry: SurveyedWorkflow): number => (entry.kind === 'shadowed' ? 1 : 0)
+      return surveyed.sort(
+        (left, right) => nameOf(left).localeCompare(nameOf(right)) || rank(left) - rank(right)
+      )
     }
   }
+}
+
+function nameOf(entry: SurveyedWorkflow): string {
+  return entry.kind === 'loaded' ? entry.workflow.name : entry.name
+}
+
+// What the file itself said, without the sentence this loader wraps it in:
+// the catalog already names the file beside it.
+function loadError(cause: unknown): string {
+  const inner = cause instanceof Error && cause.cause !== undefined ? cause.cause : cause
+  return inner instanceof Error ? inner.message : String(inner)
 }
 
 /** What "the same file" means for the manifest kept from the last read. */

@@ -6,6 +6,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { AdapterEvent } from './adapter'
 import type { ImageAttachment, QueuedEntry } from './port'
 import { createFakeWorkflowRunService } from '../workflows/fake-service'
+import { DEFAULT_CATALOG_READER } from '../workflows/catalog-settings'
+import { readingOf } from '../workflows/reader'
 import {
   createFakeAdapter,
   FAKE_CACHE_MISS,
@@ -917,6 +919,32 @@ describe('the fake titler', () => {
 
     expect(await adapter.titleConversation('s1')).toBeUndefined()
     expect(await adapter.titleConversation('never-bound')).toBeUndefined()
+  })
+})
+
+describe('the fake workflow reader', () => {
+  it('answers with a reading whose citations the file bears out, for no call and no cost', async () => {
+    const adapter = createFakeAdapter({ pauseMs: 0 })
+    const text = [
+      "const MODEL = 'anthropic/claude-opus-5-5:high'",
+      'const workPrompt = (intent: string): string => `Do ${intent}.`',
+      'export default workflow({',
+      '  run: async (ctx) => {',
+      "    await ctx.node('work', { model: MODEL, prompt: workPrompt })",
+      '  }',
+      '})'
+    ].join('\n')
+    const request = {
+      reader: DEFAULT_CATALOG_READER,
+      name: 'chores',
+      files: [{ path: '/w/chores.ts', label: 'chores.ts', text }],
+      manifest: { description: 'does the chores', inputs: {} }
+    }
+
+    const { reply } = await adapter.readWorkflow(request)
+    const [agent] = readingOf(reply, request, '2026-09-01T00:00:00.000Z').agents
+    expect(agent.model?.value).toBe('anthropic/claude-opus-5-5:high')
+    expect(agent.prompt).toMatchObject({ name: 'workPrompt', start: 2, end: 2 })
   })
 })
 

@@ -13,6 +13,7 @@ import { RUN_PAGE } from '../runs/page'
 import { money, shortAge, since } from '../runs/format'
 import { InvestigateButton } from './InvestigateButton'
 import { ShowMore } from './ShowMore'
+import { WorkflowName } from './WorkflowName'
 import './runs.css'
 
 // One workspace's runs, in three bands: running, needs you, done. Nothing of
@@ -185,7 +186,9 @@ export function RunsOverview({
                   >
                     <span className={`dot ${run.status}`} />
                     <span className="wf">
-                      <Lit text={run.workflow} needle={needle} />
+                      <WorkflowName workspacePath={run.workspacePath} name={run.workflow}>
+                        <Lit text={run.workflow} needle={needle} />
+                      </WorkflowName>
                     </span>
                     {repository === undefined ? null : (
                       <span className="repo">

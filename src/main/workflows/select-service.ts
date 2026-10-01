@@ -17,7 +17,7 @@ import { readShippedNodeBasePrompt, shippedSkillsPath, shippedWorkflowLibPath } 
 import { createSkillService, userSkillsPath } from '../skills/service'
 import { createWorkflowEngine } from './engine'
 import type { SpawnHost } from './host/host'
-import { createWorkflowLoader, type WorkflowLoader } from './loader'
+import { createWorkflowLoader, type WorkflowLoader, type WorkflowSurveyor } from './loader'
 import { createLiveWorkflowRunService } from './service'
 import { createSdkNodeSessionFactory } from './sdk-node-session'
 import { createRunStore } from './store'
@@ -34,7 +34,7 @@ export function shippedWorkflowLoader(
   appPath: string,
   log: LogSink,
   spawnHost: SpawnHost
-): WorkflowLoader {
+): WorkflowLoader & WorkflowSurveyor {
   return createWorkflowLoader({
     roots: { user: userWorkflowsPath() },
     authoringModule: shippedWorkflowLibPath(appPath),

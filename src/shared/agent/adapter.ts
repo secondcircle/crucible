@@ -22,6 +22,7 @@ import type {
   Unsubscribe
 } from './port'
 import type { CompactionRecord } from '../compaction/record'
+import type { WorkflowReadAnswer, WorkflowReadRequest } from '../workflows/catalog'
 import type { CompactionTrigger } from '../compaction/record'
 
 // Crucible's identities go down and π's never come up: where a conversation
@@ -310,6 +311,11 @@ export interface ConversationAdapter {
       }
     | undefined
   >
+
+  // One model call reading a workflow's files for the workflow catalog, with
+  // the reader the request names. The reply comes back unparsed: the caller
+  // checks every citation in it against the files before keeping any of it.
+  readWorkflow(request: WorkflowReadRequest): Promise<WorkflowReadAnswer>
 
   // Credentials are the agent side's, so they live behind this seam with the
   // models they unlock.

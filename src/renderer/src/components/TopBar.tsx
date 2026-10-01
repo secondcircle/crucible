@@ -18,6 +18,7 @@ export function TopBar({
   onOpenUsage,
   onJumpToCacheMiss,
   issues,
+  workflows,
   schedules,
   update
 }: {
@@ -38,6 +39,12 @@ export function TopBar({
   readonly issues?: {
     readonly open: number
     readonly yours: number
+    readonly onOpen: () => void
+  }
+  // The workflow catalog's door, on the same terms: absent until the catalog
+  // has answered for this workspace, and absent where it has no workflows.
+  readonly workflows?: {
+    readonly count: number
     readonly onOpen: () => void
   }
   // The schedule board's whole resting surface, on the same terms: absent
@@ -85,6 +92,18 @@ export function TopBar({
             {issues.open} issue{issues.open === 1 ? '' : 's'}
           </b>
           {issues.yours > 0 ? <u> · {issues.yours} yours</u> : null}
+        </button>
+      )}
+
+      {/* Never lit: nothing about a workflow's file asks for anyone. */}
+      {workflows === undefined ? null : (
+        <button className="tchip" aria-label="Workflow catalog" onClick={workflows.onOpen}>
+          <span className="g" aria-hidden="true">
+            ⚑
+          </span>{' '}
+          <b>
+            {workflows.count} workflow{workflows.count === 1 ? '' : 's'}
+          </b>
         </button>
       )}
 

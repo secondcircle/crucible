@@ -130,6 +130,13 @@ function pageWithPreload(
         }),
         onEvent: (): (() => void) => () => {}
       },
+      catalog: {
+        request: async (): Promise<{ ok: true; value: unknown }> => ({
+          ok: true,
+          value: { workspaces: [] }
+        }),
+        onEvent: (): (() => void) => () => {}
+      },
       monitors: {
         request: async (): Promise<{ ok: true; value: unknown }> => ({
           ok: true,

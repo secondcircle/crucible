@@ -1,0 +1,93 @@
+/* A workflow's name with a card behind it: the name reads as it always did,
+   with a dotted underline saying there is more on hover. */
+.wfname {
+  border-bottom: 1px dotted var(--faint);
+  cursor: help;
+}
+
+.wfcard {
+  position: fixed;
+  z-index: 60;
+  width: 360px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  padding: 12px 14px;
+  font: 12.5px/1.5 var(--font);
+  color: var(--dim);
+  text-align: left;
+  white-space: normal;
+  box-shadow: 0 10px 30px rgb(0 0 0 / 45%);
+  cursor: default;
+}
+
+.wfcard .wch {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.wfcard .wch b {
+  font: 600 13px var(--mono);
+  color: var(--ink);
+}
+
+.wfcard .origin {
+  font: 10.5px var(--mono);
+  color: var(--faint);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 0 5px;
+}
+
+.wfcard p {
+  margin: 0 0 8px;
+}
+
+.wfcard .err {
+  color: var(--error);
+}
+
+.wfcard .quiet {
+  color: var(--faint);
+}
+
+.wfcard .wck {
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--faint);
+  margin: 6px 0 3px;
+}
+
+.wfcard ul {
+  margin: 0 0 6px;
+  padding-left: 16px;
+}
+
+.wfcard code {
+  font: 11.5px var(--mono);
+  color: var(--code-ink);
+}
+
+.wfcard li b {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.wfcard .wcopen {
+  margin-top: 6px;
+  width: 100%;
+  padding: 6px 10px;
+  border-radius: var(--radius);
+  border: 1px solid var(--accent);
+  background: none;
+  color: var(--accent2);
+  font-size: 12.5px;
+}
+
+.wfcard .wcopen:hover {
+  color: var(--ink);
+  border-color: var(--accent2);
+}

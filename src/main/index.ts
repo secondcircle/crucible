@@ -56,6 +56,8 @@ import { selectWorkspaceService } from './workspace/select-service'
 import { serveWorkflowRunChannel, type WorkflowRunChannel } from './workflows/channel'
 import type { SpawnHost } from './workflows/host/host'
 import { selectWorkflowRunService } from './workflows/select-service'
+import { serveCatalogChannel, type CatalogChannel } from './workflow-catalog/channel'
+import { selectWorkflowCatalog } from './workflow-catalog/select-service'
 import { watchProcessDeath } from './watchdog/process-death'
 import { inspectorProfiler, startStallWatchdog } from './watchdog/stalls'
 
@@ -321,6 +323,15 @@ const { adapter, flavor } = selectAdapter(
   questions
 )
 
+// The workflow catalog reads with whichever adapter the launch chose, so a
+// fake-flavor launch's readings are canned and cost nothing.
+const catalog = selectWorkflowCatalog(flavor, log, {
+  appPath: app.getAppPath(),
+  stateDir: app.getPath('userData'),
+  spawnHost,
+  adapter
+})
+
 // One flavor decision governs every seam, so a fake-flavor launch reads no
 // folder, starts no process and serves canned commands.
 const workspace = selectWorkspaceService(flavor, log, {
@@ -462,6 +473,7 @@ let workflowRunChannel: WorkflowRunChannel | undefined
 let scheduleChannel: ScheduleChannel | undefined
 let monitorChannel: MonitorChannel | undefined
 let exhibitKeyChannel: ExhibitKeyChannel | undefined
+let catalogChannel: CatalogChannel | undefined
 
 function openWindow(reason?: 'activate'): void {
   const window = createMainWindow({
@@ -493,6 +505,7 @@ function openWindow(reason?: 'activate'): void {
   scheduleChannel = serveScheduleChannel(schedules.service, window)
   monitorChannel = serveMonitorChannel(monitors, window)
   exhibitKeyChannel = serveExhibitKeyChannel(window)
+  catalogChannel = serveCatalogChannel(catalog, window)
   // ⌘R is the global runs view (Q15). Taken here, before the menu can spend
   // it on reload; dev reloads keep ⇧⌘R. On non-mac the chord is Ctrl+R.
   window.webContents.on('before-input-event', (event, input) => {
@@ -552,6 +565,8 @@ app.on('will-quit', () => {
   monitorChannel?.dispose()
   monitors.dispose()
   exhibitKeyChannel?.dispose()
+  catalogChannel?.dispose()
+  catalog.dispose()
   workspaceChannel?.dispose()
   commandChannel?.dispose()
   appUpdateChannel?.dispose()

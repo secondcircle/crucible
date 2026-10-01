@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import type { HostChild, SpawnHost } from './host/host'
-import { createWorkflowLoader, type WorkflowLoader } from './loader'
+import { createWorkflowLoader, type WorkflowLoader, type WorkflowSurveyor } from './loader'
 import { AUTHORING_MODULE as AUTHORING, forkHost } from './testing/host-fork'
 
 // Real files loaded through the real host: a forked process running the real
@@ -37,7 +37,11 @@ function workflowFile(folder: string, name: string, description: string): void {
   )
 }
 
-function loaderOver(user: string, broken?: string[], spawn: SpawnHost = forkHost): WorkflowLoader {
+function loaderOver(
+  user: string,
+  broken?: string[],
+  spawn: SpawnHost = forkHost
+): WorkflowLoader & WorkflowSurveyor {
   return createWorkflowLoader({
     roots: { user },
     authoringModule: AUTHORING,
@@ -208,5 +212,46 @@ describe('workflow loader', () => {
     workflowFile(user, 'adhoc', 'rewording')
     expect((await loader.resolve(tempDir(), 'adhoc')).manifest.description).toBe('rewording')
     expect(spawn.started).toHaveLength(3)
+  })
+
+  // What a person is shown, as opposed to what runs: the file a workspace
+  // file of the same name wins over, and the file that will not load, are
+  // there with the reason, while list and resolve go on as before.
+  it('surveys every file, a shadowed one naming its winner and a broken one its error', async () => {
+    const user = tempDir()
+    const workspace = tempDir()
+    const workspaceFolder = join(workspace, '.crucible', 'workflows')
+    workflowFile(user, 'adhoc', 'the user one')
+    workflowFile(user, 'deploy', 'shadowed')
+    workflowFile(workspaceFolder, 'deploy', 'the winner')
+    writeFileSync(join(user, 'wip.ts'), 'export default {{{', 'utf8')
+
+    const broken: string[] = []
+    const loader = loaderOver(user, broken)
+    const surveyed = await loader.survey(workspace)
+    expect(
+      surveyed.map((entry) =>
+        entry.kind === 'loaded'
+          ? [entry.kind, entry.workflow.name, entry.workflow.origin]
+          : [entry.kind, entry.name]
+      )
+    ).toEqual([
+      ['loaded', 'adhoc', 'user'],
+      ['loaded', 'deploy', 'workspace'],
+      ['shadowed', 'deploy'],
+      ['broken', 'wip']
+    ])
+    expect(surveyed[2]).toMatchObject({
+      path: join(user, 'deploy.ts'),
+      winner: join(workspaceFolder, 'deploy.ts')
+    })
+    expect(surveyed[3]).toMatchObject({ origin: 'user', path: join(user, 'wip.ts') })
+    expect(surveyed[3].kind === 'broken' && surveyed[3].error).toMatch(/\S/)
+    expect(broken).toEqual([join(user, 'wip.ts')])
+
+    expect((await loader.list(workspace)).map((workflow) => workflow.name)).toEqual([
+      'adhoc',
+      'deploy'
+    ])
   })
 })

@@ -11,6 +11,7 @@ import { keyLabel } from '../keys'
 import { waitedFor } from '../monitors/activity'
 import { MonitorChip } from './MonitorChip'
 import { MonitorDetail } from './MonitorDetail'
+import { WorkflowName } from './WorkflowName'
 import './cache-strip.css'
 import './runs.css'
 import './monitors.css'
@@ -57,7 +58,9 @@ export function RunStrip({
               title={`run ${run.id} · click to open`}
             >
               <span className={`dot ${run.status}`} />
-              <b>{run.workflow}</b>
+              <b>
+                <WorkflowName workspacePath={run.workspacePath} name={run.workflow} />
+              </b>
               {repository === undefined ? null : <span className="repo">{repository}</span>}
               <span className="node">{chipNodeLabel(run, node)}</span>
               <span className="age">

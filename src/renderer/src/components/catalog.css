@@ -1,0 +1,444 @@
+/* The workflow catalog's own half of the board frame: the list on the left,
+   the chosen workflow's page on the right. The heading, the sub-line and the
+   group heads come from board-frame.css, which every board shares. */
+
+.board.catalog .bsub .src,
+.board.catalog .bsub .readby {
+  font-family: var(--mono);
+  font-size: 11.5px;
+}
+
+.board.catalog .bsub .readby {
+  margin-left: auto;
+  white-space: nowrap;
+}
+
+.board.catalog .split {
+  flex: 1;
+  display: flex;
+  gap: 20px;
+  min-height: 0;
+}
+
+.board.catalog .list {
+  flex: 0 0 280px;
+  min-width: 0;
+}
+
+.board.catalog .wrow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-rows: auto auto;
+  column-gap: 10px;
+  width: 100%;
+  padding: 7px 10px;
+  border-radius: var(--radius);
+  border: 1px solid transparent;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+}
+
+.board.catalog .wrow:hover {
+  background: var(--panel);
+  border-color: var(--line);
+}
+
+.board.catalog .wrow.focused {
+  background: var(--panel);
+  border-color: var(--lit);
+}
+
+.board.catalog .wname {
+  font: 12.5px var(--mono);
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.board.catalog .wdesc {
+  grid-column: 1 / -1;
+  font-size: 12px;
+  color: var(--dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* A shadowed file is listed, dimmed, because nothing here can run it. */
+.board.catalog .wrow.off .wname,
+.board.catalog .wrow.off .wdesc {
+  opacity: 0.5;
+}
+
+.board.catalog .wstate {
+  grid-row: 1;
+  grid-column: 2;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font: 10.5px var(--mono);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 0 5px;
+  color: var(--faint);
+}
+
+.board.catalog .wstate.reading {
+  color: var(--accent2);
+}
+
+.board.catalog .wstate.failed,
+.board.catalog .wstate.broken {
+  color: var(--error);
+  border-color: var(--error-line);
+}
+
+.board.catalog .wstate.shadowed {
+  color: var(--warn);
+  border-color: var(--warn-line);
+}
+
+.board.catalog .wstate .spin {
+  width: 8px;
+  height: 8px;
+  border-width: 1.5px;
+}
+
+/* The page. */
+.board.catalog .page {
+  flex: 1;
+  min-width: 0;
+  overflow-y: auto;
+  background: var(--bg2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  padding: 16px 20px 24px;
+  font-size: 13px;
+  color: var(--dim);
+}
+
+.board.catalog .phead {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.board.catalog .phead h2 {
+  font: 600 15px var(--mono);
+  color: var(--ink);
+  margin: 0;
+}
+
+.board.catalog .origin {
+  font: 10.5px var(--mono);
+  color: var(--faint);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 0 5px;
+}
+
+.board.catalog .psec {
+  margin-bottom: 18px;
+}
+
+.board.catalog .psec .ghead {
+  margin-bottom: 8px;
+}
+
+/* Provenance, quietly: never a badge that competes with the fact. */
+.board.catalog .source {
+  margin-left: auto;
+  font: 10.5px var(--mono);
+  color: var(--faint);
+}
+
+.board.catalog .page p {
+  margin: 0 0 6px;
+}
+
+.board.catalog .summary {
+  color: var(--ink);
+  line-height: 1.55;
+}
+
+.board.catalog .quiet {
+  color: var(--faint);
+}
+
+.board.catalog .readingnote {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: 8px;
+  font-size: 12px;
+  color: var(--accent2);
+}
+
+.board.catalog .note {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 9px 12px;
+  margin-bottom: 14px;
+  font-size: 12.5px;
+}
+
+.board.catalog .note.warn {
+  border-color: var(--warn-line);
+  background: var(--warn-bg);
+  color: var(--ink);
+}
+
+.board.catalog .note.bad {
+  border-color: var(--error-line);
+  background: var(--error-bg);
+  color: var(--ink);
+}
+
+.board.catalog .note pre {
+  margin: 8px 0 0;
+  font: 11.5px var(--mono);
+  color: var(--error);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.board.catalog code {
+  font: 12px var(--mono);
+  color: var(--code-ink);
+}
+
+.board.catalog .facts {
+  margin: 0;
+}
+
+.board.catalog .facts > div {
+  display: grid;
+  grid-template-columns: minmax(90px, max-content) 1fr;
+  gap: 12px;
+  padding: 3px 0;
+}
+
+.board.catalog .facts dt {
+  font: 12px var(--mono);
+  color: var(--dim);
+}
+
+.board.catalog .facts dd {
+  margin: 0;
+}
+
+.board.catalog .steps,
+.board.catalog .plain {
+  margin: 0;
+  padding-left: 20px;
+}
+
+.board.catalog .steps li,
+.board.catalog .plain li {
+  margin-bottom: 4px;
+}
+
+/* Agents: a role per row, its prompts one click away. */
+.board.catalog .agent {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+  margin-bottom: 8px;
+}
+
+.board.catalog .agent.open {
+  border-color: var(--lit);
+}
+
+.board.catalog .ahead {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  width: 100%;
+  padding: 8px 12px 2px;
+  background: none;
+  border: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+}
+
+.board.catalog .ahead .chev {
+  color: var(--faint);
+  width: 10px;
+}
+
+.board.catalog .ahead .role {
+  color: var(--ink);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.board.catalog .ahead .nodes {
+  font: 11px var(--mono);
+  color: var(--faint);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.board.catalog .ahead .model {
+  margin-left: auto;
+  white-space: nowrap;
+  font-size: 12.5px;
+}
+
+.board.catalog .ahead .model b {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.board.catalog .msrc {
+  margin-left: 7px;
+  font: 10.5px var(--mono);
+  color: var(--faint);
+}
+
+.board.catalog .msrc.default {
+  color: var(--warn);
+}
+
+.board.catalog .agent .does {
+  padding: 0 12px 8px 32px;
+  font-size: 12.5px;
+}
+
+.board.catalog .abody {
+  border-top: 1px solid var(--line);
+  padding: 10px 12px 12px;
+}
+
+.board.catalog .mline {
+  font-size: 12.5px;
+  margin-bottom: 10px;
+}
+
+.board.catalog .mline b {
+  font: 12px var(--mono);
+  color: var(--ink);
+}
+
+.board.catalog .prompt {
+  margin-bottom: 12px;
+}
+
+.board.catalog .qhead {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: 11.5px;
+  text-transform: none;
+  color: var(--dim);
+  margin-bottom: 5px;
+}
+
+.board.catalog .qhead .legend {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--faint);
+}
+
+.board.catalog .quote {
+  margin: 0;
+  max-height: 420px;
+  overflow: auto;
+  background: var(--code);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 8px 0;
+  font: 11.5px/1.55 var(--mono);
+  color: var(--code-ink);
+}
+
+.board.catalog .ql {
+  display: flex;
+}
+
+.board.catalog .ql .ln {
+  flex: none;
+  width: 44px;
+  padding-right: 12px;
+  text-align: right;
+  color: var(--faint);
+  user-select: none;
+}
+
+.board.catalog .ql .lt {
+  min-width: 0;
+  padding-right: 12px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* What a run fills in: the one thing on the quote that is not the file's own text. */
+.board.catalog mark.fill {
+  background: color-mix(in srgb, var(--accent) 22%, transparent);
+  color: var(--accent2);
+  border-radius: 3px;
+}
+
+.board.catalog .srclink {
+  background: none;
+  border: none;
+  padding: 0;
+  margin-left: 8px;
+  font: 11px var(--mono);
+  color: var(--accent2);
+  border-bottom: 1px dotted var(--link-cue);
+}
+
+.board.catalog .srclink:hover {
+  color: var(--ink);
+}
+
+.board.catalog .srclink:disabled {
+  color: var(--faint);
+  border-bottom-color: var(--line);
+}
+
+.board.catalog .recent {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.board.catalog .outcome {
+  font: 11px var(--mono);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 1px 6px;
+  color: var(--dim);
+}
+
+.board.catalog .outcome.complete {
+  color: var(--ok);
+  border-color: var(--ok-line);
+}
+
+.board.catalog .outcome.failed {
+  color: var(--error);
+  border-color: var(--error-line);
+}
+
+.board.catalog .outcome.running,
+.board.catalog .outcome.paused {
+  color: var(--run);
+}
+
+.board.catalog .outcome.interrupted,
+.board.catalog .outcome.cancelled {
+  color: var(--warn);
+  border-color: var(--warn-line);
+}

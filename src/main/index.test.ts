@@ -165,6 +165,7 @@ describe('what a launch does', () => {
       'workflow_run_service_selected',
       'schedule_service_selected',
       'adapter_selected',
+      'workflow_catalog_selected',
       'workspace_service_selected',
       'command_service_selected'
     ])
@@ -220,6 +221,7 @@ describe('what a launch does', () => {
       'workflow_run_service_selected',
       'schedule_service_selected',
       'adapter_selected',
+      'workflow_catalog_selected',
       'workspace_service_selected',
       'command_service_selected',
       'app_ready',
