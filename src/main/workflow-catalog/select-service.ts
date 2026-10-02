@@ -1,4 +1,4 @@
-import { watch as watchFs } from 'node:fs'
+import { statSync, watch as watchFs } from 'node:fs'
 import { dirname, join } from 'node:path'
 import type { ConversationAdapter } from '../../shared/agent/adapter'
 import type { MainWorkflowCatalogService } from '../../shared/workflows/catalog'
@@ -71,6 +71,9 @@ export const watchFolder: WatchFolder = (folder, onChange) => {
 
 function watchItself(folder: string, onChange: () => void): (() => void) | undefined {
   try {
+    // Linux can return a recursive watcher for a missing folder without
+    // throwing, which would skip the parent fallback and miss its creation.
+    if (!statSync(folder).isDirectory()) return undefined
     const watcher = watchFs(folder, { recursive: true }, () => onChange())
     watcher.on('error', () => watcher.close())
     return () => watcher.close()
