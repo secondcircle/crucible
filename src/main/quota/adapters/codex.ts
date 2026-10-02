@@ -85,6 +85,39 @@ function scopeLabel(limitName: string): string {
   return (segments[segments.length - 1] ?? limitName).toUpperCase()
 }
 
+function readCreditAmount(value: unknown): number | null {
+  if (typeof value !== 'number' && typeof value !== 'string') return null
+  if (typeof value === 'string' && !/^\d+(?:\.\d+)?$/u.test(value)) return null
+  const amount = Number(value)
+  return Number.isFinite(amount) && amount >= 0 ? amount : null
+}
+
+function parseSpendControl(raw: unknown, log: (message: string) => void): QuotaMeter | null {
+  if (!isRecord(raw) || raw['individual_limit'] == null) return null
+  const limit = raw['individual_limit']
+  if (!isRecord(limit) || limit['unit'] !== 'credit') {
+    log('dropped MO: spend_control.individual_limit has an unrecognized unit')
+    return null
+  }
+  const usedCredits = readCreditAmount(limit['used'])
+  const limitCredits = readCreditAmount(limit['limit'])
+  const resetsAt = readResetsAt(limit['reset_at'])
+  if (usedCredits === null || limitCredits === null || limitCredits <= 0 || resetsAt === null) {
+    log('dropped MO: spend_control.individual_limit has unreadable amounts or reset_at')
+    return null
+  }
+  return {
+    kind: 'monthly',
+    label: 'MO',
+    // The endpoint rounds used_percent to an integer; amounts preserve the
+    // real fill and pace even while the account has spent less than 1%.
+    usedPercent: Math.min(100, (usedCredits / limitCredits) * 100),
+    resetsAt,
+    usedCredits,
+    limitCredits
+  }
+}
+
 /** `null` is contract drift; `[]` is a document that legitimately meters nothing. */
 export function parseCodexQuota(
   payload: unknown,
@@ -94,9 +127,10 @@ export function parseCodexQuota(
   if (!isRecord(payload)) return null
   const rateLimit = payload['rate_limit']
   const additional = payload['additional_rate_limits']
-  // The plan's own meter block is the document's signature: without it this is
-  // an error page, a redirect body or a changed route, not a quota payload.
-  if (!isRecord(rateLimit)) return null
+  const monthly = parseSpendControl(payload['spend_control'], log)
+  // Business accounts can carry only a credit budget and a null rate_limit.
+  // A readable budget is its own signature; plan_type alone proves nothing.
+  if (!isRecord(rateLimit) && !(rateLimit === null && monthly !== null)) return null
 
   const meters: QuotaMeter[] = []
   const seen = new Set<string>()
@@ -113,12 +147,14 @@ export function parseCodexQuota(
     meters.push(meter)
   }
 
-  for (const slot of ['primary_window', 'secondary_window']) {
-    if (rateLimit[slot] === null || rateLimit[slot] === undefined) continue
-    push(parseMeter(rateLimit[slot], undefined, log))
+  if (isRecord(rateLimit)) {
+    for (const slot of ['primary_window', 'secondary_window']) {
+      if (rateLimit[slot] === null || rateLimit[slot] === undefined) continue
+      push(parseMeter(rateLimit[slot], undefined, log))
+    }
   }
 
-  if (additional !== undefined && !Array.isArray(additional)) {
+  if (additional != null && !Array.isArray(additional)) {
     log('additional_rate_limits is present but not an array — ignored')
   } else if (Array.isArray(additional)) {
     for (const entry of additional) {
@@ -141,6 +177,7 @@ export function parseCodexQuota(
     }
   }
 
+  push(monthly)
   return meters
 }
 

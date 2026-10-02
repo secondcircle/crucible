@@ -221,6 +221,50 @@ describe('pace', () => {
   })
 })
 
+describe('the monthly credit meter', () => {
+  function credits(usedCredits: number): QuotaMeter {
+    return {
+      kind: 'monthly', label: 'MO', resetsAt: MONTH_END,
+      usedPercent: Math.min(100, (usedCredits / 10000) * 100),
+      usedCredits, limitCredits: 10000
+    }
+  }
+
+  it('prints credits, not dollars, while keeping the exact fractional fill and pace', () => {
+    const [row] = quotaRows(snapshotOf({ 'openai-codex': { meters: [credits(2.41385996)] } }), NOW)
+    expect(row).toMatchObject({ name: 'Codex', state: 'ok', right: '' })
+    expect(row.meters[0]).toMatchObject({
+      kind: 'monthly', label: 'MO', text: '2.41/10k cr', level: 'normal'
+    })
+    expect(row.meters[0].fillPercent).toBeCloseTo(0.0241385996, 8)
+    expect(row.meters[0].tickPercent).toBeCloseTo((14.5 / 31) * 100, 6)
+    expect(row.outWord).toBeUndefined()
+  })
+
+  it('prints a fresh zero, thresholds and overages without clipping the amount', () => {
+    for (const [used, text, level, fill] of [
+      [0, '0/10k cr', 'normal', 0],
+      [7000, '7k/10k cr', 'warn', 70],
+      [9400, '!9.4k/10k cr', 'crit', 94],
+      [10400, '!10.4k/10k cr', 'crit', 100]
+    ] as const) {
+      const [row] = quotaRows(snapshotOf({ 'openai-codex': { meters: [credits(used)] } }), NOW)
+      expect(row.meters[0]).toMatchObject({ text, level, fillPercent: fill })
+    }
+  })
+
+  it('dims stale credits and drops them at the reported reset', () => {
+    const [row] = quotaRows(snapshotOf({
+      'openai-codex': { meters: [credits(9400)], error: 'unavailable' }
+    }), NOW)
+    expect(row.state).toBe('stale')
+    expect(row.meters[0]).toMatchObject({ text: '9.4k/10k cr', level: 'normal' })
+    expect(row.outWord).toBeUndefined()
+    const [lapsed] = quotaRows(snapshotOf({ 'openai-codex': { meters: [credits(9400)] } }), MONTH_END)
+    expect(lapsed.meters).toEqual([])
+  })
+})
+
 describe('the monthly meter\u2019s dollars', () => {
   it('prints thousands above a thousand, dropping a whole decimal', () => {
     expect(dollarText(2119.26)).toBe('$2.1k')

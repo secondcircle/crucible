@@ -12,11 +12,12 @@ export interface QuotaMeter {
   readonly resetsAt: number | null
   readonly scopeName?: string
   readonly isActive?: boolean
-  // A dollar budget, in major currency units, present exactly when kind is
-  // 'monthly'. Budget numbers, not identity: what a plan costs says nothing
-  // about who holds it.
+  // Monthly budgets carry one pair of amounts in the provider's unit. Credits
+  // are not dollars: no conversion is reported by OpenAI's usage endpoint.
   readonly usedDollars?: number
   readonly limitDollars?: number
+  readonly usedCredits?: number
+  readonly limitCredits?: number
 }
 
 // Narrower than an exception on purpose: only states the strip can draw.

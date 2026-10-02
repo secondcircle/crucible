@@ -109,7 +109,7 @@
   color: var(--accent);
 }
 
-/* Dollars, not a percent: the text decides the width and never wraps. */
+/* Monthly amounts: the text decides the width and never wraps. */
 .qmeter.qmonthly .qnum {
   width: auto;
   white-space: nowrap;

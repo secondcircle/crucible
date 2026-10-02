@@ -250,6 +250,28 @@ describe('the quota strip', () => {
     expect(row.meters[0].tick).toBeDefined()
   })
 
+  it('draws an OpenAI Business credit budget instead of a blank Codex row', async () => {
+    const container = await shellWith(createScriptedQuota(snapshotOf({
+      'openai-codex': {
+        meters: [{
+          kind: 'monthly', label: 'MO', usedPercent: 0.0241385996,
+          resetsAt: Date.UTC(2026, 8, 1),
+          usedCredits: 2.41385996, limitCredits: 10000
+        }]
+      }
+    })))
+    const [element] = rows(container)
+    const row = readRow(element)
+    expect(row.name).toBe('Codex')
+    expect(row.right).toBe('')
+    expect(row.meters.map((shown) => `${shown.label} ${shown.text}`)).toEqual(['MO 2.41/10k cr'])
+    expect(row.meters[0].fill).toBe('0.0241385996%')
+    expect(row.meters[0].tick).toBeDefined()
+    expect(element.querySelector('.qdash')).toBeNull()
+    expect(element.querySelector('.qmonthly')).not.toBeNull()
+    expect(element.textContent).not.toContain('$')
+  })
+
   it('renders a scoped meter at zero like any other, per Q1', async () => {
     const container = await shellWith(
       createScriptedQuota(

@@ -213,6 +213,38 @@ describe('the quota reader', () => {
 // This gate is where the work account's row went dark: the kind was not in the
 // allow-list and the dollars were dropped from the kinds that were.
 describe('the spend meter through the cache gate', () => {
+  it('keeps credit budgets whole and drops malformed or mixed-unit monthly meters', () => {
+    const dir = tempDir()
+    const credits = {
+      kind: 'monthly' as const, label: 'MO', usedPercent: 0.0241385996,
+      resetsAt: MONTH_END, usedCredits: 2.41385996, limitCredits: 10000
+    }
+    writeCache(dir, 'openai-codex', goodEntry('openai-codex', [credits]))
+    expect(snapshotOf(dir).providers['openai-codex'].meters).toEqual([credits])
+    expect(worstUsedPercent(snapshotOf(dir), 'openai-codex', NOW)).toBeCloseTo(0.0241385996, 8)
+    expect(snapshotOf(dir, MONTH_END).providers['openai-codex'].meters).toEqual([])
+
+    for (const change of [
+      { usedCredits: undefined }, { limitCredits: undefined }, { usedCredits: null },
+      { usedCredits: -1 }, { usedCredits: '2.41' }, { limitCredits: 0 },
+      { limitCredits: -1 }, { limitCredits: '10000' },
+      { usedDollars: 1 }, { limitDollars: 400 }, { usedDollars: 1, limitDollars: 400 }
+    ]) {
+      writeCache(dir, 'openai-codex', goodEntry('openai-codex', [
+        { ...credits, ...change } as QuotaMeter, meter()
+      ]))
+      expect(snapshotOf(dir).providers['openai-codex'].meters).toEqual([meter()])
+    }
+  })
+
+  it('strips credit amounts from non-monthly meters', () => {
+    const dir = tempDir()
+    writeCache(dir, 'openai-codex', goodEntry('openai-codex', [
+      meter({ usedCredits: 1, limitCredits: 10000 })
+    ]))
+    expect(snapshotOf(dir).providers['openai-codex'].meters).toEqual([meter()])
+  })
+
   it('reads a cached monthly meter back whole, dollars included', () => {
     const dir = tempDir()
     writeCache(dir, 'anthropic', goodEntry('anthropic', [spendMeter()]))

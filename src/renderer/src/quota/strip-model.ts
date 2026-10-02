@@ -160,15 +160,27 @@ export function dollarText(amount: number): string {
   return `$${Math.round(amount * 100) / 100}`
 }
 
-// Dollars where the plan meters dollars, a percent where it meters a percent.
-// The printed percent is unclamped, so an overage says 104% while the fill pins
-// at 100 — the bar cannot draw past its end, but the number must not lie.
+function creditText(amount: number): string {
+  return amount >= 1000
+    ? `${Math.round(amount / 100) / 10}k`
+    : `${Math.round(amount * 100) / 100}`
+}
+
+// Amounts keep their provider's unit. An overage prints past 100% while the
+// fill pins at 100, because the bar cannot draw past its end.
 function meterText(meter: QuotaMeter, level: MeterLevel): string {
   const alarm = level === 'crit' ? '!' : ''
   const used = meter.usedDollars
   const limit = meter.limitDollars
   if (meter.kind === 'monthly' && used !== undefined && limit !== undefined && limit > 0) {
     return `${alarm}${dollarText(used)}/${dollarText(limit)} · ${Math.round((used / limit) * 100)}%`
+  }
+  const usedCredits = meter.usedCredits
+  const limitCredits = meter.limitCredits
+  if (meter.kind === 'monthly' && usedCredits !== undefined && limitCredits !== undefined && limitCredits > 0) {
+    // The unit and amounts already explain the fill; a second percentage
+    // pushes credit overages past the sidebar's edge.
+    return `${alarm}${creditText(usedCredits)}/${creditText(limitCredits)} cr`
   }
   return `${alarm}${Math.round(meter.usedPercent)}%`
 }

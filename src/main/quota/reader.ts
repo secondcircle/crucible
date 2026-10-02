@@ -52,15 +52,15 @@ function isRecord(value: unknown): value is Record<string, unknown> {
  * `null` unless both amounts hold: a fabricated zero would read exactly like
  * an amount somebody actually spent, so half a reading is worse than none.
  */
-function validDollars(
+function validAmounts(
   used: unknown,
   limit: unknown
-): { usedDollars: number; limitDollars: number } | null {
+): { used: number; limit: number } | null {
   if (typeof used !== 'number' || !Number.isFinite(used) || used < 0) return null
   // A zero budget divides into nothing, so the percent the strip prints from
   // these two would be a fabrication of its own.
   if (typeof limit !== 'number' || !Number.isFinite(limit) || limit <= 0) return null
-  return { usedDollars: used, limitDollars: limit }
+  return { used, limit }
 }
 
 // A cache file is data from outside this process, so it is validated exactly
@@ -77,12 +77,20 @@ function validMeter(raw: unknown): QuotaMeter | null {
   if (usedPercent < 0 || usedPercent > 100) return null
   if (resetsAt !== null && (typeof resetsAt !== 'number' || !Number.isFinite(resetsAt))) return null
 
-  // Dollars on any other kind are stripped rather than fatal: the percent
-  // there is still a reading worth keeping.
-  let dollars: { usedDollars: number; limitDollars: number } | null = null
+  // Amounts on other kinds are stripped. A monthly budget needs exactly one
+  // complete pair: mixed units cannot be rendered without choosing a lie.
+  let amounts: Partial<QuotaMeter> = {}
   if (kind === 'monthly') {
-    dollars = validDollars(raw['usedDollars'], raw['limitDollars'])
-    if (dollars === null) return null
+    const hasDollars = raw['usedDollars'] !== undefined || raw['limitDollars'] !== undefined
+    const hasCredits = raw['usedCredits'] !== undefined || raw['limitCredits'] !== undefined
+    if (hasDollars === hasCredits) return null
+    const pair = hasCredits
+      ? validAmounts(raw['usedCredits'], raw['limitCredits'])
+      : validAmounts(raw['usedDollars'], raw['limitDollars'])
+    if (pair === null) return null
+    amounts = hasCredits
+      ? { usedCredits: pair.used, limitCredits: pair.limit }
+      : { usedDollars: pair.used, limitDollars: pair.limit }
   }
 
   return {
@@ -90,7 +98,7 @@ function validMeter(raw: unknown): QuotaMeter | null {
     label,
     usedPercent,
     resetsAt: resetsAt as number | null,
-    ...(dollars ?? {}),
+    ...amounts,
     ...(typeof raw['scopeName'] === 'string' ? { scopeName: raw['scopeName'] } : {}),
     ...(typeof raw['isActive'] === 'boolean' ? { isActive: raw['isActive'] } : {})
   }

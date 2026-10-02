@@ -9,6 +9,8 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { monthlyResetAfter } from '../../shared/quota/month'
 import type { QuotaMeter } from '../../shared/quota/types'
 import { anthropicAdapter } from './adapters/anthropic'
+import { codexAdapter } from './adapters/codex'
+import { CODEX_BUSINESS_QUOTA } from './testing/codex-business'
 import { ADAPTERS } from './adapters/index'
 import type { AdapterResult, FetchLike, ProviderAdapter } from './adapters/types'
 import { KNOWN_PROVIDER_IDS } from './paths'
@@ -381,6 +383,38 @@ describe('the quota store', () => {
     expect(readQuota({ dir, now: harnessed.now }).providers.xai.meters).toEqual([
       meter({ usedPercent: 61 })
     ])
+  })
+
+  it('round-trips a Business credit budget through the adapter, disk and read seam', async () => {
+    const dir = tempDir()
+    const at = Date.UTC(2026, 9, 2)
+    writeFileSync(join(dir, 'openai-codex.json'), JSON.stringify({
+      v: 1, providerId: 'openai-codex', windows: [],
+      fetchedAt: at - HOUR, attemptedAt: at - HOUR, error: 'unparsed'
+    }))
+    const store = createQuotaStore({
+      getAuth: bearer,
+      credentialType: () => 'oauth',
+      adapters: [codexAdapter],
+      dir,
+      now: () => at,
+      log: () => {},
+      fetchImpl: async () => ({
+        ok: true, status: 200, text: async () => JSON.stringify(CODEX_BUSINESS_QUOTA)
+      })
+    })
+    expect(store.read().providers['openai-codex'].error).toBe('unparsed')
+    const refreshed = await store.refresh()
+    const quota = store.read().providers['openai-codex']
+    expect(quota).toEqual(refreshed.providers['openai-codex'])
+    expect(quota.error).toBeUndefined()
+    expect(quota.meters).toHaveLength(1)
+    expect(quota.meters[0]).toMatchObject({
+      kind: 'monthly', label: 'MO', usedCredits: 2.4138599634170532,
+      limitCredits: 10000, resetsAt: 1793491200000
+    })
+    expect(quota.meters[0].usedPercent).toBeCloseTo(0.0241385996, 8)
+    expect(readFileSync(join(dir, 'openai-codex.json'), 'utf8')).not.toMatch(/token|account_user|remaining/)
   })
 
   it('carries the work account’s spend meter from the wire to the read seam', async () => {

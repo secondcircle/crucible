@@ -6,6 +6,7 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import type { QuotaMeter } from '../../../shared/quota/types'
 import { forgetOnceIn } from '../log'
+import { CODEX_BUSINESS_QUOTA } from '../testing/codex-business'
 import { CODEX_QUOTA_URL, codexAdapter, parseCodexQuota } from './codex'
 import type { FetchLike } from './types'
 
@@ -250,6 +251,68 @@ describe('the Codex quota adapter', () => {
     }
     // Present but empty is a real state, not drift: reachable, nothing metered.
     expect(parseCodexQuota({ rate_limit: {} }, { log: quiet().log })).toEqual([])
+  })
+
+  it('reads a Business account with no rate_limit as a monthly credit budget', async () => {
+    const stub = stubFetch(200, JSON.stringify(CODEX_BUSINESS_QUOTA))
+    const sink = quiet()
+    const result = await codexAdapter.fetchQuota('token', {
+      deadline: Date.now() + 5_000,
+      fetchImpl: stub.impl,
+      log: sink.log
+    })
+    expect(sink.messages).toEqual([])
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.meters).toEqual([{
+      kind: 'monthly',
+      label: 'MO',
+      usedPercent: (2.4138599634170532 / 10000) * 100,
+      resetsAt: 1793491200000,
+      usedCredits: 2.4138599634170532,
+      limitCredits: 10000
+    }])
+    expect(JSON.stringify(result)).not.toMatch(/Dollars|account_user_spend_controls|remaining/)
+  })
+
+  it('keeps credit budgets alongside windowed limits and preserves overages', () => {
+    const individual = CODEX_BUSINESS_QUOTA.spend_control.individual_limit
+    const meters = parsed({
+      ...CAPTURE,
+      spend_control: { individual_limit: { ...individual, used: '10400' } }
+    })
+    expect(meters.map((meter) => meter.label)).toEqual(['7D', 'SPARK', 'MO'])
+    expect(meters.find((meter) => meter.kind === 'monthly')).toMatchObject({
+      usedPercent: 100, usedCredits: 10400, limitCredits: 10000
+    })
+  })
+
+  it('accepts numeric credits and a genuinely unused budget', () => {
+    const individual = CODEX_BUSINESS_QUOTA.spend_control.individual_limit
+    const [meter] = parsed({
+      ...CODEX_BUSINESS_QUOTA,
+      spend_control: { individual_limit: { ...individual, used: 0, limit: 10000, reset_at: 1793491200000 } }
+    })
+    expect(meter).toMatchObject({ usedCredits: 0, usedPercent: 0, limitCredits: 10000, resetsAt: 1793491200000 })
+  })
+
+  it('refuses unreadable, unlimited or unfamiliar credit budgets instead of guessing', () => {
+    const individual = CODEX_BUSINESS_QUOTA.spend_control.individual_limit
+    for (const change of [
+      { unit: 'USD' }, { unit: undefined },
+      { used: null }, { used: '' }, { used: ' ' }, { used: 'Infinity' },
+      { used: '2oops' }, { used: -1 }, { used: Number.NaN }, { used: true },
+      { limit: '0' }, { limit: '-1' }, { limit: undefined }, { limit: Number.POSITIVE_INFINITY },
+      { reset_at: null }, { reset_at: 0 }, { reset_at: '1793491200' }
+    ]) {
+      const spend_control = { individual_limit: { ...individual, ...change } }
+      expect(parseCodexQuota({ ...CODEX_BUSINESS_QUOTA, spend_control }, { log: quiet().log })).toBeNull()
+      // A bad credit budget must not erase a valid weekly reading.
+      expect(parsed({ ...CAPTURE, spend_control }).map((meter) => meter.label)).toEqual(['7D', 'SPARK'])
+    }
+    for (const spend_control of [null, {}, { individual_limit: null }]) {
+      expect(parseCodexQuota({ ...CODEX_BUSINESS_QUOTA, spend_control }, { log: quiet().log })).toBeNull()
+    }
   })
 
   it('never maps a dollar field to a meter', () => {
